@@ -37,8 +37,9 @@ async function sha256Base64Url(text: string) {
 const check = async (accessToken: string) => agentGrantForToken(env.DB, await sha256Base64Url(accessToken), RESOURCE, Date.now());
 
 /** Registers a public client by open registration, as an MCP client does. */
-async function register(t: App) {
-  const res = await t.app.request(
+/** An open registration as an MCP client sends it, with `metadata` over the defaults. */
+const registration = (t: App, metadata: Record<string, unknown> = {}) =>
+  t.app.request(
     `${ORIGIN}/api/auth/oauth2/register`,
     {
       method: 'POST',
@@ -49,24 +50,29 @@ async function register(t: App) {
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
+        ...metadata,
       }),
     },
     env,
     createExecutionContext(),
   );
-  expect(res.status).toBe(201);
+
+/** Registers a public client by open registration, as an MCP client does. */
+async function register(t: App, metadata: Record<string, unknown> = {}) {
+  const res = await registration(t, metadata);
+  expect(res.status, await res.clone().text()).toBe(201);
   return (await res.json<{ client_id: string }>()).client_id;
 }
 
 const ALL_SCOPES = 'content:read content:draft content:publish screens:manage org:manage offline_access';
 
 /** The person, signed in as `c`, opens `clientId`'s authorize URL: the provider sends them to the consent page with its signed query. */
-async function consentPage(c: Client, clientId: string, scope = ALL_SCOPES) {
+async function consentPage(c: Client, clientId: string, scope = ALL_SCOPES, redirect = REDIRECT) {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
-    redirect_uri: REDIRECT,
+    redirect_uri: redirect,
     scope,
     state: 'st',
     code_challenge: await sha256Base64Url(verifier),
@@ -365,12 +371,35 @@ describe("the consent page's request", () => {
     const res = await editor.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`);
     expect(res.status).toBe(200);
     const body = await res.json<{ client: unknown; user: { email: string }; orgs: { orgId: string; name: string; role: string; scopes: string[] }[] }>();
-    expect(body.client).toEqual({ id: clientId, name: 'Test agent', verified: false, redirectHost: '127.0.0.1:33418' });
+    expect(body.client).toEqual({ id: clientId, name: 'Test agent', verified: false, redirect: { kind: 'web', host: '127.0.0.1:33418' } });
     // By name. An editor while editors may not publish: no content:publish, and no org:manage.
     expect(body.orgs).toEqual([
       { orgId: own.id, name: 'Editor Owns This', role: 'owner', scopes: ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] },
       { orgId: org.id, name: 'Grants Co', role: 'editor', scopes: ['content:read', 'content:draft', 'screens:manage'] },
     ]);
+  });
+
+  it("names an app's own scheme as where its code goes, not as a web host", async () => {
+    const { t, owner } = await team();
+    for (const [redirect, target] of [
+      ['com.example.app:/oauth/callback', 'com.example.app:'],
+      ['cursor://anysphere.cursor-retrieval/oauth/callback', 'cursor://anysphere.cursor-retrieval'],
+    ] as const) {
+      const clientId = await register(t, { redirect_uris: [redirect] });
+      const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
+      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+        client: { redirect: unknown };
+      }>();
+      expect(body.client.redirect, redirect).toEqual({ kind: 'app', target });
+    }
+  });
+
+  it('marks the first-party CLI as verified', async () => {
+    const { owner } = await team();
+    // sf-cli's registered loopback callback, on the port this run picked (RFC 8252).
+    const { oauthQuery } = await consentPage(owner, 'sf-cli', ALL_SCOPES, 'http://127.0.0.1:40123/callback');
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{ client: unknown }>();
+    expect(body.client).toEqual({ id: 'sf-cli', name: 'SignForge CLI', verified: true, redirect: { kind: 'web', host: '127.0.0.1:40123' } });
   });
 
   it('offers only what the client asked for', async () => {
@@ -449,6 +478,49 @@ describe('a membership ending', () => {
 });
 
 describe('client registration', () => {
+  it("refuses a name that poses as SignForge's own apps, however it is spelled", async () => {
+    const t = testApp();
+    for (const name of [
+      'SignForge CLI',
+      'signforge',
+      'My SignForge helper',
+      'Sign Forge',
+      'S-I-G-N-F-O-R-G-E',
+      'ＳｉｇｎＦｏｒｇｅ',
+      'S1gnF0rge',
+      'ѕignforge',
+      'Ѕіgnfоrgе',
+      'sf-cli',
+      'SF CLI',
+      'sf_cli tools',
+    ]) {
+      const res = await registration(t, { client_name: name });
+      expect(res.status, name).toBe(400);
+      expect(((await res.json()) as { error_description: string }).error_description, name).toBe('client_name must not name SignForge or its apps');
+    }
+  });
+
+  it('refuses a name with characters that reorder or hide text, and one too long for the heading', async () => {
+    const t = testApp();
+    for (const name of ['Claude\u202Eedoc', 'Claude\u2066x\u2069', 'Clau\u200Bde', 'Claude\nCode', 'Claude\u0000']) {
+      const res = await registration(t, { client_name: name });
+      expect(res.status, JSON.stringify(name)).toBe(400);
+      expect(((await res.json()) as { error_description: string }).error_description).toBe(
+        'client_name must not contain control, format or bidirectional characters',
+      );
+    }
+    const long = await registration(t, { client_name: 'A'.repeat(81) });
+    expect(long.status).toBe(400);
+    expect(((await long.json()) as { error_description: string }).error_description).toBe('client_name must be at most 80 characters');
+  });
+
+  it('accepts an ordinary name, accents and all, up to 80 characters', async () => {
+    const t = testApp();
+    for (const name of ['Claude Code', 'Cursor', 'Café Assistant', 'Script for screens', 'A'.repeat(80)]) {
+      expect((await registration(t, { client_name: name })).status, name).toBe(201);
+    }
+  });
+
   it('refuses a confidential client, or one that names no method', async () => {
     const t = testApp();
     for (const method of ['client_secret_post', 'client_secret_basic', undefined]) {

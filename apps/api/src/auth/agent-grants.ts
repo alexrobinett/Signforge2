@@ -72,6 +72,16 @@ const ENDS_MEMBERSHIP: Record<string, (returned: Record<string, unknown>) => unk
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+/**
+ * Where a client's code goes, as the consent page names it: a web callback's host, or for an app's
+ * own scheme (`com.example.app:/cb`, `cursor://anysphere.cursor-retrieval/...`) the scheme and what follows it up to the path.
+ */
+function destinationOf(redirectUri: string): { kind: 'web'; host: string } | { kind: 'app'; target: string } {
+  const url = new URL(redirectUri);
+  if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
+  return { kind: 'app', target: url.host ? `${url.protocol}//${url.host}` : url.protocol };
+}
+
 export function agentGrants(grants: GrantDeps, link: ConsentLink) {
   return {
     id: 'agent-grants',
@@ -101,7 +111,7 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
               id: clientId,
               name: client.name ?? clientId,
               verified: FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId),
-              redirectHost: new URL(query.get('redirect_uri') ?? '').host,
+              redirect: destinationOf(query.get('redirect_uri') ?? ''),
             },
             user: { name: user.name, email: user.email },
             orgs: await grants.offers(user.id, requested),

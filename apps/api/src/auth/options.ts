@@ -11,6 +11,7 @@ import { oauthProvider } from '@better-auth/oauth-provider';
 import { emailOTP, organization } from 'better-auth/plugins';
 import type { EmailSender } from '../email';
 import { agentGrants, type ConsentLink, type GrantDeps, OAUTH_SCOPES } from './agent-grants';
+import { clientNameRefusal } from './client-names';
 import { ac, ROLES, roles } from './roles';
 
 /** Session cookies are `sf.*` (`__Secure-sf.*` over https). */
@@ -129,7 +130,8 @@ function membershipAudit(audit: AuthDeps['audit']) {
 
 /**
  * Open client registration is for public clients only (owner default on #109): one that asks to
- * hold a secret is refused, as is one that names no method (RFC 7591's default is a secret).
+ * hold a secret is refused, as is one that names no method (RFC 7591's default is a secret). And
+ * under a name the consent page can show as it is (./client-names.ts).
  */
 const refusePublicOnly = {
   id: 'oauth-public-clients',
@@ -138,13 +140,16 @@ const refusePublicOnly = {
       {
         matcher: (ctx: { path?: string }) => ctx.path === '/oauth2/register',
         handler: createAuthMiddleware(async (ctx) => {
-          const method = isRecord(ctx.body) ? ctx.body.token_endpoint_auth_method : undefined;
-          if (method !== 'none') {
+          const body = isRecord(ctx.body) ? ctx.body : {};
+          if (body.token_endpoint_auth_method !== 'none') {
             throw new APIError('BAD_REQUEST', {
               error: 'invalid_client_metadata',
               error_description: 'only public clients may register: token_endpoint_auth_method must be none',
             });
           }
+          // The consent page puts the name in its heading: no posing as SignForge, no reordered text.
+          const refused = typeof body.client_name === 'string' ? clientNameRefusal(body.client_name) : undefined;
+          if (refused) throw new APIError('BAD_REQUEST', { error: 'invalid_client_metadata', error_description: refused });
         }),
       },
     ],

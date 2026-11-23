@@ -6,7 +6,11 @@ import { callApi } from './api.server';
 
 /** What to show for a signed query, or why it cannot be shown: signed out, or a query the API refuses. */
 export const getConnectRequest = createServerFn({ method: 'GET' })
-  .validator((oauthQuery: string) => oauthQuery)
+  // The page's search, so anyone's: a string, as long as a signed query could be.
+  .validator((oauthQuery: unknown) => {
+    if (typeof oauthQuery !== 'string' || !oauthQuery || oauthQuery.length > 8192) throw new Error('not an authorization request');
+    return oauthQuery;
+  })
   .handler(async ({ data: oauthQuery }): Promise<{ ok: true; request: ConnectRequest } | { ok: false; signedOut: boolean; message: string }> => {
     const res = await callApi(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`);
     if (res.ok) return { ok: true, request: await res.json() };

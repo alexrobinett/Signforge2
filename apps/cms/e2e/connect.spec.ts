@@ -1,19 +1,21 @@
 // Connecting an agent (M4-05, #110): an MCP client stub registers and opens the authorize URL; the
 // person signs in, picks an org and scopes on /connect, and Allow sends the stub a code it exchanges
 // for tokens; Cancel sends `access_denied`. An editor while editors may not publish is not offered it.
+// The first-party CLI shows as verified, and the pages are never framed.
 import { createHash, randomBytes } from 'node:crypto';
 import { expect, request as playwrightRequest, test, type Page } from '@playwright/test';
 import { axe, createOrg, disabledOnServer, fromAddress, hydrated, shots, signIn, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
-const ADDRESS = { owner: '192.0.2.161', person: '192.0.2.162', editor: '192.0.2.163', stub: '192.0.2.164' };
+const ADDRESS = { owner: '192.0.2.161', person: '192.0.2.162', editor: '192.0.2.163', stub: '192.0.2.164', cli: '192.0.2.165' };
 /** The stub's loopback callback, as a native MCP client registers one. */
 const CALLBACK = 'http://127.0.0.1:33418/callback';
 const RESOURCE = `${CMS_URL}/mcp`;
 const ALL_SCOPES = 'content:read content:draft content:publish screens:manage org:manage offline_access';
 
 const base64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const challengeOf = (verifier: string) => base64url(createHash('sha256').update(verifier).digest());
 
 /** An MCP client stub: registers by open registration, and builds an authorize URL with S256 PKCE. */
 async function stubClient(name = 'Test agent') {
@@ -36,7 +38,7 @@ async function stubClient(name = 'Test agent') {
     redirect_uri: CALLBACK,
     scope: ALL_SCOPES,
     state: 'stub-state',
-    code_challenge: base64url(createHash('sha256').update(verifier).digest()),
+    code_challenge: challengeOf(verifier),
     code_challenge_method: 'S256',
     resource: RESOURCE,
   })}`;
@@ -86,7 +88,15 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   const connectPath = new URL(page.url()).pathname + new URL(page.url()).search;
   expect(await disabledOnServer(page, connectPath, ['Allow', 'Cancel', 'Organisation'])).toEqual({ Allow: [true], Cancel: [true], Organisation: [true] });
 
+  // Neither page in the way here can be framed by another site (clickjacking Allow).
+  for (const path of [connectPath, '/sign-in']) {
+    const headers = (await page.request.get(path)).headers();
+    expect(headers['x-frame-options'], path).toBe('DENY');
+    expect(headers['content-security-policy'], path).toBe("frame-ancestors 'none'");
+  }
+
   // What it says: the client is unverified, where it sends the person, and what reading shares.
+  await expect(page.getByText('Unverified', { exact: true })).toBeVisible();
   await expect(page.getByText('Unverified: SignForge has not checked who made this app. It sends you back to 127.0.0.1:33418.')).toBeVisible();
   await expect(page.getByText('the team list with names and email addresses')).toBeVisible();
   await expect(page.getByText('The connection works in this organisation only.')).toBeVisible();
@@ -163,4 +173,31 @@ test('an editor in an org where only owners publish is not offered publishing', 
   await page.setViewportSize({ width: 1280, height: 1000 });
   await shots(page, '30-connect-agent-editor');
   await stub.dispose();
+});
+
+test('the SignForge CLI shows as verified, a client’s own `q` does not get in the way, and a bare /connect says what it is for', async ({ page }) => {
+  await signInAs(page, `e2e-connect-cli-${Date.now()}@example.com`, ADDRESS.cli);
+  await createOrg(page, 'Pier Kiosk', ADDRESS.cli);
+
+  await page.goto('/connect');
+  await expect(page.getByRole('heading', { name: 'This request can’t be used' })).toBeVisible();
+  await expect(page.getByText('This page opens when an app asks to connect to SignForge.')).toBeVisible();
+
+  // The CLI's loopback callback, on a port of its choosing, and a parameter of its own named as the page's is.
+  await page.goto(
+    `/api/auth/oauth2/authorize?${new URLSearchParams({
+      response_type: 'code',
+      client_id: 'sf-cli',
+      redirect_uri: 'http://127.0.0.1:40123/callback',
+      scope: 'content:read content:draft offline_access',
+      state: 'cli-state',
+      code_challenge: challengeOf(base64url(randomBytes(32))),
+      code_challenge_method: 'S256',
+      resource: RESOURCE,
+      q: 'the client’s own',
+    })}`,
+  );
+  await expect(page.getByRole('heading', { name: 'SignForge CLI wants to work in SignForge' })).toBeVisible();
+  await expect(page.getByText('A SignForge app. It sends you back to 127.0.0.1:40123.')).toBeVisible();
+  await expect(page.getByText('Unverified', { exact: true })).toHaveCount(0);
 });
