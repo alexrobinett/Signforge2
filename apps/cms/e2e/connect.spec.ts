@@ -88,12 +88,14 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   const connectPath = new URL(page.url()).pathname + new URL(page.url()).search;
   expect(await disabledOnServer(page, connectPath, ['Allow', 'Cancel', 'Organisation'])).toEqual({ Allow: [true], Cancel: [true], Organisation: [true] });
 
-  // Neither page in the way here can be framed by another site (clickjacking Allow).
-  for (const path of [connectPath, '/sign-in']) {
-    const headers = (await page.request.get(path)).headers();
-    expect(headers['x-frame-options'], path).toBe('DENY');
-    expect(headers['content-security-policy'], path).toBe("frame-ancestors 'none'");
+  // Neither page on the way can be framed by another site (clickjacking Allow): this one, and sign-in signed out.
+  const signedOut = await playwrightRequest.newContext({ baseURL: CMS_URL });
+  for (const res of [await page.request.get(connectPath), await signedOut.get('/sign-in')]) {
+    expect(res.status(), res.url()).toBe(200);
+    expect(res.headers()['x-frame-options'], res.url()).toBe('DENY');
+    expect(res.headers()['content-security-policy'], res.url()).toBe("frame-ancestors 'none'");
   }
+  await signedOut.dispose();
 
   // What it says: the client is unverified, where it sends the person, and what reading shares.
   await expect(page.getByText('Unverified', { exact: true })).toBeVisible();
