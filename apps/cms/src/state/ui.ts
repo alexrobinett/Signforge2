@@ -11,6 +11,11 @@ interface UiState {
   sidebarFolded: boolean;
   /** A panel on the right (the agent's drawer) folded the sidebar to make room, until it closes or the person unfolds it. */
   panelFolded: boolean;
+  /**
+   * The folded rail's tooltip that is open, by its text, or null. Held here so every tooltip stays
+   * controlled: one that was open when the sidebar unfolded would otherwise show again on the next fold.
+   */
+  tip: string | null;
   /** 'system' until the browser store reads the saved choice, so server and first client render agree. */
   theme: Theme;
 }
@@ -23,6 +28,8 @@ export interface UiSlice {
   toggleSidebar: () => void;
   /** A panel on the right opened or closed: open, it folds the sidebar. */
   setRightPanel: (open: boolean) => void;
+  /** A rail tooltip opened (its text) or closed (null). */
+  showTip: (tip: string | null) => void;
   setTheme: (theme: Theme) => void;
 }
 
@@ -32,7 +39,7 @@ const FOLD_KEY = 'sf-sidebar-folded';
 export const isFolded = (ui: Pick<UiState, 'sidebarFolded' | 'panelFolded'>) => ui.sidebarFolded || ui.panelFolded;
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
-  ui: { drawerOpen: false, sidebarFolded: false, panelFolded: false, theme: 'system' },
+  ui: { drawerOpen: false, sidebarFolded: false, panelFolded: false, tip: null, theme: 'system' },
   openDrawer: () => set((s) => ({ ui: { ...s.ui, drawerOpen: true } })),
   closeDrawer: () => set((s) => ({ ui: { ...s.ui, drawerOpen: false } })),
   toggleSidebar: () =>
@@ -41,9 +48,10 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
       try {
         localStorage.setItem(FOLD_KEY, String(sidebarFolded));
       } catch {}
-      return { ui: { ...s.ui, sidebarFolded, panelFolded: false } };
+      return { ui: { ...s.ui, sidebarFolded, panelFolded: false, tip: null } };
     }),
-  setRightPanel: (open) => set((s) => ({ ui: { ...s.ui, panelFolded: open } })),
+  setRightPanel: (open) => set((s) => ({ ui: { ...s.ui, panelFolded: open, tip: null } })),
+  showTip: (tip) => set((s) => (s.ui.tip === tip ? s : { ui: { ...s.ui, tip } })),
   setTheme: (theme) => {
     storeTheme(theme);
     applyTheme(theme);

@@ -8,6 +8,7 @@ import { Slot } from 'radix-ui';
 import type { ComponentProps } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import { cn } from '~/lib/utils';
+import { useAppStore } from '~/state/provider';
 
 export function SidebarMenuButton({
   folded,
@@ -19,6 +20,8 @@ export function SidebarMenuButton({
   folded: boolean;
   tooltip: string;
 }) {
+  const tip = useAppStore((s) => s.ui.tip);
+  const showTip = useAppStore((s) => s.showTip);
   const button = (
     <Slot.Root
       data-slot="sidebar-menu-button"
@@ -30,10 +33,11 @@ export function SidebarMenuButton({
       {...props}
     />
   );
-  // Always in its tooltip, so the button stays the same element and keeps focus as it folds; held closed while
-  // unfolded, where the label shows: an open tooltip describes its trigger, and a screen reader would say it twice.
+  // Always in its tooltip, so the button keeps focus as it folds; controlled from the store (`ui.tip`), and closed
+  // while unfolded, where the label shows. Folded, an open tooltip repeats the name to a screen reader, as in
+  // shadcn's icon sidebar: Radix 1.4 always describes the trigger by it. Accepted.
   return (
-    <Tooltip open={folded ? undefined : false}>
+    <Tooltip open={folded && tip === tooltip} onOpenChange={(open) => showTip(open && folded ? tooltip : null)}>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="right">{tooltip}</TooltipContent>
     </Tooltip>

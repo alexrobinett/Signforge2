@@ -61,6 +61,11 @@ test('the sidebar folds to an icon rail and back, by keyboard, with names and to
   const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
   const fold = sidebar.getByRole('button', { name: 'Fold the sidebar' });
   await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  // Every tooltip stays controlled as it folds: React warns when one switches between controlled and not (review of #279).
+  const warnings: string[] = [];
+  page.on('console', (m) => {
+    if (/changing from (un)?controlled to (un)?controlled/i.test(m.text())) warnings.push(m.text());
+  });
   const before = (await sidebar.boundingBox())!.width;
   // Unfolded, the label shows and no tooltip opens, so nothing describes the link a second time (review of #279).
   const screens = sidebar.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' });
@@ -104,6 +109,7 @@ test('the sidebar folds to an icon rail and back, by keyboard, with names and to
   await page.keyboard.press('Space');
   await expect(sidebar.getByRole('button', { name: 'Fold the sidebar' })).toBeFocused();
   await expect.poll(async () => (await sidebar.boundingBox())!.width).toBeGreaterThan(200);
+  expect(warnings).toEqual([]);
 });
 
 test('a phone keeps its top bar and navigation drawer, with no fold button (#260)', async () => {

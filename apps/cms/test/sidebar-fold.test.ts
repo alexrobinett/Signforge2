@@ -75,4 +75,18 @@ describe('the sidebar fold', () => {
     store.getState().setRightPanel(true);
     expect(saved.get('sf-sidebar-folded')).toBe('false');
   });
+
+  it('forgets the open tooltip on every fold and unfold, so a tooltip open as it unfolded does not show on the next fold (review of #279)', () => {
+    storage();
+    const { store } = uiStore();
+    store.getState().toggleSidebar();
+    store.getState().showTip('Screens');
+    expect(store.getState().ui.tip).toBe('Screens');
+    store.getState().toggleSidebar();
+    expect(store.getState().ui.tip).toBeNull();
+    store.getState().setRightPanel(true);
+    store.getState().showTip('Spots');
+    store.getState().setRightPanel(false);
+    expect(store.getState().ui.tip).toBeNull();
+  });
 });

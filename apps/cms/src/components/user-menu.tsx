@@ -28,6 +28,8 @@ const THEMES: { value: Theme; label: string; icon: typeof SunIcon }[] = [
   { value: 'system', label: 'System', icon: MonitorIcon },
 ];
 
+const ACCOUNT_TIP = 'Account and settings';
+
 /**
  * The account menu. `compact` (the phone's top bar) is the avatar alone; `rail` (the folded sidebar) is
  * the avatar with a tooltip, its menu opening to the right of the rail.
@@ -38,6 +40,8 @@ export function UserMenu({ user, compact: small = false, rail = false }: { user:
   const navigate = useNavigate();
   const theme = useAppStore((s) => s.ui.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const tip = useAppStore((s) => s.ui.tip);
+  const showTip = useAppStore((s) => s.showTip);
   const openCreateOrg = useAppStore((s) => s.openCreateOrg);
   const display = user.name || user.email;
 
@@ -56,7 +60,8 @@ export function UserMenu({ user, compact: small = false, rail = false }: { user:
 
   return (
     <DropdownMenu modal={false}>
-      <Tooltip open={rail ? undefined : false}>
+      {/* Controlled from the store, like the rail's other tooltips (components/ui/sidebar.tsx). */}
+      <Tooltip open={rail && tip === ACCOUNT_TIP} onOpenChange={(open) => showTip(open && rail ? ACCOUNT_TIP : null)}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             {compact ? (
@@ -76,7 +81,7 @@ export function UserMenu({ user, compact: small = false, rail = false }: { user:
             )}
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="right">Account and settings</TooltipContent>
+        <TooltipContent side="right">{ACCOUNT_TIP}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align={compact ? 'end' : 'start'}

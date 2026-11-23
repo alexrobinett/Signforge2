@@ -101,7 +101,7 @@ src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test 
 src/server/               server-only: the API binding, the shell's server functions
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI); `sidebar.tsx` is the part of shadcn's sidebar the frame uses, its fold kept in the store
-src/components/app-shell.tsx  the signed-in frame: the sidebar, which folds to an icon rail by its button or when a panel opens on the right (the choice kept per browser, `ui.sidebarFolded`), and the phone top bar and drawer
+src/components/app-shell.tsx  the signed-in frame: the sidebar, which folds to an icon rail by its button or when a panel opens on the right (the choice kept per browser, `ui.sidebarFolded`; the rail's open tooltip is `ui.tip`, so every tooltip stays controlled), and the phone top bar and drawer
 ```
 
 ## Command menu
