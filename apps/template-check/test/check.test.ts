@@ -3,7 +3,7 @@
  * otherwise, which is how `sf template seed`'s templates are checked), and each way the hostile
  * fixture misbehaves is refused with its problem.
  */
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import type { TemplateManifest } from '@signforge/contract';
 import { existsSync, readdirSync } from 'node:fs';
 import type { Browser } from 'playwright-core';

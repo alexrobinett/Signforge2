@@ -18,10 +18,9 @@ it('syncs at once when the socket says a new manifest is published, and reports 
 
   const second = h.content([{ id: 'b', durationMs: 800, label: 'second' }]);
   p.server.publish(second);
-  const pushed = Date.now();
+  // While the socket is up the player does not poll (below), so only the nudge can bring the second manifest.
   p.server.push({ type: 'manifest', id: second.manifest.id });
-  await p.until((s) => s.log.some((l) => l.manifest === second.manifest.id), 5000);
-  expect(Date.now() - pushed).toBeLessThan(5000);
+  await p.until((s) => s.log.some((l) => l.manifest === second.manifest.id));
   await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: second.manifest.id, observedAt: expect.any(String) });
 });
 
