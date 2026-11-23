@@ -170,14 +170,14 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * Run axe on the page as it is, in the light theme and the dark, and fail on any violation
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
- * theme change, or a dialog's fade. The spot editor's preview is checked too, in the light pass: the
- * real player showing a template, so every base template's text must read on its colours (#57). The
- * dark pass leaves the player's frames out, as the CMS's `.dark` never reaches them. Its template
- * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
- * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
- * restarts them. The player's own slots fade between spots, and an analysis during that fade reads
- * a spot half shown: each analysis waits for the slots to settle and is repeated if a fade began
- * during it (#95).
+ * theme change, or a dialog's fade. The players' frames (the spot editor's preview and the like) are
+ * checked on their own, in the light theme: the real player showing a template, so every base
+ * template's text must read on its colours (#57). The CMS's `.dark` never reaches them. Their
+ * template frames keep playing, so each is held at rest, after its intro and before its outro
+ * (which starts at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70).
+ * The next play restarts them. The player's own slots fade between spots, and an analysis during
+ * that fade reads a spot half shown: each analysis waits for the slots to settle and is repeated if
+ * a fade began during it (#95).
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
@@ -186,21 +186,26 @@ export async function axe(page: Page) {
     violations.flatMap((v) => v.nodes.map((n) => `${theme} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`));
   try {
     await page.evaluate(() => document.documentElement.classList.remove('dark'));
-    // A play or slot fade that began during an analysis may have shown it a spot mid-intro or half
-    // faded: settle, hold, analyse again. A stage looping 4 s spots can do that several times.
-    let found: string[] = [];
-    let held = false;
-    for (let tries = 0; tries < 5 && !held; tries++) {
-      // Often: between 4 s spots with a long fade, the stage is still for about a second.
-      await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
-      const fades = await slotFades(page);
-      if (fades === undefined) continue;
-      await holdTemplates(page);
-      found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).analyze()).violations);
-      held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+    // The CMS's own document first, its transitions off: nothing in it moves, so one analysis.
+    expect(report('light', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+    // Then the players' frames alone, so each analysis is short beside the spots' 4 s. A play or slot
+    // fade that began during one may have shown it a spot mid-intro or half faded: settle, hold,
+    // analyse again.
+    if ((await page.locator('iframe').count()) > 0) {
+      let found: string[] = [];
+      let held = false;
+      for (let tries = 0; tries < 5 && !held; tries++) {
+        // Often: between 4 s spots with a long fade, the stage is still for about a second.
+        await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
+        const fades = await slotFades(page);
+        if (fades === undefined) continue;
+        await holdTemplates(page);
+        found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).include('iframe').analyze()).violations);
+        held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+      }
+      expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
+      expect(found, page.url()).toEqual([]);
     }
-    expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
-    expect(found, page.url()).toEqual([]);
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     expect(report('dark', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
   } finally {
