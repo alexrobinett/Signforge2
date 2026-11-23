@@ -59,6 +59,20 @@ function ConnectPage() {
   );
 }
 
+/**
+ * The client's name as it registered it, kept apart from the text around it (`<bdi>`), and in quotes
+ * unless the client is SignForge's own: the name is only the app's claim.
+ */
+function ClientName({ client }: { client: ConnectRequest['client'] }) {
+  return client.verified ? (
+    <bdi>{client.name}</bdi>
+  ) : (
+    <>
+      “<bdi>{client.name}</bdi>”
+    </>
+  );
+}
+
 function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery: string }) {
   const { client, user, orgs } = request;
   const orgFieldId = useId();
@@ -87,16 +101,18 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
             <BotIcon className="size-4" />
           </span>
           <div className="flex flex-col gap-0.5">
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-              <h1 className="text-[22px] font-semibold tracking-tight">
-                <bdi>{client.name}</bdi> wants to work in SignForge
-              </h1>
+            {/* The badge is part of the heading, so moving by heading reads it. */}
+            <h1 className="text-[22px] font-semibold tracking-tight">
+              <ClientName client={client} /> wants to work in SignForge
               {client.verified ? null : (
-                <span className="rounded-full border border-status-updating bg-status-updating-muted px-2 py-0.5 text-xs font-semibold text-status-updating-foreground">
-                  Unverified
-                </span>
+                <>
+                  {' '}
+                  <span className="ml-1 inline-block rounded-full border border-status-updating bg-status-updating-muted px-2 py-0.5 align-middle text-xs font-semibold tracking-normal text-status-updating-foreground">
+                    Unverified
+                  </span>
+                </>
               )}
-            </div>
+            </h1>
             <span className="text-sm text-muted-foreground">
               Signed in as {user.name || user.email}
               {org ? ` · ${ROLE_NAMES[org.role]}` : ''}
@@ -159,7 +175,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
               </fieldset>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Nothing <bdi>{client.name}</bdi> asked for is open to you in <bdi>{org.name}</bdi>. Pick another organisation, or cancel.
+                Nothing <ClientName client={client} /> asked for is open to you in <bdi>{org.name}</bdi>. Pick another organisation, or cancel.
               </p>
             )}
 
@@ -169,13 +185,14 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
                 <p className="flex gap-2.5 rounded-[10px] border border-status-updating bg-status-updating-muted px-3.5 py-3 text-sm leading-snug text-status-updating-foreground">
                   <TriangleAlertIcon className="mt-0.5 size-4 flex-none" aria-hidden />
                   <span>
-                    <bdi>{client.name}</bdi> will be able to change what every screen in <bdi>{org.name}</bdi> shows without asking. Each publish is in the
-                    audit log and can be undone.
+                    <ClientName client={client} /> will be able to change what every screen in <bdi>{org.name}</bdi> shows without asking. Each publish is in
+                    the audit log and can be undone.
                   </span>
                 </p>
               ) : (
                 <p className="text-sm leading-snug text-muted-foreground">
-                  Without publishing, <bdi>{client.name}</bdi>’s changes stay drafts until someone who may publish in <bdi>{org.name}</bdi> publishes them.
+                  Without publishing, changes by <ClientName client={client} /> stay drafts until someone who may publish in <bdi>{org.name}</bdi> publishes
+                  them.
                 </p>
               )}
             </div>
@@ -203,7 +220,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
         ) : (
           <EditorFields>
             <p className="text-sm text-muted-foreground">
-              You are not in an organisation yet, so there is nowhere to connect <bdi>{client.name}</bdi> to.
+              You are not in an organisation yet, so there is nowhere to connect <ClientName client={client} /> to.
             </p>
             <div className="flex justify-end">
               <Button type="button" variant="outline" size="lg" aria-disabled={busy} onClick={busy ? undefined : cancel}>
@@ -214,7 +231,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
         )}
       </main>
       <p className="max-w-[520px] text-center text-[13px] text-muted-foreground">
-        You can change these scopes or disconnect <bdi>{client.name}</bdi> at any time in Settings › API &amp; agents.
+        You can change these scopes or disconnect <ClientName client={client} /> at any time in Settings › API &amp; agents.
       </p>
     </>
   );

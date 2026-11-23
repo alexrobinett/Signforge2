@@ -80,7 +80,8 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   await page.goto(stub.authorizeUrl);
   await expect(page).toHaveURL(/\/sign-in\?redirect=%2Fconnect/);
   await signIn(page, email);
-  await expect(page.getByRole('heading', { name: 'Test agent wants to work in SignForge' })).toBeVisible();
+  // An unverified client's name is quoted, as its own claim, and the heading says it is unverified.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveAccessibleName('“Test agent” wants to work in SignForge Unverified');
   await hydrated(page);
   await expect(page).toHaveURL(/\/connect\?q=/);
 
@@ -98,7 +99,7 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   await signedOut.dispose();
 
   // What it says: the client is unverified, where it sends the person, and what reading shares.
-  await expect(page.getByText('Unverified', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 }).getByText('Unverified', { exact: true })).toBeVisible();
   await expect(page.getByText('Unverified: SignForge has not checked who made this app. It sends you back to 127.0.0.1:33418.')).toBeVisible();
   await expect(page.getByText('the team list with names and email addresses')).toBeVisible();
   await expect(page.getByText('The connection works in this organisation only.')).toBeVisible();
@@ -116,7 +117,7 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // Publishing on: the warning names the org.
   await page.getByLabel('Organisation', { exact: true }).selectOption({ label: 'Quayside Market' });
   await page.getByRole('checkbox', { name: /Publish to live screens/ }).check();
-  await expect(page.getByRole('status')).toContainText('Test agent will be able to change what every screen in Quayside Market shows without asking.');
+  await expect(page.getByRole('status')).toContainText('“Test agent” will be able to change what every screen in Quayside Market shows without asking.');
   await shots(page, '30-connect-agent-publish');
   await page.setViewportSize({ width: 390, height: 844 });
   await shots(page, '30-connect-agent-phone');
@@ -165,7 +166,7 @@ test('an editor in an org where only owners publish is not offered publishing', 
   expect(accepted.status(), await accepted.text()).toBe(200);
   const stub = await stubClient('Editor agent');
   await page.goto(stub.authorizeUrl);
-  await expect(page.getByRole('heading', { name: 'Editor agent wants to work in SignForge' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '“Editor agent” wants to work in SignForge' })).toBeVisible();
   await hydrated(page);
   await expect(page.getByLabel('Organisation', { exact: true })).toHaveValue(/.+/);
   await expect(page.getByText('Signed in as')).toContainText('Editor');
@@ -199,7 +200,7 @@ test('the SignForge CLI shows as verified, a client’s own `q` does not get in 
       q: 'the client’s own',
     })}`,
   );
-  await expect(page.getByRole('heading', { name: 'SignForge CLI wants to work in SignForge' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveAccessibleName('SignForge CLI wants to work in SignForge');
   await expect(page.getByText('A SignForge app. It sends you back to 127.0.0.1:40123.')).toBeVisible();
   await expect(page.getByText('Unverified', { exact: true })).toHaveCount(0);
 });
