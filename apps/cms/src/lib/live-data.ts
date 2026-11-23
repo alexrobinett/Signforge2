@@ -48,7 +48,7 @@ export const placeName = (p: Pick<PlaceView, 'name' | 'region' | 'country'>) => 
  * The fields a person types: neither live nor one of a source's settings (an Open-Meteo
  * source's units). A table source's live fields are typed until they are bound.
  */
-export function typedFields(m: TemplateManifest, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
+export function typedFields(m: Pick<TemplateManifest, 'fields' | 'live'>, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
   if (!m.live) return m.fields;
   const skip = new Set(
     Object.values(liveSources(m.live)).flatMap((live) => [
