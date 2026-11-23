@@ -13,12 +13,14 @@
  * publish of anything; End now is the way back.
  */
 import { toast } from 'sonner';
+import { toggleOf } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import { versionName } from '~/lib/publishes';
+import { versionsById } from '~/lib/spots';
 import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
-import { spotQuery, spotsQuery } from '~/queries/spots';
+import { assetsQuery, brandKitsQuery, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 interface Pin {
@@ -59,6 +61,14 @@ export interface PublishingSlice {
 
 const TOAST_ID = 'publish';
 
+/** A held draft's kinds, the one the others wait on first: a playlist waits on its spots, an entry on its playlist. */
+const HELD_ORDER = ['spot', 'playlist', 'schedule_entry'] as const;
+
+/** A record a held problem names by id ("brand kit bk_9 is not available"), as the publish checks word it. */
+const MENTION = /\b(spot|playlist|brand kit|template version|asset) ([A-Za-z0-9_-]+)/g;
+/** Those that belong to the draft itself: unnamed, "its brand kit"; another draft is "a spot". */
+const OWN = new Set(['brand kit', 'template version', 'asset']);
+
 const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
 
 export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, { queryClient, router }) => {
@@ -68,11 +78,55 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   const viewRollout = (id: string) => ({ label: 'View rollout', onClick: () => void router.navigate({ to: '/publishes', search: { id } }) });
 
   /**
+   * Why a publish was held back, in names (#253): the draft the others wait on (a spot before its
+   * playlist, a playlist before its entry), its first problem with each id named, and a way to open
+   * it. Names come from the lists already read, else a read now, never retried: someone is waiting
+   * on the toast. A name that cannot be read is said in plain words ("its brand kit"), never an id.
+   */
+  async function heldWords(orgId: string, held: ToolOutput<'publish'>['held']) {
+    const root = HELD_ORDER.flatMap((kind) => held.filter((h) => h.kind === kind))[0];
+    if (!root) return undefined;
+    const problem = (root.problems[0] ?? '').replace(new RegExp(`^${root.kind} ${root.id}: `), '').replace(/^brand: /, '');
+    const mentioned = new Set([root.kind, ...[...problem.matchAll(MENTION)].map((m) => m[1])]);
+    const once = { staleTime: Number.POSITIVE_INFINITY, retry: false } as const;
+    const none = () => undefined;
+    const image = /^image field "(.+)" has no asset$/.exec(problem)?.[1];
+    const [spots, playlists, templates, kits, assets] = await Promise.all([
+      mentioned.has('spot') ? queryClient.query({ ...spotsQuery(orgId), ...once }).catch(none) : undefined,
+      mentioned.has('playlist') ? queryClient.query({ ...playlistsQuery(orgId), ...once }).catch(none) : undefined,
+      mentioned.has('template version') || image !== undefined ? queryClient.query({ ...templatesQuery(orgId), ...once }).catch(none) : undefined,
+      mentioned.has('brand kit') ? queryClient.query({ ...brandKitsQuery(orgId), ...once }).catch(none) : undefined,
+      mentioned.has('asset') ? queryClient.query({ ...assetsQuery(orgId), ...once }).catch(none) : undefined,
+    ]);
+    const versions = versionsById(templates?.templates ?? []);
+    const names = new Map<string, string>([
+      ...[...(spots?.spots ?? []), ...(playlists?.playlists ?? []), ...(kits?.brandKits ?? []), ...(assets?.assets ?? [])].map((x) => [x.id, x.name] as const),
+      ...(templates?.templates ?? []).flatMap((t) => t.versions.map((v) => [v.id, `${t.name} ${v.version}`] as const)),
+    ]);
+    const named = problem.replace(MENTION, (_all, kind: string, id: string) => names.get(id) ?? `${OWN.has(kind) ? 'its' : 'a'} ${kind}`);
+    const name = root.kind === 'schedule_entry' ? 'The schedule entry' : (names.get(root.id) ?? `This ${root.kind}`);
+    const open =
+      root.kind === 'spot'
+        ? () => router.navigate({ to: '/spots/$spotId', params: { spotId: root.id } })
+        : root.kind === 'playlist'
+          ? () => router.navigate({ to: '/playlists/$playlistId', params: { playlistId: root.id } })
+          : () => router.navigate({ to: '/schedule' });
+    const action = { label: root.kind === 'schedule_entry' ? 'Open the schedule' : `Open ${name}`, onClick: () => void open() };
+    if (image !== undefined && root.kind === 'spot') {
+      const version = spots?.spots.find((s) => s.id === root.id)?.templateVersionId;
+      const fields = (version && versions.get(version)?.manifest.fields) || {};
+      const toggle = fields[toggleOf(image)]?.label;
+      return { text: `${name} has no image for ${fields[image]?.label ?? image}: choose one${toggle ? `, or untick ${toggle}` : ''}.`, action };
+    }
+    return { text: `${name} does not pass its checks: ${named}.`, action };
+  }
+
+  /**
    * The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless
    * `undo` is false. `refused` titles a publish that was held back, as it does a refused one.
    */
-  function told(orgId: string, r: ToolOutput<'publish'>, undo = true, refused = 'Not published') {
-    const held = r.held.flatMap((h) => h.problems)[0];
+  async function told(orgId: string, r: ToolOutput<'publish'>, undo = true, refused = 'Not published') {
+    const held = await heldWords(orgId, r.held);
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
     // Every screen refused it: say the screens' own reason, not a guess.
     const allFailed = r.screens.length > 0 && r.screens.every((s) => s.outcome === 'failed');
@@ -85,7 +139,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           ? 'No screen plays it yet: add it to a playlist that screens play.'
           : 'No screen is paired yet.';
     if (!r.publish) {
-      if (held) toast.error(refused, { description: `It does not pass its checks: ${held}.` });
+      if (held) toast.error(refused, { description: held.text, action: held.action, duration: 10_000 });
       else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: reachesNone });
       else toast('Nothing to publish', { description: 'Every screen already plays this.' });
       return;
@@ -95,7 +149,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const failed = r.screens.filter((s) => s.outcome === 'failed').length;
     const notes = [
       made.screens ? 'Each screen switches as it hears of it; the rollout says why any wait.' : reachesNone,
-      held && `Held back: ${held}.`,
+      held && `Held back: ${held.text}`,
       made.screens > 0 && failed > 0 && `${screensWord(failed)} could not take it and keep what they play.`,
     ].filter(Boolean);
     const previous = made.previousId;
@@ -135,7 +189,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published') {
     pending(true);
     try {
-      told(orgId, await callTool('publish', { drafts: pins }), undo, refused);
+      await told(orgId, await callTool('publish', { drafts: pins }), undo, refused);
       await refresh(orgId);
     } catch (err) {
       toast.error(refused, {
@@ -250,7 +304,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     async endTakeover(orgId, entryId) {
       pending(true);
       try {
-        told(orgId, await callTool('end_takeover', { scheduleEntryId: entryId }), false);
+        await told(orgId, await callTool('end_takeover', { scheduleEntryId: entryId }), false);
         await refresh(orgId);
       } catch (err) {
         toast.error('Not ended', { description: toolMessage(err) });

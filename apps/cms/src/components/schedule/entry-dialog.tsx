@@ -87,7 +87,8 @@ export function EntryDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
+      {/* Scroll padding the height of the stuck footer, so a field focused near the foot scrolls clear of it (#253). */}
+      <DialogContent className="max-h-[90dvh] scroll-pb-56 overflow-y-auto sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{draft.record ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
@@ -204,7 +205,8 @@ export function EntryDialog({
                   : `${playlist.name} and this entry: the playlist has never been published.`}
             </p>
           )}
-          <DialogFooter>
+          {/* Stuck to the dialog's foot (#253): on a phone its fields scroll, and Save would be below them. The negative margins span the dialog's padding. */}
+          <DialogFooter className="sticky -bottom-6 -mx-6 -mb-6 border-t bg-popover px-6 pt-4 pb-6">
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>

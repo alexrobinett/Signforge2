@@ -97,11 +97,22 @@ export function startValue(d: ScalarFieldDef): unknown {
   }
 }
 
-/** A new spot's data: a value for each field the template gives no default, so the draft starts valid but for a date to pick. */
+/**
+ * A new spot's data: a value for each field the template gives no default, so the draft starts valid
+ * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
+ * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
+ * someone else's words. Other defaults are settings, and stand.
+ */
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(
     Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'image' || def.default !== undefined ? [] : [[name, def.type === 'list' ? [] : startValue(def)]],
+      def.type === 'list'
+        ? [[name, []]]
+        : def.type === 'text'
+          ? [[name, '']]
+          : def.type === 'image' || def.default !== undefined
+            ? []
+            : [[name, startValue(def)]],
     ),
   );
 

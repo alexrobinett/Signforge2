@@ -40,8 +40,12 @@ const playsWord = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
 export const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
   p.restoresRevision === null ? versionName(p) : `${versionName(p)}: back to ${versionName({ revision: p.restoresRevision })}`;
 
-/** Who made a publish, in words. */
-export const byWord = (p: PublishView) => p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
+/**
+ * Who made a publish, in words: "you" for `me`'s own (#253). The API names a member with no name by
+ * their address before the @, so "a member" is left for a user since deleted.
+ */
+export const byWord = (p: Pick<PublishView, 'by'>, me: string) =>
+  p.by.kind === 'user' && p.by.id === me ? 'you' : p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
 
 const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
 

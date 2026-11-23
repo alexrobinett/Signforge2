@@ -20,15 +20,29 @@ import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
 const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role, editorsPublish: true }) })));
-const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
+const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {
-  it('lists every tool an owner may use: the whole registry', () => {
-    expect(toolNames('owner').sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review).
+  const PER_SCREEN = ['restart_screen'];
+
+  it('lists every tool an owner may use: the whole registry, but for Restart', () => {
+    expect(toolNames('owner').sort()).toEqual(
+      TOOLS.map((t) => t.name)
+        .filter((n) => !PER_SCREEN.includes(n))
+        .sort(),
+    );
+  });
+
+  it('offers Restart only on a found screen, where it is checked: never as a tool whose form takes any screen id', () => {
+    for (const role of ['owner', 'editor'] as const) {
+      expect(listed(role).map((t) => t.name)).toContain('restart_screen');
+      expect(toolNames(role)).not.toContain('restart_screen');
+    }
   });
 
   it('lists every tool an editor may use, and none of the owner-only ones', () => {
-    const editorTools = TOOLS.filter((t) => t.minRole !== 'owner').map((t) => t.name);
+    const editorTools = TOOLS.filter((t) => t.minRole !== 'owner' && !PER_SCREEN.includes(t.name)).map((t) => t.name);
     expect(toolNames('editor').sort()).toEqual(editorTools.sort());
     expect(toolNames('editor')).not.toContain('revoke_screen_credential');
   });
@@ -49,9 +63,19 @@ describe('command menu entries', () => {
     const byName = new Map(commandEntries(listed('owner')).flatMap((e) => (e.kind === 'tool' ? [[e.tool.name, e.label]] : [])));
     expect(byName.get('rename_screen')).toBe('Rename a screen');
     expect(byName.get('claim_screen')).toBe('Pair a screen');
-    expect(byName.get('restart_screen')).toBe("Restart the screen's player now");
     expect(byName.get('revoke_screen_credential')).toBe("Revoke one of a screen's credentials");
     expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, labels, status and manifests');
+  });
+
+  it('opens the takeover dialog, sent at once, for a member who may publish, as the Schedule page does (#253)', () => {
+    const takeover = commandEntries(listed('owner')).find((e) => e.id === 'tool:start_takeover');
+    expect(takeover).toMatchObject({ kind: 'takeover', label: 'Take over screens now…' });
+    // An editor where only owners publish can only draft one, as the tool says.
+    const drafts = parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role: 'editor', editorsPublish: false }) })));
+    expect(commandEntries(drafts).find((e) => e.id === 'tool:start_takeover')).toMatchObject({
+      kind: 'tool',
+      label: 'Take over screens with a playlist, as a draft',
+    });
   });
 });
 
@@ -123,7 +147,7 @@ describe('a result toast', () => {
 });
 
 describe("a found screen's and group's actions (#180)", () => {
-  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active' } as ScreenView;
+  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active', state: { kind: 'online', reason: null } } as ScreenView;
   const labels = (role: Role, s: ScreenView = screen, checked = true) =>
     targetActions({ kind: 'screen', screen: s }, listed(role), checked).map((a) => a.label);
 
@@ -132,6 +156,11 @@ describe("a found screen's and group's actions (#180)", () => {
     expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
       expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
     );
+  });
+
+  it('offers no Restart for a screen that cannot be reached: the restart would go nowhere (#253)', () => {
+    const away = { ...screen, state: { ...screen.state, kind: 'unreachable' } } as ScreenView;
+    expect(labels('editor', away)).toEqual(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)']);
   });
 
   it('offers no takeover to an editor where only owners publish: it would start, and its publish be refused', () => {
