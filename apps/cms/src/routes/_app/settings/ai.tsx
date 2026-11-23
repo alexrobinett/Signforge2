@@ -196,7 +196,8 @@ function KeyForm({ provider }: { provider: AiProvider | null }) {
         <ActionError at="key" />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" aria-disabled={running !== undefined || undefined}>
-            {running === 'key' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <KeyRoundIcon aria-hidden />} {provider ? 'Save provider' : 'Save key'}
+            {running === 'key' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <KeyRoundIcon aria-hidden />}{' '}
+            {provider ? 'Save provider' : 'Save key'}
           </Button>
           {provider && <RemoveKey />}
         </div>
