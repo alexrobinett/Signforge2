@@ -5,10 +5,14 @@
  * provider until a tool uses it.
  *
  * Milestone 4's `/mcp` caller is the third adapter: it builds its services here, with its own
- * `ServiceScope` (the grant's org, and whoever the rate limits should count).
+ * `ServiceScope` (the grant's org, and whoever the rate limits should count). Its `members` needs a
+ * Better Auth that acts as the grant's member, and an audit hook that records the agent: today only
+ * a session's request has one (`auth`).
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
+import type { Auth } from './auth';
+import { betterAuthMembers } from './auth/members';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
 import { alertSecretSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
@@ -38,6 +42,8 @@ export interface ServiceScope {
   email?: EmailSender;
   /** Reaches providers. Tests pass a fake provider's; otherwise `connectorDeps(env)`. */
   connectors?: ConnectorDeps;
+  /** The request's Better Auth, for the member tools, which act as its session's member. Only `/api` has one. */
+  auth?: Auth;
 }
 
 /** Every service, each key present, so a service added to `ToolServices` is a type error here until it is built. */
@@ -54,6 +60,7 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
     tables: tableReader(feedGuards(env, workerFetch)),
     templateCheck: templateChecker(env),
     connectors: connectorsFor(env, scope.connectors ?? connectorDeps(env), new URL(CALLBACK_PATH, c.req.url).href),
+    members: scope.auth && orgId !== null ? betterAuthMembers(scope.auth, c.req.raw.headers, orgId) : undefined,
     rateLimit: async (bucket) => {
       // A template check counts against the org, whose one container it uses. The platform's templates are not checked here.
       if (bucket === 'template_check') return orgId !== null && templateCheckAllowed(env, orgId);

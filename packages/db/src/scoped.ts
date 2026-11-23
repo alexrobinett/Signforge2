@@ -639,6 +639,13 @@ export function scoped(d1: D1Database, orgId: string) {
   };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
+  /** The org's member rows with their user's name and address, narrowed by `where`. */
+  const memberRows = (where?: SQL) =>
+    db
+      .select({ id: s.member.id, userId: s.member.userId, name: s.user.name, email: s.user.email, role: s.member.role, createdAt: s.member.createdAt })
+      .from(s.member)
+      .innerJoin(s.user, eq(s.user.id, s.member.userId))
+      .where(and(eq(s.member.organizationId, orgId), where));
 
   return {
     orgId,
@@ -2014,6 +2021,33 @@ export function scoped(d1: D1Database, orgId: string) {
           deleteExpired: (now: number): Staged => staged(undefined, db.delete(cna).where(and(eq(cna.orgId, orgId), lte(cna.expiresAt, now)))),
         },
       },
+    },
+
+    /**
+     * The org's members (Better Auth's `member` rows), with each one's name and address. Read only:
+     * members change through Better Auth's organization endpoints, which keep its rules (one of our
+     * roles each, never without an owner) and write the audit row (`membershipAudit` in apps/api).
+     */
+    members: {
+      list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),
+      get: (memberId: string) => memberRows(eq(s.member.id, memberId)).get(),
+    },
+    /** The org's invitations (Better Auth's `invitation` rows), read only, as `members` is. */
+    invitations: {
+      /** Those still pending, oldest first. One whose `expiresAt` has passed can no longer be accepted. */
+      pending: () =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.status, 'pending')))
+          .orderBy(s.invitation.createdAt, s.invitation.id)
+          .all(),
+      get: (invitationId: string) =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.id, invitationId)))
+          .get(),
     },
 
     auditLog: {

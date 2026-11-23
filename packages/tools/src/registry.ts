@@ -14,6 +14,7 @@ import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
 import { groupTools } from './groups';
 import { labelTools } from './labels';
+import { memberTools } from './members';
 import { pairingTools } from './pairing';
 import { playlistTools } from './playlists';
 import { publishTools } from './publish';
@@ -43,6 +44,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...playlistTools,
   ...scheduleTools,
   ...auditTools,
+  ...memberTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 
