@@ -90,6 +90,8 @@ describe('guardedFetch', () => {
     ['::ffff:0:7f00:1', 'IPv4-translated 127.0.0.1'],
     ['::127.0.0.1', 'IPv4-compatible 127.0.0.1'],
     ['::a00:1', 'IPv4-compatible 10.0.0.1, in hex'],
+    ['::8.8.8.8', 'IPv4-compatible, carrying a public IPv4'],
+    ['::808:808', 'IPv4-compatible, carrying a public IPv4, in hex'],
     ['0:0:0:0:0:0:0:1', 'loopback, written out in full'],
     ['0::', 'unspecified, in another spelling'],
     ['2002:7f00:1::', '6to4'],
