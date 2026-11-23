@@ -72,6 +72,18 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 
 Without the cache on disk, the warm list is empty, and each module is fetched on its own (the largest is 1.5 MiB). packages/tools' warm message was 11 MiB and packages/db's under 0.25 MiB, so they keep the cache. If either one starts to crash the same way, give it the same setting. The bug is in the plugin: drop the setting once the plugin sends warm modules in pieces.
 
+## The CMS e2e's workers
+
+`apps/cms/playwright.config.ts` runs the e2e's specs side by side, but each spec's own tests in order (`fullyParallel: false`). It uses three workers on a laptop and one on CI (`CI` set). Sharding across jobs would cost more minutes, not fewer, since each job repeats the install and the setup. GitHub's `ubuntu-24.04` runner for this private repository has 2 cores (`nproc`). The API (workerd), the CMS (vite) and one Chromium already keep 67% of them busy, and a second worker leaves the player stages too little CPU. The spots' fades then never settle for axe, and tests time out. Measured 2026-11-22 (#249; runs 45107471407 and 45109633670 on CI, an 18-core Mac locally):
+
+| Workers | Laptop: wall, 3 runs | CI: wall | CI: result |
+| ---: | --- | --- | --- |
+| 1 | 13.7, 13.6, 14.5 min | 22.1, 26.2 min | 70 passed, both runs |
+| 2 | 7.3, 7.2, 7.4 min | 15.4, 17.7, 20.2, 20.6, 20.8 min | 1 of 5 runs all passed. The others had 1–2 failures each, and 3–7 tests did not run. Three of them included command-menu's 60 s timeout, which #250 has since raised |
+| 3 | 5.6, 5.6, 5.7 min | 16.9, 19.0, 20.5 min | 5–8 failures each (timeouts, fades that never settle) |
+
+On CI, where the CPU goes during one serial run (CPU seconds, sampled with `ps`): Chromium's renderers 508 s, its browser process 415 s and its GPU process (software rendering) 358 s; Playwright's runner 321 s; workerd 114 s; vite 106 s. Most of it is Chromium drawing the real player on the stages. A runner with 4 or more cores is what would let workers pay off on CI. On the laptop, 3 workers take the run from 13.7 to 5.6 min.
+
 ## Measured
 
 Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.04` runners, 2026-11-18. The baseline is the workflow before this change, which ran everything on every run. The docs, feeds and player rows are throwaway pull requests on top of this change (#9, #10, #11), each touching one place. They started with cold caches: a pull request reads only its own caches and `master`'s, and `master` had not run this workflow yet.
