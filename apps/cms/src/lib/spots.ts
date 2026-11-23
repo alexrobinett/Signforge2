@@ -8,7 +8,7 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import { validateSpotField, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import { validateSpotField, type FieldDef, type Orientation, type ScreenManifest, type Transition } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
@@ -80,47 +80,6 @@ export function fieldProblems(
   }
   return out;
 }
-
-/** A value for a field with no default yet: a new list row's, or a new spot's. */
-export function startValue(d: ScalarFieldDef): unknown {
-  if (d.default !== undefined) return d.default;
-  switch (d.type) {
-    case 'text':
-    case 'url':
-      return '';
-    case 'number':
-      return d.min ?? 0;
-    case 'boolean':
-      return false;
-    case 'color':
-      return '#ffffff';
-    case 'select':
-      return d.options[0];
-    case 'date':
-    case 'datetime':
-      // No day is right for every template (a countdown's target, an event's start): without a `min`, the editor asks for one.
-      return d.min ?? '';
-  }
-}
-
-/**
- * A new spot's data: a value for each field the template gives no default, so the draft starts valid
- * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
- * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
- * someone else's words. Other defaults are settings, and stand.
- */
-export const startData = (fields: Record<string, FieldDef>) =>
-  Object.fromEntries(
-    Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'list'
-        ? [[name, []]]
-        : def.type === 'text'
-          ? [[name, '']]
-          : def.type === 'image' || def.default !== undefined
-            ? []
-            : [[name, startValue(def)]],
-    ),
-  );
 
 /**
  * The asset and template views as the draft-to-spot module reads them. A template is the one

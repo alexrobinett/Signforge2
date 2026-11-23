@@ -10,6 +10,7 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } from './command-menu';
 import { connectUi, createUiSlice, type UiSlice } from './ui';
+import { createAgentSlice, type AgentSlice } from './agent';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
 import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
@@ -42,7 +43,8 @@ export type AppState = UiSlice &
   PublishingSlice &
   ScheduleSlice &
   TargetPickerSlice &
-  GroupsSlice;
+  GroupsSlice &
+  AgentSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -74,6 +76,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createScheduleSlice(set, get, deps),
     ...createTargetPickerSlice(set, get, deps),
     ...createGroupsSlice(set, get, deps),
+    ...createAgentSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

@@ -479,6 +479,11 @@ export const channelView = z.object({
 
 // ------------------------------------------------------------------ AI providers
 
+/** The client id of the agent built into the CMS, which acts as the signed-in member (docs/proposals/cms-agent.md). */
+export const CMS_AGENT_CLIENT_ID = 'cms-agent';
+/** Its type, for the CMS, which imports only types from here: a constant of this type cannot drift from it. */
+export type CmsAgentClientId = typeof CMS_AGENT_CLIENT_ID;
+
 /** The model providers an org can bring its own key for: Anthropic (#261), and any OpenAI-compatible endpoint (#262). */
 export const AI_PROVIDERS = ['anthropic', 'openai-compatible'] as const;
 export type AiProviderName = (typeof AI_PROVIDERS)[number];
