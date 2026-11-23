@@ -69,13 +69,17 @@ function readsAsOurs(name: string): boolean {
       .map((w) => skeleton(w, paren))
       .filter(Boolean);
     const joined = words.join('');
-    const starts = words.map((_, i) => words.slice(0, i).join('').length);
+    // Where each word lies in `joined`.
+    const spans = words.map((w, i) => {
+      const from = words.slice(0, i).join('').length;
+      return { from, to: from + w.length };
+    });
     // A label counts only after a name that reads as something (not `- (SignForge CLI)`).
     const named = prefix === undefined ? 0 : skeleton(prefix, paren).length;
     const labelAt = named > 0 ? named : joined.length;
     return RESERVED.some((r) => {
       for (let at = joined.indexOf(r); at !== -1 && at < labelAt; at = joined.indexOf(r, at + 1)) {
-        if (starts.includes(at) || words.some((w, i) => at >= starts[i] && at + r.length <= starts[i] + w.length)) return true;
+        if (spans.some(({ from, to }) => at === from || (at > from && at + r.length <= to))) return true;
       }
       return false;
     });
