@@ -48,6 +48,7 @@ import {
   validatePreviewHostMessage,
   validateServerSocketMessage,
   validateSpotData,
+  validateSpotField,
   validateSyncRequest,
   MAX_SYNC_PLAY_COUNTS,
   MAX_SYNC_SOURCES,
@@ -121,6 +122,20 @@ describe('validateSpotData', () => {
     // Only a boolean toggle by that name counts; an image without one always needs its asset.
     expect(validateSpotData({ photo: photo.photo!, showPhoto: { type: 'text', label: 'x', default: '' } }, { showPhoto: '' }, {})).toEqual(missing);
     expect(validateSpotData({ photo: photo.photo! }, {}, {})).toEqual(missing);
+  });
+
+  it("checks one field as the whole spot's check does, an image with its toggle and the bindings (#285)", () => {
+    const photo: Record<string, FieldDef> = {
+      photo: { type: 'image', label: 'Photo' },
+      showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
+    };
+    const bound = { showPhoto: { source: 'src_1', path: 'show' } };
+    expect(validateSpotField(photo, { showPhoto: false }, {}, {}, 'photo')).toEqual([]);
+    expect(validateSpotField(photo, { showPhoto: false }, {}, bound, 'photo')).toEqual(['image field "photo" has no asset']);
+    // A bad toggle is the toggle's problem, not the image's.
+    expect(validateSpotField(photo, { showPhoto: 'no' }, { photo: 'sha-photo' }, {}, 'photo')).toEqual([]);
+    expect(validateSpotField(photo, { showPhoto: 'no' }, { photo: 'sha-photo' }, {}, 'showPhoto')).toEqual(['field "showPhoto" must be true or false']);
+    expect(validateSpotField(photo, {}, {}, {}, 'other')).toEqual(['field "other" has no valid definition']);
   });
 
   it('holds a url to an https address within its maxLength, or empty for none', () => {

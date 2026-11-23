@@ -18,8 +18,8 @@ describe('a url field in the spot editor', () => {
   });
 
   it("puts the contract's message by the field for an address that is not https, and none for one that is", () => {
-    expect(fieldProblems(fields, { data: { qrUrl: 'https://example.com/floor-plan', links: [] }, assets: {} })).toEqual(new Map());
-    expect(fieldProblems(fields, { data: { qrUrl: 'http://example.com/floor-plan', links: [] }, assets: {} })).toEqual(
+    expect(fieldProblems(fields, { data: { qrUrl: 'https://example.com/floor-plan', links: [] }, assets: {}, bindings: {} })).toEqual(new Map());
+    expect(fieldProblems(fields, { data: { qrUrl: 'http://example.com/floor-plan', links: [] }, assets: {}, bindings: {} })).toEqual(
       new Map([['qrUrl', ['field "qrUrl" must be an https address']]]),
     );
   });
@@ -31,14 +31,27 @@ describe('a photo with its toggle in the spot editor (#252)', () => {
     showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
   };
   it('asks for a photo while it is shown, and not once it is switched off, as a publish checks it', () => {
-    expect(fieldProblems(fields, { data: {}, assets: {} })).toEqual(new Map([['photo', ['image field "photo" has no asset']]]));
-    expect(fieldProblems(fields, { data: { showPhoto: false }, assets: {} })).toEqual(new Map());
-    expect(fieldProblems(fields, { data: { showPhoto: true }, assets: { photo: 'ast_1' } })).toEqual(new Map());
+    expect(fieldProblems(fields, { data: {}, assets: {}, bindings: {} })).toEqual(new Map([['photo', ['image field "photo" has no asset']]]));
+    expect(fieldProblems(fields, { data: { showPhoto: false }, assets: {}, bindings: {} })).toEqual(new Map());
+    expect(fieldProblems(fields, { data: { showPhoto: true }, assets: { photo: 'ast_1' }, bindings: {} })).toEqual(new Map());
   });
   it("puts a bad toggle's message by the toggle only", () => {
-    expect(fieldProblems(fields, { data: { showPhoto: 'no' }, assets: { photo: 'ast_1' } })).toEqual(
+    expect(fieldProblems(fields, { data: { showPhoto: 'no' }, assets: { photo: 'ast_1' }, bindings: {} })).toEqual(
       new Map([['showPhoto', ['field "showPhoto" must be true or false']]]),
     );
+  });
+  it('asks for a photo when its toggle is bound to live data, even with a static false, as a publish does (#285)', () => {
+    const draft: SpotDraft = {
+      name: 'Welcome',
+      durationMs: 10_000,
+      data: { showPhoto: false },
+      assets: {},
+      bindings: { showPhoto: { dataSourceId: 'src_1', path: 'show' } },
+      assetId: null,
+      fit: 'cover',
+      url: '',
+    };
+    expect(fieldProblems(fields, draft)).toEqual(new Map([['photo', ['image field "photo" has no asset']]]));
   });
 });
 
@@ -73,11 +86,13 @@ describe('date and datetime fields in the spot editor', () => {
 
   it('starts a date at its min, and one with no min empty, which the editor says needs one', () => {
     expect(startData(fields)).toEqual({ opens: '2026-12-01', target: '', events: [] });
-    expect(fieldProblems(fields, { data: startData(fields), assets: {} })).toEqual(new Map([['target', ['field "target" has no date and time yet']]]));
+    expect(fieldProblems(fields, { data: startData(fields), assets: {}, bindings: {} })).toEqual(
+      new Map([['target', ['field "target" has no date and time yet']]]),
+    );
   });
 
   it("puts the contract's message by the field for a day outside min and max, and none for one inside", () => {
-    const at = (opens: string) => fieldProblems(fields, { data: { opens, target: '2026-12-24T18:00', events: [] }, assets: {} });
+    const at = (opens: string) => fieldProblems(fields, { data: { opens, target: '2026-12-24T18:00', events: [] }, assets: {}, bindings: {} });
     expect(at('2026-12-24')).toEqual(new Map());
     expect(at('2026-11-30')).toEqual(new Map([['opens', ['field "opens" must be on or after 2026-12-01']]]));
     expect(at('2027-01-01')).toEqual(new Map([['opens', ['field "opens" must be on or before 2026-12-31']]]));
