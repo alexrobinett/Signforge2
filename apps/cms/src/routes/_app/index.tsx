@@ -242,9 +242,7 @@ function PlayingNow({ rows, anyScreen }: { rows: Playing[]; anyScreen: boolean }
  */
 function SpotThumb({ spot }: { spot: Playing['spot'] }) {
   const t = spot.template;
-  const src = spot.image
-    ? sessionBlobPath(spot.image)
-    : t && templateThumbnail(t);
+  const src = spot.image ? sessionBlobPath(spot.image) : t && templateThumbnail(t);
   return src ? (
     <img src={src} alt="" width={480} height={270} loading="lazy" className="aspect-video w-full bg-muted object-cover" />
   ) : (
