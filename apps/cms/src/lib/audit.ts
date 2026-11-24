@@ -80,6 +80,7 @@ export const TARGET_KINDS: { value: string; label: string }[] = [
   { value: 'alert_delivery', label: 'Alert delivery' },
   { value: 'org', label: 'Settings' },
   { value: 'publish', label: 'Publish' },
+  { value: 'publish_request', label: 'Publish request' },
 ];
 export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value === kind)?.label ?? kind.replaceAll('_', ' ');
 
@@ -118,6 +119,9 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   end_takeover: { group: 'Schedule', words: 'Takeover ended' },
   publish: { group: 'Publishes', words: 'Published' },
   roll_back_publish: { group: 'Publishes', words: 'Rolled back' },
+  request_publish: { group: 'Publishes', words: 'Asked to publish' },
+  approve_publish_request: { group: 'Publishes', words: 'Request approved' },
+  decline_publish_request: { group: 'Publishes', words: 'Request declined' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
   renew_asset_upload: { group: 'Assets', words: 'Upload renewed' },
   finalize_asset: { group: 'Assets', words: 'Image checked' },
@@ -221,9 +225,9 @@ function madeDefaultOf(e: AuditEntry): string | undefined {
   return typeof made === 'object' && made !== null && 'name' in made ? text(made.name) : undefined;
 }
 
-/** What an entry did, in words: a publish that made the default says so. */
+/** What an entry did, in words: a publish, or an approved request's (M4-09), that made the default says so. */
 export function whatText(e: AuditEntry): string {
-  const made = e.action === 'publish' ? madeDefaultOf(e) : undefined;
+  const made = e.action === 'publish' || e.action === 'approve_publish_request' ? madeDefaultOf(e) : undefined;
   const words = eventText({ action: e.action, input: inputOf(e) });
   return made ? `${words} · made ${made} the default playlist` : words;
 }

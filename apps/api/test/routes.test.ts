@@ -111,6 +111,7 @@ describe('requests', () => {
   let baseTemplate: string;
   let baseVersion: string;
   let grantId: string;
+  let publishRequestId: string;
 
   beforeAll(async () => {
     ({ template: baseTemplate, templateVersion: baseVersion } = await seedBaseTemplate(env.DB));
@@ -135,6 +136,21 @@ describe('requests', () => {
     await testScope(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // get_agent_grant's: an agent connected to this org by its owner.
     grantId = (await check((await agentToken(t, setup, org.id, ['content:read'])).access_token))!.grantId;
+    // get_publish_request's: the agent's request to publish the spot.
+    const asked = testScope(env.DB, org.id).publishRequests.stage.insert(
+      {
+        requestedByKind: 'agent',
+        requestedBy: grantId,
+        draftsJson: JSON.stringify([{ kind: 'spot', id: spotId, version: 1 }]),
+        reason: 'Guarded',
+        brandState: '',
+        expiresAt: Date.UTC(2100, 0, 1),
+      },
+      Date.UTC(2026, 10, 24),
+      10,
+    );
+    await testScope(env.DB, org.id).commit(asked.writes);
+    publishRequestId = asked.row.id;
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -180,6 +196,7 @@ describe('requests', () => {
         spotId,
         playlistId,
         grantId,
+        publishRequestId,
       };
       const input = Object.fromEntries(Object.entries(example).map(([k, v]) => [k, orgIds[k] ?? v]));
       const res = await owner.tool(tool.name, input);

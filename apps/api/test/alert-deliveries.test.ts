@@ -1,8 +1,9 @@
 // Alerts to Slack and signed outgoing webhooks (#88): a screen going offline is queued for each
 // channel its rule names, sent after the check through the fetch guards, retried with backoff
 // while the receiver fails, and shown in the delivery log. No network: fetch and DNS are stubbed.
-import { orgMembers } from '@signforge/db';
+import { orgMembers, scoped } from '@signforge/db';
 import { testScope } from '@signforge/db/testing';
+import { dispatch, registry } from '@signforge/tools';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -302,6 +303,92 @@ describe('alerts to Slack and webhooks', () => {
     const later = (await owner.ok<{ publishes: { id: string; playing: number; replaced: number; reached: number | null }[] }>('/api/tools/list_publishes', {}))
       .publishes;
     expect(later.find((h) => h.id === v1.id)).toMatchObject({ playing: 0, replaced: 2, reached: 2 });
+  });
+
+  it('sends a publish request to Slack, the webhook, and by email to each member who may approve when it is sent, never the asker or its reason (M4-09)', async () => {
+    const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    await owner.ok('/api/tools/update_org_settings', { alerts: { publish_requested: { slack: true, webhook: true } } });
+    const o = testScope(env.DB, org.id);
+    // An editor who asks, another who may approve, and a viewer, who may not.
+    const member = async (name: string, role: string) => {
+      const userId = `${org.id}-${name}`;
+      await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, '2026-11-24', '2026-11-24')")
+        .bind(userId, name, `${userId}@signforge.test`)
+        .run();
+      await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, '2026-11-24')")
+        .bind(`${userId}-m`, org.id, userId, role)
+        .run();
+      return { userId, email: `${userId}@signforge.test` };
+    };
+    const asker = await member('Ada', 'editor');
+    const other = await member('Ben', 'editor');
+    const viewer = await member('Cy', 'viewer');
+    const ownerEmail = (await orgMembers(env.DB, org.id)).find((m) => m.role === 'owner')!.email;
+    const ask = async (name: string) => {
+      const spot = await o.spots.insert({ name, kind: 'url', durationMs: 10_000, url: `https://example.com/${name}` });
+      const r = await dispatch(
+        registry,
+        'request_publish',
+        { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }], reason: 'SECRET-REASON-TEXT' },
+        { org: scoped(env.DB, org.id), role: 'editor', actor: { kind: 'user', id: asker.userId, clientId: 'cms' }, blobs: env.BLOBS, services: {} },
+      );
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { request: { id: string; expiresAt: number } }).request;
+    };
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    const start = Date.now();
+    const request = await ask('menu');
+    // The first run sends Slack and the webhook, and fans the email out to each approver; the next sends those.
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    const asks = (addr: string) => outbox.messages.filter((m) => m.to === addr && m.subject.includes('asks to publish'));
+    for (const addr of [ownerEmail, other.email]) {
+      expect(asks(addr), addr).toEqual([
+        {
+          to: addr,
+          subject: `SignForge: Ada asks to publish 1 draft in ${org.name}`,
+          text: `Ada asks to publish 1 draft in ${org.name}. Approve or decline it in SignForge before ${new Date(request.expiresAt).toISOString()} (UTC); after that it expires.\n\nWho gets these is in Settings, Notifications.`,
+        },
+      ]);
+    }
+    expect([...asks(asker.email), ...asks(viewer.email)]).toEqual([]);
+    const event = await to(webhookUrl)[0]!.json();
+    expect(event).toEqual({
+      type: 'publish.requested',
+      id: `evt_publish_requested_${request.id}`,
+      occurredAt: expect.any(String),
+      org: { id: org.id, name: org.name },
+      data: {
+        request: { id: request.id, url: null, drafts: 1, expiresAt: new Date(request.expiresAt).toISOString() },
+        by: { kind: 'user', id: asker.userId, name: 'Ada' },
+      },
+    });
+    const slack = await to(slackUrl)[0]!.json<{ text: string; blocks: unknown[] }>();
+    expect(slack.text).toBe(`Ada asks to publish 1 draft in ${org.name}`);
+    expect(JSON.stringify(slack.blocks)).toContain('*Decide by*');
+    for (const body of [JSON.stringify(event), JSON.stringify(slack), JSON.stringify(outbox.messages)]) expect(body).not.toContain('SECRET-REASON-TEXT');
+
+    // While only owners publish, an editor is not asked to approve: the email goes to whoever may when it is sent.
+    await owner.ok('/api/tools/update_org_settings', { editorsPublish: false });
+    await ask('specials');
+    await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
+    await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
+    expect(asks(ownerEmail)).toHaveLength(2);
+    expect(asks(other.email)).toHaveLength(1);
+
+    // One mailbox that fails stops no other, and its retry sends to it alone (re-check of #386).
+    await owner.ok('/api/tools/update_org_settings', { editorsPublish: true });
+    const failing = {
+      send: async (m: { to: string; subject: string; text: string }) => (m.to === other.email ? Promise.reject(new Error('mailbox full')) : outbox.send(m)),
+    };
+    await ask('lunch');
+    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
+    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(1);
+    await deliverAlerts(env, outbox, { now: start + 3 * MIN + HOUR, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(2);
   });
 
   it("sends an agent's repeated refusals to Slack and the webhook once an hour, naming its client as a page does (M4-08)", async () => {

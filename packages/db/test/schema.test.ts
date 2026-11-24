@@ -67,6 +67,7 @@ describe('schema', () => {
       'play_counts',
       'playlist_items',
       'playlists',
+      'publish_requests',
       'publish_screens',
       'publishes',
       'schedule_entries',

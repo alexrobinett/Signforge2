@@ -56,6 +56,19 @@ export type AlertEvent = { id: string; occurredAt: string; org: { id: string; na
         needs: string | null;
       };
     }
+  | {
+      type: 'publish.requested';
+      /**
+       * Someone asked to publish chosen drafts (M4-09), for a member who may publish to approve or
+       * decline before `expiresAt`. `by.name` is a member's name, or an agent's client name when a
+       * page may show it (`shownClient`), else null. Never the request's reason: the asker's own
+       * words are read in SignForge, beside the drafts. `url` is where to see it in the CMS.
+       */
+      data: {
+        request: { id: string; url: string | null; drafts: number; expiresAt: string };
+        by: { kind: 'user' | 'agent'; id: string; name: string | null };
+      };
+    }
   | { type: 'test'; data: { message: string } }
 );
 

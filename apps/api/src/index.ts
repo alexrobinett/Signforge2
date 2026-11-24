@@ -19,7 +19,14 @@ import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
 import { mcp } from './mcp';
-import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys, pruneUnconsentedClients } from '@signforge/db';
+import {
+  AUDIT_ROWS_PER_RUN,
+  expireAlertDeliveries,
+  expireAuditRows,
+  expireIdempotencyKeys,
+  expirePublishRequests,
+  pruneUnconsentedClients,
+} from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
 import { type FeedImageJob, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
@@ -71,7 +78,13 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
       // schedule could run out before the sends do, letting the next run send them again.
       Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
       ...(daily
-        ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now), pruneUnconsentedClients(env.DB, now)]
+        ? [
+            expireAuditRows(env.DB, now),
+            expireIdempotencyKeys(env.DB, now),
+            expireAlertDeliveries(env.DB, now),
+            pruneUnconsentedClients(env.DB, now),
+            expirePublishRequests(env.DB, now),
+          ]
         : []),
     ]);
     const audit = results[checks.length + 1];

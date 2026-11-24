@@ -41,6 +41,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   publish: (o) => o.publish,
   // An agent grant (M4-07's tools): `grantId`.
   grant: (o) => o.agentGrant,
+  publishRequest: (o) => o.publishRequest,
   // Better Auth's rows, as seedTeam names them.
   member: (o) => `${o.orgId}-member`,
   invitation: (o) => `${o.orgId}-invitation`,
@@ -144,6 +145,14 @@ const LISTS_CALLS: Record<string, (out: unknown) => unknown> = {
   list_audit_log: (out) => (out as { entries: { at: number; action: string; actor: { id: string } }[] }).entries.map((e) => [e.at, e.action, e.actor.id]),
 };
 
+/**
+ * Tools whose ids sit in a list of draft pins, `{ kind, id, version }`, which no field's name says:
+ * each runs with org B's own draft here, and is refused org A's below.
+ */
+const PINNED: Record<string, (o: SeededOrg) => unknown> = {
+  request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend hours' }),
+};
+
 /** Fields whose foreign id is refused by the check of another field, which the tool makes first. */
 const REFUSED_BY_ANOTHER = new Set([
   // The credential is looked up first and must belong to the screen named.
@@ -245,11 +254,25 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     expect(paths('update_spot')).toContain('bindings.*.dataSourceId');
   });
 
+  it("refuses a draft pin naming org A's draft as not there (version 0), for publish and request_publish", async () => {
+    const pins = [{ kind: 'spot', id: s.a.templateSpot, version: 1 }];
+    for (const [name, input] of [
+      ['publish', { drafts: pins }],
+      ['request_publish', { drafts: pins, reason: 'Weekend hours' }],
+    ] as const) {
+      expect(await dispatch(registry, name, input, callerB), name).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        details: { id: s.a.templateSpot, version: 0 },
+      });
+    }
+  });
+
   for (const tool of TOOLS) {
     const fields = unique(idFields(z.toJSONSchema(tool.input, { io: 'input', unrepresentable: 'any' })));
     if (!fields.length) {
       it(`${tool.name}: names no ids, and works on org B alone`, async () => {
-        const result = await dispatch(registry, tool.name, tool.example, callerB);
+        const result = await dispatch(registry, tool.name, PINNED[tool.name]?.(s.b) ?? tool.example, callerB);
         expect(result.ok, JSON.stringify(result)).toBe(true);
         const calls = LISTS_CALLS[tool.name];
         if (calls && result.ok) {

@@ -1,7 +1,8 @@
 /**
  * Retention (F13, #41): cross-org deletes by age, run daily from the API's Cron Trigger. They
  * read no row and name no org: idempotency keys and alert deliveries (the delivery log, #88) go
- * after 7 days, audit rows after each org's `org_settings.audit_retention_days`. The feed photos
+ * after 7 days, audit rows after each org's `org_settings.audit_retention_days`, and so do publish
+ * requests once decided or expired (M4-09). The feed photos
  * sweep's finders are here too, with the rules of ./feed-photos.ts.
  */
 import { lt, type SQL, sql } from 'drizzle-orm';
@@ -71,6 +72,26 @@ export async function expireAuditRows(d1: D1Database, now: number): Promise<numb
     WHERE ${a.orgId} = ${o.id} AND ${a.at} < ${now} - COALESCE(${os.auditRetentionDays}, ${DEFAULT_AUDIT_RETENTION_DAYS}) * ${DAY_MS}
     LIMIT ${AUDIT_BATCH})`;
   return deleteInBatches(db, batch);
+}
+
+/**
+ * Delete every org's publish requests decided or expired longer ago than its audit retention at
+ * `now`, as audit rows go; a pending one never goes. Returns how many went.
+ */
+export async function expirePublishRequests(d1: D1Database, now: number): Promise<number> {
+  const r = s.publishRequests;
+  const os = s.orgSettings;
+  const o = s.organization;
+  // Decided: when decided. Undecided: when it expired, which a pending one has not.
+  return deleteInBatches(
+    drizzle(d1),
+    sql`DELETE FROM ${r} WHERE rowid IN (
+    SELECT ${r}.rowid FROM ${o}
+    LEFT JOIN ${os} ON ${os.orgId} = ${o.id}
+    CROSS JOIN ${r}
+    WHERE ${r.orgId} = ${o.id} AND COALESCE(${r.decidedAt}, ${r.expiresAt}) < ${now} - COALESCE(${os.auditRetentionDays}, ${DEFAULT_AUDIT_RETENTION_DAYS}) * ${DAY_MS}
+    LIMIT ${AUDIT_BATCH})`,
+  );
 }
 
 /** Run `batch`, a DELETE of at most AUDIT_BATCH rows, until it deletes fewer or AUDIT_BATCHES have run; how many went. */

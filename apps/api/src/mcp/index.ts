@@ -54,7 +54,7 @@ const RATE_LIMITED = -32000;
 const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 
 const INSTRUCTIONS = `SignForge runs digital signage. You act as one member in one organization, with the scopes they granted; the tools listed are the ones you may use.
-- Changes are drafts. Screens show them only once published; without content:publish, a person publishes them.
+- Changes are drafts. Screens show them only once published; without content:publish, ask a person with request_publish, pinning each draft at the version you read, and follow it with get_publish_request.
 - Updates take ifVersion: send the version you read. A conflict means someone changed it since: read it again, then decide.
 - Creating tools take an optional idempotencyKey: send the same key when you retry a creation, and a new one for each new thing.
 - Limits per grant: 120 calls a minute (tools/list included), 30 changes a minute and 2,000 a UTC day. Over one, a call is refused with rate_limited and retryAfterSeconds; wait that long.
@@ -219,6 +219,7 @@ mcp.post('/mcp', refuseSession, async (c) => {
     services: agentServices(c, grant),
     publishLock: publishLock(c.env, grant.orgId),
     agentLimiter: agentLimiter(c.env),
+    member: grant.userId,
   };
   // One message a request: a batch (which 2025-06-18 took out of the protocol) would run its calls at once.
   const body = await readRequestBody(c.req.raw.clone(), BODY_MAX);
