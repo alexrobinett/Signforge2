@@ -1,7 +1,8 @@
-// The drawer's drafts in the store (#268): nothing written until the person saves them; a save as
-// the API answers it, a refused one overwriting nothing; Undo putting each back as it was, as the
-// person, the last first, at the version the save left. The API and the tools are stubs; nothing
-// waits on a clock.
+// The drawer's drafts in the store (#268): nothing written until the person saves them, nor before
+// every draft has its summary; a save as the API answers it, a refused one overwriting nothing; Undo
+// putting each back as it was, as the person, the last first, at the version its target is at now,
+// and carrying on from where one that failed stopped. The API, the pages' reads and the tools are
+// stubs; nothing waits on a clock.
 import type { AnswerCard, ChatEvent } from '@signforge/api/agent-chat';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,18 +11,37 @@ import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agen
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/lib/live', () => ({ orgOnScreen: () => 'org_1' }));
-// The pages' reads, for the summaries: failing here, so none is worked out, which the card waits out.
-const nothing = (key: string) => ({ queryKey: ['org', 'org_1', key], queryFn: async () => Promise.reject(new Error('not read in this test')) });
-vi.mock('~/queries/screens', () => ({ screensQuery: () => nothing('screens') }));
-vi.mock('~/queries/schedule', () => ({ scheduleQuery: () => nothing('schedule') }));
-vi.mock('~/queries/playlists', () => ({ playlistsQuery: () => nothing('playlists') }));
-vi.mock('~/queries/spots', () => ({ spotsQuery: () => nothing('spots'), templatesQuery: () => nothing('templates') }));
-const tools = vi.hoisted(() => ({ calls: [] as { name: string; input: unknown }[] }));
+// The pages' reads, for the summaries: an empty org whose card template has a headline; each read
+// fails while `fail`, and the templates are read without the card's version while `stale` is above 0.
+const reads = vi.hoisted(() => ({ fail: false, stale: 0, templatesRead: 0 }));
+const CARD_VERSION = { id: 'tpv_card', manifest: { fields: { headline: { type: 'text', label: 'Headline' } } } };
+const read = (key: string, data: () => unknown) => ({
+  queryKey: ['org', 'org_1', key],
+  queryFn: async () => (reads.fail ? Promise.reject(new Error('offline')) : data()),
+});
+vi.mock('~/queries/screens', () => ({ screensQuery: () => read('screens', () => ({ screens: [], groups: [] })) }));
+vi.mock('~/queries/schedule', () => ({ scheduleQuery: () => read('schedule', () => ({ entries: [] })) }));
+vi.mock('~/queries/playlists', () => ({ playlistsQuery: () => read('playlists', () => ({ playlists: [] })) }));
+vi.mock('~/queries/spots', () => ({
+  spotsQuery: () => read('spots', () => ({ spots: [] })),
+  templatesQuery: () =>
+    read('templates', () => {
+      reads.templatesRead++;
+      return { templates: [{ versions: reads.stale-- > 0 ? [] : [CARD_VERSION] }] };
+    }),
+}));
+// The tools Undo calls: each answers with `answer`, or throws while `failing` names it.
+const tools = vi.hoisted(() => ({
+  calls: [] as { name: string; input: unknown }[],
+  failing: new Set<string>(),
+  answer: (_name: string, _input: any): unknown => ({}),
+}));
 vi.mock('~/lib/tools', async (actual) => ({
   ...(await actual<object>()),
   callToolByName: async (name: string, input: unknown) => {
     tools.calls.push({ name, input });
-    return {};
+    if (tools.failing.has(name)) throw new Error(`${name} failed`);
+    return tools.answer(name, input);
   },
 }));
 
@@ -31,6 +51,9 @@ beforeEach(() => {
   sent.length = 0;
   answers.length = 0;
   tools.calls.length = 0;
+  tools.failing.clear();
+  tools.answer = () => ({});
+  Object.assign(reads, { fail: false, stale: 0, templatesRead: 0 });
   vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
     sent.push({ path, body: JSON.parse(String(init.body)) });
     const res = answers.shift();
@@ -56,8 +79,8 @@ const CARD: AnswerCard = {
     { tool: 'create_schedule_entry', input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' }, target: null, before: null },
   ],
 };
-const turn = () =>
-  new Response(`${JSON.stringify({ type: 'answer', card: CARD } satisfies ChatEvent)}\n`, { headers: { 'content-type': 'application/x-ndjson' } });
+const turn = (card: AnswerCard = CARD) =>
+  new Response(`${JSON.stringify({ type: 'answer', card } satisfies ChatEvent)}\n`, { headers: { 'content-type': 'application/x-ndjson' } });
 
 function draftsStore() {
   const reloaded: string[] = [];
@@ -71,6 +94,7 @@ function draftsStore() {
     reloadSpot: async (_o: string, id: string) => void reloaded.push(id),
     publishSpot: vi.fn(async () => {}),
     publishEntry: vi.fn(async () => {}),
+    publishPlaylist: vi.fn(async () => {}),
   }));
   const at = () => store.getState().agentDrawer.messages[1];
   return { store: store as unknown as { getState: () => AgentDrawerSlice & Record<string, any> }, reloaded, at };
@@ -81,7 +105,8 @@ describe("the drawer's drafts, in the store", () => {
     const { store, reloaded, at } = draftsStore();
     answers.push(turn());
     await store.getState().askAgent('Make the headline punchier, and breakfast weekdays 6-11 on the drive-thrus');
-    expect(at()).toMatchObject({ role: 'assistant', drafts: { status: 'proposed' } });
+    expect(at()).toMatchObject({ role: 'assistant', drafts: { status: 'proposed', shown: { state: 'shown' } } });
+    expect(at().drafts.shown.summaries).toHaveLength(2);
     expect(sent.map((s) => s.path)).toEqual(['/api/agent/chat']);
 
     answers.push(
@@ -104,7 +129,7 @@ describe("the drawer's drafts, in the store", () => {
 
     await store.getState().undoDrafts(1);
     expect(tools.calls).toEqual([
-      { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new' } },
+      { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new', ifVersion: 1 } },
       { name: 'update_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 } },
     ]);
     expect(at().drafts.status).toBe('undone');
@@ -124,5 +149,168 @@ describe("the drawer's drafts, in the store", () => {
     // Nothing of it was written, so Undo puts nothing back.
     await store.getState().undoDrafts(1);
     expect(tools.calls).toEqual([]);
+  });
+  it('keeps Save from writing until every draft has its summary; a read that fails says so, and Try again works it out', async () => {
+    const { store, at } = draftsStore();
+    reads.fail = true;
+    answers.push(turn());
+    await store.getState().askAgent('Punchier');
+    expect(at().drafts.shown).toEqual({ state: 'failed', reason: expect.stringMatching(/Could not read/) });
+    await store.getState().saveDrafts(1);
+    expect(sent.map((s) => s.path)).toEqual(['/api/agent/chat']);
+    expect(at().drafts.status).toBe('proposed');
+
+    reads.fail = false;
+    await store.getState().showDrafts(1);
+    expect(at().drafts.shown).toMatchObject({ state: 'shown', summaries: [{ title: 'Spot Promo' }, { title: 'New schedule entry' }] });
+    answers.push(Response.json({ results: [] }));
+    await store.getState().saveDrafts(1);
+    expect(sent.map((s) => s.path)).toEqual(['/api/agent/chat', '/api/agent/apply']);
+  });
+
+  it('reads the templates again for a spot on a version they did not have, and refuses to save while it is still not read', async () => {
+    const { store, at } = draftsStore();
+    reads.stale = 1;
+    answers.push(turn());
+    await store.getState().askAgent('Punchier');
+    expect(reads.templatesRead).toBe(2);
+    expect(at().drafts.shown.state).toBe('shown');
+
+    const second = draftsStore();
+    reads.stale = 2;
+    answers.push(turn());
+    await second.store.getState().askAgent('Punchier');
+    expect(second.at().drafts.shown).toEqual({ state: 'failed', reason: expect.stringMatching(/template could not be read/) });
+    await second.store.getState().saveDrafts(1);
+    expect(sent.filter((s) => s.path === '/api/agent/apply')).toEqual([]);
+  });
+
+  /** An answer of `drafts`, saved as the API answers them with `results`. */
+  async function saved(drafts: AnswerCard['drafts'], results: unknown[]) {
+    const s = draftsStore();
+    answers.push(turn({ ...CARD, drafts }));
+    await s.store.getState().askAgent('Change it');
+    answers.push(Response.json({ results }));
+    await s.store.getState().saveDrafts(1);
+    expect(s.at().drafts.status).toBe('saved');
+    return s;
+  }
+  const ENTRY = {
+    id: 'sch_1',
+    playlistId: 'pls_a',
+    target: 'org',
+    groupId: null,
+    screenId: null,
+    priority: 2,
+    days: [1, 2],
+    from: '06:00',
+    to: null,
+    startDate: null,
+    endDate: null,
+    version: 4,
+  };
+
+  it("puts a schedule entry's aim back whole: from a group to everywhere, and from everywhere to a group", async () => {
+    const toGroup = await saved(
+      [
+        {
+          tool: 'update_schedule_entry',
+          input: { scheduleEntryId: 'sch_1', target: 'group', groupId: 'grp_dt', ifVersion: 4 },
+          target: { kind: 'schedule_entry', id: 'sch_1' },
+          before: ENTRY,
+        },
+      ],
+      [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, target: 'group', groupId: 'grp_dt', version: 5 } } }],
+    );
+    await toGroup.store.getState().undoDrafts(1);
+    expect(tools.calls).toEqual([
+      {
+        name: 'update_schedule_entry',
+        input: {
+          scheduleEntryId: 'sch_1',
+          playlistId: 'pls_a',
+          target: 'org',
+          priority: 2,
+          days: [1, 2],
+          from: '06:00',
+          to: null,
+          startDate: null,
+          endDate: null,
+          ifVersion: 5,
+        },
+      },
+    ]);
+
+    tools.calls.length = 0;
+    const grouped = { ...ENTRY, target: 'group', groupId: 'grp_dt' };
+    const toOrg = await saved(
+      [
+        {
+          tool: 'update_schedule_entry',
+          input: { scheduleEntryId: 'sch_1', target: 'org', ifVersion: 4 },
+          target: { kind: 'schedule_entry', id: 'sch_1' },
+          before: grouped,
+        },
+      ],
+      [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, version: 5 } } }],
+    );
+    await toOrg.store.getState().undoDrafts(1);
+    expect(tools.calls).toEqual([
+      {
+        name: 'update_schedule_entry',
+        input: {
+          scheduleEntryId: 'sch_1',
+          playlistId: 'pls_a',
+          target: 'group',
+          groupId: 'grp_dt',
+          priority: 2,
+          days: [1, 2],
+          from: '06:00',
+          to: null,
+          startDate: null,
+          endDate: null,
+          ifVersion: 5,
+        },
+      },
+    ]);
+  });
+
+  it('carries on an Undo that stopped from where it did, each draft at the version its target is at now: two playlist changes and an entry made', async () => {
+    const PLAYLIST = { id: 'pls_a', name: 'Breakfast', transition: { type: 'cut' }, spotIds: ['spt_1'], version: 5 };
+    const drafts: AnswerCard['drafts'] = [
+      { tool: 'update_playlist', input: { playlistId: 'pls_a', name: 'Morning', ifVersion: 5 }, target: { kind: 'playlist', id: 'pls_a' }, before: PLAYLIST },
+      {
+        tool: 'update_playlist',
+        input: { playlistId: 'pls_a', spotIds: [], ifVersion: 6 },
+        target: { kind: 'playlist', id: 'pls_a' },
+        before: { ...PLAYLIST, name: 'Morning', version: 6 },
+      },
+      { tool: 'create_schedule_entry', input: { playlistId: 'pls_a', target: 'org', idempotencyKey: 'k' }, target: null, before: null },
+    ];
+    const { store, at } = await saved(drafts, [
+      { tool: 'update_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', version: 6 } } },
+      { tool: 'update_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', spotIds: [], version: 7 } } },
+      { tool: 'create_schedule_entry', ok: true, output: { entry: { ...ENTRY, id: 'sch_new', version: 1 } } },
+    ]);
+    // Each undo answers with the version it left.
+    let version = 7;
+    tools.answer = (name) => (name === 'update_playlist' ? { playlist: { ...PLAYLIST, version: ++version } } : { deleted: 'sch_new', version: null });
+    tools.failing.add('update_playlist');
+    await store.getState().undoDrafts(1);
+    expect(at().drafts).toMatchObject({ status: 'saved', error: 'update_playlist failed', undone: [2] });
+    expect(tools.calls.map((c) => c.input)).toEqual([
+      { scheduleEntryId: 'sch_new', ifVersion: 1 },
+      { playlistId: 'pls_a', spotIds: ['spt_1'], ifVersion: 7 },
+    ]);
+
+    tools.calls.length = 0;
+    tools.failing.clear();
+    await store.getState().undoDrafts(1);
+    expect(tools.calls.map((c) => c.input)).toEqual([
+      { playlistId: 'pls_a', spotIds: ['spt_1'], ifVersion: 7 },
+      // The first change, at the version the undo of the second left.
+      { playlistId: 'pls_a', name: 'Breakfast', ifVersion: 8 },
+    ]);
+    expect(at().drafts).toMatchObject({ status: 'undone', error: null, undone: [2, 1, 0] });
   });
 });

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, STUB_DRAFT, STUB_DRAFTED } from './servers';
 
-const ADDRESS = '192.0.2.182';
+const ADDRESS = '192.0.2.183';
 
 test('a member asks the agent for a punchier headline and a QR link, sees what it would change, saves it, sees the stage redraw, and undoes it (#268)', async ({
   page,

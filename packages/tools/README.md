@@ -113,7 +113,7 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `create_schedule_entry` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, idempotencyKey? }` | `{ entry }` |
 | `start_takeover` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, startsAt?, endsAt, idempotencyKey? }` | `{ entry }` |
 | `update_schedule_entry` | content:draft | editor | `{ scheduleEntryId, playlistId?, target?, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, startsAt?, endsAt?, ifVersion? }` | `{ entry }` |
-| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version` |
+| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId, ifVersion? }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version` |
 | `end_takeover` | content:publish | editor | `{ scheduleEntryId }` | as `publish`: the takeover deleted and published alone, in one batch |
 | `get_org_settings` | content:read | viewer | `{}` | `{ settings }` |
 | `update_org_settings` | org:manage | owner | `{ timezone?, locale?, displayHours?, updateWindow?, unreachableAfterMinutes?, editorsPublish?, auditRetentionDays?, alerts?, ifVersion? }` | `{ settings }` |

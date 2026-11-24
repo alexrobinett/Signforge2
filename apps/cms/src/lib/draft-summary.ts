@@ -3,6 +3,9 @@
  * before → after, a link field's new value in full and marked to check (people scan a QR code's
  * link; SignForge never fetches it), and how many screens it reaches at the next publish. Reach comes
  * from the schedule's own targeting (`howItReaches`, `entryPreview`), never from the model.
+ *
+ * It shows all a draft writes or says why it cannot: a spot's data on a template version not read,
+ * so its fields are unknown. A data key no field of the template names is shown too, to check.
  */
 import type { ProposedCall } from '@signforge/api/agent-chat';
 import type { FieldDef } from '@signforge/contract';
@@ -88,15 +91,19 @@ function wins(entry: Row, replaces: string | null, d: DraftContext): string {
   return reached.length ? `Wins on ${won.length} of ${screensWord(reached.length)} at the next publish` : 'Reaches no screen';
 }
 
-export function summarize(call: ProposedCall, d: DraftContext): DraftSummary {
+export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | { problem: string } {
   const before = call.before ?? {};
   const input = call.input;
   const line = (label: string, a: unknown, b: unknown, check = false): DraftLine[] => (same(a, b) ? [] : [{ label, before: shown(a), after: shown(b), check }]);
   switch (call.tool) {
     case 'update_spot': {
-      const fields = d.fieldsOf(str(before.templateVersionId)) ?? {};
       const data = isRow(input.data) ? input.data : undefined;
-      const changes = data && isRow(before.data) ? fillChanges(fields, before.data, data) : [];
+      const fields = d.fieldsOf(str(before.templateVersionId));
+      if (data && !fields) return { problem: `The fields of spot ${str(before.name)}'s template could not be read, so its change cannot be shown.` };
+      const was = isRow(before.data) ? before.data : {};
+      const changes = data && fields ? fillChanges(fields, was, data) : [];
+      // The data replaces the draft's whole: a key no field names, added, changed or dropped, is shown as it is.
+      const unexplained = data ? [...new Set([...Object.keys(was), ...Object.keys(data)])].filter((k) => !Object.hasOwn(fields ?? {}, k)) : [];
       const lines = [
         ...line('Name', before.name, input.name ?? before.name),
         ...line(
@@ -107,7 +114,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary {
         ...changes.map(
           (c): DraftLine =>
             c.kind === 'value'
-              ? { label: c.label, before: c.before, after: c.after, check: fields[c.field]?.type === 'url' }
+              ? { label: c.label, before: c.before, after: c.after, check: fields?.[c.field]?.type === 'url' }
               : {
                   label: c.label,
                   before: [...c.changed.map((r) => r.name), ...c.removed].join(', ') || '(none)',
@@ -115,6 +122,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary {
                   check: false,
                 },
         ),
+        ...unexplained.flatMap((k) => line(`"${k}", which no field of the template names`, was[k], data?.[k], true)),
       ];
       const reach = d.playlists.filter((p) => p.spotIds.includes(call.target?.id ?? '')).reduce((n, p) => Math.max(n, playing(p.id, d)), 0);
       return { title: `Spot ${str(before.name)}`, lines, reach: `Reaches ${screensWord(reach)} at the next publish` };
@@ -141,6 +149,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary {
         { label: 'Plays', before: '(new)', after: name, check: false },
         { label: 'On', before: '(new)', after: aimedAt(aimOf(input), d.screens, d.groups), check: false },
         { label: 'When', before: '(new)', after: when, check: false },
+        { label: 'Priority', before: '(new)', after: String(typeof input.priority === 'number' ? input.priority : 0), check: false },
       ];
       return { title: 'New schedule entry', lines, reach: wins(input, null, d) };
     }

@@ -56,12 +56,14 @@ function Suggestions({ path, onAsk }: { path: string; onAsk: (q: string) => void
 
 /**
  * The change summary card (#268): each change the agent drafted, before → after, a link to check
- * marked amber in full, and how many screens it reaches; Save as draft, then Undo these changes and,
- * for those who may, Publish now…. A viewer's are a request to copy, never saved.
+ * marked amber in full, and how many screens it reaches; Save as draft once every change is shown
+ * (or why it cannot be, with Try again), then Undo these changes and, for those who may, Publish now….
+ * A rename is not a draft: it shows at once. A viewer's are a request to copy, never saved.
  */
 function DraftsCard({ index }: { index: number }) {
   const m = useAppStore((s) => s.agentDrawer.messages[index]);
   const save = useAppStore((s) => s.saveDrafts);
+  const show = useAppStore((s) => s.showDrafts);
   const undo = useAppStore((s) => s.undoDrafts);
   const confirm = useAppStore((s) => s.confirmPublish);
   const publish = useAppStore((s) => s.publishDrafts);
@@ -69,12 +71,23 @@ function DraftsCard({ index }: { index: number }) {
   const canPublish = useCanPublish();
   if (m?.role !== 'assistant' || !m.drafts) return null;
   const d = m.drafts;
-  const summaries = d.summaries;
+  const summaries = d.shown.state === 'shown' ? d.shown.summaries : [];
+  const savable = summaries.length === m.card.drafts.length;
+  // A screen's new name shows at once; the rest wait for a publish.
+  const renames = m.card.drafts.filter((c) => c.tool === 'rename_screen').length;
+  const drafted = m.card.drafts.length - renames;
   const request = summaries.map((s) => [s.title, ...s.lines.map((l) => `${l.label}: ${l.before} → ${l.after}`), s.reach].join('\n')).join('\n\n');
   return (
     <section aria-label="Changes the agent drafted" className="mt-2 flex flex-col gap-3 rounded-lg border border-actor-agent/40 bg-card p-3 text-sm">
-      {summaries.length === 0 ? (
+      {d.shown.state === 'working' ? (
         <p className="text-muted-foreground">Working out what the {m.card.drafts.length === 1 ? 'change does' : 'changes do'}…</p>
+      ) : d.shown.state === 'failed' ? (
+        <div className="flex flex-col gap-2">
+          <p className="font-medium text-destructive">{d.shown.reason} Nothing is saved until every change is shown.</p>
+          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => void show(index)}>
+            Try again
+          </Button>
+        </div>
       ) : (
         <ul className="flex flex-col gap-3">
           {summaries.map((s, i) => (
@@ -117,15 +130,23 @@ function DraftsCard({ index }: { index: number }) {
           </Button>
         </div>
       ) : d.status === 'proposed' || d.status === 'saving' ? (
-        <Button type="button" size="sm" className="self-start" disabled={d.status === 'saving'} onClick={() => void save(index)}>
-          {d.status === 'saving' ? 'Saving…' : 'Save as draft'}
+        <Button type="button" size="sm" className="self-start" disabled={d.status === 'saving' || !savable} onClick={() => void save(index)}>
+          {d.status === 'saving' ? 'Saving…' : drafted ? 'Save as draft' : 'Save'}
         </Button>
       ) : d.status === 'undone' ? (
         <p>Undone: the drafts are as they were.</p>
       ) : (
         <div className="flex flex-col gap-2">
           {d.status !== 'refused' && (
-            <p className="font-medium">{d.status === 'published' ? 'Published.' : 'Saved as draft. No screen shows it until it is published.'}</p>
+            <p className="font-medium">
+              {d.status === 'published'
+                ? 'Published.'
+                : !drafted
+                  ? 'Saved. The new name shows at once.'
+                  : renames
+                    ? 'Saved. The new screen name shows at once; the rest is a draft no screen shows until it is published.'
+                    : 'Saved as draft. No screen shows it until it is published.'}
+            </p>
           )}
           {d.confirming ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -145,6 +166,7 @@ function DraftsCard({ index }: { index: number }) {
                 </Button>
               )}
               {d.status === 'saved' &&
+                drafted > 0 &&
                 (canPublish ? (
                   <Button type="button" size="sm" onClick={() => confirm(index, true)}>
                     Publish now…

@@ -7,9 +7,11 @@
  *
  * An answer may hold drafts (#268): changes the agent proposes, written only when the person saves
  * them (`POST /api/agent/apply`). Their summary and reach are worked out here, from the pages' own
- * reads (src/lib/draft-summary.ts). Saved, a spot's changed fields are marked in its editor, as the
- * agent's update marks them (#264); Undo these changes puts each back as it was, as the person, with
- * `ifVersion`, in reverse order.
+ * reads (src/lib/draft-summary.ts), and nothing is saved until each draft has its summary: a read
+ * that fails, or a change the card cannot show, leaves them unsaved until worked out again. Saved, a
+ * spot's changed fields are marked in its editor, as the agent's update marks them (#264); Undo these
+ * changes puts each back as it was, as the person, the last first, each at the version its target is
+ * at now; one that fails stops the rest, and Undo again carries on from it.
  */
 import {
   type AnswerCard,
@@ -32,13 +34,19 @@ import { screensQuery } from '~/queries/screens';
 import { spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
+/** What an answer's drafts do: being worked out, one summary a draft, or why not, so they cannot be saved yet. */
+type Shown = { state: 'working' } | { state: 'shown'; summaries: DraftSummary[] } | { state: 'failed'; reason: string };
+
 /** An answer's drafts: proposed, saving, saved (or refused at the first that was), then undone or published. */
 interface Drafts {
   status: 'proposed' | 'saving' | 'saved' | 'refused' | 'undoing' | 'undone' | 'publishing' | 'published';
-  /** By draft, once worked out; empty until then, or if the pages' reads failed. */
-  summaries: DraftSummary[];
+  shown: Shown;
   /** What the save wrote, in order: the last refused, when one was. */
   results: ApplyAnswer['results'];
+  /** The saved drafts Undo has put back, by their place in `results`: Undo again skips them. */
+  undone: number[];
+  /** Each saved target's version now, by its id, as the last save or undo left it: what the next undo of it is made at. */
+  versions: Record<string, number>;
   error: string | null;
   /** "Publish now…" pressed: the question shown, and Publish to confirm. */
   confirming: boolean;
@@ -79,7 +87,9 @@ export interface AgentDrawerSlice {
    * org's. Both go, so nothing of it reaches the new org's model or lands in its drawer.
    */
   forgetAgentDrawer: () => void;
-  /** Saves the drafts of the answer at `index` (#268). */
+  /** Works out again what the drafts of the answer at `index` do, after it failed. */
+  showDrafts: (index: number) => Promise<void>;
+  /** Saves the drafts of the answer at `index` (#268), once each has its summary. */
   saveDrafts: (index: number) => Promise<void>;
   /** Puts back, as the person, what the saved drafts of the answer at `index` changed. */
   undoDrafts: (index: number) => Promise<void>;
@@ -109,18 +119,36 @@ const savedOf = (tool: string, output: unknown): Row | undefined => {
 };
 
 /**
- * The call that puts a saved draft back: a creation deleted; an update given back each value it
- * changed, as the draft read it, at the version the save left.
+ * The call that puts a saved draft back, at `version`, its target's now: a creation deleted, unless
+ * edited since; a schedule entry given back all it was, so whom it is aimed at goes back too (from a
+ * group to everywhere, or back); another update given back each value it changed, as the draft read it.
  */
-function undoOf(call: ProposedCall, output: unknown): { tool: string; input: Row } | undefined {
-  const t = TARGETS[call.tool];
-  const saved = savedOf(call.tool, output);
-  if (!t || !saved) return undefined;
-  if (call.tool === 'create_schedule_entry') return { tool: 'delete_schedule_entry', input: { scheduleEntryId: saved.id } };
+function undoOf(call: ProposedCall, saved: Row, version: number | undefined): { tool: string; input: Row } {
+  const id = TARGETS[call.tool]?.id ?? '';
   const before = call.before ?? {};
-  const keys = Object.keys(call.input).filter((k) => k !== t.id && k !== 'ifVersion');
-  return { tool: call.tool, input: { [t.id]: saved.id, ...Object.fromEntries(keys.map((k) => [k, before[k] ?? null])), ifVersion: saved.version } };
+  if (call.tool === 'create_schedule_entry') return { tool: 'delete_schedule_entry', input: { scheduleEntryId: saved.id, ifVersion: version } };
+  if (call.tool === 'update_schedule_entry')
+    return {
+      tool: call.tool,
+      input: {
+        scheduleEntryId: saved.id,
+        playlistId: before.playlistId,
+        target: before.target,
+        ...(before.target === 'group' ? { groupId: before.groupId } : before.target === 'screen' ? { screenId: before.screenId } : {}),
+        priority: before.priority,
+        ...Object.fromEntries(['days', 'from', 'to', 'startDate', 'endDate'].map((k) => [k, before[k] ?? null])),
+        ifVersion: version,
+      },
+    };
+  const keys = Object.keys(call.input).filter((k) => k !== id && k !== 'ifVersion');
+  return { tool: call.tool, input: { [id]: saved.id, ...Object.fromEntries(keys.map((k) => [k, before[k] ?? null])), ifVersion: version } };
 }
+
+/** A version a tool gave back, of its record or, for a deletion, at top level. */
+const versionOf = (tool: string, output: unknown): number | undefined => {
+  const v = savedOf(tool, output)?.version ?? (isRow(output) ? output.version : undefined);
+  return typeof v === 'number' ? v : undefined;
+};
 
 const IN_SETTINGS = new Set(['no_model', 'model_refused']);
 
@@ -148,33 +176,44 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     return m?.role === 'assistant' && m.drafts ? { card: m.card, drafts: m.drafts } : undefined;
   };
 
-  /** The drafts' summaries and reach, from the pages' own reads of the org: a help, so a read that fails leaves them out. */
-  async function summarizeAt(index: number, calls: ProposedCall[]) {
+  /**
+   * The drafts' summaries and reach, from the pages' own reads of the org. Each draft needs one
+   * before any is saved: a read that fails, or a change one cannot show, says why instead.
+   */
+  async function summarizeAt(index: number) {
+    const at = draftsAt(index);
     const orgId = orgOnScreen(router);
-    if (!orgId) return;
-    const summaries = await Promise.all([
-      queryClient.query(screensQuery(orgId)),
-      queryClient.query(scheduleQuery(orgId)),
-      queryClient.query(playlistsQuery(orgId)),
-      queryClient.query(spotsQuery(orgId)),
-      queryClient.query(templatesQuery(orgId)),
-    ]).then(
-      ([fleet, schedule, playlists, spots, templates]) => {
-        const versions = versionsById(templates.templates);
-        const context = {
-          screens: fleet.screens,
-          groups: fleet.groups,
-          entries: schedule.entries,
-          playlists: playlists.playlists,
-          spots: spots.spots,
-          fieldsOf: (id: string) => versions.get(id)?.manifest.fields,
-          at: new Date(),
-        };
-        return calls.map((call) => summarize(call, context));
-      },
-      (): DraftSummary[] => [],
-    );
-    drafts(index, (d) => ({ ...d, summaries }));
+    if (!at || !orgId) return;
+    const calls = at.card.drafts;
+    drafts(index, (d) => ({ ...d, shown: { state: 'working' } }));
+    try {
+      const [fleet, schedule, playlists, spots, templates] = await Promise.all([
+        queryClient.query(screensQuery(orgId)),
+        queryClient.query(scheduleQuery(orgId)),
+        queryClient.query(playlistsQuery(orgId)),
+        queryClient.query(spotsQuery(orgId)),
+        queryClient.query(templatesQuery(orgId)),
+      ]);
+      let versions = versionsById(templates.templates);
+      // A spot on a template version added since the templates were read: read them again.
+      const wanted = calls.flatMap((c) => (c.tool === 'update_spot' && typeof c.before?.templateVersionId === 'string' ? [c.before.templateVersionId] : []));
+      if (wanted.some((id) => !versions.has(id))) versions = versionsById((await queryClient.query({ ...templatesQuery(orgId), staleTime: 0 })).templates);
+      const context = {
+        screens: fleet.screens,
+        groups: fleet.groups,
+        entries: schedule.entries,
+        playlists: playlists.playlists,
+        spots: spots.spots,
+        fieldsOf: (id: string) => versions.get(id)?.manifest.fields,
+        at: new Date(),
+      };
+      const summaries = calls.map((call) => summarize(call, context));
+      const problem = summaries.find((s) => 'problem' in s);
+      const shown = summaries.filter((s) => 'lines' in s);
+      drafts(index, (d) => ({ ...d, shown: problem ? { state: 'failed', reason: problem.problem } : { state: 'shown', summaries: shown } }));
+    } catch {
+      drafts(index, (d) => ({ ...d, shown: { state: 'failed', reason: 'Could not read your screens, schedule and content to show what the changes do.' } }));
+    }
   }
 
   /** A saved spot draft's changed fields, marked in its editor until edited or Done, as the agent's update marks them (#264). */
@@ -221,10 +260,14 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   return {
     agentDrawer: closed(),
 
+    showDrafts: summarizeAt,
+
     async saveDrafts(index) {
       const at = draftsAt(index);
       const orgId = orgOnScreen(router);
-      if (!at || !orgId || at.drafts.status !== 'proposed') return;
+      // Not before the card shows every change it would write.
+      const { shown } = at?.drafts ?? {};
+      if (!at || !orgId || at.drafts.status !== 'proposed' || shown?.state !== 'shown' || shown.summaries.length !== at.card.drafts.length) return;
       drafts(index, (d) => ({ ...d, status: 'saving', error: null }));
       try {
         const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
@@ -246,9 +289,16 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           const spot = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (r.tool === 'update_spot' && spot) await get().reloadSpot(orgId, String(at.card.drafts[i]?.target?.id ?? spot.id));
         }
+        // The version each save left, the last of a target's: what Undo puts it back at.
+        const versions: Record<string, number> = {};
+        for (const r of answer.results) {
+          const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
+          if (saved && typeof saved.version === 'number') versions[String(saved.id)] = saved.version;
+        }
         drafts(index, (d) => ({
           ...d,
           results: answer.results,
+          versions,
           status: refused ? 'refused' : 'saved',
           error: refused?.message ?? null,
         }));
@@ -260,23 +310,33 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     async undoDrafts(index) {
       const at = draftsAt(index);
       const orgId = orgOnScreen(router);
-      if (!at || !orgId || (at.drafts.status !== 'saved' && at.drafts.status !== 'refused')) return;
+      const was = at?.drafts.status;
+      if (!at || !orgId || (was !== 'saved' && was !== 'refused')) return;
       drafts(index, (d) => ({ ...d, status: 'undoing', error: null }));
+      let { undone, versions } = at.drafts;
       try {
-        // The last saved first: what each put back is what it found.
+        // The last saved first: what each put back is what it found. One put back already, by an Undo that stopped, is skipped.
         for (const [i, r] of [...at.drafts.results.entries()].reverse()) {
+          if (undone.includes(i)) continue;
           const call = at.card.drafts[i];
-          const undo = r.ok && call ? undoOf(call, r.output) : undefined;
-          if (undo) await callToolByName(undo.tool, undo.input);
+          const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
+          if (call && saved) {
+            const id = String(saved.id);
+            const undo = undoOf(call, saved, versions[id]);
+            const now = versionOf(undo.tool, await callToolByName(undo.tool, undo.input));
+            if (now !== undefined) versions = { ...versions, [id]: now };
+          }
+          undone = [...undone, i];
+          drafts(index, (d) => ({ ...d, undone, versions }));
           const spot = call?.tool === 'update_spot' ? call.target?.id : undefined;
           if (spot) set((s) => ({ agent: { ...s.agent, filled: Object.fromEntries(Object.entries(s.agent.filled).filter(([k]) => k !== spot)) } }));
         }
-        await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
-        for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
         drafts(index, (d) => ({ ...d, status: 'undone' }));
       } catch (err) {
-        drafts(index, (d) => ({ ...d, status: 'saved', error: toolMessage(err) }));
+        drafts(index, (d) => ({ ...d, status: was, error: toolMessage(err) }));
       }
+      await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+      for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
     },
 
     confirmPublish: (index, confirming) => drafts(index, (d) => ({ ...d, confirming })),
@@ -338,12 +398,16 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         if (running === turn) drawer(change);
       };
       const say = (message: DrawerMessage) => mine((d) => ({ ...d, messages: [...d.messages, message] }));
+      /** The answer's drafts being worked out: the turn ends once they are. */
+      let showing: Promise<void> | undefined;
       const hear = (event: ChatEvent) => {
         if (event.type === 'call') mine((d) => ({ ...d, progress: [...d.progress, event.item] }));
         else if (event.type === 'answer') {
-          const drafts = event.card.drafts.length ? { status: 'proposed' as const, summaries: [], results: [], error: null, confirming: false } : null;
+          const drafts: Drafts | null = event.card.drafts.length
+            ? { status: 'proposed', shown: { state: 'working' }, results: [], undone: [], versions: {}, error: null, confirming: false }
+            : null;
           say({ role: 'assistant', card: event.card, drafts });
-          if (drafts) void summarizeAt(get().agentDrawer.messages.length - 1, event.card.drafts);
+          if (drafts) showing = summarizeAt(get().agentDrawer.messages.length - 1);
         } else say({ role: 'error', text: event.message, inSettings: IN_SETTINGS.has(event.error) });
       };
       try {
@@ -361,6 +425,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           for (const line of lines) if (line.trim()) hear(JSON.parse(line));
         }
         if (rest.trim()) hear(JSON.parse(rest));
+        await showing;
       } catch (err) {
         say({ role: 'error', text: toolMessage(err), inSettings: err instanceof Refusal && IN_SETTINGS.has(err.code) });
       } finally {

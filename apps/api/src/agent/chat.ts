@@ -43,7 +43,7 @@ import {
   type TraceItem,
 } from './chat-shapes';
 import { type AgentDeps, dayIn, fenced, readBody } from './inline';
-import { draftTools, MAX_DRAFTS, propose } from './drafts';
+import { draftTools, MAX_DRAFTS, propose, SAVE_STATEMENTS, saveStatements } from './drafts';
 import { type ChatTool, type ChatTurn, chatWith, type ModelReach } from './provider';
 
 /** The most tool calls one turn makes. */
@@ -324,17 +324,36 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           if (draftNames.has(call.name)) {
             const proposed =
               drafts.length >= MAX_DRAFTS ? { problem: `at most ${MAX_DRAFTS} changes in one turn` } : await propose(caller, call.name, call.input);
+            let joined = false;
+            let problem = 'problem' in proposed ? proposed.problem : undefined;
+            if ('call' in proposed) {
+              const made = proposed.call;
+              // A second change to the same thing joins the first, on the same read, so the save writes them as one and conflicts with neither.
+              const at = made.target ? drafts.findIndex((d) => d.target?.kind === made.target?.kind && d.target?.id === made.target?.id) : -1;
+              const earlier = drafts[at];
+              const next = earlier
+                ? drafts.with(at, { ...earlier, input: { ...earlier.input, ...made.input, ifVersion: earlier.input.ifVersion } })
+                : [...drafts, made];
+              if (saveStatements(next) > SAVE_STATEMENTS) problem = 'more than one save holds: draft fewer changes, or a shorter play order';
+              else {
+                drafts.splice(0, drafts.length, ...next);
+                joined = earlier !== undefined;
+              }
+            }
             const item = {
               name: call.name,
-              summary: 'call' in proposed ? `Drafted ${call.name.replaceAll('_', ' ')}` : `Could not draft ${call.name.replaceAll('_', ' ')}`,
+              summary: problem === undefined ? `Drafted ${call.name.replaceAll('_', ' ')}` : `Could not draft ${call.name.replaceAll('_', ' ')}`,
             };
             trace.push(item);
             await send({ type: 'call', item });
-            if ('call' in proposed) drafts.push(proposed.call);
             results.push(
-              'call' in proposed
-                ? { id: call.id, content: 'Proposed, not written: the person sees what it changes and saves it as a draft, or not.', error: false }
-                : { id: call.id, content: `refused: ${proposed.problem}`, error: true },
+              problem === undefined
+                ? {
+                    id: call.id,
+                    content: `Proposed, not written${joined ? ', with your earlier change to the same thing, as one change' : ''}: the person sees what it changes and saves it, or not.`,
+                    error: false,
+                  }
+                : { id: call.id, content: `refused: ${problem}`, error: true },
             );
             continue;
           }

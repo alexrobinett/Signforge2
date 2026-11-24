@@ -7,7 +7,7 @@ import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import { drawerTools, MAX_CALLS, NEVER_OFFERED } from '../src/agent/chat';
-import { draftTools } from '../src/agent/drafts';
+import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
 import type { ChatEvent } from '../src/agent/chat-shapes';
 import type { FetchGuards } from '../src/data/fetch';
 import { Client, clockLimits, email, testApp } from './client';
@@ -390,6 +390,8 @@ async function drafting(options: Parameters<typeof setup>[0] & { script: (ids: {
   return { ...s, spot, web, apply, stored };
 }
 
+const CUT = JSON.stringify({ type: 'cut' });
+
 const answerOf = (lines: ChatEvent[]) => {
   const last = lines.at(-1);
   if (last?.type !== 'answer') throw new Error(`no answer: ${JSON.stringify(last)}`);
@@ -521,7 +523,7 @@ describe('the drawer drafting changes (#268)', () => {
     const before = await d.stored();
     for (const calls of [
       [{ tool: 'update_spot', input: { spotId: d.spot.id, url: 'https://evil.example', ifVersion: before.version } }],
-      [{ tool: 'update_spot', input: { spotId: d.web.id, name: 'Evil' } }],
+      [{ tool: 'update_spot', input: { spotId: d.web.id, name: 'Evil', ifVersion: 1 } }],
       [{ tool: 'publish', input: {} }],
       [{ tool: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_x' } }],
     ]) {
@@ -560,22 +562,130 @@ describe('the drawer drafting changes (#268)', () => {
     expect((await d.stored()).data).toEqual({ headline: 'Breakfast served', theme: 'day' });
   });
 
-  it('saves within its budget: 5 drafts in at most 45 D1 statements', async () => {
+  it('saves an update only at the version it was drafted on: one without ifVersion is refused, writing nothing', async () => {
     const d = await drafting({ script: () => [ANSWER] });
-    let statements = 0;
-    const counting = new Proxy(env.DB, {
-      get(target, prop) {
-        if (prop === 'prepare') statements++;
-        const v = Reflect.get(target, prop, target);
-        return typeof v === 'function' ? v.bind(target) : v;
-      },
+    const before = await d.stored();
+    const res = await d.apply([{ tool: 'update_spot', input: { spotId: d.spot.id, name: 'Unguarded' } }]);
+    expect(res.status).toBe(400);
+    expect((await res.json<any>()).results).toEqual([{ tool: 'update_spot', ok: false, error: 'invalid_input', message: expect.stringMatching(/ifVersion/) }]);
+    expect(await d.stored()).toEqual(before);
+  });
+
+  it('joins two changes to one thing in a turn into one draft, on one read, which saves without conflict', async () => {
+    const d = await drafting({
+      script: ({ spot }) => [
+        {
+          calls: [
+            { name: 'update_spot', input: { spotId: spot, name: 'Breakfast' } },
+            { name: 'update_spot', input: { spotId: spot, durationMs: 12_000 } },
+          ],
+        },
+        ANSWER,
+      ],
     });
-    const member = new Client(d.member.t, d.member.ip, { ...env, DB: counting });
-    for (const [k, v] of d.member.jar) member.jar.set(k, v);
-    let version = (await d.stored()).version ?? 0;
-    const calls = Array.from({ length: 5 }, (_, i) => ({ tool: 'update_spot', input: { spotId: d.spot.id, name: `Breakfast ${i}`, ifVersion: version++ } }));
-    const res = await member.post('/api/agent/apply', { calls });
+    const was = await d.stored();
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts).toEqual([
+      expect.objectContaining({ tool: 'update_spot', input: { spotId: d.spot.id, name: 'Breakfast', durationMs: 12_000, ifVersion: was.version } }),
+    ]);
+    expect(d.model.asked[1].messages.at(-1).content[1].content).toMatch(/with your earlier change to the same thing/);
+    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(statements).toBeLessThanOrEqual(45);
+    const row = await d.scope.spots.get(d.spot.id);
+    expect(row).toMatchObject({ name: 'Breakfast', durationMs: 12_000, rowVersion: was.version! + 1 });
+  });
+
+  it('reads a schedule entry it drafts by its id, whatever page of the schedule it is on; a deleted one is not found', async () => {
+    // The model's calls, filled in once the entries are made.
+    const first: NonNullable<Step['calls']> = [];
+    const second: NonNullable<Step['calls']> = [];
+    const d = await drafting({ script: () => [{ calls: first }, { calls: second }, ANSWER] });
+    const playlist = await d.scope.playlists.insert({ name: 'Breakfast', transitionJson: CUT });
+    const entry = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
+    const gone = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', deletedAt: 1 });
+    first.push({ name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 4 } });
+    second.push({ name: 'update_schedule_entry', input: { scheduleEntryId: gone.id, priority: 4 } });
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts).toEqual([
+      expect.objectContaining({
+        input: { scheduleEntryId: entry.id, priority: 4, ifVersion: entry.rowVersion },
+        before: expect.objectContaining({ id: entry.id, priority: 0 }),
+      }),
+    ]);
+    expect(d.model.asked[2].messages.at(-1).content[0].content).toMatch(/not found/);
+  });
+
+  describe('its budget: the session and each draft, costed before anything is written', () => {
+    /** A save by an editor, on a D1 binding that counts every statement prepared. */
+    async function measured(d: Awaited<ReturnType<typeof drafting>>, calls: { tool: string; input: Record<string, unknown> }[]) {
+      let statements = 0;
+      const counting = new Proxy(env.DB, {
+        get(target, prop) {
+          if (prop === 'prepare') statements++;
+          const v = Reflect.get(target, prop, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+      });
+      const member = new Client(d.member.t, d.member.ip, { ...env, DB: counting });
+      for (const [k, v] of d.member.jar) member.jar.set(k, v);
+      const res = await member.post('/api/agent/apply', { calls });
+      return { status: res.status, body: await res.text(), statements };
+    }
+    async function content(d: Awaited<ReturnType<typeof drafting>>, spots: number) {
+      const playlist = await d.scope.playlists.insert({ name: 'Breakfast', transitionJson: CUT });
+      const entry = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
+      const screen = await d.scope.screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
+      const spotIds: string[] = [];
+      for (let i = 0; i < spots; i++)
+        spotIds.push((await d.scope.spots.insert({ name: `S${i}`, kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id);
+      return { playlist, entry, screen, spotIds };
+    }
+
+    it('each drafting tool saved alone within what it is costed at', async () => {
+      const d = await drafting({ role: 'editor', script: () => [ANSWER] });
+      const { playlist, entry, screen, spotIds } = await content(d, 30);
+      const calls = [
+        { tool: 'update_spot', input: { spotId: d.spot.id, name: 'Breakfast', ifVersion: (await d.stored()).version } },
+        { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds, ifVersion: playlist.rowVersion } },
+        { tool: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 3, ifVersion: entry.rowVersion } },
+        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'org', idempotencyKey: 'budget-create-1' } },
+        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+      ];
+      for (const call of calls) {
+        const { status, body, statements } = await measured(d, [call]);
+        expect(status, body).toBe(200);
+        expect(statements, call.tool).toBeLessThanOrEqual(saveStatements([call]));
+      }
+    });
+
+    it(`the costliest save it allows, two screens renamed and a playlist's order, in at most ${SAVE_STATEMENTS}`, async () => {
+      const d = await drafting({ role: 'editor', script: () => [ANSWER] });
+      const { playlist, screen } = await content(d, 0);
+      const other = await d.scope.screens.insert({ name: 'Drive-thru', timezone: 'UTC', orientation: 'landscape' });
+      const calls = [
+        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        { tool: 'rename_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
+        { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
+      ];
+      expect(saveStatements(calls)).toBe(SAVE_STATEMENTS);
+      const { status, body, statements } = await measured(d, calls);
+      expect(status, body).toBe(200);
+      expect(statements).toBeLessThanOrEqual(SAVE_STATEMENTS);
+    });
+
+    it('refuses a save over it before writing anything: five orders of 200 spots', async () => {
+      const d = await drafting({ role: 'editor', script: () => [ANSWER] });
+      const playlists = [];
+      for (let i = 0; i < 5; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
+      const calls = playlists.map((p) => ({
+        tool: 'update_playlist',
+        input: { playlistId: p.id, spotIds: Array(200).fill(d.spot.id), ifVersion: p.rowVersion },
+      }));
+      const { status, body, statements } = await measured(d, calls);
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toMatchObject({ error: 'invalid_input', message: expect.stringMatching(/too large to save at once/) });
+      expect(statements).toBeLessThanOrEqual(2);
+      for (const p of playlists) expect((await d.scope.playlists.get(p.id))?.rowVersion).toBe(p.rowVersion);
+    });
   });
 });
