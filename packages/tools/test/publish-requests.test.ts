@@ -7,12 +7,10 @@ import { draftChanged, type OrgScope, published, StaleVersionError } from '@sign
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type AgentLimiter, type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role, type Scope } from '../src';
+import { type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role, type Scope } from '../src';
 import { MAX_PENDING, PUBLISH_REQUEST_TTL_MS } from '../src/publish-requests';
-import { call, racing } from './calls';
+import { call, racing, unlimited } from './calls';
 import { fakeServices } from './services';
-
-const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
 
 let orgs = 0;
 let o: SeededOrg;

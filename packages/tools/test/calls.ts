@@ -1,6 +1,6 @@
 // Calling tools in a test as the CMS does: as an editor of the org, through the registry.
 import type { OrgScope, Write } from '@signforge/db';
-import { type Caller, dispatch, registry } from '../src';
+import { type AgentLimiter, type Caller, dispatch, registry } from '../src';
 import { memberOf } from './member';
 
 /** A function that calls a tool as an editor of `org`. */
@@ -36,3 +36,6 @@ export function racing(caller: Caller, before: () => Promise<unknown>): Caller {
   };
   return { ...caller, org: new Proxy(org, { get: (t, k) => (k === 'commit' ? commit : Reflect.get(t, k)) }) };
 }
+
+/** An agent's limiter that never limits: for tests of what a tool does, not of the limits. */
+export const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };

@@ -7,11 +7,10 @@ import { published } from '@signforge/db';
 import { seedOrg, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type AgentLimiter, type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role } from '../src';
-import { call, racing } from './calls';
+import { type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role } from '../src';
+import { call, racing, unlimited } from './calls';
 import { fakeServices } from './services';
 
-const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
 let orgs = 0;
 let o: SeededOrg;
 beforeEach(async () => {

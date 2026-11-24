@@ -1,19 +1,18 @@
 // The approvals queue's actions (#115): Approve publishes exactly what the request pinned, with its
 // sample text acknowledged exactly as checked, and its toast's Undo is a roll back to the publish
 // before; Decline's Undo puts the request back. The tools are stubbed; toasts read from sonner's store.
-import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ApprovalItem } from '../src/lib/approvals';
 import { callTool, Refusal } from '../src/lib/tools';
 import { type ApprovalsSlice, createApprovalsSlice } from '../src/state/approvals';
+import { ORG, toastTitled, watchedQueries } from './store-kit';
 
 // The stages' reads: not reached here, no player being attached.
 vi.mock('~/queries/spots', () => ({ assetsQuery: vi.fn(), spotPreviewQuery: vi.fn(), templatesQuery: vi.fn() }));
 vi.mock('~/lib/tools', async (original) => ({ ...(await original<typeof import('../src/lib/tools')>()), callTool: vi.fn() }));
 
-const ORG = 'org_1';
 
 const request = {
   id: 'prq_1',
@@ -48,8 +47,7 @@ const item = (samples: ApprovalItem['check']['samples'] = []): ApprovalItem => (
 const rollBackTo = vi.fn();
 
 function setup() {
-  const queryClient = new QueryClient();
-  const invalidated = vi.spyOn(queryClient, 'invalidateQueries');
+  const { queryClient, invalidated } = watchedQueries();
   const store = createStore<ApprovalsSlice & { rollBackTo: typeof rollBackTo }>()((set, get) => ({
     rollBackTo,
     ...createApprovalsSlice(set as never, get as never, { router: { navigate: vi.fn() }, queryClient } as never),
@@ -57,8 +55,6 @@ function setup() {
   return { s: store, invalidated };
 }
 
-/** The toast titled `title` as sonner holds it. */
-const toastTitled = (title: string) => toast.getToasts().find((t) => 'title' in t && t.title === title);
 
 beforeEach(() => {
   toast.dismiss();

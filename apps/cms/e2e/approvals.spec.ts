@@ -6,7 +6,7 @@
 // stays a draft, and the agent's get_publish_request says declined. An editor who may not publish
 // sees the queue without its actions. Light and dark, desktop and phone, with axe at each.
 import { expect, test, type Page } from '@playwright/test';
-import { callbackOf, stubClient } from './agent-stub';
+import { connectStub } from './agent-stub';
 import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, stageShows, tool } from './helpers';
 import { API_PORT } from './servers';
 
@@ -50,11 +50,7 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
   await tool(page, 'publish', {});
 
   // The agent connects with drafting only, edits the board and asks to publish it.
-  const stub = await stubClient('Deli helper', ADDRESS.stub);
-  await page.goto(stub.authorizeUrl);
-  await hydrated(page);
-  const back = await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
-  const token = (await stub.exchange(back.searchParams.get('code')!)).body.access_token!;
+  const { stub, token } = await connectStub(page, 'Deli helper', ADDRESS.stub);
   const call = async (name: string, args: unknown) => {
     const { result } = await stub.mcp(token, 'tools/call', { name, arguments: args });
     expect(result.isError, JSON.stringify(result)).toBeUndefined();

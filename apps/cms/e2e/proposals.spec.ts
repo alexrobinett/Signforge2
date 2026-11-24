@@ -4,7 +4,7 @@
 // not the published version; its Undo puts the agent's back; Keep makes it the draft. Light and dark,
 // desktop and phone, with axe at each.
 import { expect, test } from '@playwright/test';
-import { callbackOf, stubClient } from './agent-stub';
+import { connectStub } from './agent-stub';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
 
 /** This spec's own client addresses, so its sign-in and registration have their own rate limits. */
@@ -29,11 +29,7 @@ test("an agent's edit over /mcp shows as its proposal; Reject puts the person's 
   const mine = (await tool(page, 'update_spot', { spotId: spot.id, data: { greeting: 'Opening soon' }, ifVersion: spot.version })).spot.version as number;
 
   // An agent with drafting only edits it on top, over /mcp.
-  const stub = await stubClient('Deli bot', ADDRESS.stub);
-  await page.goto(stub.authorizeUrl);
-  await hydrated(page);
-  const back = await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
-  const token = (await stub.exchange(back.searchParams.get('code')!)).body.access_token!;
+  const { stub, token } = await connectStub(page, 'Deli bot', ADDRESS.stub);
   const edited = await stub.mcp(token, 'tools/call', {
     name: 'update_spot',
     arguments: { spotId: spot.id, data: { greeting: 'Tomato basil soup' }, ifVersion: mine },
