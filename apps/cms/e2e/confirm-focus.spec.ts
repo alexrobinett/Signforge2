@@ -35,7 +35,10 @@ test('a removal moves focus into its confirmation, Keep it puts it back on Remov
 }) => {
   await signInAs(page, `e2e-confirm-focus-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Harbour Lights Deli', ADDRESS);
-  await tool(page, 'set_webhook_alert_channel', { webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' });
+  await tool(page, 'set_webhook_alert_channel', {
+    webhookUrl: 'https://ops.example.com/hooks/signforge',
+    signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD',
+  });
   await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY });
 
   // Notifications: the webhook's Remove, inside its card's Manage.
