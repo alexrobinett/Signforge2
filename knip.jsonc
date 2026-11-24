@@ -2,8 +2,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // Throwaway platform spikes: M3-00's Vitest config reads a migrations folder that is not there,
-  // and M4-01's scripts are run by hand against `wrangler dev`.
-  "ignoreWorkspaces": ["spike/m3-platform", "spike/m4-oauth"],
+  // M4-01's scripts are run by hand against `wrangler dev`, and #346's bundle-size script measures a package nothing imports.
+  "ignoreWorkspaces": ["spike/m3-platform", "spike/m4-oauth", "spike/tanstack-ai"],
   // A system binary the CLI runs for video probes, not a package.
   "ignoreBinaries": ["ffprobe"],
   "workspaces": {

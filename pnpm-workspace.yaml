@@ -6,6 +6,7 @@ packages:
   - infra/*
   - spike/m3-platform
   - spike/m4-oauth
+  - spike/tanstack-ai
 allowBuilds:
   esbuild: true
   workerd: true
