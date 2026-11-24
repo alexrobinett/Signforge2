@@ -22,6 +22,7 @@ import {
   PLACES,
   portTaken,
   RUN_DIR,
+  STUB_CARD,
   STUB_FILL,
   STUB_MENU,
 } from './servers';
@@ -63,7 +64,8 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
  * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
  * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
  * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
- * Promo template, or, asked to update a Menu Board (#264), with `STUB_MENU`. On a free port, so the run never reaches the internet or spends a token.
+ * Promo template, or, asked to update a Menu Board (#264), with `STUB_MENU`; and the drawer's tool
+ * loop (#267), a read of the screens' status and then `STUB_CARD`. On a free port, so the run never reaches the internet or spends a token.
  */
 async function anthropicStub(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
@@ -76,6 +78,25 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
       });
       req.on('end', () => {
         const asked = JSON.parse(body);
+        // The drawer's tool loop (#267): first a read, then the answer, as `STUB_CARD`.
+        if (asked.tools) {
+          const read = asked.messages.at(-1)?.content?.[0]?.type === 'tool_result';
+          const call = read ? { name: 'answer', input: STUB_CARD } : { name: 'list_screen_status', input: {} };
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              id: 'msg_stub',
+              type: 'message',
+              role: 'assistant',
+              model: asked.model,
+              content: [{ type: 'tool_use', id: `toolu_${read ? 2 : 1}`, ...call }],
+              stop_reason: 'tool_use',
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
+          );
+          return;
+        }
         const keys: string[] = asked.output_config.format.schema.properties.template.enum;
         const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0] ?? '';
         const { name, ...data } = template.startsWith('base/menu-board@') ? STUB_MENU : STUB_FILL;

@@ -22,7 +22,46 @@ interface ModelProvider {
   listModels(): Promise<string[]>;
   /** One structured call (#263): the model's answer to `request`, as JSON text to its schema; null when it gave none (it refused). */
   fill(request: FillRequest): Promise<string | null>;
+  /** One step of a tool loop (#267): the model's text and the tools it calls next, none when it is done. */
+  chat(request: ChatRequest): Promise<ChatStep>;
 }
+
+/** A tool the model is offered: its name, what it does, and its input's JSON schema. */
+export interface ChatTool {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+}
+
+interface ToolCall {
+  id: string;
+  name: string;
+  /** As the model wrote it: parsed by the tool it names, never trusted here. */
+  input: unknown;
+}
+
+/** A conversation as both providers are told it: the person's words, the model's steps, and the tools' results. */
+export type ChatTurn =
+  | { role: 'user'; text: string }
+  | { role: 'assistant'; text: string; calls: ToolCall[] }
+  | { role: 'tool'; results: { id: string; content: string; error: boolean }[] };
+
+export interface ChatRequest {
+  model: string;
+  system: string;
+  turns: ChatTurn[];
+  tools: ChatTool[];
+}
+
+/** The model's step: its text, and the tools it calls; `refused` when it would not answer. */
+export interface ChatStep {
+  text: string;
+  calls: ToolCall[];
+  refused: boolean;
+}
+
+/** The most one step of the drawer's loop may be, in tokens. */
+const CHAT_MAX_TOKENS = 2048;
 
 /** What an inline call asks a model: our instructions, the material as fenced text and maybe an image, and the answer's JSON schema. */
 export interface FillRequest {
@@ -82,14 +121,66 @@ function anthropicProvider(apiKey: string, options: { baseURL: string; fetch: ty
       if (message.stop_reason === 'refusal') return null;
       return message.content.find((b) => b.type === 'text')?.text ?? null;
     },
+    chat: async ({ model, system, turns, tools }) => {
+      const messages = turns.map((t): Anthropic.MessageParam => {
+        if (t.role === 'user') return { role: 'user', content: t.text };
+        if (t.role === 'assistant')
+          return {
+            role: 'assistant',
+            content: [
+              ...(t.text ? [{ type: 'text' as const, text: t.text }] : []),
+              ...t.calls.map((c) => ({ type: 'tool_use' as const, id: c.id, name: c.name, input: c.input })),
+            ],
+          };
+        return {
+          role: 'user',
+          content: t.results.map((r) => ({ type: 'tool_result' as const, tool_use_id: r.id, content: r.content, is_error: r.error })),
+        };
+      });
+      const message = await client.messages.create({
+        model,
+        max_tokens: CHAT_MAX_TOKENS,
+        system,
+        messages,
+        tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: { ...t.schema, type: 'object' as const } })),
+      });
+      return {
+        text: message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'),
+        calls: message.content.flatMap((b) => (b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : [])),
+        refused: message.stop_reason === 'refusal',
+      };
+    },
   };
 }
 
 /** An OpenAI-compatible endpoint's model list (GET <base>/models), as the OpenAI API answers it. */
 const modelList = z.object({ data: z.array(z.object({ id: z.string() })) });
 
-/** An endpoint's chat completion, as the OpenAI API answers it: the first choice's text, or null. */
-const completion = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().nullable().optional() }) })) });
+/** An endpoint's chat completion, as the OpenAI API answers it: the first choice's text and tool calls. */
+const completion = z.object({
+  choices: z.array(
+    z.object({
+      message: z.object({
+        content: z.string().nullable().optional(),
+        tool_calls: z
+          .array(z.object({ id: z.string(), function: z.object({ name: z.string(), arguments: z.string() }) }))
+          .nullable()
+          .optional(),
+      }),
+      finish_reason: z.string().nullable().optional(),
+    }),
+  ),
+});
+
+/** A tool call's arguments, which the endpoint gives as JSON text: as written, if it is not JSON, for the tool to refuse. */
+function argumentsOf(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    if (err instanceof SyntaxError) return text;
+    throw err;
+  }
+}
 
 function endpointProvider(apiKey: string, baseUrl: string, guards: FetchGuards): ModelProvider {
   return {
@@ -114,6 +205,39 @@ function endpointProvider(apiKey: string, baseUrl: string, guards: FetchGuards):
       const answer = completion.safeParse(await guardedKeyedJson(`${baseUrl}/chat/completions`, apiKey, { ...guards, timeoutMs: FILL_TIMEOUT_MS }, body));
       if (!answer.success) throw new FetchError('its answer is not an OpenAI-style completion', { code: 'http-status' });
       return answer.data.choices[0]?.message.content ?? null;
+    },
+    chat: async ({ model, system, turns, tools }) => {
+      const messages = [
+        { role: 'system', content: system },
+        ...turns.flatMap((t) => {
+          if (t.role === 'user') return [{ role: 'user', content: t.text }];
+          if (t.role === 'assistant')
+            return [
+              {
+                role: 'assistant',
+                content: t.text || null,
+                ...(t.calls.length && {
+                  tool_calls: t.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.input) } })),
+                }),
+              },
+            ];
+          return t.results.map((r) => ({ role: 'tool', tool_call_id: r.id, content: r.content }));
+        }),
+      ];
+      const body = {
+        model,
+        max_tokens: CHAT_MAX_TOKENS,
+        messages,
+        tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.schema } })),
+      };
+      const answer = completion.safeParse(await guardedKeyedJson(`${baseUrl}/chat/completions`, apiKey, guards, body));
+      if (!answer.success) throw new FetchError('its answer is not an OpenAI-style completion', { code: 'http-status' });
+      const choice = answer.data.choices[0];
+      return {
+        text: choice?.message.content ?? '',
+        calls: (choice?.message.tool_calls ?? []).map((c) => ({ id: c.id, name: c.function.name, input: argumentsOf(c.function.arguments) })),
+        refused: choice?.finish_reason === 'content_filter',
+      };
     },
   };
 }
@@ -189,6 +313,27 @@ export async function fillWith(
   try {
     const text = await model.provider.fill(request);
     return text === null ? { ok: false, problem: 'unreadable' } : { ok: true, text };
+  } catch (err) {
+    return { ok: false, problem: model.problemOf(err) };
+  }
+}
+
+/**
+ * One step of the drawer's tool loop with an org's provider and its key (#267), given `timeout` ms:
+ * the model's step, or why not in a word. A key sealed under a rotated CONNECTION_KEY reads as refused.
+ */
+export async function chatWith(
+  env: Pick<Env, 'CONNECTION_KEY' | 'ENVIRONMENT' | 'ANTHROPIC_BASE_URL'>,
+  key: AiKey,
+  sealed: string,
+  reach: ModelReach,
+  request: ChatRequest,
+  timeout: number,
+): Promise<{ ok: true; step: ChatStep } | { ok: false; problem: Problem }> {
+  const model = await openModel(env, key, sealed, { ...reach, guards: { ...reach.guards, timeoutMs: timeout } }, timeout);
+  if (!model) return { ok: false, problem: 'refused' };
+  try {
+    return { ok: true, step: await model.provider.chat(request) };
   } catch (err) {
     return { ok: false, problem: model.problemOf(err) };
   }

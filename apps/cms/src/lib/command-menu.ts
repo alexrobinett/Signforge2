@@ -28,7 +28,9 @@ export type CommandEntry =
   | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[] }
   /** `start_takeover` for a member who may publish: the takeover dialog, which sends it at once, as the Schedule page's does (#253). */
   | { kind: 'takeover'; id: string; label: string; tool: ToolListing; keywords: string[] }
-  | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] };
+  | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] }
+  /** The agent's drawer (#267). */
+  | { kind: 'agent'; id: string; label: string; keywords: string[] };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -94,6 +96,7 @@ export function commandEntries(tools: ToolListing[]): CommandEntry[] {
   const publishes = tools.some((t) => t.name === 'publish');
   return [
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
+    { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
     ...tools
       .filter((t) => t.name !== 'restart_screen')
       .map((tool): CommandEntry => {

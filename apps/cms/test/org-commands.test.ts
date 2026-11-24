@@ -13,13 +13,15 @@ vi.mock('~/lib/orgs', () => orgs);
 
 const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}) };
 const deps = { router, queryClient: {} } as never;
-/** The slices these commands touch, with the settings slice's one action they call. */
+/** The slices these commands touch, with the settings slice's and the agent drawer's one action they call. */
+const forgetAgentDrawer = vi.fn();
 const appStore = () =>
   createStore<any>()((set, get) => ({
     ...createUiSlice(set, get, deps),
     ...createOrgsSlice(set, get, deps),
     ...createCommandMenuSlice(set, get, deps),
     forgetOrgSettings: () => {},
+    forgetAgentDrawer,
   }));
 
 describe('orgCommands', () => {
@@ -130,5 +132,35 @@ describe('creating an org and switching, one at a time (re-check of #208)', () =
     await creating;
     await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
     expect(orgs.switchOrganization).toHaveBeenCalledWith(router, 'org_b');
+  });
+});
+
+describe('switching org', () => {
+  it("forgets the agent drawer's conversation, and its turn on its way, before the switch: none of it goes to the next org (review of #327)", async () => {
+    const store = appStore();
+    forgetAgentDrawer.mockClear();
+    orgs.switchOrganization.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(async () => {
+      // By the time the switch starts, the drawer has forgotten.
+      expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+    });
+    await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
+    expect(orgs.switchOrganization).toHaveBeenCalledTimes(1);
+    expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('creating an org', () => {
+  it("forgets the agent drawer's conversation before the new org becomes active (re-check of #327)", async () => {
+    const store = appStore();
+    forgetAgentDrawer.mockClear();
+    orgs.createOrganization.mockClear();
+    orgs.createOrganization.mockImplementationOnce(async () => {
+      expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+    });
+    store.getState().editOrgName('dialog', 'Harbor North');
+    await store.getState().createOrg('dialog');
+    expect(orgs.createOrganization).toHaveBeenCalledTimes(1);
+    expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
   });
 });

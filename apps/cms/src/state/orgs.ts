@@ -66,6 +66,8 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
+      // The drawer's conversation, and a turn on its way, are this org's: none of it goes to the next.
+      get().forgetAgentDrawer();
       if (busy(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({
@@ -98,6 +100,8 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       const name = get().orgs.drafts[form].name.trim();
       if (!name) return draft(form, { error: 'Enter a name.' });
       draft(form, { pending: true, error: null });
+      // Creating makes the new org active: the drawer's conversation stays with the org it was in, as on a switch.
+      get().forgetAgentDrawer();
       try {
         await createOrganization(router, name);
         get().forgetOrgSettings();

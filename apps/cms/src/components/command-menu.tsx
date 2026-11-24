@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { defaultFilter } from 'cmdk';
-import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
+import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, SparklesIcon, UsersIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
 import { OrgAvatar } from '~/components/org-switcher';
@@ -358,7 +358,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
 
   const entries = [...commandEntries(tools), ...orgCommands(shell.organizations.length)];
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
-  const go = entries.filter((e) => e.kind === 'go');
+  const go = entries.filter((e) => e.kind === 'go' || e.kind === 'agent');
   const org = entries.filter((e) => e.kind === 'org');
   const actions = entries.filter((e) => e.kind === 'tool' || e.kind === 'takeover');
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
@@ -369,6 +369,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
+        {e.kind === 'agent' && <SparklesIcon className="size-4 text-actor-agent" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
         {(e.kind === 'tool' || e.kind === 'takeover') && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
