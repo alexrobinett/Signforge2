@@ -124,6 +124,18 @@ const updatePlaylist = defineTool({
   refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
 });
 
+/**
+ * `ifDefault` (`set_default_playlist`, `publish`): refused as a conflict naming the default now unless
+ * it is `playlistId` (null: none); else the guard that holds it so as the batch runs, so a default
+ * chosen between this read and the commit fails it.
+ */
+export async function stillDefault(org: OrgScope, playlistId: string | null) {
+  const now = (await org.settings.get())?.defaultPlaylistId ?? null;
+  if (now !== playlistId)
+    throw new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', { defaultPlaylistId: now });
+  return org.settings.stage.defaultIs(playlistId);
+}
+
 /** The playlist's takeovers that have ended for good: they play nowhere again, and go with it. */
 const endedWith = async (org: OrgScope, playlistId: string, now: number) =>
   (await org.scheduleEntries.list()).filter((e) => ended(e, now) && (e.playlistId === playlistId || published(e)?.playlistId === playlistId));
@@ -183,15 +195,7 @@ const setDefaultPlaylist = defineTool({
   target,
   handler: async ({ org, input, write }) => {
     const row = await requirePlaylist(org, input.playlistId);
-    if (input.ifDefault !== undefined) {
-      const now = (await org.settings.get())?.defaultPlaylistId ?? null;
-      if (now !== input.ifDefault)
-        throw new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', {
-          defaultPlaylistId: now,
-        });
-      // As the batch runs too: one chosen between this read and the save fails it.
-      write(org.settings.stage.defaultIs(input.ifDefault));
-    }
+    if (input.ifDefault !== undefined) write(await stillDefault(org, input.ifDefault));
     write(await org.settings.stage.set({ defaultPlaylistId: row.id }, input.ifVersion));
     return { playlist: playlistView(row, await org.playlists.items(row.id), row.id) };
   },

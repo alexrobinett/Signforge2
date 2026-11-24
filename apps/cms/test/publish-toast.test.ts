@@ -81,6 +81,16 @@ function setup(entries: ScheduleEntryView[]) {
   return store.getState();
 }
 
+/** The publish of the entry with its default, never published, pinned: only while it is still the default (#393). */
+const pinnedDefault = {
+  ifDefault: 'pls_all_day',
+  drafts: [
+    { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+    { kind: 'playlist', id: 'pls_all_day', version: 2 },
+    { kind: 'spot', id: 'spt_open', version: 3 },
+  ],
+};
+
 describe('the publish toast', () => {
   it("offers Undo for a publish of schedule entries, and a takeover's toast after it does not keep it", async () => {
     const s = setup([entry('sch_breakfast', false)]);
@@ -187,15 +197,7 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
     vi.mocked(callTool).mockClear();
     await setup([mine]).publishEntry(ORG, 'sch_mine');
     expect(names()).toEqual(['publish']);
-    // Only while it is still the default: one switched since refuses the publish (#393).
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
-      ifDefault: 'pls_all_day',
-      drafts: [
-        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
-        { kind: 'playlist', id: 'pls_all_day', version: 2 },
-        { kind: 'spot', id: 'spt_open', version: 3 },
-      ],
-    });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault);
   });
 
   it('says the default was set when the publish after it fails (#336)', async () => {
@@ -267,14 +269,7 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
     await setup([mine]).publishEntry(ORG, 'sch_mine', 'pls_all_day');
     expect(names()).toEqual(['set_default_playlist', 'publish']);
     expect(vi.mocked(callTool)).toHaveBeenNthCalledWith(1, 'set_default_playlist', { playlistId: 'pls_all_day', ifDefault: null });
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
-      ifDefault: 'pls_all_day',
-      drafts: [
-        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
-        { kind: 'playlist', id: 'pls_all_day', version: 2 },
-        { kind: 'spot', id: 'spt_open', version: 3 },
-      ],
-    });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault);
   });
 
   it('pins its own playlist once when the default chosen is it', async () => {

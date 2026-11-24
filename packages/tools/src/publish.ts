@@ -20,6 +20,7 @@ import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
+import { stillDefault } from './playlists';
 import { keysetPage, pageInput } from './paging';
 import { publishOrg, type DraftPin } from './publishing';
 import { manifestKey } from './r2';
@@ -178,17 +179,9 @@ const publish = defineTool({
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: async (ctx) => {
     const { org, input, write } = ctx;
-    if (input.ifDefault !== undefined) {
-      const now = (await org.settings.get())?.defaultPlaylistId ?? null;
-      if (now !== input.ifDefault)
-        throw new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', {
-          defaultPlaylistId: now,
-        });
-    }
-    const out = await runPublish(ctx, input.drafts);
-    // As the batch runs too, with the pins' guards: a default switched meanwhile fails it.
-    if (input.ifDefault !== undefined) write(org.settings.stage.defaultIs(input.ifDefault));
-    return out;
+    // Held in the batch with the pins' guards: a default switched meanwhile fails it.
+    if (input.ifDefault !== undefined) write(await stillDefault(org, input.ifDefault));
+    return runPublish(ctx, input.drafts);
   },
 });
 
