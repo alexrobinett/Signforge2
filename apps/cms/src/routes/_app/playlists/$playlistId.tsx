@@ -28,6 +28,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
+import { problemWords } from '~/lib/field-words';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
 import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
 import { isRetired } from '~/lib/screen-status';
@@ -237,7 +238,10 @@ function PlaylistEditor() {
                           {why && (
                             <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                              <span>Not in the preview yet: {why.join('; ')}</span>
+                              <span>
+                                Not in the preview yet. {/* In words, by the field's label (#359). */}
+                                {why.map((p) => `${problemWords(p, versions.get(spot?.templateVersionId ?? '')?.manifest.fields ?? {})}.`).join(' ')}
+                              </span>
                             </span>
                           )}
                         </span>
