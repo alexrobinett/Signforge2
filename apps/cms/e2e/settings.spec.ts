@@ -439,6 +439,22 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await expect(row).toHaveCount(0);
 });
 
+test('the last owner cannot step down: the members page says why, and they stay owner (#292)', async ({ page }) => {
+  const ownerEmail = `e2e-settings-last-owner-${Date.now()}@example.com`;
+  await signInAs(page, ownerEmail, '192.0.2.182');
+  await createOrg(page, 'Northside Library', '192.0.2.182');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  const role = page.getByRole('region', { name: 'People' }).getByLabel(new RegExp(`Role for ${ownerEmail.split('@')[0]}`));
+  await expect(role).toBeEnabled();
+  await role.selectOption('editor');
+  await expect(page.getByRole('alert').filter({ hasText: /without an owner/ })).toBeVisible();
+  await expect(role).toHaveValue('owner');
+  await page.reload();
+  await hydrated(page);
+  await expect(role).toHaveValue('owner');
+});
+
 test("an edit typed while its save runs is kept: the next addresses to invite, and General's retention (review of #143, 4)", async ({ page }) => {
   // The invite form cleared itself once sent, and General remounted on the version its save made:
   // either wiped what was typed while the save ran.

@@ -134,9 +134,9 @@ export interface Invitation {
 
 /**
  * Changes an org's members and invitations through Better Auth's organization endpoints, as the
- * caller, in the org the service was made for: Better Auth keeps its rules (one of our roles each,
- * never without an owner), sends the invitation, and its after hook writes the change's audit row,
- * so the member tools stage nothing. Its refusal is a `ToolError`. A tool checks the row is in its
+ * caller, in the org the service was made for: Better Auth keeps its rules (one of our roles each),
+ * D1 keeps an owner (#292), Better Auth sends the invitation, and its after hook writes the change's
+ * audit row, so the member tools stage nothing. Its refusal is a `ToolError`. A tool checks the row is in its
  * org (`org.members`, `org.invitations`) before it asks.
  */
 export interface Members {

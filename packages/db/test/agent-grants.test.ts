@@ -238,6 +238,10 @@ describe('the token check', () => {
     const g = await grant('grants-c', c.userId, clientId);
     await tokens(g.id, clientId, c.userId, 'h-member');
     expect(await agentGrantForToken(env.DB, 'h-member', RESOURCE, NOW)).toBeDefined();
+    // Another owner stays, as one always does (#292).
+    await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('grants-c-other', 'grants-c', ?, 'owner', ?)")
+      .bind(a.userId, iso(NOW))
+      .run();
     await env.DB.prepare('DELETE FROM member WHERE id = ?').bind(c.member).run();
     expect(await agentGrantForToken(env.DB, 'h-member', RESOURCE, NOW)).toBeUndefined();
 
