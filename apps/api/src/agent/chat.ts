@@ -38,11 +38,11 @@ import { type ChatTool, type ChatTurn, chatWith, type ModelReach } from './provi
 /** The most tool calls one turn makes. */
 export const MAX_CALLS = 8;
 /** How long one turn may take, model calls and tools together. */
-export const TURN_MS = 25_000;
+const TURN_MS = 25_000;
 /** The most D1 statements one turn's tool calls prepare. */
-export const TOOL_STATEMENTS = 40;
+const TOOL_STATEMENTS = 40;
 /** The most fetches one turn's model calls make. */
-export const MODEL_FETCHES = 40;
+const MODEL_FETCHES = 40;
 /** The most of one tool's output the model reads, in characters. */
 const OUTPUT_CHARS = 12_000;
 
