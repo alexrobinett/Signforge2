@@ -21,7 +21,7 @@ import {
   type TableFeed,
   type TemplateManifest,
 } from '@signforge/contract';
-import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
+import { draftChanged, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
 import { page, pageInput } from './paging';
@@ -387,21 +387,23 @@ async function inUse(org: OrgScope, spotId: string): Promise<ToolError | undefin
 const deleteSpot = defineTool({
   name: 'delete_spot',
   description:
-    'Delete a spot, its draft and its published version. Refused with a conflict while a playlist plays it, in its draft or its published version (details.playlists, each { id, name }): take it out of those first, and publish them if screens play them. Its assets and data sources are not deleted. Only a person may delete one: no agent is offered it. Returns { deleted: spotId }.',
+    'Delete a spot, its draft and its published version. Refused with a conflict while a playlist plays it, in its draft or its published version (details.playlists, each { id, name }): take it out of those first, and publish them if screens play them. Its assets and data sources are not deleted. Pass the version you read as ifVersion so a spot changed since is not deleted. Only a person may delete one: no agent is offered it. Returns { deleted: spotId }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   // #242: deleting is a person's choice, as its confirmation in the spot editor says; no ticket gives it to an agent.
   people: true,
-  input: z.object({ spotId: id('spot') }),
+  input: z.object({ spotId: id('spot'), ifVersion }),
   output: outputs.delete_spot,
   example: { spotId: 'spt_example' },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
   handler: async ({ org, input, write }) => {
-    await requireSpot(org, input.spotId);
+    const row = await requireSpot(org, input.spotId);
+    if (input.ifVersion !== undefined && row.rowVersion !== input.ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
     const used = await inUse(org, input.spotId);
     if (used) throw used;
-    write(org.spots.stage.delete(input.spotId));
+    // At a version: guarded in the batch, as an edit is, so one saved between this read and the commit refuses it too.
+    write(input.ifVersion === undefined ? org.spots.stage.delete(input.spotId) : org.spots.stage.remove(row));
     return { deleted: input.spotId };
   },
   // A playlist that took the spot in since fails the delete's foreign key: said as the same conflict.

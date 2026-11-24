@@ -117,8 +117,11 @@ export interface SpotEditorSlice {
   /** Creates the spot from the dialog's draft and opens its editor. */
   createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
   askDeleteSpot: (open: boolean) => void;
-  /** Deletes the spot and goes to the spot library; refused while a playlist plays it. */
-  deleteSpot: (orgId: string, spotId: string) => Promise<void>;
+  /**
+   * Deletes the spot, at the version the editor holds (as loaded, or as its own save left it), and goes
+   * to the spot library; refused while a playlist plays it, or once someone else saved it. Says whether it went.
+   */
+  deleteSpot: (orgId: string, spotId: string) => Promise<boolean>;
 }
 
 const closedDelete = (): SpotEditorState['deleting'] => ({ open: false, pending: false, error: null, playlists: [] });
@@ -391,19 +394,23 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     async deleteSpot(orgId, spotId) {
       editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null, playlists: [] } }));
       try {
-        await callTool('delete_spot', { spotId });
+        await callTool('delete_spot', { spotId, ifVersion: savedSpot(orgId, spotId)?.version });
         // Only once it is gone: a refused delete leaves the waiting save to run.
         drafts.drop(spotId);
         await router.navigate({ to: '/spots' });
         queryClient.removeQueries({ queryKey: spotKeys.one(orgId, spotId), exact: true });
         await queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         editor((e) => ({ ...e, deleting: closedDelete() }));
+        return true;
       } catch (err) {
         const playlists = blocking(err);
         const error = playlists.length
           ? `Playlists play this spot, so it cannot be deleted. Take it out of ${playlists.length === 1 ? 'this one' : 'these'} first, and publish ${playlists.length === 1 ? 'it' : 'them'} if screens play ${playlists.length === 1 ? 'it' : 'them'}:`
-          : toolMessage(err);
+          : err instanceof Refusal && err.code === 'conflict'
+            ? 'Someone saved this spot since you opened it, so it was not deleted. Reload it to see their change.'
+            : toolMessage(err);
         editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error, playlists } }));
+        return false;
       }
     },
   };

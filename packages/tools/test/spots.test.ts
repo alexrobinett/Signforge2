@@ -526,4 +526,30 @@ describe('deleting a spot (#242)', () => {
     });
     expect(await scoped(env.DB, 'spot-del-race').spots.get(o.imageSpot)).toBeDefined();
   });
+  it('refuses a delete at a version someone has saved past, at the read or between the read and the commit, and keeps the spot', async () => {
+    const { org, call } = await seeded('spot-del-version');
+    const { spot } = await ok(call('create_spot', { name: 'Site', kind: 'url', url: 'https://example.com/a', idempotencyKey: 'spot-del-version' }));
+    const id = (spot as { id: string }).id;
+    await ok(call('update_spot', { spotId: id, name: 'Their edit', ifVersion: 1 }));
+    expect(await call('delete_spot', { spotId: id, ifVersion: 1 })).toMatchObject({ ok: false, error: 'conflict', details: { id, version: 2 } });
+
+    // Saved again after the delete read the spot: the batch's guard refuses it.
+    let raced = false;
+    const racing = {
+      ...org,
+      spots: {
+        ...org.spots,
+        usedBy: async (spotId: string) => {
+          if (!raced) {
+            raced = true;
+            await editorCalls(org)('update_spot', { spotId, name: 'Saved meanwhile', ifVersion: 2 });
+          }
+          return org.spots.usedBy(spotId);
+        },
+      },
+    };
+    expect(await editorCalls(racing)('delete_spot', { spotId: id, ifVersion: 2 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await org.spots.get(id)).toMatchObject({ name: 'Saved meanwhile', rowVersion: 3 });
+    expect(await ok(call('delete_spot', { spotId: id, ifVersion: 3 }))).toEqual({ deleted: id });
+  });
 });
