@@ -273,7 +273,7 @@ export async function dispatch<D extends DataScope>(
     checkOutput(tool, output);
     if (keyed && writes.length) writes.push(...(await keyed.record(output)));
     try {
-      await commit(tool.target?.(parsed.data, output), {});
+      await commit(tool.target?.(parsed.data, output), tool.auditDetail?.(output) ?? {});
     } catch (err) {
       // A publish that lost a race runs again (`publishAttempts`).
       if (tool.publishes && err instanceof StaleVersionError) throw err;

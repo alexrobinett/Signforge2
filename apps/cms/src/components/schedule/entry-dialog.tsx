@@ -20,6 +20,7 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, entryProblems, entryWhen } from '~/state/schedule';
+import { FirstDefaultNote } from './first-default-note';
 import { TargetPicker } from './target-picker';
 
 export function EntryDialog({
@@ -195,6 +196,7 @@ export function EntryDialog({
               )}
             </div>
           )}
+          {canPublish && <FirstDefaultNote playlists={playlists} playlistId={d.playlistId} action="Save and publish" />}
           {canPublish && playlist && (
             <p className="text-xs text-muted-foreground">
               Save and publish sends{' '}

@@ -830,8 +830,10 @@ describe('the publish tools (M3-18)', () => {
     const { org } = await seedSmallOrg('tool-default');
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     const p = publisher(org);
-    const none = (await ok(p.call('publish', {}))) as unknown as Out;
+    // No schedule entry made live, so no playlist to make the default (#243): no screen can be published to.
+    const none = (await ok(p.call('publish', { drafts: [] }))) as unknown as Out;
     expect(none.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect(none).toMatchObject({ madeDefault: null });
     const call = editorCalls(org);
     expect(await ok(call('set_default_playlist', { playlistId: x('main') }))).toMatchObject({ playlist: { id: x('main'), isDefault: true } });
     expect((await ok(call('get_playlist', { playlistId: x('evenings') }))).playlist).toMatchObject({ isDefault: false });
@@ -843,6 +845,45 @@ describe('the publish tools (M3-18)', () => {
     await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
     expect(await call('set_default_playlist', { playlistId: x('evenings') })).toMatchObject({ ok: false, error: 'forbidden' });
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  it('makes the playlist its schedule entry plays the default when the org has none, so its screens are reached, and audits it (#243)', async () => {
+    const { org } = await seedSmallOrg('tool-first-default');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const out = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: string | null };
+    // The one entry plays Evenings: it becomes what every screen plays when nothing is scheduled.
+    expect(out.madeDefault).toBe(x('evenings'));
+    expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
+    const row = (await org.auditLog.list({ limit: 100 })).find((e) => e.action === 'publish');
+    expect(JSON.parse(row!.detailJson!)).toMatchObject({ madeDefault: x('evenings') });
+    // The next publish finds it set, and leaves it.
+    await editDeal(org, 'Three for $5');
+    expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
+  });
+
+  it('leaves a default the org has alone, and makes none when the entries made live play several playlists', async () => {
+    const { org } = await seedSmallOrg('tool-default-kept');
+    expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+
+    const { org: two, front } = await seedSmallOrg('tool-default-several');
+    await two.scheduleEntries.insert({
+      id: x('mornings'),
+      playlistId: x('main'),
+      priority: 3,
+      target: 'group',
+      groupId: front.id,
+      fromTime: '06:00',
+      toTime: '09:00',
+    });
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const out = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: string | null };
+    // Which of two would be a guess: nothing is set, and the screens say why.
+    expect(out.madeDefault).toBeNull();
+    expect(out.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
   });
 
   it("deletes the spot editor's weather sources nothing binds, but not one a published version bound before the publish, nor one just made (#98)", async () => {

@@ -413,6 +413,8 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * takes the output as possibly undefined and returns undefined for no target.
    */
   target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string } | undefined;
+  /** What the call's audit row records beyond its input: a change its input does not name (`publish`'s new default). */
+  auditDetail?: (output: NoInfer<z.output<R>>) => Record<string, unknown>;
   handler: (ctx: ToolContext<z.output<S>, D, N>) => Promise<NoInfer<z.output<R>>>;
   /**
    * For a tool whose writes carry a guard (a statement that fails the batch when what the handler

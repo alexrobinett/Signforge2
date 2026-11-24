@@ -524,7 +524,16 @@ export async function publishOrg(
   opts: CompileOptions,
   pins?: readonly DraftPin[],
   end: readonly string[] = [],
-): Promise<{ writes: Write[]; removals: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; read: OrgGraph; graph: OrgGraph }> {
+): Promise<{
+  writes: Write[];
+  removals: Write[];
+  drafts: DraftReport;
+  screens: ScreenPublish[];
+  revision: number;
+  read: OrgGraph;
+  graph: OrgGraph;
+  madeDefault: string | null;
+}> {
   const read = await loadOrg(org);
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
@@ -539,8 +548,14 @@ export async function publishOrg(
       }
     }
   }
-  const { graph, writes: promotions, removals, drafts } = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const { writes: promotions, removals, drafts } = promoted;
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
+  // With no default playlist no screen can be compiled, and a new org's first schedule entry or
+  // takeover would reach none (#243): the playlist it plays becomes the default, in the same batch.
+  const madeDefault = read.defaultPlaylist ? null : firstDefault(promoted.graph, drafts);
+  if (madeDefault) writes.push(...(await org.settings.stage.set({ defaultPlaylistId: madeDefault })).writes);
+  const graph = madeDefault ? { ...promoted.graph, defaultPlaylist: madeDefault } : promoted.graph;
   // A takeover whose published version has ended plays nowhere again, though its draft may run on.
   const now = opts.now.getTime();
   const compiled = { ...graph, entries: graph.entries.filter((r) => (published(r)?.endsAt ?? Number.POSITIVE_INFINITY) > now) };
@@ -564,5 +579,18 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph };
+  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+}
+
+/**
+ * The default an org with none gets from a publish: the playlist every schedule entry it made live
+ * plays, if they all play one, published. None when they play several (which would be a guess) or
+ * the publish made no entry live.
+ */
+function firstDefault(graph: OrgGraph, drafts: DraftReport): string | null {
+  const made = new Set(drafts.promoted.filter((d) => d.kind === 'schedule_entry').map((d) => d.id));
+  const playlists = new Set(graph.entries.filter((e) => made.has(e.id)).map((e) => e.playlistId));
+  const [only] = playlists;
+  if (playlists.size !== 1 || only === undefined) return null;
+  return graph.playlists.some((p) => p.id === only && published(p)) ? only : null;
 }
