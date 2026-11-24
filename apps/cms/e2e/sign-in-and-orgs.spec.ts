@@ -10,6 +10,7 @@ import {
   orgSwitcher,
   requestCode,
   screenshot,
+  shots,
   signIn,
   signInAs,
 } from './helpers';
@@ -55,8 +56,13 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   // Signed in with no org yet: back on the page asked for, offered to create the first org.
   await expect(page).toHaveURL(/\/screens$/);
   await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
+  // No org yet: only the logo and the account menu, no sections to go to or search (#379).
+  await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Sidebar' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Search and actions/ })).toHaveCount(0);
+  await expect(accountMenu(page)).toBeVisible();
   await axe(page);
-  await screenshot(page, '03-first-org');
+  await shots(page, '03-first-org');
   await fillUntilEnabled(page, 'Organization name', 'Acme Coffee', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Screens', level: 1 })).toBeVisible();

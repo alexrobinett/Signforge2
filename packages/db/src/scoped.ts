@@ -37,7 +37,7 @@ import { contentJson, published } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
-import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, GUARD_ABORT, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type AlertChannel = typeof s.alertChannels.$inferSelect;
@@ -117,9 +117,9 @@ type Ids = 'content' | 'server';
  * version `stale` reads now. Every version check inside a batch is one of these.
  */
 function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
-  // json() of text that is not JSON raises an error, which aborts the batch.
+  // A JSON path that is not one raises an error naming it, which aborts the batch: `commit` knows a guard's abort by it.
   const check = db
-    .select({ ok: sql`json(CASE WHEN ${holds} THEN '1' ELSE 'stale version' END)` })
+    .select({ ok: sql`json_extract('{}', CASE WHEN ${holds} THEN '$' ELSE ${GUARD_ABORT} END)` })
     .from(s.organization)
     .where(eq(s.organization.id, orgId));
   return guard(check, { id, version, holds, stale });
@@ -1256,6 +1256,19 @@ export function scoped(d1: D1Database, orgId: string) {
             auditRetentionDays: null,
           });
           return upsertVersioned(os, { id: 'settings', key: { orgId }, absent: 1, fresh }, values, ifVersion);
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `default_playlist`) unless, as it
+         * runs, the org's default playlist is `playlistId` (null: it has none). A default chosen or changed
+         * by someone else between a read and the batch fails it.
+         */
+        defaultIs: (playlistId: string | null): Staged => {
+          const holds = sql`COALESCE((SELECT ${os.defaultPlaylistId} FROM ${os} WHERE ${os.orgId} = ${orgId}), '') = ${playlistId ?? ''}`;
+          const stale = async () => {
+            const row = await db.select({ id: os.defaultPlaylistId, version: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get();
+            return (row?.id ?? null) === playlistId ? undefined : (row?.version ?? 1);
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'default_playlist', 0, holds, stale)] };
         },
         /**
          * Nothing written: the batch is refused (`StaleVersionError`, id `settings`) unless editors

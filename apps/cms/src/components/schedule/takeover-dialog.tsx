@@ -13,7 +13,7 @@ import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, firstDefaultOf } from '~/state/schedule';
-import { FirstDefaultChoice } from './first-default-note';
+import { FirstDefaultChoice, UnpublishedDefault } from './first-default-note';
 import { TargetPicker } from './target-picker';
 
 const DAY_MS = 86_400_000;
@@ -95,6 +95,7 @@ export function TakeoverDialog({
             <p className="text-xs text-muted-foreground">In your time zone. At most 24 hours from now.</p>
           </div>
           <FirstDefaultChoice playlists={playlists} value={firstDefaultOf(d)} onChange={(firstDefault) => edit({ firstDefault })} action="Taking over" />
+          <UnpublishedDefault playlists={playlists} checked={d.publishDefault === true} onChange={(publishDefault) => edit({ publishDefault })} />
           {(error || problem) && (
             <div role="alert" className="text-sm text-destructive">
               {problem ?? error}
