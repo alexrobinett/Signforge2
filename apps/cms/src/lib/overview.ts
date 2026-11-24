@@ -3,13 +3,11 @@
  * drafts not published yet, and a new org's setup checklist (#334). Each is worked out from the
  * tools' answers, so a step ticks itself off once the data says it is done.
  */
-import { isBaseTemplateKey } from '@signforge/contract';
 import { isRetired } from './screen-status';
 import type { PlaylistView } from './playlists';
 import type { ScheduleEntryView } from './schedule';
 import type { ScreenView } from './screen-types';
 import type { SpotView } from './spots';
-import thumbnails from './template-thumbnails.json';
 
 /**
  * Overview's Query key (src/queries/overview.ts). Every save of a spot, playlist or schedule entry
@@ -86,15 +84,6 @@ export function unpublished(d: { spots: readonly Spot[]; playlists: readonly Pla
   ]
     .toSorted((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, SHOWN_DRAFTS);
-}
-
-const THUMBNAILS: Record<string, string> = thumbnails;
-
-/** A base template's thumbnail, drawn by the player (scripts/template-thumbnails.ts), from its key (`base/clock@1.2.4`); null for an org's own template. */
-export function templateThumbnail(key: string): string | null {
-  if (!isBaseTemplateKey(key)) return null;
-  const id = key.slice('base/'.length, key.lastIndexOf('@'));
-  return id in THUMBNAILS ? `/template-thumbnails/${id}.webp` : null;
 }
 
 export interface Playing {

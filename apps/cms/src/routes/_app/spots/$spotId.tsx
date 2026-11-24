@@ -20,7 +20,7 @@ import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton,
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
-import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import {
   AlertDialog,
@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
+import { templateThumbnail } from '~/lib/template-thumbnail';
 import { cn } from '~/lib/utils';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
@@ -99,6 +100,7 @@ function SpotEditor() {
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);
+  const checkAll = useAppStore((s) => s.checkAllFields);
   const filled = useAppStore((s) => s.agent.filled[spotId]);
   const clearMark = useAppStore((s) => s.clearFillMark);
   const finishFill = useAppStore((s) => s.finishFill);
@@ -116,6 +118,7 @@ function SpotEditor() {
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
   const version = versionsById(templates).get(templateVersionId ?? '');
+  const template = templates.find((t) => t.versions.some((v) => v.id === templateVersionId));
   const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot.id, c);
   const set = (patch: Partial<SpotDraft>) => change((d) => ({ ...d, ...patch }));
   const range = version?.manifest.duration;
@@ -126,7 +129,7 @@ function SpotEditor() {
 
   return (
     // Clipped, not hidden: an overflow-hidden box is a scroll container, so the review's action bar would stick to it, not the page.
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/spots', label: 'Spots' }}
         title={draft.name || spot.name}
@@ -144,7 +147,16 @@ function SpotEditor() {
             <DeleteButton onAsk={() => askDelete(true)} />
           </>
         )}
-        {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
+        {canPublish && (
+          <PublishButton
+            pending={publishing}
+            disabled={stale}
+            onPublish={() => {
+              checkAll(spotId);
+              void publish(orgId, spotId);
+            }}
+          />
+        )}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
       {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
@@ -170,9 +182,9 @@ function SpotEditor() {
           onDone={() => finishFill(spotId)}
         />
       )}
-      <div className="flex flex-1 flex-wrap items-stretch">
+      <div className={EDITOR_ROW}>
         {reviewing && version && (
-          <div className="flex max-w-full flex-[1_1_360px] flex-col border-r bg-card px-4 pt-5 sm:px-6">
+          <div className={cn(EDITOR_FORM, 'px-4 pt-5 sm:px-6')}>
             <FillReview spotId={spotId} fields={version.manifest.fields} />
           </div>
         )}
@@ -180,7 +192,7 @@ function SpotEditor() {
           hidden={reviewing && version !== undefined}
           aria-label="Spot fields"
           onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
+          className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}
         >
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
@@ -213,6 +225,7 @@ function SpotEditor() {
               (version ? (
                 <EditorSection title="Content">
                   <FieldForm
+                    spotId={spotId}
                     fields={version.manifest.fields}
                     shown={typedFields(version.manifest, draft.bindings)}
                     draft={draft}
@@ -307,7 +320,7 @@ function SpotEditor() {
           </EditorFields>
         </form>
         {/* While a review is open, a phone shows the stage playing the change first, the review under it. */}
-        <div className={cn('flex min-w-0 flex-[999_1_560px] flex-col', reviewing && 'max-sm:order-first')}>
+        <div className={cn(STAGE_COLUMN, reviewing && 'max-sm:order-first')}>
           <PlayerStage
             target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit }}
             kits={brandKits}
@@ -315,6 +328,7 @@ function SpotEditor() {
             search={search}
             onSearch={setSearch}
             bound={Object.keys(draft.bindings).length > 0}
+            thumbnail={template && templateThumbnail(template)}
           />
         </div>
       </div>

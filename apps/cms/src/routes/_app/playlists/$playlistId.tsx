@@ -13,7 +13,7 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -28,6 +28,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
+import { problemWords } from '~/lib/field-words';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
 import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
 import { isRetired } from '~/lib/screen-status';
@@ -144,7 +145,7 @@ function PlaylistEditor() {
   const kitId = search.kit ?? brandKits.find((k) => k.isDefault)?.id ?? null;
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/playlists', label: 'Playlists' }}
         title={draft.name || playlist.name}
@@ -169,12 +170,8 @@ function PlaylistEditor() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-1 flex-wrap items-stretch">
-        <form
-          aria-label="Playlist"
-          onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full min-w-0 flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
-        >
+      <div className={EDITOR_ROW}>
+        <form aria-label="Playlist" onSubmit={(e) => e.preventDefault()} className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}>
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="playlist-name" className="font-medium">
@@ -235,9 +232,12 @@ function PlaylistEditor() {
                             {spot ? `${spotWhat(spot, versions)} · ${seconds(spot.durationMs)} s` : ''}
                           </span>
                           {why && (
-                            <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
+                            <span className="flex items-start gap-1.5 text-sm text-status-updating-foreground">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                              <span>Not in the preview yet: {why.join('; ')}</span>
+                              <span>
+                                Not in the preview yet. {/* In words, by the field's label (#359). */}
+                                {why.map((p) => `${problemWords(p, versions.get(spot?.templateVersionId ?? '')?.manifest.fields ?? {})}.`).join(' ')}
+                              </span>
                             </span>
                           )}
                         </span>
@@ -351,7 +351,7 @@ function PlaylistEditor() {
           </EditorFields>
         </form>
         {/* The form can be far longer than a spot's, so the stage stays in view beside it as it scrolls. */}
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col bg-[#18181a] lg:sticky lg:top-0 lg:h-[calc(100dvh-8rem)] lg:self-start">
+        <div className={STAGE_COLUMN}>
           {draft.spotIds.length ? (
             <PlayerStage
               target={{ orgId, playlistId, orientation: search.o ?? 'landscape', brandKitId: search.kit }}
@@ -361,7 +361,7 @@ function PlaylistEditor() {
               onSearch={setSearch}
             />
           ) : (
-            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-[#18181a] p-8 text-center text-[#c8c8c8]">
+            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-stage p-8 text-center text-stage-muted-foreground">
               Add spots and the player plays the loop here.
             </section>
           )}
@@ -431,7 +431,7 @@ function WherePlays({ orgId, playlist }: { orgId: string; playlist: PlaylistView
                 <strong className="font-semibold">{aimedAt(e, screens, groups)}</strong>{' '}
                 <span className="text-muted-foreground">· {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}</span>
               </span>
-              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+              <span className="text-sm text-muted-foreground">{stateWord(e)}</span>
             </li>
           ))}
         </ul>

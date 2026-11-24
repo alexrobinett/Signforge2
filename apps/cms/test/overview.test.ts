@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { listOutOfDate } from '../src/lib/fleet-status';
-import { playingNow, SHOWN_DRAFTS, setupSteps, templateThumbnail, unpublished } from '../src/lib/overview';
+import { playingNow, SHOWN_DRAFTS, setupSteps, unpublished } from '../src/lib/overview';
 import type { ScreenView } from '../src/lib/screen-types';
 import { connectUi, createUiSlice, type UiSlice } from '../src/state/ui';
 
@@ -100,15 +100,6 @@ describe('playingNow', () => {
     const took = [{ id: 's1', ...screen('updating', 'a') }];
     expect(listOutOfDate(list as never, took as never)).toBe(true);
     expect(listOutOfDate(took as never, took as never)).toBe(false);
-  });
-});
-
-describe('templateThumbnail', () => {
-  it("is a base template's drawn thumbnail, and none for an org's own", () => {
-    expect(templateThumbnail('base/clock@1.2.4')).toBe('/template-thumbnails/clock.webp');
-    expect(templateThumbnail('base/clock@9.9.9')).toBe('/template-thumbnails/clock.webp');
-    expect(templateThumbnail('base/unknown@1.0.0')).toBeNull();
-    expect(templateThumbnail('org_1/clock@1.2.4')).toBeNull();
   });
 });
 

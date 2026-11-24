@@ -96,7 +96,9 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByRole('heading', { name: 'Lobby clock', level: 1 })).toBeVisible();
 
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByRole('status')).toHaveText('The draft, as a screen would show it. Screens play what is published.');
+  await expect(stage.getByText('The draft, as a screen would show it. Screens play what is published.')).toBeVisible();
+  // What the stage is doing, said politely as it changes.
+  await expect(stage.getByRole('status')).toHaveText(/Drawing…|Drawn by the player your screens run\./);
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 
@@ -116,11 +118,12 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await axe(page);
   await shots(page, '30-spot-editor');
 
-  // Invalid: the contract's message by the field, the stage keeps the last frame, nothing is saved.
+  // Invalid: the problem by the field in words (#359), the stage keeps the last frame and says why, nothing is saved.
   await greeting.fill('x'.repeat(41));
-  await expect(page.getByText('field "greeting" is longer than 40')).toBeVisible();
+  const tooLong = 'Greeting (empty for good morning/afternoon/evening) is longer than 40 characters.';
+  await expect(page.locator('#field-greeting-error')).toHaveText(tooLong);
   await expect(greeting).toHaveAttribute('aria-invalid', 'true');
-  await expect(stage.getByText('Holding the last valid frame until the marked field is fixed.')).toBeVisible();
+  await expect(stage.getByText(`Holding the last valid frame. ${tooLong}`)).toBeVisible();
   await expect(page.getByText('Not saved: fix the marked field')).toBeVisible();
   expect(await stageShows(page, 'Welcome to Northside')).toBe(true);
   await axe(page);
@@ -311,6 +314,139 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await expect.poll(qr, { timeout: 10_000 }).toBe(true);
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
+});
+
+test('an Announcement with its photo off draws once the stage is in view, and the player is not asked to draw it out of view (#342)', async () => {
+  // On a phone the stage follows the form; beside it, on a wide screen, it stays in view (#363).
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const announcement = templates.find((t: { key: string }) => t.key.endsWith('announcement') || t.key === 'announcement');
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'No photo',
+    kind: 'template',
+    templateVersionId: announcement.versions.at(-1).id,
+    data: { showPhoto: false },
+  });
+  const skipped: string[] = [];
+  const listen = (m: { text(): string }) => m.text().includes('[sf] skipped') && skipped.push(m.text());
+  page.on('console', listen);
+  // Each draft the player is sent, as it arrives: whether its frame was in the page's window then. In every frame:
+  // the player's frame starts as about:blank, where this runs, and keeps its window when the player loads; only it is sent drafts.
+  await page.addInitScript(() => {
+    addEventListener('message', (e) => {
+      if (e.data?.type !== 'draft') return;
+      const box = window.frameElement?.getBoundingClientRect();
+      const inView = box !== undefined && box.bottom > 0 && box.top < window.parent.innerHeight;
+      Reflect.set(window, 'sfDrafts', [...(Reflect.get(window, 'sfDrafts') ?? []), inView]);
+    });
+  });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  // The form is long: the stage starts below the fold, where a browser runs no animation frames.
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  expect(await stage.evaluate((el) => el.getBoundingClientRect().top > innerHeight)).toBe(true);
+  const player = () => page.frames().find((f) => f.url().includes('/player/'));
+  const drafts = async () => (await player()?.evaluate(() => Reflect.get(window, 'sfDrafts') ?? [])) ?? [];
+  await expect(stage.getByText('Drawing…').first()).toBeAttached();
+  await stage.scrollIntoViewIfNeeded();
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  // Every draft the player was sent arrived with its frame in view: none while it was below the fold.
+  const arrived = await drafts();
+  expect(arrived.length).toBeGreaterThan(0);
+  expect(arrived.every(Boolean)).toBe(true);
+  page.off('console', listen);
+  expect(skipped).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // #359: the photo turned on says nothing under its field until Publish, then says it in words; the choice by its label.
+  await expect(page.getByLabel('Look').locator('option:checked')).toHaveText('Pop');
+  await page.getByLabel('Show the photo').check();
+  // The stage draws once back in view: it keeps the frame it drew, and says why in the same words.
+  await stage.scrollIntoViewIfNeeded();
+  await expect(stage.getByText('Holding the last valid frame. No image for Photo: choose one, or untick Show the photo.')).toBeVisible();
+  const photoError = page.locator('#field-photo-error');
+  await expect(photoError).toBeEmpty();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(photoError).toHaveText('No image for Photo: choose one, or untick Show the photo.');
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+});
+
+test("an editor gives the stage the room: the sidebar folded to its rail, the stage filling its column, and the template's thumbnail with Drawing… until the player draws (#363)", async () => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const announcement = templates.find((t: { key: string }) => t.key === 'announcement');
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'Room to draw',
+    kind: 'template',
+    templateVersionId: announcement.versions.at(-1).id,
+    data: { showPhoto: false },
+  });
+  // The player is held back, so the stage shows what it shows while it waits.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/player/index.html*', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'Unfold the sidebar' })).toHaveAttribute('aria-expanded', 'false');
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  await expect(stage.getByText('Drawing…').first()).toBeVisible();
+  await expect(stage.locator('img[src="/template-thumbnails/announcement.webp"]')).toBeVisible();
+  // The column is the editor's height, and the stage fills it.
+  const fills = await stage.evaluate((el) => {
+    const column = el.parentElement!.getBoundingClientRect();
+    const own = el.getBoundingClientRect();
+    return Math.abs(own.height - column.height) < 1 && column.height > innerHeight / 2;
+  });
+  expect(fills).toBe(true);
+  // Beside the form, in view, at desktop widths, folded and not: the row never wraps there.
+  const beside = () =>
+    stage.evaluate((el) => {
+      const form = document.querySelector('form[aria-label="Spot fields"]')!.getBoundingClientRect();
+      const own = el.getBoundingClientRect();
+      return own.left >= form.right - 1 && own.top < innerHeight && own.bottom <= innerHeight + 1;
+    });
+  expect(await beside()).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 720 });
+  expect(await beside()).toBe(true);
+  await axe(page);
+  await shots(page, '92-spot-editor-drawing');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  release();
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await page.unroute('**/player/index.html*');
+
+  // The editor, not the window, decides: at 1024 with the agent's drawer open the stage stacks under the form, at full width.
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const stacked = await stage.evaluate((el) => {
+    const form = document.querySelector('form[aria-label="Spot fields"]')!.getBoundingClientRect();
+    const own = el.getBoundingClientRect();
+    return own.top >= form.bottom - 1 && own.width >= form.width - 1;
+  });
+  expect(stacked).toBe(true);
+  await page.getByRole('button', { name: 'Close the agent' }).click();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // At 100% the screen scrolls inside the stage: the stage's status stays in the window.
+  await page.getByRole('group', { name: 'Scale' }).getByRole('button', { name: '100%' }).click();
+  const status = stage.getByRole('status');
+  await expect(status).toBeInViewport();
+  expect(await status.evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight)).toBe(true);
+  await page.getByRole('group', { name: 'Scale' }).getByRole('button', { name: 'Fit' }).click();
+
+  // Unfolded here, it stays open on this visit, and the stage stays beside the form; the list keeps the person's own choice.
+  await page.getByRole('button', { name: 'Unfold the sidebar' }).click();
+  await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toHaveAttribute('aria-expanded', 'true');
+  expect(await beside()).toBe(true);
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
+  await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toBeVisible();
 });
 
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
