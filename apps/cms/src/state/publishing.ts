@@ -18,7 +18,7 @@ import { problemWords } from '~/lib/field-words';
 import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
 import { type SpotView, versionsById } from '~/lib/spots';
-import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
+import { callTool, isConflict, isStale, Refusal, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { assetsQuery, brandKitsQuery, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
@@ -148,8 +148,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       // A default set on the way stays set, though nothing is published (#336).
       const stays = setDefault ? `${setDefault} is now the default playlist. ` : '';
       if (held) toast.error(refused, { description: `${stays}${held.text}`, action: held.action, duration: 10_000 });
-      else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: reachesNone });
-      else toast('Nothing to publish', { description: 'Every screen already plays this.' });
+      else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: `${stays}${reachesNone}` });
+      else toast('Nothing to publish', { description: `${stays}Every screen already plays this.` });
       return;
     }
     const made = r.publish;
@@ -251,8 +251,14 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       await told(orgId, await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}) }), undo, refused, made);
       await refresh(orgId);
     } catch (err) {
-      const why = isStale(err) ? 'It changed since you opened it, perhaps in another tab. Reload and publish again.' : toolMessage(err);
-      toast.error(refused, { description: made ? `${made} is now the default playlist. ${why}` : why });
+      // `ifDefault` refused: the default the pins were for is no longer it, the one this set included.
+      const moved =
+        err instanceof Refusal && err.code === 'conflict' && typeof err.details === 'object' && err.details !== null && 'defaultPlaylistId' in err.details;
+      if (moved) toast.error(refused, { description: 'Someone changed the default playlist. Reload to see it.' });
+      else {
+        const why = isStale(err) ? 'It changed since you opened it, perhaps in another tab. Reload and publish again.' : toolMessage(err);
+        toast.error(refused, { description: made ? `${made} is now the default playlist. ${why}` : why });
+      }
     } finally {
       pending(false);
     }

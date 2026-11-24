@@ -239,7 +239,11 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     const theirs = await org.playlists.insert({ name: 'Theirs', transitionJson: JSON.stringify({ type: 'cut' }) });
     // Chosen between the read and the batch.
     const late = editorCalls(racing(org, () => chooseDefault(org, theirs.id)));
-    expect(await late('set_default_playlist', { playlistId: o.playlist, ifDefault: null })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await late('set_default_playlist', { playlistId: o.playlist, ifDefault: null })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { defaultPlaylistId: theirs.id },
+    });
     expect((await org.settings.get())?.defaultPlaylistId).toBe(theirs.id);
     // Chosen before it read: refused at once, naming it.
     expect(await call('set_default_playlist', { playlistId: o.playlist, ifDefault: null })).toMatchObject({
@@ -259,12 +263,24 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     const spot = (await org.spots.get(o.templateSpot))!;
     const pins = { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }], ifDefault: o.playlist };
     // Switched between its read and its batch: nothing is published.
-    expect(await owner(racing(org, () => chooseDefault(org, other.id)))('publish', pins)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await owner(racing(org, () => chooseDefault(org, other.id)))('publish', pins)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { defaultPlaylistId: other.id },
+    });
     expect(published((await org.spots.get(spot.id))!)).toBeUndefined();
     // Switched before it read: refused at once, naming the default now.
     expect(await owner(org)('publish', pins)).toMatchObject({ ok: false, error: 'conflict', details: { defaultPlaylistId: other.id } });
     // While it is: published.
     await chooseDefault(org, o.playlist);
     expect(await ok(owner(org)('publish', pins))).toMatchObject({ promoted: [{ kind: 'spot', id: spot.id }] });
+    // A publish that changes no screen (removals only, or nothing) is held to it as well.
+    const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+    expect(await owner(racing(org, () => chooseDefault(org, other.id)))('publish', { drafts: [], ifDefault: o.playlist })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { defaultPlaylistId: other.id },
+    });
+    expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
   });
 });
