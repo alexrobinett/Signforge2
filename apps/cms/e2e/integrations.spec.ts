@@ -193,9 +193,24 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await owner.keyboard.press('Escape');
   await owner.getByRole('button', { name: 'Manage RSS / Atom' }).click();
   const feeds = owner.getByRole('dialog', { name: 'RSS / Atom feeds' });
+  const confirmBlog = owner.getByRole('alertdialog', { name: 'Delete Northside blog?' });
+  // Escape while the delete is still on its way (held here): its row's button is disabled, so focus goes to the Sources dialog, not behind it.
+  const deleting = await holdFirst(owner, '/api/tools/delete_data_source');
   await feeds.getByRole('button', { name: 'Delete Northside blog' }).click();
-  await owner.getByRole('alertdialog', { name: 'Delete Northside blog?' }).getByRole('button', { name: 'Delete source' }).click();
+  await confirmBlog.getByRole('button', { name: 'Delete source' }).click();
+  const held = await deleting.arrived;
+  await owner.keyboard.press('Escape');
+  await expect(confirmBlog).toBeHidden();
+  await expect(feeds).toBeFocused();
+  await held.abort('connectionrefused');
+  await owner.unroute('**/api/tools/delete_data_source');
+  // Deleted: its row's button is gone, and focus stays in the Sources dialog.
+  await feeds.getByRole('button', { name: 'Delete Northside blog' }).click();
+  await confirmBlog.getByRole('button', { name: 'Delete source' }).click();
   await expect(feeds.getByText('None yet.')).toBeVisible();
+  await expect(feeds).toBeFocused();
+  await owner.keyboard.press('Tab');
+  await expect(feeds.locator(':focus')).toHaveCount(1);
   await owner.keyboard.press('Escape');
   await expect(now.getByText('RSS · Northside blog')).toHaveCount(0);
 

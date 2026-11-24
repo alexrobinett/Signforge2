@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { type Clock, failingWords, hasAddress, kindOf, type ListedSource, type SourceKind, sourceState, weatherFixWords } from '~/lib/integrations';
+import { SOURCES_DIALOG } from '~/state/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
@@ -52,7 +53,7 @@ export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: str
 
   return (
     <Dialog open={format !== null} onOpenChange={(open) => !open && openSources(null)}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={(e) => focusBack('sources', e)}>
+      <DialogContent id={SOURCES_DIALOG} className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={(e) => focusBack('sources', e)}>
         {format && (
           <>
             <DialogHeader>

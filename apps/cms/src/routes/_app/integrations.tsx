@@ -298,7 +298,7 @@ function FailingSources({ sources, clock, canManage }: { sources: ListedSource[]
   return failing.map((s) => (
     <Alert key={s.id} variant="destructive" role="alert" aria-labelledby={`failing-${s.id}`}>
       <TriangleAlertIcon aria-hidden />
-      <AlertTitle id={`failing-${s.id}`}>
+      <AlertTitle id={`failing-${s.id}`} className="wrap-anywhere">
         {KIND_WORD[s.format]} · {s.name}
       </AlertTitle>
       <AlertDescription className="text-foreground">

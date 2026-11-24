@@ -70,13 +70,18 @@ export interface IntegrationsSlice {
   /** Disconnects the connection being confirmed. */
   disconnect: (orgId: string) => Promise<void>;
   /**
-   * A dialog closed (its `onCloseAutoFocus`): focus goes back to what opened it, or to the page's main
-   * region once that is gone (a fixed source's alert). These dialogs have no trigger for Radix to return to.
+   * A dialog closed (its `onCloseAutoFocus`): focus goes back to what opened it while that can take it;
+   * else, from a confirm over the Sources dialog, to that dialog (its deleted row's button is gone, or
+   * disabled while the delete runs); else to the page's main region (a fixed source's alert is gone).
+   * These dialogs have no trigger for Radix to return to.
    */
   focusBack: (dialog: OpenedDialog, e: Event) => void;
 }
 
 type OpenedDialog = 'sources' | 'delete' | 'disconnect';
+
+/** The Sources dialog's element id: where focus goes from a confirm over it once its opener is gone. */
+export const SOURCES_DIALOG = 'sources-dialog';
 
 const initialNewSource: NewSource = { name: '', feedUrl: '', horizonDays: DEFAULT_HORIZON_DAYS };
 
@@ -129,7 +134,9 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     focusBack(dialog, e) {
       e.preventDefault();
       const el = openers.get(dialog);
-      (el instanceof HTMLElement && el.isConnected && el !== document.body ? el : document.getElementById('main'))?.focus();
+      const usable = el instanceof HTMLElement && el.isConnected && el !== document.body && !el.matches(':disabled');
+      const sources = dialog !== 'sources' && get().integrations.dialog !== null ? document.getElementById(SOURCES_DIALOG) : null;
+      (usable ? el : (sources ?? document.getElementById('main')))?.focus();
     },
 
     openSources: (dialog, open = {}) => {
