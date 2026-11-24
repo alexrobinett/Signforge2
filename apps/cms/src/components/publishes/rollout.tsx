@@ -26,10 +26,10 @@ export function RolloutLegend({ publish, screens, now, reasons }: { publish: Pub
   const segs = segments(publish, screens, now);
   if (!reasons) {
     return (
-      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-foreground/80">
+      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-meta text-foreground/80">
         {segs.map((s) => (
           <li key={s.outcome} className="flex items-center gap-2">
-            <span aria-hidden className="size-2.5 shrink-0 rounded-[2px]" style={{ background: OUTCOME_COLOR[s.outcome] }} />
+            <span aria-hidden className="size-2.5 shrink-0 rounded-xs" style={{ background: OUTCOME_COLOR[s.outcome] }} />
             {s.count} {s.label}
           </li>
         ))}
@@ -40,7 +40,7 @@ export function RolloutLegend({ publish, screens, now, reasons }: { publish: Pub
     <ul className="flex flex-col divide-y">
       {segs.map((s) => (
         <li key={s.outcome} className="flex gap-3 py-3 first:pt-0 last:pb-0">
-          <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-[2px]" style={{ background: OUTCOME_COLOR[s.outcome] }} />
+          <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-xs" style={{ background: OUTCOME_COLOR[s.outcome] }} />
           <span className="flex min-w-0 flex-col gap-0.5">
             <strong className="font-semibold">
               {s.count} {s.label}

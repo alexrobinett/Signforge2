@@ -7,6 +7,7 @@
  * written; each answer is a card, its tool calls a one-line trace that expands. The turn's progress
  * and its answer reach a live region.
  */
+import { Badge } from '~/components/ui/badge';
 import type { AnswerCard as Card, ToolCard } from '@signforge/api/agent-chat';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
@@ -104,7 +105,9 @@ function DraftsCard({ index }: { index: number }) {
                 <p key={l.label} data-check={l.check || undefined} className="break-words">
                   {l.label}: <del className="text-muted-foreground">{l.before}</del> → <ins className="no-underline">{l.after}</ins>
                   {l.check && (
-                    <span className="ml-1.5 rounded-full bg-status-updating-muted px-2 py-0.5 text-xs font-medium text-status-updating-foreground">Check</span>
+                    <Badge variant="updating" className="ml-1.5">
+                      Check
+                    </Badge>
                   )}
                 </p>
               ))}

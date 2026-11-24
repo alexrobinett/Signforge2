@@ -123,7 +123,7 @@ function AuditLogPage() {
 
         {search.targetId && (
           <p className="text-sm">
-            Only {targetLabel(search.target ?? '')} <span className="font-mono text-[13px]">{search.targetId}</span>.{' '}
+            Only {targetLabel(search.target ?? '')} <span className="font-mono text-meta">{search.targetId}</span>.{' '}
             <Link from="/audit" to="/audit" search={({ targetId: _, ...rest }) => rest} className="font-medium text-primary underline-offset-4 hover:underline">
               Show every {targetLabel(search.target ?? '').toLowerCase()}
             </Link>
@@ -132,7 +132,7 @@ function AuditLogPage() {
 
         {entries.length ? (
           <div className="overflow-x-auto rounded-xl border bg-card">
-            <table className="w-full border-collapse text-[15px] sm:min-w-[44rem]">
+            <table className="w-full border-collapse text-md sm:min-w-[44rem]">
               <thead className="bg-muted/60 text-left text-sm text-muted-foreground">
                 <tr>
                   <th scope="col" className="w-24 px-3 py-2 font-semibold">
@@ -175,7 +175,7 @@ function AuditLogPage() {
             </Button>
           </div>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-[15px]">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-md">
           <span id={countId} tabIndex={-1} role="status" className="text-muted-foreground outline-none">
             Showing {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
             {entries.length > 0 && !hasNextPage ? ', all there are' : ''}
@@ -204,7 +204,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
   const detail = detailText(e);
   return (
     <tr className={cn('border-t align-top', e.detail.refused !== undefined && 'bg-accent/50')}>
-      <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
+      <td className="px-3 py-2 font-mono text-meta whitespace-nowrap text-muted-foreground">
         <time dateTime={new Date(e.at).toISOString()}>{time}</time>
       </td>
       <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>
@@ -212,7 +212,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
         {whatText(e)}
         {/* In <bdi>: what a tool was given (an agent's reason for its publish request) cannot reorder the row around it. */}
         {detail && (
-          <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">
+          <span className="mt-0.5 block font-mono text-meta break-all text-muted-foreground">
             <bdi>{detail}</bdi>
           </span>
         )}
@@ -247,7 +247,7 @@ function TargetLink({ target, className }: { target: { kind: string; id: string 
       from="/audit"
       to="/audit"
       search={(s) => ({ ...s, target: target.kind, targetId: target.id })}
-      className={cn('font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline', className)}
+      className={cn('font-mono text-meta break-all text-primary underline-offset-4 hover:underline', className)}
       aria-label={`Only ${targetLabel(target.kind).toLowerCase()} ${target.id}`}
     >
       {target.id}

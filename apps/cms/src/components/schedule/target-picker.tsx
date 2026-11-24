@@ -128,7 +128,7 @@ export function TargetPicker({
                   <CommandGroup heading="Every screen">
                     <CommandItem value="org" onSelect={() => pick({ target: 'org', groupId: '', screenId: '' })}>
                       <span className="min-w-0 flex-1 truncate">Every screen</span>
-                      <span className="text-[13px] text-muted-foreground">{count(screens.length)}</span>
+                      <span className="text-meta text-muted-foreground">{count(screens.length)}</span>
                       {tick('org')}
                     </CommandItem>
                   </CommandGroup>
@@ -138,7 +138,7 @@ export function TargetPicker({
                     {shownGroups.map((g) => (
                       <CommandItem key={g.id} value={`group:${g.id}`} onSelect={() => pick({ target: 'group', groupId: g.id, screenId: '' })}>
                         <span className="min-w-0 flex-1 truncate">{g.name}</span>
-                        <span className="text-[13px] text-muted-foreground">{count(g.screenIds.length)}</span>
+                        <span className="text-meta text-muted-foreground">{count(g.screenIds.length)}</span>
                         {tick(`group:${g.id}`)}
                       </CommandItem>
                     ))}
@@ -153,9 +153,9 @@ export function TargetPicker({
                           <StatusGlyph tone={toneOf(s.state.kind)} />
                           <span className="flex min-w-0 flex-1 flex-col">
                             <span className="truncate">{s.name}</span>
-                            {inGroups.length > 0 && <span className="truncate text-[13px] text-muted-foreground">{inGroups.join(', ')}</span>}
+                            {inGroups.length > 0 && <span className="truncate text-meta text-muted-foreground">{inGroups.join(', ')}</span>}
                           </span>
-                          <span className="text-[13px] text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
+                          <span className="text-meta text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
                           {tick(`screen:${s.id}`)}
                         </CommandItem>
                       );

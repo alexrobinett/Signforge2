@@ -254,7 +254,7 @@ function TableValues({
           </div>
         );
       })}
-      <p className="text-[13px] leading-snug text-foreground">
+      <p className="text-meta leading-snug text-foreground">
         {firstRead && !dataSource.lastError
           ? 'Read just now. Screens get it after the first check, within a minute.'
           : freshness(dataSource, snapshot, now).replaceAll('fallback values', 'typed items')}
@@ -285,7 +285,7 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
     <div className="flex flex-col gap-3">
       {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}.table`} label="Table" word="table" />}
       {st.adding ? (
-        <fieldset className="rounded-[10px] border p-3">
+        <fieldset className="rounded-lg border p-3">
           {/* Floated, so it sits inside the frame instead of cutting its border. */}
           <legend className="float-left mb-3 font-medium">From a CSV or JSON link</legend>
           <div className="clear-left flex flex-col gap-3">

@@ -134,7 +134,7 @@ function Scopes({ grant, mine, grantedBy }: { grant: AgentGrant; mine: ConnectSc
           {CONNECT_SCOPES.map((s) => {
             const why = lockedOn(s);
             return (
-              <label key={s} className={`flex items-start gap-3 rounded-[10px] p-3 ${shown.includes(s) ? 'bg-accent' : ''}`}>
+              <label key={s} className={`flex items-start gap-3 rounded-lg p-3 ${shown.includes(s) ? 'bg-accent' : ''}`}>
                 <input
                   type="checkbox"
                   className="mt-px size-5 flex-none accent-primary"
@@ -149,7 +149,7 @@ function Scopes({ grant, mine, grantedBy }: { grant: AgentGrant; mine: ConnectSc
                   <span className="font-semibold">
                     {SCOPE_WORDS[s].title} <span className="font-mono text-xs font-normal text-muted-foreground">{s}</span>
                   </span>
-                  <span id={`${id}-${s}`} className="text-[13px] leading-snug text-muted-foreground">
+                  <span id={`${id}-${s}`} className="text-meta leading-snug text-muted-foreground">
                     {why ?? SCOPE_WORDS[s].desc}
                   </span>
                 </span>

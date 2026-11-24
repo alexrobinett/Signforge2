@@ -38,7 +38,7 @@ function SignInPage() {
         <div className="w-full max-w-[25rem]">
           <SignInForm options={options} next={next} />
         </div>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">New here? Signing in creates your account, and then your organization.</p>
+        <p className="text-meta leading-relaxed text-muted-foreground">New here? Signing in creates your account, and then your organization.</p>
       </main>
     </div>
   );
@@ -83,7 +83,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
       <div className="space-y-7">
         <div className="space-y-2">
           {/* Focused on arrival, so a screen reader announces the new step. */}
-          <h1 ref={focusOnMount} tabIndex={-1} className="text-[34px] leading-[1.15] font-semibold tracking-tight outline-none">
+          <h1 ref={focusOnMount} tabIndex={-1} className="text-4xl leading-tight font-semibold tracking-tight outline-none">
             Check your email
           </h1>
           <p className="text-base leading-normal text-muted-foreground">
@@ -106,7 +106,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
               required
               aria-invalid={error ? true : undefined}
               aria-describedby={describedBy}
-              className="h-16 px-4 font-mono text-[32px] tracking-[0.5em] md:text-[32px]"
+              className="h-16 px-4 font-mono text-3xl tracking-[0.5em] md:text-3xl"
             />
           </div>
           <FormMessages error={error} errorId={errorId} notice={notice} />
@@ -130,7 +130,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
   return (
     <div className="space-y-7">
       <div className="space-y-2">
-        <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight">Sign in to SignForge</h1>
+        <h1 className="text-4xl leading-tight font-semibold tracking-tight">Sign in to SignForge</h1>
         <p className="text-base leading-normal text-muted-foreground">We will email you a 6-digit code. No password to remember.</p>
       </div>
       <form method="post" onSubmit={onEmailSubmit} className="space-y-7" noValidate>
@@ -159,7 +159,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
           </Button>
           {options.github && (
             <>
-              <div className="flex items-center gap-3 text-[13px] text-muted-foreground" aria-hidden>
+              <div className="flex items-center gap-3 text-meta text-muted-foreground" aria-hidden>
                 <span className="h-px flex-1 bg-border" />
                 or
                 <span className="h-px flex-1 bg-border" />
@@ -236,7 +236,7 @@ function RenderWall() {
   return (
     <section
       aria-label="Spots rendered by the SignForge player"
-      className="relative flex h-64 flex-col overflow-hidden bg-[#0e0f12] md:h-auto md:min-h-dvh md:flex-[1_1_35rem]"
+      className="relative flex h-64 flex-col overflow-hidden bg-stage md:h-auto md:min-h-dvh md:flex-[1_1_35rem]"
     >
       <div className="-mt-10 grid flex-1 origin-[40%_30%] -rotate-[4deg] scale-[1.12] grid-cols-3 gap-3.5 px-3.5">
         {WALL.map((column, i) => (
@@ -245,14 +245,14 @@ function RenderWall() {
             className={i === 0 ? 'flex flex-col gap-3.5 pt-[60px]' : i === 2 ? 'flex flex-col gap-3.5 pt-[120px]' : 'flex flex-col gap-3.5'}
           >
             {column.map((spot) => (
-              <img key={spot.src} src={`/sign-in/${spot.src}.webp`} alt={spot.alt} className="block w-full rounded-[10px]" loading="eager" decoding="async" />
+              <img key={spot.src} src={`/sign-in/${spot.src}.webp`} alt={spot.alt} className="block w-full rounded-lg" loading="eager" decoding="async" />
             ))}
           </div>
         ))}
       </div>
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0e0f12f5] from-30% to-transparent px-6 pt-28 pb-6 text-[#ededef] sm:px-10 sm:pb-9">
-        <p className="text-[13px] tracking-[0.08em] text-[#b4b6be] uppercase">Rendered by the SignForge player</p>
-        <p className="mt-2 max-w-[30ch] text-lg leading-snug font-medium sm:text-[22px]">Every spot here is a template filled in by someone in the CMS.</p>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-stage/95 from-30% to-transparent px-6 pt-28 pb-6 text-stage-foreground sm:px-10 sm:pb-9">
+        <p className="text-meta tracking-[0.08em] text-stage-muted-foreground uppercase">Rendered by the SignForge player</p>
+        <p className="mt-2 max-w-[30ch] text-lg leading-snug font-medium sm:text-2xl">Every spot here is a template filled in by someone in the CMS.</p>
       </div>
     </section>
   );

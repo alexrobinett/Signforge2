@@ -246,7 +246,7 @@ function SpotEditor() {
             {(spot.kind === 'image' || spot.kind === 'video') && (
               <EditorSection title={spot.kind === 'image' ? 'Image' : 'Video'}>
                 <div className="flex items-center gap-3">
-                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
+                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-stage">
                     {image && <img src={sessionBlobPath(image.sha256)} alt="" className="size-full object-cover" />}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm">{image?.name ?? 'Not in the library'}</span>
