@@ -11,6 +11,8 @@ interface UiState {
   sidebarFolded: boolean;
   /** A panel on the right (the agent's drawer) folded the sidebar to make room, until it closes or the person unfolds it. */
   panelFolded: boolean;
+  /** The editor the person unfolded the sidebar in: an editor folds it by default (#363), until then, for that visit. */
+  unfoldedIn: string | null;
   /**
    * The folded rail's tooltip that is open, by its text, or null. Held here so every tooltip stays
    * controlled: one that was open when the sidebar unfolded would otherwise show again on the next fold.
@@ -35,20 +37,30 @@ export interface UiSlice {
 
 const FOLD_KEY = 'sf-sidebar-folded';
 
-/** Whether the sidebar shows only icons: the person folded it, or a panel on the right did. */
-export const isFolded = (ui: Pick<UiState, 'sidebarFolded' | 'panelFolded'>) => ui.sidebarFolded || ui.panelFolded;
+/** A spot's or a playlist's editor: its stage needs the room, so the sidebar starts folded there (#363). */
+const EDITOR = /^\/(?:spots|playlists)\/[^/]+$/;
 
-export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
-  ui: { drawerOpen: false, sidebarFolded: false, panelFolded: false, tip: null, theme: 'system' },
+/**
+ * Whether the sidebar shows only icons at `path`: the person folded it, a panel on the right did, or
+ * it is an editor the person has not unfolded it in. From the path, so the server draws it as the browser does.
+ */
+export const isFolded = (ui: Pick<UiState, 'sidebarFolded' | 'panelFolded' | 'unfoldedIn'>, path: string) =>
+  ui.panelFolded || (EDITOR.test(path) ? ui.unfoldedIn !== path : ui.sidebarFolded);
+
+export const createUiSlice: SliceCreator<UiSlice> = (set, _get, { router }) => ({
+  ui: { drawerOpen: false, sidebarFolded: false, panelFolded: false, unfoldedIn: null, tip: null, theme: 'system' },
   openDrawer: () => set((s) => ({ ui: { ...s.ui, drawerOpen: true } })),
   closeDrawer: () => set((s) => ({ ui: { ...s.ui, drawerOpen: false } })),
   toggleSidebar: () =>
     set((s) => {
-      const sidebarFolded = !isFolded(s.ui);
+      const path = router.state.location.pathname;
+      const folding = !isFolded(s.ui, path);
+      // In an editor the fold is its own, for this visit: the person's saved choice, for every other page, is never written from one.
+      if (EDITOR.test(path)) return { ui: { ...s.ui, panelFolded: false, unfoldedIn: folding ? null : path, tip: null } };
       try {
-        localStorage.setItem(FOLD_KEY, String(sidebarFolded));
+        localStorage.setItem(FOLD_KEY, String(folding));
       } catch {}
-      return { ui: { ...s.ui, sidebarFolded, panelFolded: false, tip: null } };
+      return { ui: { ...s.ui, sidebarFolded: folding, panelFolded: false, tip: null } };
     }),
   setRightPanel: (open) => set((s) => ({ ui: { ...s.ui, panelFolded: open, tip: null } })),
   showTip: (tip) => set((s) => (s.ui.tip === tip ? s : { ui: { ...s.ui, tip } })),
@@ -76,6 +88,9 @@ export function connectUi(store: AppStore, { router }: StoreDeps) {
     if (store.getState().ui.theme === 'system') applyTheme('system');
   });
   router.subscribe('onBeforeNavigate', ({ pathChanged }) => {
-    if (pathChanged) store.getState().closeDrawer();
+    if (!pathChanged) return;
+    store.getState().closeDrawer();
+    // An editor unfolded on this visit starts folded on the next.
+    store.setState((s) => ({ ui: { ...s.ui, unfoldedIn: null } }));
   });
 }

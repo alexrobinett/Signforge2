@@ -31,7 +31,7 @@ Tenant branding does not re-theme the CMS in v1 (decided in `brand-and-editor.md
 | `button` | keep the six variants; add `size: "xs"` for table row actions |
 | `table` | `density: compact | comfortable`; sticky header; numeric columns right-aligned with tabular figures |
 | `input`, `select`, `textarea` | an `invalid` state wired to the contract's problem messages |
-| `sidebar` | the app nav (Screens, Spots, Playlists, Schedules, Brand kits, Audit log) and the settings nav, collapsible to icons |
+| `sidebar` | the app nav (Screens, Spots, Playlists, Schedules, Brand kits, Audit log) and the settings nav, collapsible to icons; folded to icons by default in a spot's or a playlist's editor, for the stage's room, until the person unfolds it on that visit (#363) |
 | `tabs` | an underline variant for the editor (Content, Style, Timing) |
 
 ## 3. Our own components (built on shadcn primitives)
@@ -40,7 +40,7 @@ These are SignForge's, so no registry has them:
 
 - **`ScreenTile` / `ScreenRow`**: thumbnail, name, location, status badge, version, last heartbeat. Used by Screens A/B/C and the screen detail page.
 - **`RolloutBar`**: one publish's screens by state (applied, downloading, asleep, offline), with a legend that names counts.
-- **`PlayerStage`**: the real player in an iframe (M3-36 preview channel), scaled to fit at true resolution, with landscape/portrait and fit/100% toggles. The heart of the editor.
+- **`PlayerStage`**: the real player in an iframe (M3-36 preview channel), scaled to fit at true resolution, with landscape/portrait and fit/100% toggles. The heart of the editor. Beside the form it fills its column and stays in view as the form scrolls (`STAGE_COLUMN`, the editor's height `--editor-height`); until the player draws it shows the spot's template thumbnail dimmed, with "Drawing…" (#363). It draws only in view (#342). Its colours are the `stage` tokens, a screen's dark surround in light and dark alike.
 - **`FieldForm`**: a form generated from a template's `fields` (text, number, boolean, color, select, url, date, datetime, image, list), with the contract's validators giving each field's errors (`validateSpotField`, the per-field part of the publish's `validateSpotData`), said in words by the field's label, as the publish toast says them (`problemWords`, `apps/cms/src/lib/field-words.ts`, #359): "No image for Photo: choose one, or untick Show the photo", never `image field "photo" has no asset`. An empty field's problem shows only once the field is touched (changed, left, or its picker opened) or Publish is pressed, so a spot just made is not a page of errors; a wrong value shows at once. A choice shows its options by a label (Pop, not `pop`; a unit as written). The stage and a playlist's rows give the same words for what they leave out. It draws only the fields a person types, but checks each against all of the template's fields, as a publish does, so an image whose toggle is a live field is checked with it. Built on shadcn `form` patterns.
 - **`BrandColorField`**: "Brand accent" or a custom colour, with the contrast check beside it.
 - **`AssetPicker`**: the media library in a `dialog` (built with the library page in M3-14). The focal point for portrait crops comes with the spot editor (M3-16).
