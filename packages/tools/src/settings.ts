@@ -113,8 +113,7 @@ const updateOrgSettings = defineTool({
       ...(['editorsPublish', 'auditRetentionDays'] as const).filter((k) => input[k] !== undefined),
       ...(input.alerts?.agent_refused ? ['alerts.agent_refused'] : []),
     ];
-    if (isAgent(actor) && kept.length)
-      throw new ToolError('forbidden', `an agent cannot change ${kept.join(' or ')}: ask an owner to change it in the CMS`);
+    if (isAgent(actor) && kept.length) throw new ToolError('forbidden', `an agent cannot change ${kept.join(' or ')}: ask an owner to change it in the CMS`);
     const current = await org.settings.get();
     const row = write(
       await org.settings.stage.set(

@@ -34,7 +34,10 @@ export const SCOPE_WORDS: Record<ConnectScope, { title: string; desc: string }> 
   'content:draft': { title: 'Make and edit drafts', desc: 'Drafts never reach a screen on their own.' },
   'content:publish': { title: 'Publish to live screens', desc: 'Off unless you turn it on.' },
   'screens:manage': { title: 'Manage screens', desc: 'Rename screens, change display hours and groups.' },
-  'org:manage': { title: 'Manage the organisation', desc: 'Cancel invitations and change most organisation settings; never invite, remove people or change where alerts go. Off unless you turn it on.' },
+  'org:manage': {
+    title: 'Manage the organisation',
+    desc: 'Cancel invitations and change most organisation settings; never invite, remove people or change where alerts go. Off unless you turn it on.',
+  },
 };
 
 /** Whether a scope starts on: reading is always on, drafting on, the rest off. */

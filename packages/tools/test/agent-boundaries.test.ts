@@ -117,7 +117,7 @@ describe("an agent, even an owner's with every scope", () => {
         });
   });
 
-  it("is refused in a handler only where the rule is partial: a tool that refuses an agent outright is `people` (review of #419)", () => {
+  it('is refused in a handler only where the rule is partial: a tool that refuses an agent outright is `people` (review of #419)', () => {
     /** Tools whose handler treats an agent apart, and why that is not a refusal of the whole tool. */
     const PARTIAL: Record<string, string> = {
       update_org_settings: 'refuses three fields; the rest are an agent’s to change',

@@ -487,7 +487,9 @@ describe('the second re-check of #386', () => {
       }),
     };
     await editSpot(agent(), o.templateSpot, 14_000);
-    expect(await dispatch(registry, 'publish', { drafts: [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }] }, flickering)).toMatchObject({
+    expect(
+      await dispatch(registry, 'publish', { drafts: [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }] }, flickering),
+    ).toMatchObject({
       ok: false,
       error: 'forbidden',
     });

@@ -241,7 +241,10 @@ async function dispatchCall<D extends DataScope>(
     const refusal = refusedBy(now);
     if (refusal) return refusal;
     if (holdsPublish && !effectiveScopes(now).includes('content:publish'))
-      return fail('forbidden', now.role === 'editor' && !now.editorsPublish ? 'Only owners publish in this organization' : `${tool.name} needs the right to publish here`);
+      return fail(
+        'forbidden',
+        now.role === 'editor' && !now.editorsPublish ? 'Only owners publish in this organization' : `${tool.name} needs the right to publish here`,
+      );
     // Back by the time it is read: it changed and changed back meanwhile.
     return fail('forbidden', `your right to ${tool.name} changed while it ran: read again and retry`);
   };

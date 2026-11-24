@@ -96,7 +96,12 @@ describe('an expired token or grant', () => {
     let tokens = { access_token, refresh_token };
     for (const day of [29, 58, 87, 90 - 1 / 48]) {
       vi.setSystemTime(start + day * DAY);
-      const res = await form(t, '/api/auth/oauth2/token', { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId, resource: RESOURCE });
+      const res = await form(t, '/api/auth/oauth2/token', {
+        grant_type: 'refresh_token',
+        refresh_token: tokens.refresh_token,
+        client_id: clientId,
+        resource: RESOURCE,
+      });
       expect(res.status, await res.clone().text()).toBe(200);
       tokens = await res.json();
     }
@@ -207,7 +212,9 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
 
   it("refuses a draft-only agent a feed's address, which screens follow with no publish, and keeps the sealed one", async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
+    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
     const before = (await scoped(env.DB, org.id).dataSources.get('menu'))?.urlEncrypted;
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
     expect(await mcpTool(access_token, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://evil.example.com/menu.json' })).toMatchObject({
@@ -222,9 +229,11 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
     });
   });
 
-  it("changes a feed within the budget (the Free plan: 50 D1 queries an invocation)", async () => {
+  it('changes a feed within the budget (the Free plan: 50 D1 queries an invocation)', async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
+    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
     const publisher = (await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish'])).access_token;
     const drafter = (await agentToken(t, owner, org.id, ['content:read', 'content:draft'])).access_token;
     const address = await measure(async (b) => {
@@ -233,7 +242,9 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
       });
     });
     const refresh = await measure(async (b) => {
-      expect(await mcpTool(drafter, 'update_data_source', { dataSourceId: 'menu', refreshS: 600 }, b)).toMatchObject({ structuredContent: { dataSource: { id: 'menu' } } });
+      expect(await mcpTool(drafter, 'update_data_source', { dataSourceId: 'menu', refreshS: 600 }, b)).toMatchObject({
+        structuredContent: { dataSource: { id: 'menu' } },
+      });
     });
     // Measured, as the most each may take, the grant's write limit the one RPC of each. A new address holds the right to
     // publish to its batch (one statement more there); any other change reads the spots that might show the source (a

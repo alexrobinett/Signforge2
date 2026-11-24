@@ -316,8 +316,20 @@ describe("an agent's change that reaches screens with no publish (#122, review o
     const now = new Date(0).toISOString();
     for (const role of ['owner', 'editor'])
       await env.DB.batch([
-        env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(userOf(role), role, `${userOf(role)}@signforge.test`, now, now),
-        env.DB.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, ?)').bind(`mem-${userOf(role)}`, a.orgId, userOf(role), role, now),
+        env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+          userOf(role),
+          role,
+          `${userOf(role)}@signforge.test`,
+          now,
+          now,
+        ),
+        env.DB.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, ?)').bind(
+          `mem-${userOf(role)}`,
+          a.orgId,
+          userOf(role),
+          role,
+          now,
+        ),
       ]);
     for (const id of ['quiet', 'live'])
       expect(await change('create_data_source', { id, name: id, format: 'json', feedUrl: `https://${id}.example.com/feed.json` })).toMatchObject({ ok: true });
@@ -339,8 +351,11 @@ describe("an agent's change that reaches screens with no publish (#122, review o
     }
   });
 
-  it("refuses a draft-only agent any change but the name to a source published spots show, and allows one no published spot shows", async () => {
-    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 600 }, agent('owner', drafts))).toMatchObject({ ok: false, error: 'forbidden' });
+  it('refuses a draft-only agent any change but the name to a source published spots show, and allows one no published spot shows', async () => {
+    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 600 }, agent('owner', drafts))).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
     expect(await change('update_data_source', { dataSourceId: 'live', name: 'Live feed' }, agent('owner', drafts))).toMatchObject({ ok: true });
     expect(await change('update_data_source', { dataSourceId: 'quiet', refreshS: 600 }, agent('owner', drafts))).toMatchObject({ ok: true });
   });

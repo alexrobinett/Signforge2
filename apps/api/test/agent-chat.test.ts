@@ -1109,7 +1109,9 @@ describe('confirmation cards (#269)', () => {
       role: 'editor',
       steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'update_data_source', input: ask.called }] } : ANSWER),
     });
-    expect((await s.owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
+    expect(
+      (await s.owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status,
+    ).toBe(200);
     const before = (await s.scope.dataSources.get('menu'))?.urlEncrypted;
     expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
     ask.called = { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' };
@@ -1522,7 +1524,9 @@ describe('prompt injection through content, in the drawer (#122)', () => {
     });
     const spot = await s.scope.spots.insert({ name: SAYS, kind: 'url', durationMs: 10_000, url: 'https://example.com/pier' });
     const sample = (texts: string[]) =>
-      env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?').bind(JSON.stringify({ texts, lists: {} }), spot.id).run();
+      env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+        .bind(JSON.stringify({ texts, lists: {} }), spot.id)
+        .run();
     await sample(['headline']);
     ask.called = { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }] };
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
