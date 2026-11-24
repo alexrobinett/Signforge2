@@ -440,7 +440,13 @@ describe('a membership ending while one of its grants changes (#328, review of #
     const scope = scoped(env.DB, org.id);
     for (let i = 0; i < 40; i++)
       await scope.commit(
-        scope.agentGrants.stage.insert({ userId: editorId, clientId: `many-${i}`, clientName: null, scopesJson: '["content:read"]', expiresAt: Date.now() + 60_000 }).writes,
+        scope.agentGrants.stage.insert({
+          userId: editorId,
+          clientId: `many-${i}`,
+          clientName: null,
+          scopesJson: '["content:read"]',
+          expiresAt: Date.now() + 60_000,
+        }).writes,
       );
     const many = counted();
     await grantStore(many.bindings.DB).revokeMember(org.id, editorId, ownerId);

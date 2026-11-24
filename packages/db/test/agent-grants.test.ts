@@ -213,7 +213,8 @@ describe("revoking all of a member's grants as their membership ends (#328, revi
     expect(await count('oauthAccessToken', someoneElse.id)).toBe(1);
     expect(await scoped(env.DB, 'grants-b').agentGrants.get(elsewhere.id)).toMatchObject({ revokedAt: null });
     expect(await count('oauthAccessToken', elsewhere.id)).toBe(1);
-    const rows = async () => (await org.auditLog.list({ limit: 100 })).filter((e) => e.action === 'revoke_agent_grant' && theirs.some((g) => g.id === e.targetId));
+    const rows = async () =>
+      (await org.auditLog.list({ limit: 100 })).filter((e) => e.action === 'revoke_agent_grant' && theirs.some((g) => g.id === e.targetId));
     expect(await rows()).toHaveLength(2);
     expect(await rows()).toEqual(
       expect.arrayContaining(

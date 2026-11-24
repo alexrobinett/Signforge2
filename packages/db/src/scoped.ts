@@ -488,7 +488,9 @@ export function scoped(d1: D1Database, orgId: string) {
       db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
       db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
       db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
-      db.delete(s.verification).where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+      db
+        .delete(s.verification)
+        .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
     );
 
   const screens = entity(db, orgId, s.screens, 'scr');
@@ -2217,7 +2219,11 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(live);
           return {
             row: undefined,
-            writes: [...staged(undefined, audit).writes, ...grantTokenDeletes(db.select({ id: ag.id }).from(ag).where(theirs)).writes, ...staged(undefined, mark).writes],
+            writes: [
+              ...staged(undefined, audit).writes,
+              ...grantTokenDeletes(db.select({ id: ag.id }).from(ag).where(theirs)).writes,
+              ...staged(undefined, mark).writes,
+            ],
           };
         },
       },
