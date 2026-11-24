@@ -151,6 +151,26 @@ describe('list_audit_log', () => {
     }
   });
 
+  it("hides the invitee of a cancel the tool recorded, under its detail, as it does Better Auth's (#321)", async () => {
+    const log = scoped(env.DB, o.orgId).auditLog;
+    await log.append({
+      at: T + 4000,
+      actorKind: 'agent',
+      actorId: 'agt_1',
+      clientId: 'agent-app',
+      action: 'cancel_invitation',
+      targetKind: 'invitation',
+      targetId: 'inv_2',
+      detailJson: JSON.stringify({ input: { invitationId: 'inv_2' }, detail: { email: 'kim.invitee@example.com' } }),
+    });
+    const mine = { target: { kind: 'invitation', id: 'inv_2' } };
+    expect((await all(mine, 'owner')).map((e) => e.detail)).toEqual([{ input: { invitationId: 'inv_2' }, detail: { email: 'kim.invitee@example.com' } }]);
+    for (const role of ['editor', 'viewer'] as const) {
+      expect((await all(mine, role)).map((e) => e.detail)).toEqual([{ input: { invitationId: 'inv_2' }, detail: {} }]);
+      expect(await all({ query: 'kim.invitee' }, role)).toEqual([]);
+    }
+  });
+
   it("refuses a cursor made in another org, so a member who switched org cannot page one org's log into another's", async () => {
     const other = await seedOrg(env.DB, 'audit-other-org');
     const first = await list({ limit: 1 });

@@ -26,6 +26,7 @@ import {
   STUB_DRAFT,
   STUB_DRAFTED,
   STUB_TAKEN,
+  STUB_CANCELLED,
   STUB_FILL,
   STUB_MENU,
 } from './servers';
@@ -68,7 +69,8 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
  * structured output asked with the tools). On a spot's page (#268): read the spot, draft a punchier
  * headline and a QR link from its data as read, then `STUB_DRAFTED`. Asked about the storm (#269): read
  * the playlists, take every screen over with the first for an hour (the run pauses there for the
- * person's press), then `STUB_TAKEN`. Anywhere else (#267): read the screens' status, then `STUB_CARD`.
+ * person's press), then `STUB_TAKEN`. Asked to cancel an invitation by its id (#321): cancel it (a card the
+ * person presses), then `STUB_CANCELLED`. Anywhere else (#267): read the screens' status, then `STUB_CARD`.
  */
 function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } | { card: object } {
   // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
@@ -88,6 +90,9 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
     }
     return { card: { groups: [], steps: [], ...STUB_TAKEN } };
   }
+  // The drawer offers no org:manage read, so the question names the invitation.
+  const invitation = /cancel the invitation (inv_[\w-]+)/i.exec(first)?.[1];
+  if (invitation) return result ? { card: { groups: [], steps: [], ...STUB_CANCELLED } } : { name: 'cancel_invitation', input: { invitationId: invitation } };
   if (!spotId) return result ? { card: STUB_CARD } : { name: 'list_screen_status', input: {} };
   if (!result) return { name: 'get_spot', input: { spotId } };
   if (lastCall === 'get_spot') {

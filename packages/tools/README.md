@@ -42,7 +42,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `<CMS host>/mcp`, with an OAuth access token from the agent grant a person consented to (`apps/api/src/mcp`, the backend plan's Agents section). The adapter:
 
-- builds the `Caller` from the grant alone: `org: scoped(db, grant.orgId)`, the member's role now, the grant's scopes, `actor: { kind: 'agent', id: <grant id>, clientId: <its OAuth client> }`, `agentLimiter`, and the API's `toolServices` without `members` (an agent has no Better Auth session, so `invite_member` and `cancel_invitation` are not offered);
+- builds the `Caller` from the grant alone: `org: scoped(db, grant.orgId)`, the member's role now, the grant's scopes, `actor: { kind: 'agent', id: <grant id>, clientId: <its OAuth client> }`, `agentLimiter`, and the API's `toolServices` without `members` (an agent has no Better Auth session, so the member tools that need it are not offered; `cancel_invitation` needs none, #321);
 - answers `tools/list` with `describeTools` for the grant, less any tool needing a service it lacks, each tool's input schema and hints (`readOnlyHint` from `mutates`, `destructiveHint` for `delete_*` and `revoke_*`, `idempotentHint` for keyed creations). A `tools/list` counts as one call against the grant's limit (`overLimit`), and over it is a JSON-RPC error `-32000` with `rate_limited`, the limit and `retryAfterSeconds` in its data;
 - answers `tools/call` with `dispatch`: the output as `structuredContent` and as JSON text, or a refusal as a result with `isError` and `{ error, message, details }`. JSON-RPC errors are only for faults in the protocol, and an unexpected failure is a bare `-32603 Internal error`, its details only in the log.
 
@@ -134,8 +134,8 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `list_audit_log` | content:read | viewer | `{ actor?: { kind?, id? }, action?, target?: { kind, id? }, from?, to?, query?, limit?, cursor? }` | `{ entries: { at, actor: { kind, id, clientId }, action, target, detail }[], next }`, newest first |
 | `list_members` | content:read | viewer | `{ limit?, cursor? }` | `{ members: { id, userId, name, email, role, createdAt }[], next }`, oldest first |
 | `list_invitations` | org:manage | owner | `{ limit?, cursor? }` | `{ invitations: { id, email, role, status, expiresAt, inviterId, createdAt }[], next }`, pending ones, oldest first |
-| `invite_member` | org:manage | owner | `{ email, role }` | `{ invitation }`; an agent only as viewer or editor |
-| `cancel_invitation` | org:manage | owner | `{ invitationId }` | `{ canceled }` |
+| `invite_member` | org:manage | owner, people | `{ email, role }` | `{ invitation }`; never an agent (#321) |
+| `cancel_invitation` | org:manage | owner | `{ invitationId }` | `{ canceled, email }`; an agent too, as its member, through the org's scope with no session (#321) |
 | `update_member_role` | org:manage | owner | `{ memberId, role }` | `{ member }`; people only |
 | `remove_member` | org:manage | owner | `{ memberId }` | `{ removed }`; people only |
 | `list_agent_grants` | content:read | viewer | `{ limit?, cursor? }` | `{ grants: AgentGrant[], next }`, newest first; an owner's every grant, anyone else's own; people only |

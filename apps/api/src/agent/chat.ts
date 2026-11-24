@@ -144,6 +144,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   start_takeover: { title: 'Takeover', did: 'Took over the screens' },
   end_takeover: { title: 'End takeover', did: 'Ended the takeover' },
   delete_playlist: { title: 'Delete playlist', did: 'Deleted a playlist' },
+  cancel_invitation: { title: 'Cancel an invitation', did: 'Cancelled an invitation' },
   delete_schedule_entry: { title: 'Remove schedule entry', did: 'Removed a schedule entry' },
   revoke_screen_credential: { title: 'Revoke credential', did: "Revoked a screen's credential" },
   set_display_override: { title: 'Display on or off', did: "Set a screen's display" },

@@ -215,10 +215,13 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   }
 }
 
-/** The input a tool was given, or a membership change's own fields. */
+/** The input a tool was given, or a membership change's own fields; a cancel's invitee too, which the tool records apart (#321). */
 const inputOf = (e: AuditEntry): Record<string, unknown> => {
   const input = e.detail.input;
-  return typeof input === 'object' && input !== null && !Array.isArray(input) ? { ...input } : e.detail;
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return e.detail;
+  const more = e.detail.detail;
+  const invitee = e.action === 'cancel_invitation' && typeof more === 'object' && more !== null && 'email' in more ? { email: more.email } : {};
+  return { ...input, ...invitee };
 };
 
 /** The playlist a publish made the org's first default (#243), from its row's `detail`. */

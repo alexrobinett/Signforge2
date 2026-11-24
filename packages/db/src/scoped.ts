@@ -2148,6 +2148,24 @@ export function scoped(d1: D1Database, orgId: string) {
           .from(s.invitation)
           .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.id, invitationId)))
           .get(),
+      stage: {
+        /**
+         * Cancel a pending invitation of this org, as Better Auth's cancel does (`canceled`), for a caller with
+         * no session (an agent over /mcp, #321). The batch is refused (`StaleVersionError`, id the invitation's)
+         * unless, as it runs, the invitation is this org's and still pending: one accepted, rejected or
+         * cancelled meanwhile is left as it is. Only this one write to Better Auth's table: inviting stays its.
+         */
+        cancel: (invitationId: string): Staged => {
+          const iv = s.invitation;
+          const mine = and(eq(iv.organizationId, orgId), eq(iv.id, invitationId), eq(iv.status, 'pending'));
+          const holds = sql`EXISTS (SELECT 1 FROM ${iv} WHERE ${mine})`;
+          const stale = async () => ((await db.select({ id: iv.id }).from(iv).where(mine).get()) ? undefined : 0);
+          return {
+            row: undefined,
+            writes: [staleGuard(db, orgId, invitationId, 0, holds, stale), ...staged(undefined, db.update(iv).set({ status: 'canceled' }).where(mine)).writes],
+          };
+        },
+      },
     },
 
     auditLog: {

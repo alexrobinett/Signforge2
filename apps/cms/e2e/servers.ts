@@ -41,6 +41,8 @@ export const STUB_DRAFT = { headline: 'Hot breakfast, fast', qrUrl: 'https://ord
 export const STUB_DRAFTED = { text: 'I drafted a punchier headline and a QR link to the menu. Check the link before you save.' };
 /** The drawer's answer once a takeover it asked for was pressed (#269). */
 export const STUB_TAKEN = { text: 'Every screen plays the storm closure for the next hour. End it from the Schedule when Bayside reopens.' };
+/** What it answers once a cancelled invitation's card is pressed (#321). */
+export const STUB_CANCELLED = { text: 'The invitation is cancelled: its link no longer works. Only an owner can invite them again.' };
 /** The one key the run's OpenAI-compatible stub accepts at any host's /v1/models (the feed server, global-setup.ts), and its models (#262). */
 export const ENDPOINT_STUB_KEY = 'sk-e2e-endpoint-stub-key-000000000000-Cd34';
 export const ENDPOINT_STUB_MODELS = ['gemini-stub-flash', 'gemini-stub-pro'];

@@ -796,6 +796,38 @@ describe('confirmation cards (#269)', () => {
     });
   });
 
+  it('cancels a pending invitation on a press of its card, as the member through the drawer, and never offers inviting (#321)', async () => {
+    const ask: { called?: Record<string, unknown> } = {};
+    const s = await setup({
+      steps: (body) =>
+        body.messages.length === 1
+          ? { calls: [{ name: 'cancel_invitation', input: ask.called }] }
+          : { text: JSON.stringify({ text: 'Cancelled.', groups: [], steps: [] }) },
+    });
+    const invited = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'card-321@signforge.test', role: 'editor' });
+    ask.called = { invitationId: invited.id };
+    const { card, body } = pressOf(await raw(await s.ask('Cancel the invitation for card-321')), 'q');
+    expect(card).toMatchObject({
+      tool: 'cancel_invitation',
+      title: 'Cancel an invitation',
+      lines: ['The invitation for card-321@signforge.test as editor stops working: its link no longer lets them in.'],
+      undo: 'No undo: an owner invites them again.',
+      token: expect.any(String),
+    });
+    // Nothing until the press.
+    expect(await s.scope.invitations.get(invited.id)).toMatchObject({ status: 'pending' });
+    expect(doneOf(await raw(await s.member.post('/api/agent/chat', body)))).toMatchObject({ ok: true, message: 'Cancelled an invitation' });
+    expect(await s.scope.invitations.get(invited.id)).toMatchObject({ status: 'canceled' });
+    const row = (await s.scope.auditLog.list({ limit: 10 })).find((r) => r.action === 'cancel_invitation');
+    expect(row).toMatchObject({ actorKind: 'user', clientId: 'cms-agent', targetId: invited.id });
+    expect(JSON.parse(row?.detailJson ?? '{}').confirmed).toMatchObject({ summary: expect.stringMatching(/^Cancel an invitation/) });
+    // Inviting is a person's: the drawer never offers it, to any role.
+    for (const role of ['viewer', 'editor', 'owner'] as const) {
+      const offered = drawerTools({ role, scopes: undefined, editorsPublish: true }).map((t) => t.name);
+      expect(offered, role).not.toContain('invite_member');
+    }
+  });
+
   it('stops at an address card showing the address in full, audits a confirmed read, and a live screen command at a card naming the screen', async () => {
     const steps: Step[] = [];
     const s = await setup({ steps });

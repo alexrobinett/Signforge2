@@ -3,7 +3,7 @@
 // at a card until the person presses it. No test reaches a real model.
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
-import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, STUB_CARD, STUB_TAKEN } from './servers';
+import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, CMS_URL, STUB_CANCELLED, STUB_CARD, STUB_TAKEN } from './servers';
 
 const ADDRESS = '192.0.2.193';
 
@@ -84,6 +84,54 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await expect(takeovers).toHaveCount(1);
   await takeovers.first().getByRole('button', { name: 'End now' }).click();
   await expect(page.getByRole('region', { name: 'Takeovers' })).toHaveCount(0);
+});
+
+test('an owner asks the agent to cancel an invitation: a card says whose, the press cancels it, and the audit log names the invitee (#321)', async ({
+  page,
+}) => {
+  await signInAs(page, `e2e-confirm-invite-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Bayside Invitations', ADDRESS);
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
+  const invited = await page.request.post('/api/auth/organization/invite-member', {
+    headers: { origin: CMS_URL, 'cf-connecting-ip': ADDRESS },
+    data: { email: 'kim.bayside@example.com', role: 'editor' },
+  });
+  expect(invited.status(), await invited.text()).toBe(200);
+  const { id } = (await invited.json()) as { id: string };
+
+  await page.goto('/settings/members');
+  await hydrated(page);
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Agent' });
+  await drawer.getByLabel('Ask about your screens and content').fill(`Cancel the invitation ${id}`);
+  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  const card = drawer.getByRole('region', { name: 'Cancel an invitation' });
+  await expect(card).toContainText('The invitation for kim.bayside@example.com as editor stops working: its link no longer lets them in.');
+  await expect(card).toContainText('No undo: an owner invites them again.');
+  expect((await tool(page, 'list_invitations', {})).invitations).toHaveLength(1);
+  await axe(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await shots(page, '104-cancel-invitation-card');
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await card.getByRole('button', { name: 'Cancel the invitation' }).click();
+  await expect(card).toContainText('Done.');
+  await expect(drawer.getByRole('article').last()).toContainText(STUB_CANCELLED.text);
+  expect((await tool(page, 'list_invitations', {})).invitations).toEqual([]);
+  await drawer.getByRole('button', { name: 'Close the agent' }).click();
+
+  // The audit log says who it was for, and that the agent did it for the owner.
+  await page.goto('/audit');
+  await hydrated(page);
+  const row = page.getByRole('row', { name: /Invitation cancelled/ });
+  await expect(row).toContainText('via agent');
+  await expect(row).toContainText('email: kim.bayside@example.com');
+  await axe(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await shots(page, '104-cancel-invitation-audit');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await shots(page, '104-cancel-invitation-audit-phone');
 });
 
 test('⌘K asks the agent a sentence typed into it, by keyboard: Enter opens the drawer with it, ⌘Enter keeps the menu (#270)', async ({ page }) => {

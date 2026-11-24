@@ -34,6 +34,13 @@ describe('the audit log in words', () => {
     expect(detailText(publish({ input: {}, detail: { madeDefault: { id: 'pls_1', name: 'Opening week' } } }))).toBe('');
   });
 
+  it("says who a cancelled invitation was for, from Better Auth's row or the tool's, which keeps it apart from its input (#321)", () => {
+    const target = { kind: 'invitation', id: 'inv_1' };
+    const endpoint = entry({ action: 'cancel_invitation', target, detail: { email: 'sam@example.com' } });
+    const tool = entry({ action: 'cancel_invitation', target, detail: { input: { invitationId: 'inv_1' }, detail: { email: 'sam@example.com' } } });
+    for (const e of [endpoint, tool]) expect([whatText(e), detailText(e)]).toEqual(['Invitation cancelled', 'email: sam@example.com']);
+  });
+
   it('words a membership change from the fields it kept, and an agent refused for its limits', () => {
     expect(
       whatText(entry({ action: 'invite_member', target: { kind: 'invitation', id: 'inv_1' }, detail: { email: 'sam@example.com', role: 'editor' } })),

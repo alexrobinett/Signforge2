@@ -27,7 +27,6 @@ export const fakeServices: Pick<Required<ToolServices>, ServiceName> = {
       inviterId: 'user-fake',
       createdAt: '2029-12-25T00:00:00.000Z',
     }),
-    cancelInvitation: async () => {},
     updateRole: async () => {},
     remove: async () => {},
   },
