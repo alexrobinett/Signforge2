@@ -13,8 +13,8 @@
  * publish of anything; End now is the way back.
  */
 import { toast } from 'sonner';
-import { toggleOf } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
+import { problemWords } from '~/lib/field-words';
 import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
 import { type SpotView, versionsById } from '~/lib/spots';
@@ -92,11 +92,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const mentioned = new Set([root.kind, ...[...problem.matchAll(MENTION)].map((m) => m[1])]);
     const once = { staleTime: Number.POSITIVE_INFINITY, retry: false } as const;
     const none = () => undefined;
-    const image = /^image field "(.+)" has no asset$/.exec(problem)?.[1];
+    // A spot's field's problem, said with the field's label, as its editor says it (#359).
+    const field = root.kind === 'spot' && /^(?:image )?field "/.test(problem);
     const [spots, playlists, templates, kits, assets] = await Promise.all([
       mentioned.has('spot') ? queryClient.query({ ...spotsQuery(orgId), ...once }).catch(none) : undefined,
       mentioned.has('playlist') ? queryClient.query({ ...playlistsQuery(orgId), ...once }).catch(none) : undefined,
-      mentioned.has('template version') || image !== undefined ? queryClient.query({ ...templatesQuery(orgId), ...once }).catch(none) : undefined,
+      mentioned.has('template version') || field ? queryClient.query({ ...templatesQuery(orgId), ...once }).catch(none) : undefined,
       mentioned.has('brand kit') ? queryClient.query({ ...brandKitsQuery(orgId), ...once }).catch(none) : undefined,
       mentioned.has('asset') ? queryClient.query({ ...assetsQuery(orgId), ...once }).catch(none) : undefined,
     ]);
@@ -114,11 +115,13 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           ? () => router.navigate({ to: '/playlists/$playlistId', params: { playlistId: root.id } })
           : () => router.navigate({ to: '/schedule' });
     const action = { label: root.kind === 'schedule_entry' ? 'Open the schedule' : `Open ${name}`, onClick: () => void open() };
-    if (image !== undefined && root.kind === 'spot') {
+    if (field) {
       const version = spots?.spots.find((s) => s.id === root.id)?.templateVersionId;
-      const fields = (version && versions.get(version)?.manifest.fields) || {};
-      const toggle = fields[toggleOf(image)]?.label;
-      return { text: `${name} has no image for ${fields[image]?.label ?? image}: choose one${toggle ? `, or untick ${toggle}` : ''}.`, action };
+      const words = problemWords(problem, (version && versions.get(version)?.manifest.fields) || {});
+      return {
+        text: words.startsWith('No image') ? `${name} has ${words.charAt(0).toLowerCase()}${words.slice(1)}.` : `${name} does not pass its checks: ${words}.`,
+        action,
+      };
     }
     return { text: `${name} does not pass its checks: ${named}.`, action };
   }
