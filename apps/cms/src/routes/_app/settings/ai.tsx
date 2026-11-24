@@ -233,7 +233,11 @@ function RemoveKey() {
     );
   return (
     // Escape is Keep it (review of #421): focus goes back to Remove key.
-    <fieldset aria-label="Remove the key" className="m-0 min-w-0 w-full space-y-2 rounded-lg border border-destructive/40 p-3 text-sm" onKeyDown={(e) => e.key === 'Escape' && ask(orgId, false)}>
+    <fieldset
+      aria-label="Remove the key"
+      className="m-0 min-w-0 w-full space-y-2 rounded-lg border border-destructive/40 p-3 text-sm"
+      onKeyDown={(e) => e.key === 'Escape' && ask(orgId, false)}
+    >
       {/* Focus comes here as Remove key gives way to it (#289): the question first, then Tab to its answers. */}
       <p ref={focus('confirm:key')} tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
         Remove the key? It is deleted, and the agent goes back to SignForge’s demo model and its daily limit.
