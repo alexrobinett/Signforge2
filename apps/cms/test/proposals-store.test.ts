@@ -115,4 +115,35 @@ describe("an agent's proposal", () => {
     expect(kept()).toBe(before);
     expect(reloadSpot).not.toHaveBeenCalled();
   });
+
+  it('runs an Undo pressed while the Reject is still read again once it is, and is never left pending by a read that fails', async () => {
+    const { s } = setup();
+    vi.mocked(callTool).mockResolvedValue({ spot: { version: 8 }, rejected: true } as never);
+    let reread = () => {};
+    let started = () => {};
+    const rereading = new Promise<void>((go) => (started = go));
+    reloadSpot.mockImplementation(() => {
+      started();
+      return new Promise<void>((done) => (reread = done));
+    });
+    const first = s.getState().rejectProposal(ORG, 'spot', 'spt_soup', 7);
+    await rereading;
+    // This Reject's toast: sonner keeps the earlier tests' too.
+    const done = toast.getToasts().filter((t) => 'title' in t && t.title === "Rejected the agent's draft").at(-1);
+    const undo = done && 'action' in done ? done.action : undefined;
+    if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
+    // Pressed now, it waits: nothing more is sent until the read again is done.
+    reloadSpot.mockImplementation(async () => {});
+    undo.onClick({} as never);
+    expect(callTool).toHaveBeenCalledTimes(1);
+    reread();
+    await first;
+    // The Undo goes once the Reject's run is over: a few turns of the microtask queue, no clock.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(callTool).toHaveBeenLastCalledWith('revert_spot_draft', { spotId: 'spt_soup', ifVersion: 8 }, ORG);
+    // A read again that fails: the slice is free again for the next press.
+    reloadSpot.mockRejectedValueOnce(new Error('offline'));
+    await s.getState().keepProposal(ORG, 'spot', 'spt_soup', 9).catch(() => {});
+    expect(s.getState().proposals.pending).toBeNull();
+  });
 });

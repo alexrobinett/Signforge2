@@ -593,6 +593,9 @@ export async function publishOrg(
 }> {
   // Entries staged earlier in the same batch (`publish_takeover`): read as if they were there, so the publish promotes them with the rest.
   const base = loaded ?? (await loadOrg(org));
+  // Which drafts have one kept beside them (#116), read with the org and before anything is compiled: each one this publish
+  // clears is guarded below at the version this read has, so a draft written after it (and its kept draft) is never cleared.
+  const kept = await org.draftSnapshots.kept();
   const read = added.length ? { ...base, entries: [...base.entries, ...added] } : base;
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
@@ -670,12 +673,21 @@ export async function publishOrg(
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
   // A draft it covers is no longer an agent's proposal, though it needed no promotion (published as it is, or put back as
-  // published): every one it pins, or with no pins every one, but those it held back. Only those with one kept, so a publish
-  // that changes nothing still writes nothing. One kept after this read is an agent's newer draft, which this publish does not cover.
+  // published): every one it pins, or with no pins every one, but those it held back; only those in this publish's read with
+  // one kept, so a publish that changes nothing still writes nothing. Each is held to the version read: by its promotion, by
+  // its pin's guard, or else by a guard of its own here, so an edit landing before the batch (an agent's new proposal, or a
+  // person's draft kept anew) fails it and the publish runs again from a fresh read (review of #410).
   const held = new Set(drafts.held.map((h) => pinKey(h.kind, h.id)));
-  const keptCleared = (await org.draftSnapshots.kept())
-    .filter((k) => (!pinned || pinned.has(pinKey(k.kind, k.id))) && !held.has(pinKey(k.kind, k.id)))
-    .flatMap((k) => org.draftSnapshots.stage.clear(k.kind, k.id).writes);
+  const guarded = new Set([...drafts.promoted.map((d) => pinKey(d.kind, d.id)), ...(pinned?.keys() ?? [])]);
+  const keptCleared = kept.flatMap((k) => {
+    const key = pinKey(k.kind, k.id);
+    if ((pinned && !pinned.has(key)) || held.has(key)) return [];
+    const spot = k.kind === 'spot' ? read.spots.find((r) => r.id === k.id) : undefined;
+    const playlist = k.kind === 'playlist' ? read.playlists.find((r) => r.id === k.id) : undefined;
+    if (!spot && !playlist) return [];
+    const guard = guarded.has(key) ? [] : spot ? org.spots.stage.unchanged(spot).writes : playlist ? org.playlists.stage.unchanged(playlist).writes : [];
+    return [...guard, ...org.draftSnapshots.stage.clear(k.kind, k.id).writes];
+  });
   return { writes, removals, pinGuards, keptCleared, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
 }
 

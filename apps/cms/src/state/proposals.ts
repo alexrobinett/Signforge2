@@ -41,18 +41,32 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
    * One action at a time, said in a toast either way: pending until the editor has read the draft again, so
    * a second press cannot go from the version the first changed (review of #410).
    */
+  /** The action on its way, with its read again, if any: what a toast's Undo waits for. */
+  let running: Promise<void> | null = null;
   const run = async (orgId: string, kind: Kind, id: string, act: () => Promise<void>, refused: string) => {
     if (get().proposals.pending || !showing(orgId)) return;
     pending(`${kind}:${id}`);
+    const going = (async () => {
+      try {
+        await act();
+      } catch (err) {
+        if (showing(orgId)) toast.error(refused, { description: toolMessage(err) });
+      }
+      try {
+        if (showing(orgId)) await reread(orgId, kind, id);
+      } finally {
+        pending(null);
+      }
+    })();
+    running = going;
     try {
-      await act();
-    } catch (err) {
-      if (showing(orgId)) toast.error(refused, { description: toolMessage(err) });
+      await going;
     } finally {
-      if (showing(orgId)) await reread(orgId, kind, id);
-      pending(null);
+      if (running === going) running = null;
     }
   };
+  /** A toast's Undo: at once, or, pressed while the Reject is still being read again, once it is (review of #410). */
+  const once = (go: () => void) => (running ? void running.then(go) : go());
 
   return {
     proposals: { pending: null },
@@ -76,7 +90,7 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
           }
           toast("Rejected the agent's draft", {
             description: 'The draft it wrote over is back. Nothing on screens changed.',
-            action: { label: 'Undo', onClick: () => void get().rejectProposal(orgId, kind, id, now) },
+            action: { label: 'Undo', onClick: () => once(() => void get().rejectProposal(orgId, kind, id, now)) },
             duration: 10_000,
           });
         },

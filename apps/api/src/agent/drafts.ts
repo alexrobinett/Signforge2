@@ -69,7 +69,10 @@ const STATEMENTS: Record<string, number> = {
   create_schedule_entry: 7,
   rename_screen: 16,
 };
-/** The session's reads, before any draft. */
+/**
+ * The session's reads, before any draft, with its cookie cache warm. A cold session whose cache is refreshed
+ * reads one more, 3: `SAVE_STATEMENTS` (48) leaves that one under the Free plan's 50 (review of #410).
+ */
 const SESSION_STATEMENTS = 2;
 
 /** The D1 statements a save of `calls` prepares, at most; a tool it does not draft is refused before any. */

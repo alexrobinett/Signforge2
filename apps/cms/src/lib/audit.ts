@@ -275,6 +275,15 @@ export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: 
   }
 }
 
+/**
+ * An agent named as a page names it (the approvals queue's `askerName`, #410): its client's plain name and ", agent";
+ * "An agent" when the name may not be shown; "An agent no longer connected" only once it is gone.
+ */
+export function agentWho(a: { name: string | null; gone: boolean } | undefined): string {
+  if (a?.name) return `${a.name}, agent`;
+  return a?.gone ? 'An agent no longer connected' : 'An agent';
+}
+
 /** What it came through: the CMS, an agent's client, a screen, or the system. */
 export function viaText(e: AuditEntry): string {
   switch (e.actor.kind) {

@@ -190,7 +190,6 @@ const keepPlaylistDraft = defineTool({
     const row = await playlistAt(org, input.playlistId, input.ifVersion);
     if ((await org.draftSnapshots.get('playlist', row.id))?.holds !== 'person')
       throw new ToolError('conflict', `playlist ${row.id} is not an agent's proposal`);
-    // Held to the version shown in the batch too: an edit landing first refuses it.
     // Held to the version shown, and to the agent's proposal, in the batch too: an edit, a Reject, a Keep or a publish landing first refuses it.
     write(org.playlists.stage.unchanged(row));
     write(org.draftSnapshots.stage.holding('playlist', row.id, 'person'));

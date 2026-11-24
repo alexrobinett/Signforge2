@@ -10,7 +10,7 @@ import { SparklesIcon } from 'lucide-react';
 import { useId } from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
-import { ACTIONS, auditTime, whoText } from '~/lib/audit';
+import { ACTIONS, agentWho, auditTime, whoText } from '~/lib/audit';
 import { useNow } from '~/lib/live';
 import { ago } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
@@ -47,15 +47,6 @@ function valueWords(c: Change, value: unknown, spotNames: ReadonlyMap<string, st
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) return value.length === 1 ? '1 row' : `${value.length} rows`;
   return 'Set';
-}
-
-/**
- * An agent as a page names it (the approvals queue's `askerName`): its client's plain name; "An agent" when
- * the name may not be shown; "An agent no longer connected" only once it is gone.
- */
-function agentName(a: { name: string | null; gone: boolean } | undefined): string {
-  if (a?.name) return a.name;
-  return a?.gone ? 'An agent no longer connected' : 'An agent';
 }
 
 export function ProposalPanel({
@@ -217,7 +208,7 @@ export function ProposalPanel({
                 <span className="text-muted-foreground tabular-nums">{auditTime(e.at, timezone, now)}</span>
                 <bdi className="font-medium [overflow-wrap:anywhere]">
                   {/* An agent by its client's plain name, never its id (as the approvals queue names an asker). */}
-                  {e.actor.kind === 'agent' ? `${agentName(draft.agents.find((a) => a.id === e.actor.id))}, agent` : whoText(e, names, me)}
+                  {e.actor.kind === 'agent' ? agentWho(draft.agents.find((a) => a.id === e.actor.id)) : whoText(e, names, me)}
                 </bdi>
                 <span>{ACTIONS[e.action]?.words ?? e.action.replaceAll('_', ' ')}</span>
               </li>

@@ -268,3 +268,49 @@ describe("the agents in a draft's audit log strip (#410)", () => {
     expect((await draftOf()).agents).toEqual([{ id: o.agentGrant, name: null, gone: true }]);
   });
 });
+
+describe('a publish of every draft, raced by an agent (review round 2 of #410)', () => {
+  const kept = async () => (await scope().draftSnapshots.get('spot', o.templateSpot))?.holds ?? null;
+  /** The owner, whose publish reads which drafts have one kept only after `before` has run: an edit during its compile. */
+  const duringCompile = (before: () => Promise<unknown>): Caller => {
+    const base = person('owner');
+    const org = base.org;
+    let ran = false;
+    const draftSnapshots = {
+      ...org.draftSnapshots,
+      kept: async () => {
+        if (!ran) {
+          ran = true;
+          await before();
+        }
+        return org.draftSnapshots.kept();
+      },
+    };
+    return { ...base, org: new Proxy(org, { get: (t, k) => (k === 'draftSnapshots' ? draftSnapshots : Reflect.get(t, k)) }) };
+  };
+
+  it("never clears an agent's new proposal it did not publish: one made during its compile is published with it, or kept", async () => {
+    await call(person('owner'), 'publish', {});
+    const live = await spot();
+    // The agent edits the published, unchanged spot while the publish compiles.
+    expect(await dispatch(registry, 'publish', {}, duringCompile(() => edit(agent(), 12_000, live.rowVersion)))).toMatchObject({ ok: true });
+    // Run again from a fresh read, it published the agent's edit: what the proposal was cleared for is on screens.
+    expect(published(await spot())?.durationMs).toBe(12_000);
+    expect(await kept()).toBeNull();
+  });
+
+  it("never clears the person's draft kept under an agent's edit landing before its batch: it publishes what it then reads", async () => {
+    await call(person('owner'), 'publish', {});
+    const live = await spot();
+    const mine = await edit(person(), 13_000, live.rowVersion);
+    // The agent edits it back to as published: nothing to promote, the person's draft kept.
+    const back = await edit(agent(), live.durationMs, mine);
+    expect(await kept()).toBe('person');
+    // The agent edits again before the publish's batch.
+    const raced = racing(person('owner'), () => edit(agent(), 14_000, back));
+    expect(await dispatch(registry, 'publish', {}, raced)).toMatchObject({ ok: true });
+    // Never the person's draft cleared while the agent's edit is no more than a draft: the retry published that edit.
+    expect(published(await spot())?.durationMs).toBe(14_000);
+    expect(await kept()).toBeNull();
+  });
+});

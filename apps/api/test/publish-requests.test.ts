@@ -125,10 +125,12 @@ async function editors(orgId: string, n: number) {
 }
 
 /**
- * The most a refused approval of 40 pins may take: its reads, the failed batch, the guards read 15 to a
- * query, and the retry's reads, which find the pin changed. Measured at 37 or 38 (the session's cache read varies).
+ * What a refused approval of 40 pins takes at most: its reads (each attempt's which drafts have one kept, #116, among
+ * them), the failed batch, the diagnosis reading the guards 15 to a query up to the chunk holding the edited pin, and the
+ * retry's reads, which find the pin changed. The test edits the pin that sorts last, the last chunk, so it is the most;
+ * the chunk a pin falls in depends on its id, which is why a test that picked one by position measured 39 to 41.
  */
-const STALE_PINS_QUERIES = 40;
+const STALE_PINS_QUERIES = 42;
 
 describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', () => {
   it('on its costliest case, 30 approvers, Slack and a webhook, and screens to compile: asking, reading and deciding stay within it', async () => {
@@ -202,8 +204,8 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     // The org read once for the check and both of its dry runs, the second acknowledging the sample text; every
     // playlist's items in that one read, however many are pinned. Reopening reads the request, the asker's waiting
     // ones and the names, and writes the request and its audit row with their guards in one batch. The dry run reads which
-    // drafts have one kept beside them (#116), once.
-    expect(checking).toEqual({ statements: 19, queries: 19, rpcs: [] });
+    // drafts have one kept beside them (#116), once in each of its two dry runs.
+    expect(checking).toEqual({ statements: 20, queries: 20, rpcs: [] });
     expect(reopening).toEqual({ statements: 9, queries: 7, rpcs: [] });
     for (const path of [checking, reopening]) expect(path.queries).toBeLessThan(50);
   });
@@ -217,16 +219,18 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       drafts: spots.map((s) => ({ kind: 'spot', id: s.id, version: s.rowVersion })),
       reason: 'Forty at once',
     });
-    // The 21st pin edited between the approval's reads and its batch: the batch fails, and the retry finds it.
+    // The pin that sorts last by id edited between the approval's reads and its batch: the batch fails, and the diagnosis reads
+    // every chunk of guards before the one that holds it, the most it ever reads; the retry finds it. Never a random pin.
+    const edited = spots.map((x) => x.id).sort().at(-1)!;
     const { result, bindings } = counted(() =>
-      env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(spots[20]!.id).run(),
+      env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(edited).run(),
     );
     const c = new Client(t.owner.t, t.owner.ip, bindings);
     for (const [k, v] of t.owner.jar) c.jar.set(k, v);
     const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
     expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: spots[20]!.id } });
+    expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: edited } });
     expect(result().rpcs).toEqual(['acquire', 'release']);
-    expect(result().queries).toBeLessThanOrEqual(STALE_PINS_QUERIES);
+    expect(result().queries).toBe(STALE_PINS_QUERIES);
   });
 });
