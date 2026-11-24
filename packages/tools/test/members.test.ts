@@ -8,6 +8,7 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, ROLES, type AgentLimiter, type Caller, type Members, type Role, type Scope } from '../src';
 import { outputs } from '../src/outputs';
+import { racing } from './calls';
 import { fakeServices } from './services';
 
 let o: SeededOrg;
@@ -198,6 +199,25 @@ describe("an owner's agent", () => {
       message: expect.stringContaining('accepted, rejected or cancelled meanwhile'),
     });
     expect(await statusOf(id)).toBe('accepted');
+  });
+
+  it('cancels nothing when its member is made an editor between its read and its batch: forbidden, not a conflict (review of #414)', async () => {
+    const { members } = recorder();
+    const id = await pending();
+    // Another owner first, as the org must keep one.
+    const now = new Date(0).toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(`${o.orgId}-second`, 'Second', `${o.orgId}-second@signforge.test`, now, now),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(`${o.orgId}-member-2`, o.orgId, `${o.orgId}-second`, now),
+    ]);
+    const setRole = (role: Role) => env.DB.prepare('UPDATE member SET role = ? WHERE id = ?').bind(role, member()).run();
+    const demoted = racing({ ...as('owner', members, manager), member: inviter }, () => setRole('editor'));
+    try {
+      expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, demoted)).toMatchObject({ ok: false, error: 'forbidden' });
+    } finally {
+      await setRole('owner');
+    }
+    expect(await statusOf(id)).toBe('pending');
   });
 
   it('never invites, changes a role or removes a member', async () => {

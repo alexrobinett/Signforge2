@@ -2211,7 +2211,7 @@ export function scoped(d1: D1Database, orgId: string) {
         },
       },
     },
-    /** The org's invitations (Better Auth's `invitation` rows), read only, as `members` is. */
+    /** The org's invitations (Better Auth's `invitation` rows): read, and cancelled (`stage.cancel`); Better Auth makes them. */
     invitations: {
       /** Those still pending, oldest first. One whose `expiresAt` has passed can no longer be accepted. */
       pending: () =>
@@ -2236,6 +2236,8 @@ export function scoped(d1: D1Database, orgId: string) {
          */
         cancel: (invitationId: string): Staged => {
           const iv = s.invitation;
+          // Better Auth's table: its primary key is the id alone, with no org in it, so this predicate is the only thing
+          // keeping the guard and the update to this org's row. Both use it, unchanged.
           const mine = and(eq(iv.organizationId, orgId), eq(iv.id, invitationId), eq(iv.status, 'pending'));
           const holds = sql`EXISTS (SELECT 1 FROM ${iv} WHERE ${mine})`;
           const stale = async () => ((await db.select({ id: iv.id }).from(iv).where(mine).get()) ? undefined : 0);

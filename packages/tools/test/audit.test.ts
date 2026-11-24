@@ -171,6 +171,37 @@ describe('list_audit_log', () => {
     }
   });
 
+  it("hides the invitee a drawer card's summary names, on a confirmed cancel and on a refused press, rows written before the card withheld it (review of #414)", async () => {
+    const log = scoped(env.DB, o.orgId).auditLog;
+    const confirmed = { summary: 'Cancel an invitation: The invitation for lee.invitee@example.com as editor stops working.', runId: 'run_1', callId: 'call_1' };
+    const rows = [
+      { input: { invitationId: 'inv_3' }, detail: { email: 'lee.invitee@example.com' }, confirmed },
+      { input: { invitationId: 'inv_3' }, refused: { error: 'conflict', message: 'invitation inv_3 was accepted, rejected or cancelled meanwhile' }, confirmed },
+    ];
+    for (const [i, detail] of rows.entries())
+      await log.append({
+        at: T + 5000 + i,
+        actorKind: 'user',
+        actorId: 'usr_jun',
+        clientId: 'cms-agent',
+        action: 'cancel_invitation',
+        targetKind: 'invitation',
+        targetId: 'inv_3',
+        detailJson: JSON.stringify(detail),
+      });
+    const mine = { target: { kind: 'invitation', id: 'inv_3' } };
+    expect(JSON.stringify(await all(mine, 'owner'))).toContain('lee.invitee@example.com');
+    for (const role of ['editor', 'viewer'] as const) {
+      const seen = await all(mine, role);
+      expect(seen.map((e) => e.detail.confirmed)).toEqual([
+        { runId: 'run_1', callId: 'call_1' },
+        { runId: 'run_1', callId: 'call_1' },
+      ]);
+      expect(JSON.stringify(seen)).not.toContain('lee.invitee');
+      expect(await all({ query: 'lee.invitee' }, role)).toEqual([]);
+    }
+  });
+
   it("refuses a cursor made in another org, so a member who switched org cannot page one org's log into another's", async () => {
     const other = await seedOrg(env.DB, 'audit-other-org');
     const first = await list({ limit: 1 });

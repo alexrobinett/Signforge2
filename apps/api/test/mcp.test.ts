@@ -209,6 +209,8 @@ describe('tools', () => {
     expect(names).toContain('cancel_invitation');
     expect(tools.find((tool) => tool.name === 'create_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(tools.find((tool) => tool.name === 'delete_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    // Its link stops working for good: only a person invites again (review of #414).
+    expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
   });
 
   it('runs a read and a write through the dispatcher, audited as the agent with its client', async () => {
@@ -259,9 +261,9 @@ describe('tools', () => {
     });
     expect(out).toMatchObject({ structuredContent: { canceled: invited.id } });
     // Measured, as the most it may take: the token with its grant and member, the invitation, then the guard that it is still
-    // pending, the cancel and the audit row in one batch; and the grant's write limit, its one RPC (#107).
-    // A new statement fails this on purpose: look at the budget, then raise it.
-    expect(cost).toEqual({ statements: 6, queries: 4, rpcs: ['write'] });
+    // pending, the guard that its member is still an owner (review of #414), the cancel and the audit row in one batch; and
+    // the grant's write limit, its one RPC (#107). A new statement fails this on purpose: look at the budget, then raise it.
+    expect(cost).toEqual({ statements: 7, queries: 4, rpcs: ['write'] });
     expect(cost.queries).toBeLessThan(50);
   });
 

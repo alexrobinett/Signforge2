@@ -759,7 +759,19 @@ describe('confirmation cards (#269)', () => {
   it('shows a member who may not press who may, and gives no token', async () => {
     const s = await takeover({ role: 'viewer' });
     const { card } = pressOf(await raw(await s.ask('q')), 'q');
-    expect(card).toMatchObject({ token: null, why: 'You can view only: ask an editor.' });
+    expect(card).toEqual({
+      tool: 'start_takeover',
+      // The tool's own title: nothing is read for the card.
+      title: 'Takeover',
+      lines: [],
+      address: null,
+      when: '',
+      undo: '',
+      press: '',
+      token: null,
+      why: 'You can view only: ask an editor.',
+      expiresAt: expect.any(Number),
+    });
   });
 
   it('pins a publish at the versions shown, keeps every constraint the model gave, says how many screens it changes, and lists the sample text a press publishes (#392)', async () => {
@@ -820,11 +832,51 @@ describe('confirmation cards (#269)', () => {
     expect(await s.scope.invitations.get(invited.id)).toMatchObject({ status: 'canceled' });
     const row = (await s.scope.auditLog.list({ limit: 10 })).find((r) => r.action === 'cancel_invitation');
     expect(row).toMatchObject({ actorKind: 'user', clientId: 'cms-agent', targetId: invited.id });
-    expect(JSON.parse(row?.detailJson ?? '{}').confirmed).toMatchObject({ summary: expect.stringMatching(/^Cancel an invitation/) });
+    // The summary every member reads leaves out whose it was (review of #414): only the owner's detail names them.
+    expect(JSON.parse(row?.detailJson ?? '{}').confirmed).toMatchObject({ summary: 'Cancel an invitation' });
+
+    // A press refused, the invitation cancelled by another owner meanwhile: its row alone, its summary without the address too.
+    const again = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'card-414@signforge.test', role: 'viewer' });
+    ask.called = { invitationId: again.id };
+    const second = pressOf(await raw(await s.ask('Cancel the invitation for card-414')), 'q');
+    await s.owner.ok('/api/auth/organization/cancel-invitation', { invitationId: again.id });
+    expect(doneOf(await raw(await s.member.post('/api/agent/chat', second.body)))).toMatchObject({ ok: false });
+    const refused = (await s.scope.auditLog.list({ limit: 10 })).find((r) => r.action === 'cancel_invitation' && r.targetId === again.id && r.clientId === 'cms-agent');
+    expect(JSON.parse(refused?.detailJson ?? '{}')).toMatchObject({ refused: {}, confirmed: { summary: 'Cancel an invitation' } });
+    // Neither address reaches an editor's audit log, which the CSV export is made from; the owner's names both.
+    const editor = new Client(s.owner.t);
+    await editor.signIn(email('editor-414'));
+    const joined = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
+      email: (await editor.session()).body.user.email,
+      role: 'editor',
+      organizationId: s.org.id,
+    });
+    await editor.ok('/api/auth/organization/accept-invitation', { invitationId: joined.id });
+    await editor.setActive(s.org.id);
+    const log = async (who: Client) => JSON.stringify(await who.ok('/api/tools/list_audit_log', { target: { kind: 'invitation' }, limit: 200 }));
+    expect(await log(editor)).not.toMatch(/card-321|card-414/);
+    expect(await log(s.owner)).toMatch(/card-321[\s\S]*card-414|card-414[\s\S]*card-321/);
     // Inviting is a person's: the drawer never offers it, to any role.
     for (const role of ['viewer', 'editor', 'owner'] as const) {
       const offered = drawerTools({ role, scopes: undefined, editorsPublish: true }).map((t) => t.name);
       expect(offered, role).not.toContain('invite_member');
+    }
+  });
+
+  it("shows a viewer or an editor asking to cancel an invitation who may, and nothing of the invitation: not whose, nor its role (review of #414)", async () => {
+    for (const role of ['viewer', 'editor'] as const) {
+      const ask: { called?: Record<string, unknown> } = {};
+      const s = await setup({ role, steps: () => ({ calls: [{ name: 'cancel_invitation', input: ask.called }] }) });
+      const email = `card-414-${role}@signforge.test`;
+      const invited = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email, role: 'owner' });
+      ask.called = { invitationId: invited.id };
+      const all = await raw(await s.ask(`Cancel the invitation ${invited.id}`));
+      const { card } = pressOf(all, 'q');
+      expect(card, role).toMatchObject({ tool: 'cancel_invitation', title: 'Cancel an invitation', lines: [], token: null, why: 'Only owners can do this: ask an owner.' });
+      // Nowhere in what reaches the browser.
+      expect(JSON.stringify(all), role).not.toContain(email);
+      expect(JSON.stringify(all), role).not.toMatch(/as owner/);
+      expect(await s.scope.invitations.get(invited.id), role).toMatchObject({ status: 'pending' });
     }
   });
 

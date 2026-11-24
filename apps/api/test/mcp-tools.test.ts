@@ -86,13 +86,14 @@ describe('tools/list', () => {
       const tool = registry.get(t.name);
       expect(t.annotations, t.name).toEqual({
         readOnlyHint: !tool?.mutates,
-        destructiveHint: tool?.mutates === true && /^(delete|revoke)_/.test(t.name),
+        destructiveHint: tool?.mutates === true && /^(delete|revoke|cancel)_/.test(t.name),
         idempotentHint: tool?.idempotent === true,
       });
     }
     const hints = (name: string) => listedTools(owner, AGENT).find((t) => t.name === name)?.annotations;
     expect(hints('list_screens')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    expect(hints('cancel_invitation')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });
 

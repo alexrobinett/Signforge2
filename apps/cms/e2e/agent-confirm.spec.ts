@@ -1,11 +1,14 @@
 // The agent's confirmation cards (#269) and Ask agent in ⌘K (#270), against the Anthropic stub's
 // scripted turns (e2e/global-setup.ts): asked about the storm, it takes every screen over, which stops
 // at a card until the person presses it. No test reaches a real model.
+import { readFileSync } from 'node:fs';
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, CMS_URL, STUB_CANCELLED, STUB_CARD, STUB_TAKEN } from './servers';
 
 const ADDRESS = '192.0.2.193';
+/** An editor's sign-in, from its own address. */
+const EDITOR_ADDRESS = '192.0.2.194';
 
 /** Keys only: from the question, Shift+Tab back up the drawer until `target` has focus. */
 async function tabTo(page: Page, target: Locator) {
@@ -86,8 +89,9 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await expect(page.getByRole('region', { name: 'Takeovers' })).toHaveCount(0);
 });
 
-test('an owner asks the agent to cancel an invitation: a card says whose, the press cancels it, and the audit log names the invitee (#321)', async ({
+test('an owner asks the agent to cancel an invitation: a card says whose, the press cancels it, and the audit log names the invitee to owners only (#321)', async ({
   page,
+  browser,
 }) => {
   await signInAs(page, `e2e-confirm-invite-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Bayside Invitations', ADDRESS);
@@ -132,6 +136,40 @@ test('an owner asks the agent to cancel an invitation: a card says whose, the pr
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
   await shots(page, '104-cancel-invitation-audit-phone');
+
+  // An editor who asks to cancel one is told who may, and nothing of whose it is (review of #414).
+  const editor = await (await browser.newContext()).newPage();
+  await joinAsEditor(page, editor, `e2e-confirm-invite-editor-${Date.now()}@example.com`, EDITOR_ADDRESS);
+  await editor.goto('/settings/members');
+  await hydrated(editor);
+  await editor.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const theirs = editor.getByRole('dialog', { name: 'Agent' });
+  await theirs.getByLabel('Ask about your screens and content').fill(`Cancel the invitation ${id}`);
+  await theirs.getByRole('button', { name: 'Ask', exact: true }).click();
+  const refused = theirs.getByRole('region', { name: 'Cancel an invitation' });
+  await expect(refused).toContainText('Only owners can do this: ask an owner.');
+  await expect(refused).not.toContainText('kim.bayside');
+  await expect(refused.getByRole('button', { name: 'Cancel the invitation' })).toHaveCount(0);
+  await axe(editor);
+  await editor.setViewportSize({ width: 1440, height: 1000 });
+  await shots(editor, '104-cancel-invitation-editor-card');
+  await editor.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await refused.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(390);
+  await axe(editor);
+  await shots(editor, '104-cancel-invitation-editor-card-phone');
+  await editor.setViewportSize({ width: 1280, height: 900 });
+  await theirs.getByRole('button', { name: 'Close the agent' }).click();
+
+  // Their audit log, and its CSV export, say an invitation was cancelled, never whose.
+  await editor.goto('/audit');
+  await hydrated(editor);
+  await expect(editor.getByRole('row', { name: /Invitation cancelled/ })).toBeVisible();
+  await expect(editor.getByRole('table')).not.toContainText('kim.bayside');
+  const download = editor.waitForEvent('download');
+  await editor.getByRole('button', { name: 'Export CSV' }).click();
+  const csv = readFileSync(await (await download).path(), 'utf8');
+  expect(csv).toContain('cancel_invitation');
+  expect(csv).not.toContain('kim.bayside');
 });
 
 test('⌘K asks the agent a sentence typed into it, by keyboard: Enter opens the drawer with it, ⌘Enter keeps the menu (#270)', async ({ page }) => {

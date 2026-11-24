@@ -39,7 +39,7 @@ export const CONFIRM_MS = 10 * 60_000;
 interface Made {
   card: Omit<ConfirmCard, 'tool' | 'token' | 'why' | 'expiresAt'>;
   input: Row;
-  /** Lines naming what the audit log redacts (a provider's resource): shown to the person, kept out of the audit row's summary. */
+  /** Lines naming what the audit log redacts (a provider's resource, an invitee's address): shown to the person, kept out of the audit row's summary. */
   withheld?: readonly string[];
 }
 
@@ -354,11 +354,14 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     async make(org, called) {
       const invitation = await org.invitations.get(str(called.invitationId));
       if (invitation?.status !== 'pending') throw new CardProblem(`no pending invitation ${str(called.invitationId)}`);
+      const whose = `The invitation for ${invitation.email}${invitation.role ? ` as ${invitation.role}` : ''} stops working: its link no longer lets them in.`;
       return {
         input: { invitationId: invitation.id },
+        // The invitee's address: only owners read it in the audit log, so the summary every member reads leaves it out.
+        withheld: [whose],
         card: {
           title: 'Cancel an invitation',
-          lines: [`The invitation for ${invitation.email}${invitation.role ? ` as ${invitation.role}` : ''} stops working: its link no longer lets them in.`],
+          lines: [whose],
           address: null,
           when: 'Now',
           undo: 'No undo: an owner invites them again.',
