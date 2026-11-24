@@ -395,7 +395,12 @@ function Accounts({
               {canManage && (
                 <span className="flex flex-wrap gap-2">
                   {c.status !== 'active' && (
-                    <Button variant="outline" disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
+                    <Button
+                      variant="outline"
+                      disabled={connecting !== null}
+                      onClick={() => void connect(c.provider, c.id)}
+                      aria-label={`Reconnect ${c.account}`}
+                    >
                       {busy(c.id, 'connect') ? 'Opening…' : 'Reconnect'}
                     </Button>
                   )}
