@@ -249,7 +249,13 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   return out;
 }
 
-function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v: unknown): string[] {
+/**
+ * A list value's problems. Rows a spot stores (its data, a template's default) hold only the item's
+ * columns: another key would ride along in the manifest to every screen, unseen by the editor, so it
+ * is refused (#264). A live value's rows (`open`) may carry more than the template shows, as a
+ * feed's stories do: those keys are not read.
+ */
+function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v: unknown, open = false): string[] {
   if (!Array.isArray(v)) return [`field "${name}" must be a list`];
   const out: string[] = [];
   if (def.maxItems && v.length > def.maxItems) out.push(`field "${name}" has more than ${def.maxItems} rows`);
@@ -258,6 +264,7 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
       out.push(`field "${name}" row ${i + 1} must be an object`);
       return;
     }
+    if (!open) for (const k of Object.keys(row)) if (!Object.hasOwn(def.item, k)) out.push(`field "${name}" row ${i + 1} has no column "${k}"`);
     for (const [k, d] of Object.entries(def.item)) {
       const cell = own(row, k) ?? d.default;
       if (cell === undefined) out.push(`field "${name}" row ${i + 1} is missing "${k}"`);
@@ -485,7 +492,7 @@ export function validateBoundValue(fields: unknown, name: unknown, value: unknow
   const def = raw as FieldDef;
   if (def.type === 'image') return [`image field "${field}" cannot be bound to live data`];
   if (value === undefined || value === null) return [`field "${field}" has no value at the bound path`];
-  if (def.type === 'list') return listProblems(field, def, value);
+  if (def.type === 'list') return listProblems(field, def, value, true);
   const e = scalarProblem(field, def, value);
   return e ? [e] : [];
 }
