@@ -86,7 +86,7 @@ const manifest = (over: Partial<ScreenManifest> = {}): ScreenManifest =>
     generatedAt: '2026-11-18T00:00:00Z',
     screen: { id: 'scr_1', name: 'Lobby', timezone: 'America/New_York', orientation: 'landscape' },
     files: { ['a'.repeat(64)]: { size: 10, type: 'image/jpeg' }, ['b'.repeat(64)]: { size: 10, type: 'text/html' } },
-    templates: {},
+    templates: { 'cstore-promo': { manifest: { name: 'C-store promo' }, html: 'b'.repeat(64) } },
     spots: {
       promo: {
         id: 'promo',
@@ -117,7 +117,7 @@ describe('shouldBeShowing', () => {
       wakesAt: null,
       playlist: { id: 'main', name: 'Main loop' },
       takeover: false,
-      spot: { id: 'promo', name: 'Energy 3 for $7', kind: 'template', template: 'cstore-promo', image: 'a'.repeat(64) },
+      spot: { id: 'promo', name: 'Energy 3 for $7', kind: 'template', template: 'cstore-promo', templateName: 'C-store promo', image: 'a'.repeat(64) },
       spots: 2,
     });
   });
@@ -126,7 +126,7 @@ describe('shouldBeShowing', () => {
     // 07:30 local.
     expect(shouldBeShowing(manifest(), Date.parse('2026-11-18T12:30:00Z'))).toMatchObject({
       playlist: { id: 'morning' },
-      spot: { id: 'menu', kind: 'image', template: null, image: 'a'.repeat(64) },
+      spot: { id: 'menu', kind: 'image', template: null, templateName: null, image: 'a'.repeat(64) },
     });
   });
 
