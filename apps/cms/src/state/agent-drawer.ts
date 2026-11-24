@@ -26,6 +26,7 @@ import {
   CHAT_PROBLEMS,
   type ChatContext,
   type ChatTurn,
+  type ConfirmCard,
   type ProposedCall,
   type ToolCard,
 } from '@signforge/api/agent-chat';
@@ -60,11 +61,25 @@ interface Drafts {
   confirming: boolean;
 }
 
+/** A confirmation card's press: offered, pressed and running, done, let go, or refused (`error`). */
+type Press = 'offered' | 'pressing' | 'done' | 'dismissed' | 'refused';
+
 type DrawerMessage =
   | { role: 'user'; text: string }
   | { role: 'assistant'; card: AnswerCard; drafts: Drafts | null }
+  /** A tool the turn paused at, for the person to press (#269): the card as the API made it. */
+  | { role: 'confirm'; card: ConfirmCard; press: Press; error: string | null }
   /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI & agents. */
   | { role: 'error'; text: string; inSettings: boolean };
+
+/** What a run of a turn said: its answer's card, a confirmation card, why it ended, or how it failed; `settled` wakes a press waiting on it. */
+interface Got {
+  card: AnswerCard | undefined;
+  confirm: ConfirmCard | undefined;
+  ended: { code: string | undefined; message: string } | undefined;
+  failure: Error | undefined;
+  settled: (() => void) | undefined;
+}
 
 type AgentOpener = 'sidebar' | 'top-bar';
 
@@ -92,6 +107,10 @@ export interface AgentDrawerSlice {
   editQuestion: (question: string) => void;
   /** Asks `question`, or the one typed, with the conversation so far and the page shown now. */
   askAgent: (question?: string) => Promise<void>;
+  /** Presses the confirmation card at `index` (#269): the paused turn resumes, and its tool runs, as the person, now. */
+  pressConfirm: (index: number) => Promise<void>;
+  /** Lets the confirmation card at `index` go: nothing runs, and its token runs out unused. */
+  dismissConfirm: (index: number) => void;
   /**
    * The org is changing (`switchOrg`): the conversation, and any turn on its way, were the old
    * org's. Both go, so nothing of it reaches the new org's model or lands in its drawer.
@@ -207,6 +226,83 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   let thread: string | null = null;
   /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
   let conversation = 0;
+  /**
+   * The turns paused at a confirmation card (#269), by its token: each `ChatClient` holds its run's pause,
+   * which a press resumes. Held until pressed, let go, or the drawer is forgotten.
+   */
+  const paused = new Map<string, { turn: ChatClient; got: Got; context: ChatContext }>();
+
+  /**
+   * A turn's client, sending `context` with each run (`forwardedProps`), and what its run said, in `got`:
+   * each tool's card and the answer's text as they come, then the answer's card, a confirmation card, or why not.
+   */
+  function turnOf(context: ChatContext) {
+    const got: Got = { card: undefined, confirm: undefined, ended: undefined, failure: undefined, settled: undefined };
+    const turn: ChatClient = new ChatClient({
+      threadId: thread ?? crypto.randomUUID(),
+      forwardedProps: context,
+      // Its `connect` alone: the API keeps no run to join again or read back, so a stream that breaks off ends the turn.
+      connection: { connect: fetchServerSentEvents('/api/agent/chat', async () => ({ headers: await tabOrgHeaders(), fetchClient: said })).connect },
+      onChunk: (chunk) => {
+        if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.call) {
+          const shown: ToolCard = chunk.value;
+          ours(turn, (d) => ({ ...d, progress: [...d.progress, shown] }));
+        } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.text) {
+          // The card's text as far as it is written, which the API reads from the answer alone ('' takes it back).
+          const text: string = chunk.value.text;
+          ours(turn, (d) => ({ ...d, streaming: text }));
+        } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.answer) got.card = chunk.value;
+        else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.confirm) got.confirm = chunk.value;
+        else if (chunk.type === 'RUN_ERROR') got.ended = { code: chunk.code, message: chunk.message };
+      },
+      onError: (err) => {
+        // Our refusal, as the client wraps a failed read (`StreamReadError`): the API's words, not the client's.
+        let cause: unknown = err;
+        while (cause instanceof Error && !(cause instanceof Refusal)) cause = cause.cause;
+        got.failure = cause instanceof Refusal ? cause : err;
+        got.settled?.();
+      },
+      // A run of a press settles here: `resolveInterrupt` starts it, and does not wait for it.
+      onRunIdChange: (id) => {
+        if (id === null) got.settled?.();
+      },
+    });
+    return { turn, got };
+  }
+
+  /** `change`, while `turn` is the drawer's: once forgotten, or another took its place, it changes nothing. */
+  function ours(turn: ChatClient, change: (d: AgentDrawerState) => AgentDrawerState) {
+    if (running === turn) drawer(change);
+  }
+
+  /**
+   * What a run of `turn` said, said in the drawer: its answer's card, its confirmation card (the turn
+   * then held for the press), or why there is none. The text it streamed goes either way.
+   */
+  async function told(turn: ChatClient, got: Got, context: ChatContext) {
+    const say = (message: DrawerMessage) => ours(turn, (d) => ({ ...d, messages: [...d.messages, message] }));
+    const { card, confirm, ended, failure } = got;
+    ours(turn, (d) => ({ ...d, streaming: '' }));
+    if (card) {
+      const drafts: Drafts | null = card.drafts.length
+        ? { status: 'proposed', shown: { state: 'working' }, results: [], undone: [], versions: {}, error: null, confirming: false }
+        : null;
+      say({ role: 'assistant', card, drafts });
+      // The turn ends once its drafts are worked out.
+      if (drafts) await summarizeAt(get().agentDrawer.messages.length - 1);
+    } else if (confirm) {
+      say({ role: 'confirm', card: confirm, press: 'offered', error: null });
+      if (confirm.token && running === turn) paused.set(confirm.token, { turn, got, context });
+    } else if (failure instanceof Refusal) say({ role: 'error', text: toolMessage(failure), inSettings: IN_SETTINGS.has(failure.code) });
+    // Why the API ended it, in its words; the client ends a stream that broke off as one too, in its own, which are not said.
+    else if (ended && CHAT_PROBLEMS.some((p) => p === ended.code)) say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
+    else say({ role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false });
+    ours(turn, (d) => ({ ...d, asking: false, progress: [] }));
+    // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
+    if (running === turn) running = null;
+    // Held for its press, or done with.
+    if (![...paused.values()].some((held) => held.turn === turn)) turn.dispose();
+  }
 
   /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
   const drafts = (index: number, change: (d: Drafts) => Drafts) =>
@@ -415,6 +511,9 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running = null;
       thread = null;
       conversation++;
+      // The cards still waiting for a press were the old org's: their turns go, and their tokens run out unused.
+      for (const held of paused.values()) held.turn.dispose();
+      paused.clear();
       const { open } = get().agentDrawer;
       set({ agentDrawer: closed() });
       if (open) get().setRightPanel(false);
@@ -443,57 +542,53 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         streaming: '',
       }));
       thread ??= crypto.randomUUID();
-      let card: AnswerCard | undefined;
-      let ended: { code: string | undefined; message: string } | undefined;
-      let failure: Error | undefined;
-      const turn: ChatClient = new ChatClient({
-        threadId: thread,
-        // Its `connect` alone: the API keeps no run to join again or read back, so a stream that breaks off ends the turn.
-        connection: { connect: fetchServerSentEvents('/api/agent/chat', async () => ({ headers: await tabOrgHeaders(), fetchClient: said })).connect },
-        onChunk: (chunk) => {
-          if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.call) {
-            const shown: ToolCard = chunk.value;
-            mine((d) => ({ ...d, progress: [...d.progress, shown] }));
-          } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.text) {
-            // The card's text as far as it is written, which the API reads from the answer alone ('' takes it back).
-            const text: string = chunk.value.text;
-            mine((d) => ({ ...d, streaming: text }));
-          } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.answer) card = chunk.value;
-          else if (chunk.type === 'RUN_ERROR') ended = { code: chunk.code, message: chunk.message };
-        },
-        onError: (err) => {
-          // Our refusal, as the client wraps a failed read (`StreamReadError`): the API's words, not the client's.
-          let cause: unknown = err;
-          while (cause instanceof Error && !(cause instanceof Refusal)) cause = cause.cause;
-          failure = cause instanceof Refusal ? cause : err;
-        },
-      });
+      const { turn, got } = turnOf(context);
       running = turn;
-      // Only this turn's, while it is the drawer's: once forgotten, it changes nothing.
-      function mine(change: (d: AgentDrawerState) => AgentDrawerState) {
-        if (running === turn) drawer(change);
-      }
-      const say = (message: DrawerMessage) => mine((d) => ({ ...d, messages: [...d.messages, message] }));
-      await turn.sendMessage(question, context);
+      await turn.sendMessage(question);
       if (running !== turn) return turn.dispose();
-      // What streamed goes: the answer is its whole card, or there is none.
-      mine((d) => ({ ...d, streaming: '' }));
-      if (card) {
-        const drafts: Drafts | null = card.drafts.length
-          ? { status: 'proposed', shown: { state: 'working' }, results: [], undone: [], versions: {}, error: null, confirming: false }
-          : null;
-        say({ role: 'assistant', card, drafts });
-        // The turn ends once its drafts are worked out.
-        if (drafts) await summarizeAt(get().agentDrawer.messages.length - 1);
-      } else if (failure instanceof Refusal) say({ role: 'error', text: toolMessage(failure), inSettings: IN_SETTINGS.has(failure.code) });
-      // Why the API ended it, in its words; the client ends a stream that broke off as one too, in its own, which are not said.
-      else if (ended && CHAT_PROBLEMS.some((p) => p === ended?.code))
-        say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
-      else say({ role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false });
-      mine((d) => ({ ...d, asking: false, progress: [] }));
-      // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
-      if (running === turn) running = null;
-      turn.dispose();
+      await told(turn, got, context);
+    },
+
+    async pressConfirm(index) {
+      const m = get().agentDrawer.messages[index];
+      const token = m?.role === 'confirm' && m.press === 'offered' ? m.card.token : null;
+      const held = token ? paused.get(token) : undefined;
+      if (!token || !held || get().agentDrawer.asking) return;
+      paused.delete(token);
+      const press = (press: Press, error: string | null = null) =>
+        drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press, error } : x)) }));
+      press('pressing');
+      const { turn, got, context } = held;
+      Object.assign(got, { card: undefined, confirm: undefined, ended: undefined, failure: undefined });
+      drawer((d) => ({ ...d, asking: true, progress: [], streaming: '' }));
+      running = turn;
+      // The card's token, with the run's own pause, resumes it: the API runs the tool then, as the person, checked as they press.
+      turn.updateOptions({ forwardedProps: { ...context, confirm: token } });
+      const settled = new Promise<void>((resolve) => {
+        got.settled = resolve;
+      });
+      // The client declares no tools, so the server's approval reaches it as a generic interrupt, answered as approved.
+      const [pause] = turn.getInterrupts();
+      if (pause?.kind === 'generic') {
+        pause.resolveInterrupt({ approved: true });
+        await settled;
+      } else got.failure = new Error('This card can no longer be pressed. Ask again for a new one.');
+      if (running !== turn) return turn.dispose();
+      const refused = got.failure instanceof Refusal ? toolMessage(got.failure) : got.ended && !got.card ? got.ended.message : null;
+      press(got.card ? 'done' : 'refused', got.card ? null : (refused ?? 'It was not done. Ask again.'));
+      // Every page reads again what the press changed: the Schedule lists a takeover it started.
+      const orgId = orgOnScreen(router);
+      if (got.card && orgId) await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+      await told(turn, got, context);
+    },
+
+    dismissConfirm(index) {
+      const m = get().agentDrawer.messages[index];
+      if (m?.role !== 'confirm' || m.press !== 'offered') return;
+      const held = m.card.token ? paused.get(m.card.token) : undefined;
+      if (m.card.token) paused.delete(m.card.token);
+      held?.turn.dispose();
+      drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press: 'dismissed' } : x)) }));
     },
   };
 };

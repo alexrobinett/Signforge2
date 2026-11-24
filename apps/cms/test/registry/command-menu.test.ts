@@ -1,13 +1,16 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
 import {
+  askEntry,
   commandEntries,
   foundValues,
   movesSelection,
   needsInput,
   NULL_CHOICE,
+  pageQuestions,
   parseToolList,
   pointerMovesSelection,
+  readsAsSentence,
   resultText,
   selectedItem,
   targetActions,
@@ -244,5 +247,42 @@ describe("what counts as the member moving ⌘K's selection (#180)", () => {
     expect(pointerMovesSelection(null, 'tool:test_alert_channel')).toBe(false);
     expect(pointerMovesSelection({ value: 'tool:test_alert_channel', disabled: false }, 'tool:test_alert_channel')).toBe(false);
     expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: true }, 'tool:test_alert_channel')).toBe(false);
+  });
+});
+
+describe('Ask agent in ⌘K (#270)', () => {
+  it('reads a question or a request as a sentence for the agent; one or two words, and a short command, still find pages, records and tools first', () => {
+    for (const q of ['screens', 'bayside door', '  rename   ', 'publish now', 'pair a screen', 'take over Bayside now', 'go to screens'])
+      expect(readsAsSentence(q), q).toBe(false);
+    for (const q of ['why are screens behind', 'Which screens need me?', 'behind screens?', 'show me what plays now', 'Bayside closes at 2 for the storm'])
+      expect(readsAsSentence(q), q).toBe(true);
+    expect(askEntry('  why are screens behind ')).toMatchObject({
+      kind: 'ask',
+      label: 'Ask agent: why are screens behind',
+      question: 'why are screens behind',
+    });
+  });
+
+  it('lists the developer tools for an owner only, marked to go under Developer', () => {
+    const DEVELOPER = ['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places'];
+    const owner = commandEntries(listed('owner'), true)
+      .filter((e) => e.kind === 'tool' && e.developer)
+      .map((e) => (e.kind === 'tool' ? e.tool.name : ''));
+    expect(owner.sort()).toEqual([...DEVELOPER].sort());
+    for (const role of ['editor', 'viewer'] as const) {
+      const names = commandEntries(listed(role), false).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
+      for (const name of DEVELOPER) expect(names, `${role}: ${name}`).not.toContain(name);
+    }
+  });
+
+  it("suggests three questions for the page shown: its section's, a record's page by its section's, else Overview's", () => {
+    expect(pageQuestions('/screens/scr_1').map((q) => q.label)).toEqual([
+      'Which screens need me, and why?',
+      'Which screens went quiet today?',
+      'Which screens are behind the last publish?',
+    ]);
+    expect(pageQuestions('/settings/ai')[0]?.label).toBe('Who can publish in this organization?');
+    expect(pageQuestions('/')).toHaveLength(3);
+    for (const s of SECTIONS) expect(pageQuestions(s.to), s.to).toHaveLength(3);
   });
 });

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from '@tanstack/react-router';
+import { useParams, useRouterState } from '@tanstack/react-router';
 import { defaultFilter } from 'cmdk';
 import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, SparklesIcon, UsersIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
@@ -12,12 +12,15 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import {
+  askEntry,
   commandEntries,
   foundValues,
   movesSelection,
   NULL_CHOICE,
   orgCommands,
+  pageQuestions,
   pointerMovesSelection,
+  readsAsSentence,
   selectedItem,
   targetActions,
   targetItemKey,
@@ -26,7 +29,7 @@ import {
   type Field,
   type ToolListing,
 } from '~/lib/command-menu';
-import { useOrgId } from '~/lib/live';
+import { useOrgId, useRole } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
@@ -53,8 +56,20 @@ const focusSearch = (input: HTMLInputElement | null) => input?.focus();
 
 /** A found screen's or group's item value: cmdk matches it with `matchesQuery` (lib/targets.ts), the target picker's search. */
 const TARGET = /^(screen|group):/;
+/**
+ * A question for the agent always shows: what was typed, or the page's own (#270). What was typed ranks
+ * first only as a sentence; one or two words rank below every page, record and tool they find.
+ */
 const filter = (value: string, search: string, keywords?: string[]) =>
-  TARGET.test(value) ? (matchesQuery(search, keywords ?? []) ? 1 : 0) : defaultFilter(value, search, keywords);
+  value.startsWith('ask:')
+    ? value !== 'ask:typed' || readsAsSentence(search)
+      ? 1
+      : Number.MIN_VALUE
+    : TARGET.test(value)
+      ? matchesQuery(search, keywords ?? [])
+        ? 1
+        : 0
+      : defaultFilter(value, search, keywords);
 
 const screenCount = (n: number) => `${n} ${n === 1 ? 'screen' : 'screens'}`;
 
@@ -329,6 +344,9 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const select = useAppStore((s) => s.selectCommand);
   const move = useAppStore((s) => s.moveCommandSelection);
   const chooseTarget = useAppStore((s) => s.chooseTarget);
+  const askFromMenu = useAppStore((s) => s.askFromMenu);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const owner = useRole() === 'owner';
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
   // on each opening (this body mounts on each), so a screen or group someone else made since is found.
   const orgId = useOrgId();
@@ -356,11 +374,16 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
           ? 'Looking for screens…'
           : '';
 
-  const entries = [...commandEntries(tools), ...orgCommands(shell.organizations.length)];
+  const entries = [...commandEntries(tools, owner), ...orgCommands(shell.organizations.length)];
+  // What was typed, for the agent: first when it reads as a sentence, else last, below what it found (#270).
+  const asked = searching ? askEntry(query) : undefined;
+  const sentence = searching && readsAsSentence(query);
+  const questions = searching ? [] : pageQuestions(path);
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go' || e.kind === 'agent');
   const org = entries.filter((e) => e.kind === 'org');
-  const actions = entries.filter((e) => e.kind === 'tool' || e.kind === 'takeover');
+  const actions = entries.filter((e) => (e.kind === 'tool' && !e.developer) || e.kind === 'takeover');
+  const developer = entries.filter((e) => e.kind === 'tool' && e.developer);
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
 
   const item = (e: CommandEntry) => {
@@ -369,7 +392,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
-        {e.kind === 'agent' && <SparklesIcon className="size-4 text-actor-agent" aria-hidden />}
+        {(e.kind === 'agent' || e.kind === 'ask') && <SparklesIcon className="size-4 text-actor-agent" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
         {(e.kind === 'tool' || e.kind === 'takeover') && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
@@ -389,7 +412,16 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       filter={filter}
       value={shownSelection}
       onValueChange={(value) => select(value, JSON.stringify(found))}
-      onKeyDown={(e) => movesSelection(e) && move()}
+      onKeyDown={(e) => {
+        // ⌘Enter on a question asks it and keeps the menu open (#270).
+        const question = [asked, ...questions].find((q) => q?.id === shownSelection);
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && question?.kind === 'ask') {
+          e.preventDefault();
+          askFromMenu(question.question, true);
+          return;
+        }
+        if (movesSelection(e)) move();
+      }}
       // cmdk selects by pointer only over an enabled item, in each item's own handler, which replaces one passed to it.
       onPointerMove={(e) => {
         const item = e.target instanceof Element ? e.target.closest('[cmdk-item]') : null;
@@ -406,6 +438,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       </p>
       <CommandList>
         <CommandEmpty>No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.</CommandEmpty>
+        {asked && sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}
         {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
         {searching && screens.length > 0 && (
           <CommandGroup heading="Screens">
@@ -445,8 +478,11 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
           </CommandGroup>
         )}
         <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
+        {questions.length > 0 && <CommandGroup heading="Ask the agent">{questions.map(item)}</CommandGroup>}
         <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
         {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
+        {developer.length > 0 && <CommandGroup heading="Developer">{developer.map(item)}</CommandGroup>}
+        {asked && !sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}
       </CommandList>
       <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-meta text-muted-foreground">
         <CornerDownLeftIcon className="size-3.5 shrink-0" aria-hidden />

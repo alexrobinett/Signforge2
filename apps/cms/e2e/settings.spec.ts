@@ -240,7 +240,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
     await invitee.keyboard.press('ControlOrMeta+k');
     const menu = invitee.getByRole('dialog', { name: 'Command menu' });
     await expect(menu.getByRole('option', { name: /rename_screen/ })).toHaveCount(1);
-    await expect(menu.getByRole('option', { name: /publish_manifest_to_screen/ })).toHaveCount(count);
+    // Publish itself: the developer tools, publish_manifest_to_screen among them, are an owner's alone (#270).
+    await expect(menu.getByRole('option', { name: /^Publish to screens\s*publish$/ })).toHaveCount(count);
     await invitee.keyboard.press('Escape');
   };
   await publishOption(1);

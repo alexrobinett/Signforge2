@@ -82,6 +82,8 @@ export interface Caller<D extends DataScope = OrgScope> {
    * role and the org's `editorsPublish` to the commit, so a member demoted meanwhile publishes nothing.
    */
   member?: string;
+  /** The confirmation card the person pressed for this call (#269, the CMS agent's drawer): its summary, on the audit row. */
+  confirmed?: string;
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
@@ -232,7 +234,7 @@ export async function dispatch<D extends DataScope>(
       action: tool.name,
       targetKind: target?.kind ?? null,
       targetId: target?.id ?? null,
-      detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
+      detailJson: JSON.stringify({ input: redact(parsed.data), ...detail, ...(caller.confirmed !== undefined && { confirmed: caller.confirmed }) }),
     });
     await caller.org.commit([...publishRight(), ...writes, ...audit.writes]);
   };

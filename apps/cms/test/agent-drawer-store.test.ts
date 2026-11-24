@@ -3,7 +3,7 @@
 // streams the answer's text and drops it when the turn fails, keeps each answer's whole card and sends
 // them back with the next question, and says why a turn gave no answer. The API is a stubbed fetch;
 // nothing waits on a clock.
-import { type AnswerCard, CHAT_EVENTS, type ToolCard } from '@signforge/api/agent-chat';
+import { type AnswerCard, CHAT_EVENTS, type ConfirmCard, type ToolCard } from '@signforge/api/agent-chat';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
@@ -250,6 +250,126 @@ describe('the agent drawer, in the store', () => {
         { role: 'user', text: 'Why?' },
         { role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false },
       ],
+    });
+  });
+
+  describe('a confirmation card (#269)', () => {
+    const CONFIRM: ConfirmCard = {
+      tool: 'restart_screen',
+      title: 'Restart a screen',
+      lines: ['Bayside door restarts now: it goes blank for a moment, then plays again.'],
+      address: null,
+      when: 'Now, on the live screen',
+      undo: 'Nothing to undo.',
+      press: 'Restart',
+      token: 'tok_1',
+      why: null,
+      expiresAt: 1,
+    };
+    /** A turn that pauses at the card: the card, then the run's end with its pause, as the API sends them. */
+    const pausing = (run: { runId: string; threadId: string }) => {
+      const input = { screenId: 'scr_1' };
+      const pause = {
+        id: 'approval_t1',
+        reason: 'tool_call',
+        message: 'Approval required to run restart_screen',
+        toolCallId: 't1',
+        // As TanStack AI makes them for a tool whose input is { screenId: string }, hashes included.
+        responseSchema: {
+          oneOf: [
+            {
+              type: 'object',
+              properties: { approved: { const: true }, editedArgs: { type: 'object', properties: { screenId: { type: 'string' } } } },
+              required: ['approved'],
+              additionalProperties: false,
+            },
+            { type: 'object', properties: { approved: { const: false } }, required: ['approved'], additionalProperties: false },
+          ],
+        },
+        metadata: {
+          kind: 'approval',
+          toolName: 'restart_screen',
+          input,
+          'tanstack:interruptBinding': {
+            v: 1,
+            kind: 'tool-approval',
+            interruptId: 'approval_t1',
+            toolName: 'restart_screen',
+            toolCallId: 't1',
+            originalArgs: input,
+            inputSchemaHash: 'sha256:a12d7b7bf5d3d1ced9ab2538df07c51523ed67b00e74acfe0fad8585010097a5',
+            approvalSchemaHash: 'sha256:22f76d9a1c618a3cfaa891208a14f6e5e6ab1be4ff1c38cc8a8cd1e8fd0c0e4e',
+            responseSchemaHash: 'sha256:798f93d0ac0f26be753adac2de78ff20f2e4c302b9e054cf52e4858388d72e90',
+            interruptedRunId: run.runId,
+            generation: 0,
+          },
+        },
+      };
+      return stream(
+        ...[
+          { type: 'RUN_STARTED', ...run },
+          { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: CONFIRM },
+          { type: 'RUN_FINISHED', ...run, finishReason: 'tool_calls', outcome: { type: 'interrupt', interrupts: [pause] } },
+        ].map((e) => `data: ${JSON.stringify({ timestamp: 1, ...e })}\n\n`),
+      );
+    };
+    const DONE: AnswerCard = {
+      ...CARD,
+      text: 'Bayside door restarted.',
+      trace: [{ tool: 'restart_screen', title: 'Restart screen', summary: 'Restarted a screen', ok: true }],
+    };
+
+    it('holds the turn at the card; pressed, resumes it with the token, once, and shows the answer', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart the Bayside door');
+      expect(store.getState().agentDrawer).toMatchObject({ asking: false, messages: [{ role: 'user' }, { role: 'confirm', card: CONFIRM, press: 'offered' }] });
+      answer = answering(DONE);
+      await store.getState().pressConfirm(1);
+      const pressed = sent.at(-1)?.body;
+      expect(pressed).toMatchObject({
+        parentRunId: sent[0]?.body.runId,
+        resume: [{ interruptId: 'approval_t1', status: 'resolved', payload: { approved: true } }],
+        forwardedProps: { confirm: 'tok_1', page: { path: '/screens/scr_1' } },
+      });
+      expect(pressed.resume[0].payload).not.toHaveProperty('editedArgs');
+      expect(store.getState().agentDrawer).toMatchObject({
+        asking: false,
+        messages: [{ role: 'user' }, { role: 'confirm', press: 'done' }, { role: 'assistant', card: DONE }],
+      });
+      // Pressed once: again, nothing is sent.
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(2);
+    });
+
+    it('sends nothing when let go, and says why a press was refused', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      store.getState().dismissConfirm(1);
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(1);
+      expect(store.getState().agentDrawer.messages[1]).toMatchObject({ role: 'confirm', press: 'dismissed' });
+
+      await store.getState().askAgent('Restart it');
+      answer = () => Response.json({ error: 'stale_card', message: 'This card has run out. Ask again for a new one.' }, { status: 409 });
+      await store.getState().pressConfirm(3);
+      expect(store.getState().agentDrawer.messages[3]).toMatchObject({
+        role: 'confirm',
+        press: 'refused',
+        error: 'This card has run out. Ask again for a new one.',
+      });
+      expect(store.getState().agentDrawer.asking).toBe(false);
+    });
+
+    it('lets a card waiting for its press go when the org changes: pressed after, it sends nothing', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      store.getState().forgetAgentDrawer();
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(1);
+      expect(store.getState().agentDrawer.messages).toEqual([]);
     });
   });
 

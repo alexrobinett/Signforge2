@@ -8,7 +8,8 @@
  *   work of compiling twice and retrying; their order does not depend on it, since the publish
  *   revision's guard commits them in order anyway. M3-20's timed publish will keep its alarm here.
  *   It also counts the org's agent turns against its daily ceiling (#263), one call per turn, so
- *   turns taken at once cannot pass it, and a turn costs no D1 write.
+ *   turns taken at once cannot pass it, and a turn costs no D1 write; and it keeps the agent drawer's
+ *   confirmation cards (#269), each pressed once.
  * - **The fan-out**: a publish's switched screens go to the `PUBLISH_NOTICES` queue, 50 screens a
  *   message, and the consumer tells each screen's Durable Object, all of a message's at once. A
  *   batch of 10 messages is at most 500 calls, under even the Free plan's 1,000 per invocation.
@@ -24,6 +25,25 @@ const LEASE_MS = 60_000;
 interface Lease {
   token: string;
   until: number;
+}
+
+/**
+ * A confirmation card the agent's drawer showed (#269, src/agent/confirm.ts): what one press of its
+ * token runs, for whom, until when. Kept here, by its token, until pressed once or run out.
+ */
+export interface Confirmation {
+  member: string;
+  /** The tool the model called, and its input exactly as the card showed it, as JSON: a press with any other is refused. */
+  name: string;
+  calledJson: string;
+  /** What a press runs, as JSON: fixed when the card was made, with the versions and pins it showed. */
+  inputJson: string;
+  /** The run it paused, and its call: the press resumes them. */
+  runId: string;
+  toolCallId: string;
+  /** What the card said, for the audit row. */
+  summary: string;
+  expiresAt: number;
 }
 
 /** The org's agent turns on one day, by the date in its time zone. */
@@ -72,6 +92,22 @@ export class OrgObject extends DurableObject<Env> {
     if (ceiling !== null && count >= ceiling) return false;
     await this.ctx.storage.put('turns', { day, count: count + 1 } satisfies Turns);
     return true;
+  }
+
+  /** Keep a confirmation card's record under `token` (#269), dropping those run out by `now`. */
+  async offerConfirmation(token: string, record: Confirmation, now: number): Promise<void> {
+    const kept = await this.ctx.storage.list<Confirmation>({ prefix: 'confirm:' });
+    const gone = [...kept].flatMap(([key, r]) => (r.expiresAt <= now ? [key] : []));
+    if (gone.length) await this.ctx.storage.delete(gone);
+    await this.ctx.storage.put(`confirm:${token}`, record);
+  }
+
+  /** Take a confirmation card's record, once: whoever presses it, it is gone after this, used or refused. */
+  async takeConfirmation(token: string): Promise<Confirmation | undefined> {
+    // Read and deleted with no other await between: the input gate lets no other press in.
+    const record = await this.ctx.storage.get<Confirmation>(`confirm:${token}`);
+    if (record) await this.ctx.storage.delete(`confirm:${token}`);
+    return record;
   }
 
   /** Give the lock back. A token whose lease ran out and was taken releases nothing. */
