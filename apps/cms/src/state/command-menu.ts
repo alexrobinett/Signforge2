@@ -17,7 +17,7 @@ import {
   type ToolListing,
 } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
-import { callTool, callToolByName, sampleTextOf, toolMessage } from '~/lib/tools';
+import { callTool, callToolByName, sampleAcks, sampleTextOf, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
@@ -107,12 +107,15 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) await router.invalidate();
     } catch (err) {
-      // Refused for sample text (#360): the menu closes for the question, and Publish anyway runs it again, allowed.
+      // Refused for sample text (#360): the menu closes for the question, and Publish anyway runs it
+      // again acknowledging exactly the spots shown, at the versions shown, with any acknowledged
+      // before. A draft with sample text that came since is refused again, and asked about in turn.
       const [first, ...more] = sampleTextOf(err) ?? [];
       const orgId = orgOnScreen(router);
-      if (first && orgId && read.allowSample !== true) {
+      if (first && orgId) {
         finish(from, true, pending);
-        if (await get().askSampleText(orgId, [first, ...more])) await run(label, tool, { ...read, allowSample: true });
+        const before = Array.isArray(read.allowSample) ? read.allowSample : [];
+        if (await get().askSampleText(orgId, [first, ...more])) await run(label, tool, { ...read, allowSample: [...before, ...sampleAcks([first, ...more])] });
         return;
       }
       finish(from, false, pending);

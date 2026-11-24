@@ -106,9 +106,7 @@ function draftsStore(published?: boolean) {
     agent: { filled: {} },
     setRightPanel: () => {},
     reloadSpot: async (_o: string, id: string) => void reloaded.push(id),
-    publishSpot: vi.fn(async () => published ?? true),
-    publishEntry: vi.fn(async () => published ?? true),
-    publishPlaylist: vi.fn(async () => published ?? true),
+    publishTogether: vi.fn(async () => published ?? true),
   }));
   const at = () => store.getState().agentDrawer.messages[1];
   return { store: store as unknown as { getState: () => AgentDrawerSlice & Record<string, any> }, reloaded, at };
@@ -134,16 +132,18 @@ describe("the drawer's drafts, in the store", () => {
     return made;
   }
 
-  it('says Publish now was not published when a publish was let go, such as Edit first on sample text (#360), and stops there', async () => {
-    const { store, at } = await publishedNow(false);
-    expect(store.getState().publishSpot).toHaveBeenCalledWith('org_1', 'spt_1');
-    expect(store.getState().publishEntry).not.toHaveBeenCalled();
-    expect(at().drafts).toMatchObject({ status: 'saved', error: 'Not published: the changes are saved as drafts.' });
+  it('says nothing went live when the publish was let go, such as Edit first on sample text (#360)', async () => {
+    const { at } = await publishedNow(false);
+    expect(at().drafts).toMatchObject({ status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' });
   });
 
-  it('says published once every publish went through', async () => {
+  it('publishes them together, and says published once that went through', async () => {
     const { store, at } = await publishedNow(true);
-    expect(store.getState().publishEntry).toHaveBeenCalledWith('org_1', 'sch_new');
+    // Both in one publish.
+    expect(store.getState().publishTogether).toHaveBeenCalledExactlyOnceWith('org_1', [
+      { kind: 'spot', id: 'spt_1' },
+      { kind: 'schedule_entry', id: 'sch_new' },
+    ]);
     expect(at().drafts).toMatchObject({ status: 'published', error: null });
   });
 

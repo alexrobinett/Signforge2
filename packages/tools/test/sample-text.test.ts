@@ -96,7 +96,12 @@ describe('sample text on the server', () => {
       details: { spots: [{ id: later.id }] },
     });
     const made = await call(person(), 'publish', { allowSample: [...ack(spot), ...ack(later)] });
-    expect(made.promoted).toEqual(expect.arrayContaining([{ kind: 'spot', id: spot.id }, { kind: 'spot', id: later.id }]));
+    expect(made.promoted).toEqual(
+      expect.arrayContaining([
+        { kind: 'spot', id: spot.id },
+        { kind: 'spot', id: later.id },
+      ]),
+    );
   });
 
   it('lets a field go once a saved edit changes it, and then publishes without asking', async () => {

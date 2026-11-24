@@ -26,7 +26,10 @@ const ORG = 'org_1';
 
 /** The publishing slice alone. */
 function publishingStore(deps: object) {
-  return createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, deps as never));
+  return createStore<PublishingSlice & { closeScheduleDialog: () => void }>()((set, get) => ({
+    closeScheduleDialog: vi.fn(),
+    ...createPublishingSlice(set as never, get as never, deps as never),
+  }));
 }
 const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
   id,
@@ -504,7 +507,9 @@ describe('a held publish (#253)', () => {
 });
 
 describe('sample text the server refuses (#360)', () => {
-  const refusal = () => new Refusal('sample_text', 'still holding sample text', { spots: [{ id: 'spt_pier', name: 'Pier 9', fields: ['headline', 'body'] }] });
+  const refusal = () =>
+    new Refusal('sample_text', 'still holding sample text', { spots: [{ id: 'spt_pier', name: 'Pier 9', version: 3, fields: ['headline', 'body'] }] });
+  const PIER_ACK = { spotId: 'spt_pier', version: 3, fields: ['headline', 'body'] };
   /** A schedule publish the server refuses once for sample text, then publishes. */
   function refusedOnce() {
     vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
@@ -519,7 +524,7 @@ describe('sample text the server refuses (#360)', () => {
   }
   const asked = (store: ReturnType<typeof publishingStore>) => vi.waitFor(() => expect(store.getState().publishing.sampleCheck).not.toBeNull());
 
-  it('asks, naming the fields, and Publish anyway sends it again with allowSample', async () => {
+  it('asks, naming the fields, and Publish anyway sends it again acknowledging exactly that spot, version and fields', async () => {
     const { store } = refusedOnce();
     const done = store.getState().publishSchedule(ORG);
     await asked(store);
@@ -529,9 +534,25 @@ describe('sample text the server refuses (#360)', () => {
     expect(await done).toBe(true);
     expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
       drafts: [{ kind: 'schedule_entry', id: 'sch_breakfast', version: 1 }],
-      allowSample: true,
+      allowSample: [PIER_ACK],
     });
     expect(store.getState().publishing.sampleCheck).toBeNull();
+  });
+
+  it('refused again for a spot it did not acknowledge, asks about that one and sends both', async () => {
+    const { store } = refusedOnce();
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(refusal())
+      .mockRejectedValueOnce(new Refusal('sample_text', 'still', { spots: [{ id: 'spt_dock', name: 'Dock', version: 1, fields: ['title'] }] }))
+      .mockImplementation(async () => published(++revision));
+    const done = store.getState().publishSchedule(ORG);
+    await asked(store);
+    store.getState().publishAnyway();
+    await vi.waitFor(() => expect(store.getState().publishing.sampleCheck?.spotId).toBe('spt_dock'));
+    store.getState().publishAnyway();
+    expect(await done).toBe(true);
+    expect(vi.mocked(callTool).mock.calls.at(-1)?.[1]).toMatchObject({ allowSample: [PIER_ACK, { spotId: 'spt_dock', version: 1, fields: ['title'] }] });
   });
 
   it('Edit first sends nothing more, says not published, and opens the spot; Escape only lets it go', async () => {
@@ -542,6 +563,8 @@ describe('sample text the server refuses (#360)', () => {
     expect(await done).toBe(false);
     expect(vi.mocked(callTool)).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith({ to: '/spots/$spotId', params: { spotId: 'spt_pier' } });
+    // A schedule dialog that asked goes too.
+    expect(store.getState().closeScheduleDialog).toHaveBeenCalled();
 
     vi.mocked(callTool).mockReset().mockRejectedValueOnce(refusal());
     const again = store.getState().publishSchedule(ORG);
@@ -575,26 +598,86 @@ describe('sample text the server refuses (#360)', () => {
     store.getState().publishAnyway();
     expect(await yes).toBe(true);
     expect(vi.mocked(callTool).mock.calls.map((c) => c[0])).toEqual(['set_default_playlist', 'publish']);
-    expect(vi.mocked(callTool).mock.calls[1]?.[1]).toMatchObject({ allowSample: true });
+    expect(vi.mocked(callTool).mock.calls[1]?.[1]).toMatchObject({ allowSample: [{ spotId: 'spt_pier', version: 3, fields: ['headline'] }] });
   });
 
-  it('before a takeover is started, asks about its playlist’s spots: cancelled, allowed, or none to ask about', async () => {
+  it('before a schedule dialog saves, asks once about its playlist’s spots and the default it would publish', async () => {
+    const sample = (id: string, name: string) => ({
+      id,
+      name,
+      version: 2,
+      published: false,
+      draftChanged: true,
+      sampleFields: { texts: ['headline'], lists: {} },
+    });
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [] } as never);
     vi.mocked(getPlaylists).mockResolvedValue({
       playlists: [
-        { id: 'pls_flash', spotIds: ['spt_pier'] },
-        { id: 'pls_clean', spotIds: [] },
+        { id: 'pls_flash', version: 1, spotIds: ['spt_pier'], isDefault: false, published: true, draftChanged: false },
+        { id: 'pls_clean', version: 1, spotIds: [], isDefault: false, published: true, draftChanged: false },
+        { id: 'pls_home', version: 1, spotIds: ['spt_home'], isDefault: false, published: false, draftChanged: true },
       ],
     } as never);
-    vi.mocked(getSpots).mockResolvedValue({ spots: [{ id: 'spt_pier', name: 'Pier 9', sampleFields: { texts: ['headline'], lists: {} } }] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [sample('spt_pier', 'Pier 9'), sample('spt_home', 'Home')] } as never);
+    vi.mocked(callTool).mockReset();
     const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
-    expect(await store.getState().checkSampleText(ORG, 'pls_clean')).toBe('none');
-    const cancelled = store.getState().checkSampleText(ORG, 'pls_flash');
+    const would = (playlistId: string, choice?: string) => ({ playlistId, alone: false, withDefault: { choice }, refused: 'Not started' });
+    expect(await store.getState().checkSampleText(ORG, would('pls_clean'))).toEqual([]);
+    const cancelled = store.getState().checkSampleText(ORG, would('pls_flash', 'pls_home'));
     await asked(store);
+    expect(store.getState().publishing.sampleCheck?.words).toContain('Pier 9');
+    expect(store.getState().publishing.sampleCheck?.words).toContain('Home');
     store.getState().dropSampleCheck();
-    expect(await cancelled).toBe('cancelled');
-    const allowed = store.getState().checkSampleText(ORG, 'pls_flash');
+    expect(await cancelled).toBeNull();
+    const allowed = store.getState().checkSampleText(ORG, would('pls_flash', 'pls_home'));
     await asked(store);
     store.getState().publishAnyway();
-    expect(await allowed).toBe('allowed');
+    expect((await allowed)?.map((s) => [s.id, s.version])).toEqual([
+      ['spt_pier', 2],
+      ['spt_home', 2],
+    ]);
+    // Nothing is written by asking.
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+
+  it('publishes the agent’s drafts together, after one question, or nothing', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [{ ...entry('sch_new', false), playlistId: 'pls_flash' }] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({
+      playlists: [{ id: 'pls_flash', version: 1, spotIds: ['spt_pier'], isDefault: true, published: true, draftChanged: false }],
+    } as never);
+    vi.mocked(getSpots).mockResolvedValue({
+      spots: [{ id: 'spt_pier', name: 'Pier 9', version: 4, published: true, draftChanged: true, sampleFields: { texts: ['headline'], lists: {} } }],
+    } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockImplementation(async () => published(++revision));
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    Object.assign(store.getState(), { saveSpotDraft: vi.fn(), spotEditor: { drafts: {} } });
+    const items = [
+      { kind: 'spot', id: 'spt_pier' },
+      { kind: 'schedule_entry', id: 'sch_new' },
+    ] as const;
+    const no = store.getState().publishTogether(ORG, items);
+    await asked(store);
+    store.getState().dropSampleCheck();
+    expect(await no).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+
+    const yes = store.getState().publishTogether(ORG, items);
+    await asked(store);
+    store.getState().publishAnyway();
+    expect(await yes).toBe(true);
+    expect(vi.mocked(callTool).mock.calls).toEqual([
+      [
+        'publish',
+        {
+          drafts: [
+            { kind: 'spot', id: 'spt_pier', version: 4 },
+            { kind: 'schedule_entry', id: 'sch_new', version: 1 },
+          ],
+          allowSample: [{ spotId: 'spt_pier', version: 4, fields: ['headline'] }],
+        },
+      ],
+    ]);
   });
 });

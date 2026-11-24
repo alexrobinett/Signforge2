@@ -394,23 +394,23 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const orgId = orgOnScreen(router);
       if (!at || !orgId || at.drafts.status !== 'saved') return;
       drafts(index, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
-      for (const r of at.drafts.results) {
+      // All of them in one publish, after one question about sample text (#360): all go live, or none does.
+      const items = at.drafts.results.flatMap((r) => {
         const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
-        if (!saved) continue;
-        const id = String(saved.id);
-        const published =
+        const kind: 'spot' | 'playlist' | 'schedule_entry' | null =
           r.tool === 'update_spot'
-            ? await get().publishSpot(orgId, id)
+            ? 'spot'
             : r.tool === 'update_playlist'
-              ? await get().publishPlaylist(orgId, id)
+              ? 'playlist'
               : r.tool === 'create_schedule_entry' || r.tool === 'update_schedule_entry'
-                ? await get().publishEntry(orgId, id)
-                : true;
-        // Not published (Edit first on sample text, #360, or a refusal the toast told): the drafts stay saved, and the card says so.
-        if (!published) {
-          drafts(index, (d) => ({ ...d, status: 'saved', error: 'Not published: the changes are saved as drafts.' }));
-          return;
-        }
+                ? 'schedule_entry'
+                : null;
+        return saved && kind ? [{ kind, id: String(saved.id) }] : [];
+      });
+      // Not published (Edit first on sample text, or a refusal the toast told): nothing went live, the drafts stay saved, and the card says so.
+      if (!(await get().publishTogether(orgId, items))) {
+        drafts(index, (d) => ({ ...d, status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' }));
+        return;
       }
       drafts(index, (d) => ({ ...d, status: 'published' }));
     },

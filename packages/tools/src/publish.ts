@@ -14,7 +14,6 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import type { SampleFields } from '@signforge/contract';
 import { published, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { madeBySpotEditor } from './data-sources';
@@ -201,7 +200,7 @@ const publish = defineTool({
     allowSample: sampleAcks
       .optional()
       .describe(
-        "People only: the spots a sample_text refusal named, { spotId, version, fields } as it named them, once a person has seen them and chose to publish them anyway. It covers that version of each and those fields only: any other refuses again. Refused to an agent",
+        'People only: the spots a sample_text refusal named, { spotId, version, fields } as it named them, once a person has seen them and chose to publish them anyway. It covers that version of each and those fields only: any other refuses again. Refused to an agent',
       ),
   }),
   output: outputs.publish,

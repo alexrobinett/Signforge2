@@ -255,7 +255,9 @@ const approvePublishRequest = defineTool({
     publishRequestId: id('publish request'),
     allowSample: sampleAcks
       .optional()
-      .describe("The spots a sample_text refusal named, { spotId, version, fields } as named: publish them with their template's sample text anyway, once you have seen them"),
+      .describe(
+        "The spots a sample_text refusal named, { spotId, version, fields } as named: publish them with their template's sample text anyway, once you have seen them",
+      ),
   }),
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },
