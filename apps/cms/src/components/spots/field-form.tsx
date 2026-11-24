@@ -16,6 +16,7 @@ import { startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { MarkNote, MarkPill } from '~/components/spots/fill-marks';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
@@ -230,7 +231,7 @@ function ImageField({
         {mark && <MarkPill mark={mark} />}
       </span>
       <div className="flex items-center gap-3">
-        <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
+        <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-stage">
           {asset && <img src={sessionBlobPath(asset.sha256)} alt="" className="size-full object-cover" />}
         </div>
         <span className="min-w-0 flex-1 truncate text-sm">{asset ? asset.name : 'No image chosen'}</span>
@@ -317,9 +318,9 @@ function ListField({
         // biome-ignore lint/suspicious/noArrayIndexKey: a row is its position in the list.
         <div key={i} className="flex flex-col gap-2 rounded-lg border p-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
               Row {i + 1}
-              {isSampleRow(i) && ' · sample'}
+              {isSampleRow(i) && <Badge>Sample</Badge>}
             </span>
             <Button
               type="button"

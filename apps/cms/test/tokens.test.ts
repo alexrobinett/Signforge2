@@ -35,6 +35,9 @@ const TEXT_ON: [string, string][] = [
   ['actor-agent', 'actor-agent-muted'],
   ['foreground', 'actor-agent-muted'],
   ...(['updating', 'offline'] as const).map((s): [string, string] => [`status-${s}-foreground`, `status-${s}-muted`]),
+  // A toast's line and its second action, a link (#372).
+  ['toast-muted-foreground', 'toast'],
+  ['toast-link', 'toast'],
 ];
 const EDGES_ON: [string, string][] = [
   ['input', 'card'],
@@ -77,6 +80,40 @@ for (const [theme, selector] of [
     });
   });
 }
+
+// A screen's dark surround is the same in both themes, so only :root sets it (#372): its words, and
+// the asleep moon's, on it and on its controls; its ring and warning 3:1.
+it('stage tokens hold their words at 4.5:1 and their marks at 3:1', () => {
+  const t = tokens(':root');
+  const ratio = (a: string, b: string) => contrastRatio(t[a] ?? '', t[b] ?? '');
+  for (const fg of ['stage-foreground', 'stage-muted-foreground', 'stage-asleep']) {
+    expect(ratio(fg, 'stage'), `--${fg} on --stage`).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(fg, 'stage-control'), `--${fg} on --stage-control`).toBeGreaterThanOrEqual(4.5);
+  }
+  for (const mark of ['stage-ring', 'stage-warning']) expect(ratio(mark, 'stage'), `--${mark} on --stage`).toBeGreaterThanOrEqual(3);
+});
+
+/** `fg` drawn at `alpha` over `bg`, as the browser renders it. */
+function over(fg: string, bg: string, alpha: number): string {
+  const ch = (hex: string, i: number) => Number.parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+  return `#${[0, 1, 2]
+    .map((i) =>
+      Math.round(ch(fg, i) * alpha + ch(bg, i) * (1 - alpha))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+// An unreachable screen's thumbnail is dimmed to 80% (screen-thumb.tsx), its words with it; an asleep
+// one's moon and word are not dimmed (checked above as --stage-asleep on --stage).
+it('stage words dimmed on an unreachable screen still read at 4.5:1', () => {
+  const t = tokens(':root');
+  const stage = t.stage ?? '';
+  for (const fg of ['stage-foreground', 'stage-muted-foreground']) {
+    expect(contrastRatio(over(t[fg] ?? '', stage, 0.8), stage), `--${fg} at 80% on --stage`).toBeGreaterThanOrEqual(4.5);
+  }
+});
 
 /** `hsl(h s% l%)` as hex, for the contrast check of org avatars. */
 function hslHex(h: number, s: number, l: number): string {

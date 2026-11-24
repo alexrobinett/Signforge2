@@ -136,7 +136,7 @@ function LiveValues({
   return (
     <LiveCard fresh={fresh} instead="fallback" className="gap-2.5">
       <span className="font-medium break-words">{dataSource.name}</span>
-      {fresh && summary && <p className="text-[15px] font-semibold">{summary}</p>}
+      {fresh && summary && <p className="text-md font-semibold">{summary}</p>}
       {fresh && (
         <dl aria-label="Live values" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
           {rows.map(([field, path]) => {
@@ -164,7 +164,7 @@ function LiveValues({
           })}
         </dl>
       )}
-      <p className="text-[13px] leading-snug text-foreground">{freshness(dataSource, snapshot, now)}</p>
+      <p className="text-meta leading-snug text-foreground">{freshness(dataSource, snapshot, now)}</p>
       {canManage && (
         <Button ref={takeFocus} type="button" variant="outline" size="sm" className="self-start border-primary/30 text-primary" onClick={onChange}>
           Change source
@@ -278,7 +278,7 @@ function FeedPicker({
         <SourceChoice target={target} sources={mine} boundId={boundId} id={`${ids}.feed`} label={format === 'ical' ? 'Calendar' : 'News feed'} word={word} />
       )}
       {st.adding || mine.length === 0 ? (
-        <fieldset className="rounded-[10px] border p-3">
+        <fieldset className="rounded-lg border p-3">
           {/* Floated, so it sits inside the frame instead of cutting its border. */}
           <legend className="float-left mb-3 font-medium">Add a {word}</legend>
           <div className="clear-left flex flex-col gap-3">
@@ -404,13 +404,13 @@ function LiveSource({
         </p>
       )}
       {/* A disclosure the store controls: open while the person has it open, and while a fallback value is invalid. An unbound table's items are typed in Content. */}
-      <div hidden={live.source === 'table' && !boundId} className="rounded-[10px] border">
+      <div hidden={live.source === 'table' && !boundId} className="rounded-lg border">
         <button
           type="button"
           aria-expanded={fallbackShown}
           aria-controls={`${ids}.fallback`}
           onClick={() => toggleFallback(target, fallbackBad || !fallbackShown)}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <ChevronRightIcon className={cn('size-4 text-muted-foreground transition-transform', fallbackShown && 'rotate-90')} aria-hidden />
           If the source is down

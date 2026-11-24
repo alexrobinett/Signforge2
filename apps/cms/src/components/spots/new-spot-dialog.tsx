@@ -3,7 +3,7 @@
  * src/state/agent.ts); or a template (its newest approved version), an image from the library, or
  * a web page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
- * A template spot is named after its template until the person types a name, and starts with its
+ * A template spot is named after the template version picked, as its tile is labelled, until the person types a name, and starts with its
  * sample copy (`create_spot`'s `sample`, #360), which the server records and the editor marks until it is replaced. While Create is
  * off, the dialog says why.
  */
@@ -13,12 +13,12 @@ import { PlusIcon } from 'lucide-react';
 import type { KeyboardEvent, SubmitEvent } from 'react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { FillSource } from '~/components/spots/fill-source';
+import { TemplateThumb } from '~/components/spots/template-thumb';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { nextName, usableVersions, type TemplateView } from '~/lib/spots';
-import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery, spotsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -32,6 +32,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const d = useAppStore((s) => s.spotEditor.newSpot);
   const picking = useAppStore((s) => s.spotEditor.picking === 'new');
   const open = useAppStore((s) => s.openNewSpot);
+  const focusBack = useAppStore((s) => s.newSpotFocusBack);
   const edit = useAppStore((s) => s.editNewSpot);
   const pick = useAppStore((s) => s.pickImageFor);
   const create = useAppStore((s) => s.createSpot);
@@ -46,7 +47,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   // Try another template fills the template picked below; a first fill lets the agent choose.
   const pinned = fill.again ? chosen : undefined;
 
-  const name = d.name ?? (d.kind === 'template' && chosen ? nextName(chosen.template.name, spots) : '');
+  const name = d.name ?? (d.kind === 'template' && chosen ? nextName(chosen.version.manifest.name, spots) : '');
   const why =
     d.kind === 'template' && !chosen
       ? 'No template is approved for use yet.'
@@ -86,7 +87,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           New spot
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={focusBack}>
         <DialogHeader>
           <DialogTitle>New spot</DialogTitle>
           <DialogDescription>It starts as a draft. No screen shows it until you publish.</DialogDescription>
@@ -132,8 +133,8 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                         onChange={() => edit({ templateVersionId: u.version.id })}
                         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
                       />
-                      <Thumbnail template={u.template} />
-                      <span className="line-clamp-2 px-0.5">{u.template.name}</span>
+                      <TemplateThumb version={u.version} />
+                      <span className="line-clamp-2 px-0.5">{u.version.manifest.name}</span>
                     </label>
                   ))}
                 </div>
@@ -175,19 +176,5 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-const THUMBNAILS: Record<string, string> = thumbnails;
-
-/** A base template's thumbnail, drawn by the player; an org's template, or one not drawn yet, is its name on a tile. */
-function Thumbnail({ template }: { template: TemplateView }) {
-  const drawn = template.owner === 'base' && template.key in THUMBNAILS;
-  return drawn ? (
-    <img src={`/template-thumbnails/${template.key}.webp`} alt="" width={480} height={270} className="aspect-video w-full rounded-md bg-muted object-cover" />
-  ) : (
-    <span aria-hidden className="grid aspect-video w-full place-items-center rounded-md bg-muted px-2 text-center text-xs font-medium text-muted-foreground">
-      {template.name}
-    </span>
   );
 }

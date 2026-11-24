@@ -100,7 +100,7 @@ function TargetView({
         {screen && <StatusGlyph tone={toneOf(screen.state.kind)} />}
         {group && <UsersIcon className="size-4 text-muted-foreground" aria-hidden />}
         <h3 className="min-w-0 flex-1 truncate text-base font-semibold">{name}</h3>
-        <span className="shrink-0 text-[13px] text-muted-foreground">
+        <span className="shrink-0 text-meta text-muted-foreground">
           {screen ? KIND_WORD[screen.state.kind] : group ? screenCount(group.screenIds.length) : ''}
         </span>
       </div>
@@ -118,7 +118,7 @@ function TargetView({
             ))}
           </CommandGroup>
         </CommandList>
-        <p role="status" className="border-t px-4 py-3 text-[13px] text-muted-foreground empty:sr-only">
+        <p role="status" className="border-t px-4 py-3 text-meta text-muted-foreground empty:sr-only">
           {running
             ? 'A call is on its way: these wait for its answer.'
             : waiting && checking
@@ -277,7 +277,7 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
                 disabled={switchingTo !== null}
                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
               >
-                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-2xs" />
                 <span className="min-w-0 flex-1 truncate">{org.name}</span>
               </button>
             </li>
@@ -401,7 +401,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
         <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
       </CommandInput>
-      <p role="status" className="border-b px-4 py-2 text-[13px] text-muted-foreground empty:sr-only">
+      <p role="status" className="border-b px-4 py-2 text-meta text-muted-foreground empty:sr-only">
         {listStatus}
       </p>
       <CommandList>
@@ -421,7 +421,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
                 >
                   <StatusGlyph tone={toneOf(s.state.kind)} />
                   <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                  <span className="text-[13px] text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
+                  <span className="text-meta text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
                 </CommandItem>
               );
             })}
@@ -439,7 +439,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
               >
                 <UsersIcon className="size-4 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{g.name}</span>
-                <span className="text-[13px] text-muted-foreground">{screenCount(g.screenIds.length)}</span>
+                <span className="text-meta text-muted-foreground">{screenCount(g.screenIds.length)}</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -448,7 +448,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
         <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
         {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
       </CommandList>
-      <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-[13px] text-muted-foreground">
+      <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-meta text-muted-foreground">
         <CornerDownLeftIcon className="size-3.5 shrink-0" aria-hidden />
         These actions are the tool registry: the same names and roles agents call. The audit log records them by name.
       </p>

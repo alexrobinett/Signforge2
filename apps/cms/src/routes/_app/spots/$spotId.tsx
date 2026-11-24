@@ -118,7 +118,6 @@ function SpotEditor() {
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
   const version = versionsById(templates).get(templateVersionId ?? '');
-  const template = templates.find((t) => t.versions.some((v) => v.id === templateVersionId));
   const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot.id, c);
   const set = (patch: Partial<SpotDraft>) => change((d) => ({ ...d, ...patch }));
   const range = version?.manifest.duration;
@@ -247,7 +246,7 @@ function SpotEditor() {
             {(spot.kind === 'image' || spot.kind === 'video') && (
               <EditorSection title={spot.kind === 'image' ? 'Image' : 'Video'}>
                 <div className="flex items-center gap-3">
-                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
+                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-stage">
                     {image && <img src={sessionBlobPath(image.sha256)} alt="" className="size-full object-cover" />}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm">{image?.name ?? 'Not in the library'}</span>
@@ -329,7 +328,7 @@ function SpotEditor() {
             search={search}
             onSearch={setSearch}
             bound={Object.keys(draft.bindings).length > 0}
-            thumbnail={template && templateThumbnail(template)}
+            thumbnail={version && templateThumbnail(version.key)}
           />
         </div>
       </div>

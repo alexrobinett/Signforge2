@@ -104,7 +104,7 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
     <li className="space-y-3 p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <strong className="font-semibold">{source.name}</strong>
-        <span className={cn('font-mono text-[13px]', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+        <span className={cn('font-mono text-meta', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
           {state.tone === 'ok' ? `checked ${state.word}` : state.word}
         </span>
       </div>

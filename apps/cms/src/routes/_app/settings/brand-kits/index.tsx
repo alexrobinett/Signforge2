@@ -173,7 +173,7 @@ function BrandKitsPage() {
         </p>
         <ul className="flex flex-wrap gap-2">
           {FONTS.map((f) => (
-            <li key={f.id} className="rounded-md border bg-card px-2.5 py-1.5 text-[15px]" style={{ fontFamily: fontStack(f.id) }}>
+            <li key={f.id} className="rounded-md border bg-card px-2.5 py-1.5 text-md" style={{ fontFamily: fontStack(f.id) }}>
               {f.family}
             </li>
           ))}

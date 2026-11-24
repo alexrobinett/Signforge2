@@ -257,7 +257,7 @@ describe('a spot’s sample text in the editor (#360)', () => {
     const marked = html(sampleFieldsOf({ fields }, data));
     expect(marked).toContain('Sample text. Replace it before you publish.');
     expect(marked).toContain('Sample rows. Replace them before you publish.');
-    expect(marked).toContain('Row 1 · sample');
+    expect(marked).toMatch(/Row 1.*data-slot="badge"[^>]*>Sample</);
     expect(input(marked, 'field-headline')).toContain('aria-describedby="field-headline-sample"');
     expect(input(marked, 'field-items-0-name')).toContain('aria-describedby="field-items-sample"');
     expect(input(marked, 'field-items-0-price')).toContain('aria-describedby="field-items-sample"');
@@ -270,7 +270,7 @@ describe('a spot’s sample text in the editor (#360)', () => {
   });
 
   it('keeps a row marked until every cell in it is edited', () => {
-    expect(html({ texts: [], lists: { items: [['price']] } })).toContain('Row 1 · sample');
+    expect(html({ texts: [], lists: { items: [['price']] } })).toMatch(/Row 1.*data-slot="badge"[^>]*>Sample</);
     const done = html({ texts: [], lists: { items: [[]] } });
     expect(done).not.toContain('Sample rows');
     expect(input(done, 'field-items-0-name')).not.toContain('aria-describedby');

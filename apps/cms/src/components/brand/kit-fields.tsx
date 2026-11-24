@@ -126,7 +126,7 @@ export function ColourFields({
                 onChange={(e) => onChange(name, e.target.value.trim())}
                 aria-invalid={bad || undefined}
                 aria-describedby={`${id}-use${bad ? ` ${id}-bad` : ''}`}
-                className="font-mono text-[13px]"
+                className="font-mono text-meta"
               />
               {bad && (
                 <p id={`${id}-bad`} className="col-start-2 col-end-4 text-sm font-medium text-destructive">
@@ -149,7 +149,7 @@ export function ColourFields({
                 .map((p) => {
                   const fix = p.verdict === 'Pass' ? undefined : pairFix(shown, p.fg, p.bg);
                   return (
-                    <p key={p.label} className="col-start-2 col-end-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                    <p key={p.label} className="col-start-2 col-end-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
                       <span>{p.label}</span>
                       <span className={cn('font-mono font-semibold', p.verdict === 'Pass' ? 'text-status-online-foreground' : 'text-destructive')}>
                         {p.ratio} {p.verdict}
@@ -181,7 +181,7 @@ export function ColourFields({
       <p role="status" className="sr-only">
         {failing.length ? `Below 4.5:1: ${failing.join(', ')}.` : 'Every pair reaches 4.5:1.'}
       </p>
-      <p className="text-[13px] text-muted-foreground">A pair below 4.5:1 is a warning: the kit still publishes, but its text is hard to read across a room.</p>
+      <p className="text-meta text-muted-foreground">A pair below 4.5:1 is a warning: the kit still publishes, but its text is hard to read across a room.</p>
     </div>
   );
 }
@@ -209,7 +209,7 @@ export function FontField({
       </label>
       <span
         aria-hidden
-        className={cn('text-[26px] leading-tight', role === 'display' ? 'font-extrabold' : 'font-normal')}
+        className={cn('text-2xl leading-tight', role === 'display' ? 'font-extrabold' : 'font-normal')}
         style={{ fontFamily: fontStack(value) }}
       >
         {SAMPLE[role]}
@@ -313,7 +313,7 @@ export function LogoFields({
           );
         })}
       </div>
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
         An SVG or PNG from the library. Templates show the dark one on dark grounds, and the light one, if you add it, on light grounds.
       </p>
       <AssetPicker

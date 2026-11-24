@@ -138,7 +138,7 @@ export function WeekView({
                       ))}
                       {current && (
                         <div aria-hidden className="absolute inset-x-0 h-0.5 bg-foreground" style={{ top: `${(into / 60) * 100}%` }}>
-                          <span className="absolute -top-2 right-0.5 rounded bg-foreground px-1 text-[10px] font-semibold leading-4 text-background">Now</span>
+                          <span className="absolute -top-2 right-0.5 rounded bg-foreground px-1 text-2xs font-semibold leading-4 text-background">Now</span>
                         </div>
                       )}
                       <span className={cn('relative block truncate px-1.5 py-1.5 leading-4', !starts.length && 'sr-only')}>

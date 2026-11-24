@@ -84,6 +84,7 @@ export const screenOutput = z.object({
           name: z.string(),
           kind: z.enum(['template', 'image', 'video', 'url']),
           template: z.string().nullable(),
+          templateName: z.string().nullable().describe("The template's name, as people see it; null for a spot that is not a template"),
           image: z.string().nullable().describe('SHA-256 of an image the spot shows, for a thumbnail (GET /api/blobs/v2/:sha256)'),
         })
         .nullable()

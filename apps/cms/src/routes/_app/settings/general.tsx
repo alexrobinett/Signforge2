@@ -113,7 +113,7 @@ function GeneralSettings() {
                   </option>
                 ))}
               </NativeSelect>
-              <p id={`${id}-locale-help`} className="text-[13px] text-muted-foreground">
+              <p id={`${id}-locale-help`} className="text-meta text-muted-foreground">
                 Templates format dates, times and prices with it.
               </p>
             </div>

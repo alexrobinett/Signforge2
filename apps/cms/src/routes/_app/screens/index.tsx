@@ -28,6 +28,7 @@ import { LatestPublish } from '~/components/publishes/latest-publish';
 import { PairScreenForm } from '~/components/screens/pair-screen-form';
 import { NotCurrent } from '~/components/screens/not-current';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
+import { Badge } from '~/components/ui/badge';
 import { KIND_WORD, ScreenStatus } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
@@ -224,7 +225,7 @@ function Summary({ screens }: { screens: ScreenView[] }) {
   const parts = summarise(screens).split(' · ');
   const needs = parts.at(-1)?.endsWith(' you') ? parts.pop() : undefined;
   return (
-    <p role="status" className="-mt-4 text-[15px] text-muted-foreground">
+    <p role="status" className="-mt-4 text-md text-muted-foreground">
       {parts.join(' · ')}
       {needs && (
         <>
@@ -277,13 +278,13 @@ function NeedsAttention({ groups, screens, onPick }: { groups: GroupView[]; scre
                 onClick={() => onPick(g.id)}
                 className="flex min-h-10 w-full flex-col gap-1 rounded-xl border bg-card px-3.5 py-2 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:px-4 sm:py-3"
               >
-                <span className="flex items-baseline gap-2 text-[15px] whitespace-nowrap">
+                <span className="flex items-baseline gap-2 text-md whitespace-nowrap">
                   <strong className="font-semibold">{g.name}</strong>
                   <span className="font-medium text-status-needs-you-foreground">
                     {needs.length} {needs.length === 1 ? 'needs' : 'need'} you
                   </span>
                 </span>
-                <span className="hidden truncate text-[13px] text-muted-foreground sm:block">{needs.map((s) => s.name).join(', ')}</span>
+                <span className="hidden truncate text-meta text-muted-foreground sm:block">{needs.map((s) => s.name).join(', ')}</span>
               </button>
             </EditorFields>
           </li>
@@ -307,7 +308,6 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-4">
       {screens.map((s) => {
         const d = describeScreen(s, now);
-        const v = versionText(s);
         const where = groupsOf
           .get(s.id)
           ?.map((g) => g.name)
@@ -317,9 +317,9 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
             <div className="relative">
               <ScreenThumb screen={s} />
               <ScreenStatus screen={s} now={now} className="absolute top-2.5 left-2.5" />
-              <span className="absolute right-2.5 bottom-2.5 rounded-md bg-black/80 px-1.5 py-0.5 font-mono text-[11px] text-white">
+              <Badge variant="stage" className="absolute top-2.5 right-2.5 font-mono text-2xs">
                 {s.orientation === 'portrait' ? '9:16' : '16:9'}
-              </span>
+              </Badge>
             </div>
             <div className="flex flex-col gap-1.5 px-4 pt-3.5 pb-4">
               <div className="flex items-baseline justify-between gap-2">
@@ -330,16 +330,9 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 >
                   {s.name}
                 </Link>
-                {s.desiredManifestId && (
-                  <span
-                    className={cn('font-mono text-xs tabular-nums', v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground')}
-                    title="Version (manifest id)"
-                  >
-                    {v.text}
-                  </span>
-                )}
+                {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
-              <p className="text-[13px] text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
+              <p className="text-meta text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
             </div>
           </li>
         );
@@ -550,7 +543,7 @@ function ScreenTable({
                       <Link to="/screens/$screenId" params={{ screenId: s.id }} className="hover:underline">
                         {s.name}
                       </Link>
-                      <div className="text-[13px] font-normal text-muted-foreground">
+                      <div className="text-meta font-normal text-muted-foreground">
                         {s.kind === 'browser' && 'Test screen · '}
                         {groupsOf
                           .get(s.id)
@@ -565,14 +558,14 @@ function ScreenTable({
                     <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
                     <td
                       className={cn(
-                        'px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap tabular-nums',
+                        'px-3 py-1.5 text-right font-mono text-meta whitespace-nowrap tabular-nums',
                         v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground',
                       )}
                     >
                       {v.text}
                     </td>
                     <td
-                      className="px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
+                      className="px-3 py-1.5 text-right font-mono text-meta whitespace-nowrap text-muted-foreground tabular-nums"
                       title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
                     >
                       {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
