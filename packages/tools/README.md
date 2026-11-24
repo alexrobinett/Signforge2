@@ -145,7 +145,7 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `remove_member` | org:manage | owner | `{ memberId }` | `{ removed }`; people only |
 | `list_agent_grants` | content:read | viewer | `{ limit?, cursor? }` | `{ grants: AgentGrant[], next }`, newest first; an owner's every grant, anyone else's own; people only |
 | `get_agent_grant` | content:read | viewer | `{ grantId }` | `{ grant }`; people only |
-| `update_agent_grant_scopes` | content:read | viewer | `{ grantId, scopes, ifVersion? }` | `{ grant }`; people only |
+| `update_agent_grant_scopes` | content:read | viewer | `{ grantId, scopes, ifVersion }` | `{ grant }`; people only; `ifVersion` required, so a set from a stale read cannot put back a scope taken away meanwhile (#328) |
 | `revoke_agent_grant` | content:read | viewer | `{ grantId }` | `{ revoked }`; people only |
 
 Details:

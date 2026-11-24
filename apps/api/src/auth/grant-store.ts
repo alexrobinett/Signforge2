@@ -2,7 +2,7 @@
  * Where agent grants are written and ended (./agent-grants.ts's `GrantDeps`), through packages/db's
  * scoped repository, each change with its audit row in one batch, the person as the actor.
  */
-import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped } from '@signforge/db';
+import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped, StaleVersionError } from '@signforge/db';
 import { effectiveScopes, grantOf, ROLES, type Role, shownClient } from '@signforge/tools';
 import type { GrantDeps } from './agent-grants';
 
@@ -26,6 +26,9 @@ const revoking = (org: Org, grant: NonNullable<Awaited<ReturnType<Org['agentGran
     detailJson: JSON.stringify(detail),
   }).writes,
 ];
+
+/** How many reads a membership's end revokes from, each after another change to one of its grants won (#328). */
+const REVOKE_ATTEMPTS = 3;
 
 export function grantStore(d1: D1Database): GrantDeps {
   return {
@@ -60,8 +63,19 @@ export function grantStore(d1: D1Database): GrantDeps {
     },
     revokeMember: async (orgId, userId, by) => {
       const org = scoped(d1, orgId);
-      const grants = await org.agentGrants.unrevokedFor(userId);
-      if (grants.length) await org.commit(grants.flatMap((g) => revoking(org, g, by, { reason: 'membership_ended', userId })));
+      // Each revoke holds its grant's version, so a grant changed or revoked between the read and the batch refuses the
+      // whole batch, and the rest would stay connected, alive again should the person rejoin (#328). Read again and
+      // revoke what is still connected: one revoked meanwhile is left out, one changed is read at its new version.
+      for (let attempt = 1; ; attempt++) {
+        const grants = await org.agentGrants.unrevokedFor(userId);
+        if (!grants.length) return;
+        try {
+          await org.commit(grants.flatMap((g) => revoking(org, g, by, { reason: 'membership_ended', userId })));
+          return;
+        } catch (err) {
+          if (!(err instanceof StaleVersionError) || attempt === REVOKE_ATTEMPTS) throw err;
+        }
+      }
     },
     offers: async (userId, requested) => {
       const orgs = await memberships(d1, userId);

@@ -6,9 +6,12 @@ import { scoped } from '@signforge/db';
 import { createExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { grantStore } from '../src/auth/grant-store';
+import { counted } from './counting';
 import { Client, email, nextIp, ORIGIN, testApp } from './client';
 import {
   type App,
+  agentToken,
   ALL_SCOPES,
   check,
   authorize,
@@ -390,6 +393,58 @@ describe('a membership ending', () => {
     await editor.ok('/api/auth/organization/leave', { organizationId: org.id });
     expect(await check(tokens.access_token)).toBeUndefined();
     expect(await scoped(env.DB, org.id).agentGrants.get(grantId)).toMatchObject({ revokedBy: editorId, revokedAt: expect.any(Number) });
+  });
+});
+
+describe('a membership ending while one of its grants changes (#328)', () => {
+  /** Two grants of the editor's, each with a live token. */
+  async function twoGrants() {
+    const { t, owner, ownerId, editor, editorId, org } = await team();
+    const tokens = [await agentToken(t, editor, org.id, ['content:read']), await agentToken(t, editor, org.id, ['content:read', 'content:draft'])];
+    const grantIds = await Promise.all(tokens.map(async ({ access_token }) => (await check(access_token))!.grantId));
+    return { owner, ownerId, editorId, org, tokens, grantIds };
+  }
+
+  it('revokes every grant though one was changed between the read and the batch, with one audit row each', async () => {
+    const { ownerId, editorId, org, tokens, grantIds } = await twoGrants();
+    const scope = scoped(env.DB, org.id);
+    // A scope change commits first: the first batch's revoke of that grant is at its old version.
+    const changed = counted(async () => {
+      const grant = (await scope.agentGrants.get(grantIds[0]!))!;
+      await scope.commit(scope.agentGrants.stage.update(grant, { scopesJson: JSON.stringify(['content:read', 'content:draft']) }, grant.rowVersion).writes);
+    });
+    await grantStore(changed.bindings.DB).revokeMember(org.id, editorId, ownerId);
+    // The first batch lost to the change; the second, from a fresh read, revoked both. Measured, as the most it may take:
+    // each attempt the member's connected grants, then one batch of each one's revoke (its token, refresh token, consent
+    // and code deletes) and audit row. A new statement fails this on purpose: look at the budget, then raise it.
+    expect(changed.result()).toEqual({ statements: 32, queries: 6, rpcs: [] });
+    for (const id of grantIds) expect(await scope.agentGrants.get(id)).toMatchObject({ revokedAt: expect.any(Number), revokedBy: ownerId });
+    for (const { access_token } of tokens) expect(await check(access_token)).toBeUndefined();
+    const audit = (await scope.auditLog.list({ limit: 50 })).filter((e) => e.action === 'revoke_agent_grant');
+    expect(audit.map((e) => e.targetId).toSorted()).toEqual([...grantIds].sort());
+  });
+
+  it('revokes them in one read and one batch when nothing changes meanwhile', async () => {
+    const { ownerId, editorId, org, grantIds } = await twoGrants();
+    const quiet = counted();
+    await grantStore(quiet.bindings.DB).revokeMember(org.id, editorId, ownerId);
+    for (const id of grantIds) expect(await scoped(env.DB, org.id).agentGrants.get(id)).toMatchObject({ revokedAt: expect.any(Number) });
+    // Seven statements a grant in the one batch (the guard and revoke, four deletes, the audit row) and the read: two queries
+    // however many grants. A change meanwhile costs a few queries more (above), at most three reads in all.
+    expect(quiet.result()).toEqual({ statements: 15, queries: 2, rpcs: [] });
+  });
+
+  it('leaves out a grant revoked meanwhile, and revokes the rest', async () => {
+    const { owner, ownerId, editorId, org, tokens, grantIds } = await twoGrants();
+    const scope = scoped(env.DB, org.id);
+    const revokedFirst = counted(() => owner.ok('/api/tools/revoke_agent_grant', { grantId: grantIds[0] }));
+    await grantStore(revokedFirst.bindings.DB).revokeMember(org.id, editorId, ownerId);
+    expect(revokedFirst.result()).toEqual({ statements: 25, queries: 6, rpcs: [] });
+    expect(await scope.agentGrants.get(grantIds[1]!)).toMatchObject({ revokedAt: expect.any(Number), revokedBy: ownerId });
+    for (const { access_token } of tokens) expect(await check(access_token)).toBeUndefined();
+    // The one the owner revoked keeps its own row; no second.
+    const audit = (await scope.auditLog.list({ limit: 50 })).filter((e) => e.action === 'revoke_agent_grant');
+    expect(audit.map((e) => e.targetId).toSorted()).toEqual([...grantIds].sort());
   });
 });
 
