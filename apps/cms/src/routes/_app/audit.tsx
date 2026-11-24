@@ -204,7 +204,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
   const detail = detailText(e);
   return (
     <tr className={cn('border-t align-top', e.detail.refused !== undefined && 'bg-accent/50')}>
-      <td className="px-3 py-2 font-mono text-meta whitespace-nowrap text-muted-foreground">
+      <td className="px-3 py-2 text-meta whitespace-nowrap text-muted-foreground tabular-nums">
         <time dateTime={new Date(e.at).toISOString()}>{time}</time>
       </td>
       <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>

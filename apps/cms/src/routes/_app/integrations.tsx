@@ -256,7 +256,9 @@ function ConnectorRow({
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
           {kind && mine.length > 0 && (
-            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(kind, mine)}</span>
+            <span className={cn('text-sm tabular-nums', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>
+              {connectedWords(kind, mine)}
+            </span>
           )}
           {kind && action && (
             <Button
@@ -349,7 +351,7 @@ function FeedingNow({
                 <dt className="min-w-0 break-words">
                   {KIND_WORD[s.format]} · {s.name}
                 </dt>
-                <dd className={cn('m-0 font-mono text-meta', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+                <dd className={cn('m-0 text-meta tabular-nums', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                   {state.word}
                 </dd>
               </div>

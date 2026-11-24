@@ -239,7 +239,7 @@ function PlaylistEditor() {
                         )}
                       >
                         {canManage && <GripVerticalIcon className="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden />}
-                        <span className="w-6 shrink-0 text-right font-mono text-xs text-muted-foreground">{i + 1}</span>
+                        <span className="w-6 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{name}</span>
                           <span className="block truncate text-sm text-muted-foreground">
@@ -345,7 +345,7 @@ function PlaylistEditor() {
                         onChange={(e) =>
                           change({ transition: { type: t.type, ms: Number.isNaN(e.target.valueAsNumber) ? 0 : Math.round(e.target.valueAsNumber * 1000) } })
                         }
-                        className="w-24 text-center font-mono"
+                        className="w-24 text-center tabular-nums"
                         aria-invalid={msBad || undefined}
                         aria-describedby="playlist-transition-help"
                       />

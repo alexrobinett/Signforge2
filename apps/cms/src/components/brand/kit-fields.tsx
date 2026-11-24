@@ -152,7 +152,7 @@ export function ColourFields({
                   return (
                     <p key={p.label} className="col-start-2 col-end-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
                       <span>{p.label}</span>
-                      <span className={cn('font-mono font-semibold', p.verdict === 'Pass' ? 'text-status-online-foreground' : 'text-destructive')}>
+                      <span className={cn('font-semibold tabular-nums', p.verdict === 'Pass' ? 'text-status-online-foreground' : 'text-destructive')}>
                         {p.ratio} {p.verdict}
                       </span>
                       {fix && !disabled && (

@@ -91,7 +91,7 @@ export function TakeoverDialog({
             <label htmlFor={`${id}-until`} className="text-sm font-medium">
               Until
             </label>
-            <Input id={`${id}-until`} type="datetime-local" value={d.until} onChange={(e) => edit({ until: e.target.value })} className="w-60 font-mono" />
+            <Input id={`${id}-until`} type="datetime-local" value={d.until} onChange={(e) => edit({ until: e.target.value })} className="w-60 tabular-nums" />
             <p className="text-xs text-muted-foreground">In your time zone. At most 24 hours from now.</p>
           </div>
           <FirstDefaultChoice playlists={playlists} value={firstDefaultOf(d)} onChange={(firstDefault) => edit({ firstDefault })} action="Taking over" />

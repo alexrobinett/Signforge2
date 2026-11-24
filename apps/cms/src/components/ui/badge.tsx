@@ -6,7 +6,8 @@ import { cn } from '~/lib/utils';
  * A short word on a tint (#372): a screen's state, the agent's marks, a caution, or a plain fact in
  * an outline. Every pill in the CMS is this; each tint's word is 4.5:1 on it (test/tokens.test.ts).
  */
-const badgeVariants = cva('inline-flex items-center gap-1.5 rounded-full whitespace-nowrap', {
+// Tabular figures: a state's minutes and a count change as they are polled, and should not jiggle (#375).
+const badgeVariants = cva('inline-flex items-center gap-1.5 rounded-full whitespace-nowrap tabular-nums', {
   variants: {
     variant: {
       online: 'bg-status-online-muted text-status-online-foreground',

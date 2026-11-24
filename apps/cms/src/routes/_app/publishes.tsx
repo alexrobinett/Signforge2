@@ -75,7 +75,7 @@ function PublishesPage() {
             {publish.restoresRevision === null ? `Rollout of ${v}` : publishTitle(publish)}
           </h2>
           <p className="text-sm text-muted-foreground">
-            <strong className="font-mono text-base font-semibold text-foreground">{done}</strong> of {screens.length} playing it
+            <strong className="text-base font-semibold text-foreground tabular-nums">{done}</strong> of {screens.length} playing it
             {rolloutComplete(publish) ? ' · complete' : ''}
           </p>
         </div>
@@ -114,7 +114,7 @@ function PublishesPage() {
                 <span aria-hidden className="h-2 w-32 overflow-hidden rounded-full bg-muted">
                   <span className={cn('block h-full', movedOn ? 'bg-border-strong' : 'bg-chart-1')} style={{ width: `${share}%` }} />
                 </span>
-                <span className="w-40 font-mono text-sm text-muted-foreground">{standing(p)}</span>
+                <span className="w-40 text-sm text-muted-foreground tabular-nums">{standing(p)}</span>
                 {canPublish && (
                   <span className="flex w-40 justify-end">
                     {p.id !== latest?.id && (

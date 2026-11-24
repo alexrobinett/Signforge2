@@ -270,7 +270,7 @@ function ScreenPage() {
               <ol className="text-md">
                 {events.map((e) => (
                   <li key={`${e.at}-${e.action}-${e.actor.id}`} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 border-t py-2 first:border-t-0">
-                    <span className="font-mono text-meta text-muted-foreground" title={new Date(e.at).toLocaleString()}>
+                    <span className="text-meta text-muted-foreground tabular-nums" title={new Date(e.at).toLocaleString()}>
                       {ago(now - e.at)} ago
                     </span>
                     <span className="wrap-anywhere">
@@ -309,7 +309,7 @@ function ScreenPage() {
               <ul className="text-sm text-muted-foreground">
                 {screen.displayHours.exceptions.map((e) => (
                   <li key={e.date}>
-                    <span className="font-mono">{e.date}</span>: {e.on.length ? e.on.map((w) => `${w.from}–${w.to}`).join(', ') : 'off all day'}
+                    <span className="tabular-nums">{e.date}</span>: {e.on.length ? e.on.map((w) => `${w.from}–${w.to}`).join(', ') : 'off all day'}
                   </li>
                 ))}
               </ul>

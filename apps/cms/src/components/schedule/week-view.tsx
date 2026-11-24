@@ -102,7 +102,7 @@ export function WeekView({
           <tbody>
             {HOURS.map((hour) => (
               <tr key={hour}>
-                <th scope="row" className="p-1.5 text-left font-mono font-normal text-muted-foreground">
+                <th scope="row" className="p-1.5 text-left font-normal text-muted-foreground tabular-nums">
                   {String(hour).padStart(2, '0')}:00
                 </th>
                 {week.map((d) => {
