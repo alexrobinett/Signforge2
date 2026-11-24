@@ -137,6 +137,7 @@ It opens with no motion (docs/research/cms-ux.md). State is the `commandMenu` sl
   - App and flow state goes in the app store (next section). `useReducer` is allowed only for state that belongs to one component and never leaves it, as a small typed reducer.
   - Work caused by an event goes in the event handler or a store action.
   - DOM work such as focus goes in a ref callback. Make it a stable function (see `focusOnMount` in `routes/sign-in.tsx`): an inline one runs on every render.
+  - When a control gives way to another (Remove to its confirmation, and back on Keep it, or to the form that replaces what was removed), the action names what takes focus next and that element's ref callback takes it as it mounts: `focusWhenReplaced(key)` in the settings slice, one stable callback a key (#289). It is named with its org and page and taken only there, once an action is under way (a press refused as another runs names nothing), and forgotten on an org switch; Escape on a confirmation is Keep it.
   - A value that follows from props, loader data or the store is derived during render, not kept in sync.
   - Outside state, such as storage or a media query, is read with `useSyncExternalStore` or kept in the store, which subscribes once (see `connectUi` in `state/ui.ts`).
   - The ban needs named imports (`import { useId } from 'react'`); a namespace import of React is reported too.
