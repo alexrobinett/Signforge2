@@ -31,7 +31,7 @@ const TAKEOVER_MAX_MS = 24 * 3_600_000;
 /** A takeover's priority: above every schedule entry's (at most 99). */
 const TAKEOVER_PRIORITY = 100;
 
-export const aim = {
+const aim = {
   target: scheduleTarget,
   groupId: id('group').optional().describe('For a group entry: the group'),
   screenId: id('screen').optional().describe('For a screen entry: the screen'),

@@ -161,7 +161,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           return dryRun(samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })));
         });
       } catch (err) {
-        if (err instanceof ToolError) throw new CardProblem(err.message);
+        if (err instanceof ToolError) throw new CardProblem(err.message, { cause: err });
         throw err;
       }
       const reach = dry.screens.filter((x) => x.manifest && x.manifest.id !== x.current).length;
