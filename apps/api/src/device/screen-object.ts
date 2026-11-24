@@ -40,6 +40,12 @@ const PONG = 'pong';
 const CLOSE_REVOKED = 4001;
 
 export class ScreenObject extends DurableObject<Env> {
+  /**
+   * The socket messages taken so far, handled one at a time. The runtime delivers a message while an
+   * earlier one awaits D1, so without this two reports without a time could land in either order (gh-177).
+   */
+  private handling: Promise<void> = Promise.resolve();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));
@@ -73,7 +79,14 @@ export class ScreenObject extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets(credentialId)) closeRevoked(ws);
   }
 
-  override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+  override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const handled = this.handling.then(() => this.handleMessage(ws, message));
+    // A message that failed still lets the next one through; the runtime sees its error.
+    this.handling = handled.catch(() => {});
+    return handled;
+  }
+
+  private async handleMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') return;
     let msg: unknown;
     try {
