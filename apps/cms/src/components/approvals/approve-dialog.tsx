@@ -37,6 +37,12 @@ export function ApproveDialog({ item, orgId }: { item: ApprovalItem; orgId: stri
                 ))}
               </ul>
               <p>Screens: {reachWords(check)}.</p>
+              {check.madeDefault && (
+                <p className="font-medium text-foreground">
+                  Makes <bdi className="[overflow-wrap:anywhere]">{check.madeDefault.name}</bdi> the default playlist: every screen plays it when nothing is
+                  scheduled.
+                </p>
+              )}
               {samples.length > 0 && (
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">Still showing their template's sample text, which approving publishes anyway:</p>

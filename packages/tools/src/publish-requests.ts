@@ -18,7 +18,7 @@
  * same however many members there are. The same pins asked again while the first waits get the
  * first request; an asker has at most `MAX_PENDING` waiting.
  */
-import { contentJson, type OrgScope, type PublishRequestRow } from '@signforge/db';
+import { brandStateOf, contentJson, type OrgScope, published, type PublishRequestRow } from '@signforge/db';
 import { z } from 'zod';
 import { grantClient } from './agent-grants';
 import { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
@@ -27,7 +27,8 @@ import { AUDIENCE_ROLES, draftPin, outputs, type PublishRequestView } from './ou
 import { keysetPage, pageInput } from './paging';
 import { sha256Hex } from './dispatch';
 import { peopleAllowSample, runPublish, sampleAcks } from './publish';
-import { type DraftPin, dryPublish } from './publishing';
+import { type DraftPin, dryPublish, loadOrg, type OrgGraph } from './publishing';
+import { ended } from './schedule';
 import { orgSettings } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
 
@@ -73,8 +74,8 @@ const view = (row: PublishRequestRow, now: number, names: Names): PublishRequest
     id: row.requestedBy,
     clientId: row.clientId,
     ...(row.requestedByKind === 'agent'
-      ? (names.agents.get(row.requestedBy) ?? { name: null, connectedBy: null })
-      : { name: names.members.get(row.requestedBy) || null, connectedBy: null }),
+      ? { ...(names.agents.get(row.requestedBy) ?? { name: null, connectedBy: null }), gone: !names.agents.has(row.requestedBy) }
+      : { name: names.members.get(row.requestedBy) || null, connectedBy: null, gone: !names.members.has(row.requestedBy) }),
   },
   drafts: pinsOf(row),
   reason: row.reason,
@@ -292,6 +293,15 @@ const approvePublishRequest = defineTool({
       .describe(
         "The spots a sample_text refusal named, { spotId, version, fields } as named: publish them with their template's sample text anyway, once you have seen them",
       ),
+    ifScreens: z
+      .array(id('screen'))
+      .max(5000)
+      .optional()
+      .describe("check_publish_request's screens, by id: approve only if it switches exactly these. Refused with a conflict, details { screens }, otherwise"),
+    ifDefault: id('playlist')
+      .nullable()
+      .optional()
+      .describe("check_publish_request's defaultPlaylistId: approve only while it is the default (null: while there is none). Refused with a conflict otherwise"),
   }),
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },
@@ -306,7 +316,14 @@ const approvePublishRequest = defineTool({
     const { org, actor, input, write } = ctx;
     const row = await pending(org, input.publishRequestId, Date.now());
     const pins = pinsOf(row);
-    const published = await runPublish(ctx, pins, [], { exact: true, brand: row.brandState }, peopleAllowSample(ctx));
+    // Held, to the commit, to what the person was shown (#115 review): the screens it switches and the default, beside the brand kits.
+    const published = await runPublish(
+      ctx,
+      pins,
+      [],
+      { exact: true, brand: row.brandState, ifDefault: input.ifDefault, screens: input.ifScreens },
+      peopleAllowSample(ctx),
+    );
     // All or nothing: a pin held by its checks publishes none of them (the batch is not committed).
     const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
     const held = published.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));
@@ -346,6 +363,17 @@ const declinePublishRequest = defineTool({
   },
 });
 
+/** Why a declined request cannot wait again: its asker asked for the same drafts since, or has `MAX_PENDING` waiting. */
+async function reopenRefusal(org: OrgScope, row: PublishRequestRow, now: number): Promise<ToolError | undefined> {
+  const waiting = (await org.publishRequests.pendingBy(row.requestedBy, now)).filter((r) => r.id !== row.id);
+  const same = waiting.find((r) => r.draftsJson === row.draftsJson);
+  if (same)
+    return new ToolError('conflict', `the same drafts were asked for again since it was declined: request ${same.id} is waiting`, { requestId: same.id });
+  if (waiting.length >= MAX_PENDING)
+    return new ToolError('conflict', `whoever asked has ${MAX_PENDING} requests waiting already, the most that may wait`, { pending: waiting.length });
+  return undefined;
+}
+
 const reopenPublishRequest = defineTool({
   name: 'reopen_publish_request',
   description:
@@ -367,10 +395,30 @@ const reopenPublishRequest = defineTool({
     // Past its expiry it could not be decided again: said so, whatever it was.
     const status = row.expiresAt <= now ? 'expired' : statusOf(row, now);
     if (status !== 'declined') throw new ToolError('conflict', `publish request ${row.id} is ${status}`, { status });
-    if (row.decidedBy !== actor.id && !approves(role, (await orgSettings(org)).editorsPublish))
-      throw new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back');
-    const reopened = write(org.publishRequests.stage.reopen(row, now));
+    if (row.decidedBy !== actor.id) {
+      if (!approves(role, (await orgSettings(org)).editorsPublish))
+        throw new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back');
+      // Its scope is content:draft, so the dispatcher holds no right to publish to the commit: held here, as an approval's is.
+      write(org.members.stage.stillMay(actor.id, ['editor', 'owner'], true));
+    }
+    // As asking again would be refused: the same drafts asked for since, or the asker at its cap. Held to the commit by the batch too.
+    const refused = await reopenRefusal(org, row, now);
+    if (refused) throw refused;
+    const reopened = write(org.publishRequests.stage.reopen(row, now, MAX_PENDING));
     return { request: view(reopened, now, await namesOf(org, [reopened])) };
+  },  // Its batch refused as it ran: asked again, or decided, or the right to decide it lost, meanwhile.
+  refuseFailedCommit: async ({ org, input, actor }) => {
+    const now = Date.now();
+    const row = await org.publishRequests.get(input.publishRequestId);
+    if (!row) return notFound('publish request', input.publishRequestId);
+    if (row.status !== 'declined' || row.expiresAt <= now)
+      return new ToolError('conflict', `publish request ${row.id} is ${row.expiresAt <= now ? 'expired' : statusOf(row, now)}`, { status: statusOf(row, now) });
+    const refused = await reopenRefusal(org, row, now);
+    if (refused) return refused;
+    const role = await org.members.roleOf(actor.id);
+    return row.decidedBy !== actor.id && !approves(role ?? '', (await orgSettings(org)).editorsPublish)
+      ? new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back')
+      : undefined;
   },
 });
 
@@ -394,10 +442,28 @@ function changedFields(draft: Record<string, unknown>, live: Record<string, unkn
   return [...fields].sort();
 }
 
+/**
+ * How many screens play the spot now: those whose published schedule (an entry for every screen, their
+ * group or them, not ended) or published default plays a published playlist with the spot in it.
+ */
+function screensPlaying(graph: OrgGraph, spotId: string, now: number): number {
+  const playing = new Set(graph.playlists.filter((p) => published(p)?.items.includes(spotId)).map((p) => p.id));
+  const entries = graph.entries.flatMap((e) => {
+    const live = published(e);
+    return live && !ended(live, now) && playing.has(live.playlistId) ? [live] : [];
+  });
+  const defaultPlays = graph.defaultPlaylist !== null && playing.has(graph.defaultPlaylist);
+  return graph.screens.filter(
+    (s) =>
+      defaultPlays ||
+      entries.some((e) => e.target === 'org' || (e.target === 'screen' && e.screenId === s.id) || (e.target === 'group' && (graph.groupsOf.get(s.id) ?? []).includes(e.groupId ?? ''))),
+  ).length;
+}
+
 const checkPublishRequest = defineTool({
   name: 'check_publish_request',
   description:
-    "What approving a publish request would do now, writing nothing: the screens it would switch, by name; the pinned drafts that fail their checks; the pinned spots still holding their template's sample text, as approve_publish_request's allowSample takes them; what each pinned draft changes; and why approving it would be refused now, if it would (not pending, a pin changed since, the brand kits changed since it was asked, a draft held). Returns { request, refused, screens, held, samples, changes }.",
+    "What approving a publish request would do now, writing nothing: the screens it would switch, by name, and the default (pass both back to approve_publish_request as ifScreens and ifDefault); the playlist it would make the default, if any; how many screens play each pinned spot now; the pinned drafts that fail their checks; the pinned spots still holding their template's sample text, as approve_publish_request's allowSample takes them; what each pinned draft changes; and why approving it would be refused now, if it would (not pending, a pin changed since, the brand kits changed since it was asked, a draft held). Returns { request, refused, screens, defaultPlaylistId, madeDefault, liveOn, held, samples, changes }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -410,37 +476,37 @@ const checkPublishRequest = defineTool({
     if (!row) throw notFound('publish request', input.publishRequestId);
     const request = view(row, now, await namesOf(org, [row]));
     const pins = pinsOf(row);
-    const [spots, playlists, entries] = await Promise.all([org.spots.list(), org.playlists.list(), org.scheduleEntries.list()]);
-    const changes = await Promise.all(
-      pins.map(async (p) => {
-        const draft =
-          p.kind === 'spot'
-            ? spots.find((x) => x.id === p.id)
-            : p.kind === 'playlist'
-              ? playlists.find((x) => x.id === p.id)
-              : entries.find((x) => x.id === p.id);
-        const items = p.kind === 'playlist' ? await org.playlists.items(p.id) : undefined;
-        // Both as `published_json` holds content (`contentJson`): the draft's now, and the published one's.
-        const now: Record<string, unknown> | undefined = draft && JSON.parse(contentJson(draft, items));
-        const was: Record<string, unknown> | undefined = draft?.publishedJson ? JSON.parse(draft.publishedJson) : undefined;
-        return {
-          kind: p.kind,
-          id: p.id,
-          name: draft && 'name' in draft ? draft.name : p.id,
-          fresh: !was,
-          fields: now && was ? changedFields(now, was) : [],
-        };
-      }),
-    );
-    const empty = { request, screens: [], held: [], samples: [], changes };
+    // The org read once (`loadOrg`), for what each pin changes, the screens its spots play on now and the dry run alike.
+    const graph = await loadOrg(org);
+    const changes = pins.map((p) => {
+      const draft =
+        p.kind === 'spot'
+          ? graph.spots.find((x) => x.id === p.id)
+          : p.kind === 'playlist'
+            ? graph.playlists.find((x) => x.id === p.id)
+            : graph.entries.find((x) => x.id === p.id);
+      const items = p.kind === 'playlist' ? (graph.items.get(p.id) ?? []) : undefined;
+      // Both as `published_json` holds content (`contentJson`): the draft's now, and the published one's.
+      const drafted: Record<string, unknown> | undefined = draft && JSON.parse(contentJson(draft, items));
+      const was: Record<string, unknown> | undefined = draft?.publishedJson ? JSON.parse(draft.publishedJson) : undefined;
+      return {
+        kind: p.kind,
+        id: p.id,
+        name: draft && 'name' in draft ? draft.name : p.id,
+        fresh: !was,
+        fields: drafted && was ? changedFields(drafted, was) : [],
+      };
+    });
+    const liveOn = pins.filter((p) => p.kind === 'spot').map((p) => ({ spotId: p.id, screens: screensPlaying(graph, p.id, now) }));
+    const empty = { request, screens: [], defaultPlaylistId: graph.defaultPlaylist, madeDefault: null, held: [], samples: [], changes, liveOn };
     const refusal = (err: ToolError) => ({ ...empty, refused: { error: err.code, message: err.message } });
     if (request.status !== 'pending') return refusal(new ToolError('conflict', `publish request ${row.id} is ${request.status}`));
-    if ((await org.brandKits.state()) !== row.brandState)
+    if (brandStateOf([...graph.brandKits.values()], graph.brandAssignments) !== row.brandState)
       return refusal(new ToolError('conflict', 'the brand kits have changed since it was asked for, and would go live with it'));
     // Worked out as approving would publish it (`exact`), writing nothing; sample text named, then acknowledged, as the approval would take it.
     let dry: Awaited<ReturnType<typeof dryPublish>>;
     try {
-      dry = await dryPublish(org, { hash: sha256Hex, now: new Date(now) }, pins, true);
+      dry = await dryPublish(org, { hash: sha256Hex, now: new Date(now) }, pins, true, graph);
     } catch (err) {
       if (err instanceof ToolError) return refusal(err);
       throw err;
@@ -455,9 +521,12 @@ const checkPublishRequest = defineTool({
       screens: result.screens.flatMap((x) =>
         x.manifest && x.manifest.id !== x.current ? [{ id: x.screenId, name: names.get(x.screenId) ?? x.screenId }] : [],
       ),
+      defaultPlaylistId: result.read.defaultPlaylist,
+      madeDefault: result.madeDefault,
       held,
       samples: samples.map((x) => ({ spotId: x.id, name: x.name, version: x.version, fields: x.fields })),
       changes,
+      liveOn,
     };
   },
 });

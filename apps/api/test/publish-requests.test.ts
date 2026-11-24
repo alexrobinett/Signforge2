@@ -230,6 +230,46 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
   });
 
+  it('checks a request of 16 playlists and a spot still holding sample text, and puts a declined one back, within it (review of #409)', async () => {
+    const t = await team();
+    const { token, spotId, version } = await agentEdited(t);
+    await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+      .bind(JSON.stringify({ texts: ['headline'], lists: {} }), spotId)
+      .run();
+    const scope = testScope(env.DB, t.org.id);
+    for (const name of ['Door', 'Till', 'Lobby']) await scope.screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
+    const pins = [{ kind: 'spot', id: spotId, version }];
+    for (let i = 0; i < 16; i++) {
+      const p = await scope.playlists.insert({ name: `P${i}`, transitionJson: JSON.stringify({ type: 'cut' }) });
+      await scope.playlists.setItems(p.id, [spotId]);
+      pins.push({ kind: 'playlist', id: p.id, version: (await scope.playlists.get(p.id))!.rowVersion });
+    }
+    const requestId: string = (await mcpTool(token, 'request_publish', { drafts: pins, reason: 'Sixteen menus' })).structuredContent.request.id;
+    const measure = async (run: (bindings: Env) => Promise<unknown>) => {
+      const { result, bindings } = counted();
+      await run(bindings);
+      return result();
+    };
+    const owner = (b: Env) => {
+      const c = new Client(t.owner.t, t.owner.ip, b);
+      for (const [k, v] of t.owner.jar) c.jar.set(k, v);
+      return c;
+    };
+    let seen: { samples: unknown[]; refused: unknown } | undefined;
+    const checking = await measure(async (b) => {
+      seen = await owner(b).ok('/api/tools/check_publish_request', { publishRequestId: requestId });
+    });
+    expect(seen).toMatchObject({ refused: null, samples: [{ spotId, version, fields: ['headline'] }] });
+    await t.owner.ok('/api/tools/decline_publish_request', { publishRequestId: requestId });
+    const reopening = await measure((b) => owner(b).ok('/api/tools/reopen_publish_request', { publishRequestId: requestId }));
+    // The org read once for the check and both of its dry runs, the second acknowledging the sample text; every
+    // playlist's items in that one read, however many are pinned. Reopening reads the request, the asker's waiting
+    // ones and the names, and writes the request and its audit row with their guards in one batch.
+    expect(checking).toEqual({ statements: 18, queries: 18, rpcs: [] });
+    expect(reopening).toEqual({ statements: 9, queries: 7, rpcs: [] });
+    for (const path of [checking, reopening]) expect(path.queries).toBeLessThan(50);
+  });
+
   it('refuses an approval of 40 pins, one edited just before its batch, within the budget', async () => {
     const t = await team();
     const org = testScope(env.DB, t.org.id);

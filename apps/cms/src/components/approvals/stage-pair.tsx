@@ -72,7 +72,11 @@ export function StagePair({ requestId, orgId, stage, screens }: { requestId: str
         )}
       </figure>
       <figure className="m-0 flex min-w-0 flex-col gap-2">
-        <figcaption className="text-meta font-semibold">After approval · Draft {after.version}</figcaption>
+        <figcaption className="text-meta font-semibold">
+          {after.version === stage.pinned
+            ? `After approval · Draft ${after.version}`
+            : `Draft ${after.version} · changed since it was asked for (Draft ${stage.pinned})`}
+        </figcaption>
         <Player stageKey={`${key}:after`} orgId={orgId} spot={after} label={`${after.name} as approving would publish it`} after />
       </figure>
     </div>

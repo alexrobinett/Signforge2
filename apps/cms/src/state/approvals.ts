@@ -26,8 +26,11 @@ interface ApprovalStageTarget {
 }
 
 interface ApprovalsState {
-  /** The request whose Approve was pressed: its confirmation is open. */
-  confirming: string | null;
+  /**
+   * The request whose Approve was pressed, as its confirmation shows it: frozen when pressed, so a read of
+   * the queue meanwhile cannot change what the button approves (review of #409).
+   */
+  confirming: ApprovalItem | null;
   /** The request a decision (or its Undo) is on its way for. */
   deciding: string | null;
   /** Each stage's player, by its key: playing, or why not. */
@@ -38,9 +41,12 @@ interface ApprovalsState {
 
 export interface ApprovalsSlice {
   approvals: ApprovalsState;
-  askApprove: (requestId: string) => void;
+  askApprove: (item: ApprovalItem) => void;
   cancelApprove: () => void;
-  /** Approves what the confirmation showed: the request's pins, with its sample text acknowledged exactly as checked. */
+  /**
+   * Approves what the confirmation showed: the request's pins, with its sample text acknowledged exactly as
+   * checked, held to the screens it switches and the default as checked (`ifScreens`, `ifDefault`).
+   */
   approveRequest: (orgId: string, item: ApprovalItem) => Promise<void>;
   declineRequest: (orgId: string, requestId: string) => Promise<void>;
   /** A decline's Undo: the request waits again. */
@@ -115,6 +121,9 @@ export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get, { q
       try {
         const out = await callTool('approve_publish_request', {
           publishRequestId: request.id,
+          // What the person was shown: refused if the screens it switches or the default changed since.
+          ifScreens: check.screens.map((x) => x.id),
+          ifDefault: check.defaultPlaylistId,
           // Exactly the sample text the confirmation listed, or none: any other is refused (#392).
           ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.spotId, version: x.version, fields: x.fields })) } : {}),
         });

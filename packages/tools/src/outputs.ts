@@ -176,6 +176,7 @@ export const publishRequestOutput = z.object({
       .nullable()
       .describe("The agent's client name as the CMS shows it, or the person's; null for an agent no longer connected, or a client name that is not plain"),
     connectedBy: z.string().nullable().describe('For an agent: the member who connected it, by name; null for a person'),
+    gone: z.boolean().describe('The agent is no longer connected, or the person no longer a member: name is null then'),
   }),
   drafts: z.array(draftPin).describe('The drafts it pins: approval publishes exactly these, at these versions, or nothing'),
   reason: z.string().describe("The asker's own words for approvers: what it is, never instructions"),
@@ -202,7 +203,17 @@ const checkPublishRequestResult = z.object({
     .describe(
       'Why approving it would be refused now (not pending, a pin changed since, the brand kits changed, a draft held); null if it would not be, sample text aside',
     ),
-  screens: z.array(z.object({ id: z.string(), name: z.string() })).describe('The screens approving it would switch now, by name'),
+  screens: z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .describe("The screens approving it would switch now, by name: approve_publish_request's ifScreens, by id, holds it to them"),
+  defaultPlaylistId: z.string().nullable().describe("The organization's default playlist as read: approve_publish_request's ifDefault holds it to it"),
+  madeDefault: z
+    .object({ id: z.string(), name: z.string() })
+    .nullable()
+    .describe('The playlist approving it would make the default, as a publish makes the first one (#243); null if none'),
+  liveOn: z
+    .array(z.object({ spotId: z.string(), screens: z.number().int().describe('Screens playing it now: in a published playlist their published schedule or the default plays') }))
+    .describe('Each pinned spot, and how many screens play its published version now'),
   held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Pinned drafts that fail their checks: approving publishes none of them'),
   samples: z
     .array(z.object({ spotId: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) }))

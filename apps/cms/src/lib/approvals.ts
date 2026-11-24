@@ -9,10 +9,11 @@ import type { SpotView } from '~/lib/spots';
 export type RequestCheck = ToolOutput<'check_publish_request'>;
 export type RequestView = RequestCheck['request'];
 
-/** A pinned spot's stage: what screens have now (null: never published) and the draft approving publishes. */
+/** A pinned spot's stage: what screens have now (null: never published), its draft, and the version the request pinned. */
 export interface SpotStage {
   now: SpotView | null;
   after: SpotView;
+  pinned: number;
 }
 
 export interface ApprovalItem {
@@ -32,11 +33,20 @@ export function requestTitle(check: RequestCheck): string {
   return `Publish ${name}${rest.length ? ` and ${count(rest.length, 'more draft')}` : ''}`;
 }
 
-/** Who asked, as the card says it: an agent by its client's name, or a member by theirs. */
-export function askerWords(r: RequestView): string {
-  const { kind, name } = r.requestedBy;
-  return kind === 'agent' ? `${name ?? 'An agent no longer connected'}, agent via MCP` : `${name ?? 'A former member'}, member`;
+/**
+ * Who asked, by name, as the card says it: an agent by its client's name, else "An agent" (a name a page
+ * may not show, as `AgentName` withholds it) or, once it is disconnected, "An agent no longer connected";
+ * a member by theirs, or "A former member".
+ */
+export function askerName(r: RequestView): string {
+  const { kind, name, gone } = r.requestedBy;
+  if (name !== null) return name;
+  if (kind === 'user') return 'A former member';
+  return gone ? 'An agent no longer connected' : 'An agent';
 }
+
+/** What asked: "agent via MCP", or "member". */
+export const askerKind = (r: RequestView) => (r.requestedBy.kind === 'agent' ? 'agent via MCP' : 'member');
 
 /** "3 field changes in 2 spots · new playlist": what the pinned drafts change. */
 export function changeWords(check: RequestCheck): string {

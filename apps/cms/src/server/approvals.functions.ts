@@ -26,7 +26,7 @@ export const getApprovals = createServerFn({ method: 'GET', strict: { output: fa
                 tool('get_spot', { spotId: p.id }, { missing: 'null' }),
                 tool('get_spot', { spotId: p.id, published: true }, { missing: 'null' }),
               ]);
-              return after && { after: after.spot, now: now?.spot ?? null };
+              return after && { after: after.spot, now: now?.spot ?? null, pinned: p.version };
             }),
           ]);
           return { check, stages: stages.flatMap((s) => (s ? [s] : [])) };

@@ -18,7 +18,7 @@ const ORG = 'org_1';
 const request = {
   id: 'prq_1',
   status: 'pending' as const,
-  requestedBy: { kind: 'agent' as const, id: 'agt_1', clientId: 'cli_1', name: 'Kestrel agent', connectedBy: 'Ada' },
+  requestedBy: { kind: 'agent' as const, id: 'agt_1', clientId: 'cli_1', name: 'Kestrel agent', connectedBy: 'Ada', gone: false },
   drafts: [{ kind: 'spot' as const, id: 'spt_soup', version: 7 }],
   reason: 'Tomato basil today',
   createdAt: 0,
@@ -35,6 +35,9 @@ const item = (samples: ApprovalItem['check']['samples'] = []): ApprovalItem => (
     request,
     refused: null,
     screens: [{ id: 'scr_1', name: 'Deli' }],
+    defaultPlaylistId: 'pls_deli',
+    madeDefault: null,
+    liveOn: [{ spotId: 'spt_soup', screens: 1 }],
     held: [],
     samples,
     changes: [{ kind: 'spot', id: 'spt_soup', name: 'Soup board', fresh: false, fields: ['price', 'title'] }],
@@ -70,11 +73,15 @@ describe('approving', () => {
       request: { ...request, status: 'approved' },
       published: { publish: { id: 'pub_7', revision: 7, screens: 1, previousId: 'pub_6' } },
     } as never);
-    s.getState().askApprove('prq_1');
-    expect(s.getState().approvals.confirming).toBe('prq_1');
-    await s.getState().approveRequest(ORG, item([{ spotId: 'spt_soup', name: 'Soup board', version: 7, fields: ['title'] }]));
+    const shown = item([{ spotId: 'spt_soup', name: 'Soup board', version: 7, fields: ['title'] }]);
+    // The confirmation keeps the request as shown: a read of the queue meanwhile does not change what it approves.
+    s.getState().askApprove(shown);
+    expect(s.getState().approvals.confirming).toBe(shown);
+    await s.getState().approveRequest(ORG, shown);
     expect(callTool).toHaveBeenCalledWith('approve_publish_request', {
       publishRequestId: 'prq_1',
+      ifScreens: ['scr_1'],
+      ifDefault: 'pls_deli',
       allowSample: [{ spotId: 'spt_soup', version: 7, fields: ['title'] }],
     });
     expect(s.getState().approvals).toMatchObject({ confirming: null, deciding: null });
@@ -92,7 +99,7 @@ describe('approving', () => {
     const { s } = setup();
     vi.mocked(callTool).mockResolvedValue({ request, published: { publish: null } } as never);
     await s.getState().approveRequest(ORG, item());
-    expect(callTool).toHaveBeenCalledWith('approve_publish_request', { publishRequestId: 'prq_1' });
+    expect(callTool).toHaveBeenCalledWith('approve_publish_request', { publishRequestId: 'prq_1', ifScreens: ['scr_1'], ifDefault: 'pls_deli' });
     expect(toastTitled('Approved')).toMatchObject({ description: 'Every screen already plays what it asked for.' });
   });
 

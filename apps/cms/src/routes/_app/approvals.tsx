@@ -13,7 +13,7 @@ import { StagePair } from '~/components/approvals/stage-pair';
 import { EmptyState, PageHeader } from '~/components/page';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
-import { type ApprovalItem, askerWords, changeWords, reachWords, requestTitle } from '~/lib/approvals';
+import { type ApprovalItem, askerKind, askerName, changeWords, reachWords, requestTitle } from '~/lib/approvals';
 import { useCanApprove, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
@@ -37,8 +37,8 @@ function ApprovalsPage() {
   const orgId = useOrgId();
   const { items } = useSuspenseQuery(approvalsQuery(orgId)).data;
   const section = sectionFor('/approvals');
-  const confirming = useAppStore((s) => s.approvals.confirming);
-  const open = items.find((i) => i.check.request.id === confirming);
+  // The confirmation shows the request as it was when Approve was pressed, whatever the queue reads meanwhile.
+  const open = useAppStore((s) => s.approvals.confirming);
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title="Waiting for approval" description={section.description} />
@@ -109,7 +109,7 @@ function RequestCard({ item, orgId }: { item: ApprovalItem; orgId: string }) {
               {requestTitle(check)}
             </h2>
             <span className="text-sm text-muted-foreground">
-              {askerWords(request)} · asked {when(request.createdAt)}
+              <bdi className="[overflow-wrap:anywhere]">{askerName(request)}</bdi>, {askerKind(request)} · asked {when(request.createdAt)}
             </span>
           </div>
         </div>
@@ -131,7 +131,7 @@ function RequestCard({ item, orgId }: { item: ApprovalItem; orgId: string }) {
               className={cn('h-11', (busy || refused) && 'opacity-60')}
               aria-disabled={busy || refused !== null}
               aria-describedby={refused ? `${request.id}-refused` : undefined}
-              onClick={() => !busy && !refused && askApprove(request.id)}
+              onClick={() => !busy && !refused && askApprove(item)}
             >
               Approve and publish
             </Button>
@@ -140,7 +140,12 @@ function RequestCard({ item, orgId }: { item: ApprovalItem; orgId: string }) {
       </div>
       <p className="m-0 rounded-lg bg-muted px-3 py-2.5 leading-normal">
         <strong className="font-semibold">Asked for:</strong> “<bdi className="[overflow-wrap:anywhere]">{request.reason}</bdi>”
-        {connectedBy && ` · ${connectedBy}`}
+        {connectedBy && (
+          <>
+            {' · '}
+            <bdi className="[overflow-wrap:anywhere]">{connectedBy}</bdi>
+          </>
+        )}
       </p>
       {refused && (
         <Alert id={`${request.id}-refused`}>
@@ -152,7 +157,13 @@ function RequestCard({ item, orgId }: { item: ApprovalItem; orgId: string }) {
         </Alert>
       )}
       {stages.map((stage) => (
-        <StagePair key={stage.after.id} requestId={request.id} orgId={orgId} stage={stage} screens={check.screens.length} />
+        <StagePair
+          key={stage.after.id}
+          requestId={request.id}
+          orgId={orgId}
+          stage={stage}
+          screens={check.liveOn.find((l) => l.spotId === stage.after.id)?.screens ?? 0}
+        />
       ))}
       <p className="m-0 text-meta text-muted-foreground">
         {[
