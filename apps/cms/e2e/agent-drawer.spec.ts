@@ -1,5 +1,6 @@
-// The agent's drawer (#267), read-only, against the Anthropic stub's scripted turn (a read of the
-// screens' status, then STUB_CARD; e2e/global-setup.ts): no test reaches a real model.
+// The agent's drawer (#267, #350), against the Anthropic stub's scripted turn (a read of the screens'
+// status, then STUB_CARD as the structured answer; e2e/global-setup.ts), streamed over server-sent
+// events: no test reaches a real model.
 import { expect, test } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, STUB_CARD } from './servers';
@@ -32,11 +33,12 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await expect(card.getByRole('button', { name: 'Copy a note for the store' })).toBeVisible();
   // The answer reached the live region.
   await expect(drawer.getByRole('status')).toHaveText(STUB_CARD.text);
-  // The trace, one line, expands to its calls.
+  // The trace, one line, expands to its calls, each by its tool's title, never its name (#380).
   const trace = card.locator('summary');
   await expect(trace).toHaveText('Checked 0 screens');
   await trace.click();
-  await expect(card.getByText('list_screen_status')).toBeVisible();
+  await expect(card.getByText('Screen status')).toBeVisible();
+  await expect(card.getByText('list_screen_status')).toHaveCount(0);
   await axe(page);
   await shots(page, '100-drawer-answer');
 
@@ -55,6 +57,19 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await opener.click();
   await expect(drawer.getByRole('article')).toHaveCount(0);
   await page.keyboard.press('Escape');
+
+  // Under 1024 px, where the page makes no room for it, a sheet over the page, modal (#335).
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.getByRole('banner').getByRole('button', { name: 'Ask the agent' }).click();
+  await expect(drawer).toBeVisible();
+  await expect(page.getByRole('main')).toHaveCount(0);
+  // Wider again with it open: beside the page, and focus stays in it (#335).
+  await drawer.getByLabel('Ask about your screens and content').focus();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.getByRole('main')).toHaveCount(1);
+  await expect.poll(() => drawer.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
 
   // A sheet on a phone, opened from the top bar.
   await page.setViewportSize({ width: 390, height: 844 });

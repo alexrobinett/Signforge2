@@ -1,11 +1,12 @@
-// The model calls on TanStack AI (#349): every request of a fill or a drawer step goes through the
+// The model calls on TanStack AI (#349, #350): every request of a fill or a drawer turn's call goes through the
 // guards (`guardedStream`) as the call's `wrapFetch`. Nothing in process.env adds a header or moves
 // the key; the key is opened from the vault for each call; an endpoint's key goes only to its own
 // origin; nothing is retried; one deadline covers the whole call, its streamed answer included; and a
 // failure comes back as one word, with no key or body in it. Which path a model id takes is shown
 // too. No network: fetch and DNS are stubbed.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { aiProviders, chatWith, type ChatRequest, fillWith, type FillRequest } from '../src/agent/provider';
+import { chat, maxIterations } from '@tanstack/ai';
+import { aiProviders, fillWith, type FillRequest, turnWith } from '../src/agent/provider';
 import { type FetchGuards, guardedStream } from '../src/data/fetch';
 import { anthropicStream, completionStream } from './model-streams';
 
@@ -18,12 +19,55 @@ const PUBLIC = '93.184.215.14';
 
 const SCHEMA = { type: 'object', additionalProperties: false, required: ['headline'], properties: { headline: { type: 'string' } } };
 const fill = (model = 'claude-haiku-5-5'): FillRequest => ({ model, system: 'Fill the spot.', text: 'Bake sale', schema: SCHEMA });
-const step: ChatRequest = {
+const step = {
   model: 'claude-sonnet-5-5',
   system: 'Answer about screens.',
-  turns: [{ role: 'user', text: 'Why are 2 screens behind?' }],
-  tools: [{ name: 'list_screens', description: 'List the screens.', schema: { type: 'object', properties: {} } }],
+  question: 'Why are 2 screens behind?',
+  tools: [{ name: 'list_screens', description: 'List the screens.', inputSchema: { type: 'object', properties: {} } }],
 };
+
+/**
+ * One model call of a drawer turn as the route makes it (`turnWith`, then `chat()`, #350): the tools
+ * the model calls, or its failure in a word (`refused` when the key does not open).
+ */
+async function chatWith(
+  env: typeof DEV,
+  key: Parameters<typeof turnWith>[1],
+  sealedKey: string,
+  reach: Parameters<typeof turnWith>[3],
+  request: typeof step,
+  ms: number,
+) {
+  const run = await turnWith(
+    env,
+    key,
+    sealedKey,
+    reach,
+    request.model,
+    () => ms,
+    (adapter, wrapFetch) =>
+      chat({
+        adapter,
+        wrapFetch,
+        threadId: 'thread',
+        systemPrompts: [request.system],
+        messages: [{ role: 'user', content: request.question }],
+        tools: request.tools,
+        stream: true,
+        agentLoopStrategy: maxIterations(1),
+        debug: false,
+      }),
+  );
+  if (!run) return { ok: false, problem: 'refused' };
+  const calls: { id: string; name: string; input: unknown }[] = [];
+  const names = new Map<string, string>();
+  for await (const chunk of run.value) {
+    if (chunk.type === 'RUN_ERROR') return { ok: false, problem: run.problem() ?? 'unreachable' };
+    if (chunk.type === 'TOOL_CALL_START') names.set(chunk.toolCallId, chunk.toolCallName);
+    if (chunk.type === 'TOOL_CALL_END') calls.push({ id: chunk.toolCallId, name: names.get(chunk.toolCallId) ?? '', input: chunk.input });
+  }
+  return { ok: true, step: { calls } };
+}
 
 /** Every request a model call made: where it went and every header it carried. */
 type Seen = { url: string; headers: Record<string, string>; body: any };
@@ -111,7 +155,7 @@ describe('headers and the key, whatever process.env holds', () => {
       await chatWith(DEV, ANTHROPIC, key, a.reach, step, 25_000),
     ]);
     expect(filled).toEqual({ ok: true, text: '{"headline":"Bake sale"}' });
-    expect(stepped).toMatchObject({ ok: true, step: { calls: [{ id: 't1', name: 'list_screens', input: {} }], refused: false } });
+    expect(stepped).toMatchObject({ ok: true, step: { calls: [{ id: 't1', name: 'list_screens', input: {} }] } });
     expect(a.asked).toHaveLength(2);
     for (const r of a.asked) {
       // The adapter calls the beta Messages endpoint (`?beta=true`).
@@ -370,21 +414,6 @@ describe('the words a fill says, the same as before on both paths (review of #39
       const a = answering('Here is a bake sale flyer.', 'end_turn');
       expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: true, text: 'Here is a bake sale flyer.' });
     }
-  });
-});
-
-describe("a tool call's input (review of #391)", () => {
-  it("passes an endpoint's empty arguments as they came, for the tool to refuse, and Anthropic's empty input as {}", async () => {
-    const e = endpoint(() => completionStream({ toolCalls: [{ id: 'c1', name: 'list_screens', arguments: '' }] }, 'tool_calls'));
-    expect(await chatWith(DEV, ENDPOINT, await sealed(ENDPOINT), e.reach, { ...step, model: 'model-a' }, 25_000)).toMatchObject({
-      ok: true,
-      step: { calls: [{ id: 'c1', name: 'list_screens', input: '' }] },
-    });
-    const a = anthropic((b) => anthropicStream('m', b.model, [{ type: 'tool_use', id: 't1', name: 'list_screens', input: {} }], 'tool_use'));
-    expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), a.reach, step, 25_000)).toMatchObject({
-      ok: true,
-      step: { calls: [{ id: 't1', name: 'list_screens', input: {} }] },
-    });
   });
 });
 

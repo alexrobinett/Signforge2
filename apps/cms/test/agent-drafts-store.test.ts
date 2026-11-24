@@ -3,7 +3,7 @@
 // putting each back as it was, as the person, the last first, at the version its target is at now,
 // and carrying on from where one that failed stopped. The API, the pages' reads and the tools are
 // stubs; nothing waits on a clock.
-import type { AnswerCard, ChatEvent } from '@signforge/api/agent-chat';
+import { type AnswerCard, CHAT_EVENTS } from '@signforge/api/agent-chat';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
@@ -46,7 +46,8 @@ vi.mock('~/lib/tools', async (actual) => ({
 }));
 
 const sent: { path: string; body: any }[] = [];
-const answers: Response[] = [];
+/** The API's answers, in order: a turn's events are made for its request, which names its run. */
+const answers: (Response | ((body: any) => Response))[] = [];
 beforeEach(() => {
   sent.length = 0;
   answers.length = 0;
@@ -58,7 +59,7 @@ beforeEach(() => {
     sent.push({ path, body: JSON.parse(String(init.body)) });
     const res = answers.shift();
     if (!res) throw new Error(`no answer for ${path}`);
-    return res;
+    return typeof res === 'function' ? res(sent.at(-1)?.body) : res;
   });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -79,8 +80,16 @@ const CARD: AnswerCard = {
     { tool: 'create_schedule_entry', input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' }, target: null, before: null },
   ],
 };
-const turn = (card: AnswerCard = CARD) =>
-  new Response(`${JSON.stringify({ type: 'answer', card } satisfies ChatEvent)}\n`, { headers: { 'content-type': 'application/x-ndjson' } });
+/** A turn answered with `card`, as the API streams it (#350): the run, the card, its end. */
+const turn =
+  (card: AnswerCard = CARD) =>
+  ({ runId, threadId }: { runId: string; threadId: string }) =>
+    new Response(
+      [{ type: 'RUN_STARTED' }, { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: card }, { type: 'RUN_FINISHED', finishReason: 'stop' }]
+        .map((e) => `data: ${JSON.stringify({ runId, threadId, timestamp: 1, ...e })}\n\n`)
+        .join(''),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
 
 function draftsStore() {
   const reloaded: string[] = [];

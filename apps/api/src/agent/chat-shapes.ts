@@ -1,20 +1,31 @@
 /**
- * What `POST /api/agent/chat` takes and streams (#267), shared with the CMS's drawer: the
- * conversation so far and the page it was asked on; then, one JSON object a line, each tool call as
- * it runs and the answer as a card, or why the turn ended. Types and limits only, so the CMS imports
- * it without the API's code or schemas; the route parses a request with its own (./chat.ts).
+ * What `POST /api/agent/chat` takes and streams (#267, #350), shared with the CMS's drawer. The
+ * drawer's `ChatClient` (`@tanstack/ai-client`) sends AG-UI's `RunAgentInput`: the question as its
+ * one message, and in `forwardedProps` the page it was asked on and the conversation so far, each
+ * earlier answer its whole card. The answer streams back as server-sent events (TanStack AI's
+ * `toServerSentEventsResponse`): the card's text as it is written (`structured-output.*`), and the
+ * events below, `CUSTOM` ones named `CHAT_EVENTS`: each tool call as a card, then the answer's card;
+ * or a `RUN_ERROR` whose `code` is a `ChatProblem` and `message` says it in a sentence. Types and
+ * limits only, so the CMS imports it without the API's code or schemas; the route parses a request
+ * with its own (./chat.ts).
  */
 import type { ToolErrorCode } from '@signforge/tools/outputs';
 
 /** The most turns of a conversation the drawer sends back: earlier ones are left out, oldest first. */
 export const CHAT_HISTORY = 20;
-/** The most a message may be, in characters. */
+/** The most a question may be, in characters. */
 export const CHAT_MESSAGE_CHARS = 4000;
+/** The most the conversation sent back may be, as JSON, in characters. */
+export const CHAT_HISTORY_CHARS = 100_000;
 
-export interface ChatRequestBody {
-  /** The conversation, oldest first, ending with the person's question. */
-  messages: { role: 'user' | 'assistant'; text: string }[];
-  /** Where the drawer was opened: the CMS path and the record ids in it. */
+/** An earlier turn sent back: the person's words, or the agent's whole card. */
+export type ChatTurn = { role: 'user'; text: string } | { role: 'assistant'; card: AnswerCard };
+
+/** What the drawer sends besides the question, in the run's `forwardedProps`. */
+export interface ChatContext {
+  /** The conversation before the question, oldest first, starting with the person's words. */
+  history: ChatTurn[];
+  /** Where the drawer was asked: the CMS path and the record ids in it. */
   page: { path: string; ids: Record<string, string> };
 }
 
@@ -31,10 +42,12 @@ export interface AnswerStep {
   note: string;
 }
 
-/** One tool call of the turn, in words: "Checked 20 screens". */
-export interface TraceItem {
-  name: string;
+/** One tool call of the turn, as its card: the tool, its title ("Screen status"), and what it did ("Checked 20 screens"). */
+export interface ToolCard {
+  tool: string;
+  title: string;
   summary: string;
+  ok: boolean;
 }
 
 /**
@@ -53,10 +66,14 @@ export interface AnswerCard {
   text: string;
   groups: AnswerGroup[];
   steps: AnswerStep[];
-  trace: TraceItem[];
+  /** The turn's tool calls, in order. */
+  trace: ToolCard[];
   /** The changes proposed, in order: none for a question that changes nothing. */
   drafts: ProposedCall[];
 }
+
+/** The names of the `CUSTOM` events the route adds to the stream. */
+export const CHAT_EVENTS = { call: 'signforge.call', answer: 'signforge.answer' } as const;
 
 /** What a save of the drafts did: each written in order, the first refused stopping the rest. */
 export interface ApplyAnswer {
@@ -64,16 +81,15 @@ export interface ApplyAnswer {
 }
 
 /** Why a turn did not run, or ended before its answer; `message` says it in a sentence. */
-export type ChatProblem =
-  | 'invalid_input'
-  | 'no_model'
-  | 'out_of_turns'
-  | 'rate_limited'
-  | 'over_budget'
-  | 'unreadable'
-  | 'unreachable'
-  | 'model_refused'
-  | 'busy';
-
-/** One line of the stream. */
-export type ChatEvent = { type: 'call'; item: TraceItem } | { type: 'answer'; card: AnswerCard } | { type: 'error'; error: ChatProblem; message: string };
+export const CHAT_PROBLEMS = [
+  'invalid_input',
+  'no_model',
+  'out_of_turns',
+  'rate_limited',
+  'over_budget',
+  'unreadable',
+  'unreachable',
+  'model_refused',
+  'busy',
+] as const;
+export type ChatProblem = (typeof CHAT_PROBLEMS)[number];
