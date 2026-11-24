@@ -25,7 +25,8 @@ export function ScreenThumb({
   const retired = isRetired(screen);
   const s = retired ? null : screen.showing;
   const portrait = screen.orientation === 'portrait';
-  const dim = screen.state.kind === 'asleep' ? 'opacity-35' : screen.state.kind === 'unreachable' ? 'opacity-80' : '';
+  // Asleep shows only its moon and word, at full strength (an asleep screen plays nothing to dim); an unreachable one's preview is dimmed.
+  const dim = screen.state.kind === 'unreachable' ? 'opacity-80' : '';
   const drawn = s?.spot?.template ? templateThumbnail(s.spot.template) : undefined;
   const updating = screen.desiredManifestId !== null && screen.reportedManifestId !== screen.desiredManifestId;
   const label = retired
@@ -41,11 +42,11 @@ export function ScreenThumb({
     <div className={cn('relative flex aspect-video justify-center overflow-hidden bg-stage text-stage-foreground', className)} role="img" aria-label={label}>
       <div className={cn('flex h-full items-center justify-center', portrait ? 'aspect-[9/16]' : 'w-full', dim)}>
         {!s ? (
-          <span className={cn('px-3 text-center text-stage-muted-foreground', size === 'row' ? 'text-[10px]' : 'text-sm')}>
+          <span className={cn('px-3 text-center text-stage-muted-foreground', size === 'row' ? 'text-2xs' : 'text-sm')}>
             {retired ? 'Revoked' : 'Nothing published yet'}
           </span>
         ) : s.asleep ? (
-          <span className={cn('flex items-center gap-1.5 font-semibold text-[#a5b4fc]', size === 'row' ? 'text-[10px]' : 'text-sm')}>
+          <span className={cn('flex items-center gap-1.5 font-semibold text-stage-asleep', size === 'row' ? 'text-2xs' : 'text-sm')}>
             <MoonIcon className={size === 'row' ? 'size-3' : 'size-4'} aria-hidden /> Asleep
           </span>
         ) : s.spot?.image ? (
@@ -54,7 +55,7 @@ export function ScreenThumb({
           <img src={drawn} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
           <span className={cn('flex flex-col items-center gap-1 px-3 text-center', size === 'row' && 'gap-0')}>
-            <span className={cn('font-semibold', size === 'row' ? 'line-clamp-2 text-[10px] leading-tight' : 'text-lg leading-snug')}>
+            <span className={cn('font-semibold', size === 'row' ? 'line-clamp-2 text-2xs leading-tight' : 'text-lg leading-snug')}>
               {s.spot?.name ?? 'Nothing to show'}
             </span>
             {size === 'tile' && s.spot?.templateName && <span className="text-xs text-stage-muted-foreground">{s.spot.templateName}</span>}
@@ -64,7 +65,7 @@ export function ScreenThumb({
       {updating && s?.spot && !s.asleep && (
         <span
           aria-hidden
-          className={cn('absolute inset-x-0 bottom-0 truncate bg-stage/85 px-2 py-0.5 text-stage-foreground', size === 'row' ? 'text-[10px]' : 'text-xs')}
+          className={cn('absolute inset-x-0 bottom-0 truncate bg-stage/85 px-2 py-0.5 text-stage-foreground', size === 'row' ? 'text-2xs' : 'text-xs')}
         >
           {size === 'row' ? 'Updating' : `Updating to ${s.spot.name}`}
         </span>

@@ -1,10 +1,14 @@
 /**
- * The agent's drawer (#267, src/state/agent-drawer.ts): a 400 px panel on the right, beside the page
- * rather than over it (not modal), so the page stays usable; on a phone a full sheet over it, modal. It reads only.
- * Escape and its close button close it, and focus goes back to what opened it. Each answer is a card,
- * its tool calls a one-line trace that expands; the turn's progress and its answer reach a live region.
+ * The agent's drawer (#267, #350, src/state/agent-drawer.ts): a 400 px panel on the right, beside the
+ * page rather than over it (not modal), so the page stays usable, from 1024 px, where the page makes
+ * room for it; narrower, a sheet over the page, modal (#335). Escape and its close button close it,
+ * and focus goes back to what opened it; a window crossing that width keeps focus in it. As a turn
+ * runs, each tool call shows as its card, by the tool's title (#380), and the answer's text as it is
+ * written; each answer is a card, its tool calls a one-line trace that expands. The turn's progress
+ * and its answer reach a live region.
  */
-import type { AnswerCard as Card } from '@signforge/api/agent-chat';
+import { Badge } from '~/components/ui/badge';
+import type { AnswerCard as Card, ToolCard } from '@signforge/api/agent-chat';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { CopyIcon, SparklesIcon, XIcon } from 'lucide-react';
@@ -17,8 +21,11 @@ import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { screenStatusQuery } from '~/queries/screens';
 import { useAppStore } from '~/state/provider';
 
-/** A window wider than a phone, where the drawer sits beside the page; on a phone it is a sheet over it, and modal. */
-const WIDE = '(min-width: 640px)';
+/**
+ * A window wide enough for the page and the drawer side by side, where it sits beside the page (the
+ * app shell's `lg:pr-[400px]`); narrower, it is a sheet over it, and modal, so Tab never reaches a page it covers (#335).
+ */
+const WIDE = '(min-width: 1024px)';
 const onResize = (change: () => void) => {
   const media = matchMedia(WIDE);
   media.addEventListener('change', change);
@@ -98,7 +105,9 @@ function DraftsCard({ index }: { index: number }) {
                 <p key={l.label} data-check={l.check || undefined} className="break-words">
                   {l.label}: <del className="text-muted-foreground">{l.before}</del> → <ins className="no-underline">{l.after}</ins>
                   {l.check && (
-                    <span className="ml-1.5 rounded-full bg-status-updating-muted px-2 py-0.5 text-xs font-medium text-status-updating-foreground">Check</span>
+                    <Badge variant="updating" className="ml-1.5">
+                      Check
+                    </Badge>
                   )}
                 </p>
               ))}
@@ -182,6 +191,16 @@ function DraftsCard({ index }: { index: number }) {
   );
 }
 
+/** A tool call's card: the tool's title, and what the call did. */
+function CallCard({ card }: { card: ToolCard }) {
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2">
+      <span className="font-medium text-foreground">{card.title}</span>
+      <span className={card.ok ? undefined : 'text-destructive'}>{card.summary}</span>
+    </span>
+  );
+}
+
 function AnswerCard({ card }: { card: Card }) {
   return (
     <article className="flex flex-col gap-3 rounded-lg border bg-card p-3 text-sm">
@@ -222,11 +241,11 @@ function AnswerCard({ card }: { card: Card }) {
           <summary className="cursor-pointer rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
             {card.trace.map((t) => t.summary).join(' · ')}
           </summary>
-          <ol className="mt-1 list-decimal pl-5">
+          <ol className="mt-1 flex flex-col gap-1">
             {card.trace.map((t, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: one call may be made twice; its place tells them apart.
-              <li key={`${i}-${t.name}`}>
-                {t.summary} <code className="font-mono text-xs">{t.name}</code>
+              <li key={`${i}-${t.tool}`}>
+                <CallCard card={t} />
               </li>
             ))}
           </ol>
@@ -271,9 +290,17 @@ export function AgentDrawer() {
           onInteractOutside={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => {
             e.preventDefault();
-            // Once the sidebar has unfolded again: the button that opened it is drawn anew by then.
+            // Still open: the window crossed the width where it turns modal, which draws it anew. Focus stays in it (#335).
+            if (d.open) return;
+            // Once the sidebar has unfolded again: the button that opened it is drawn anew by then. One hidden since (the
+            // window resized: the top bar's button on a wide screen, the sidebar's on a phone) gives way to the Agent
+            // button shown, then the page (review of #402).
             const opener = d.opener;
-            requestAnimationFrame(() => (document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`) ?? document.getElementById('main'))?.focus());
+            requestAnimationFrame(() => {
+              const shown = (el: HTMLElement | null) => (el?.checkVisibility() ? el : null);
+              const agent = [...document.querySelectorAll<HTMLElement>('[data-agent-opener]')].find((el) => el.checkVisibility());
+              (shown(document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`)) ?? agent ?? document.getElementById('main'))?.focus();
+            });
           }}
         >
           <header className="flex items-start gap-3 border-b bg-actor-agent-muted px-4 py-3">
@@ -319,7 +346,28 @@ export function AgentDrawer() {
                 </li>
               ))}
             </ol>
-            {d.asking && <p className="text-sm text-muted-foreground">{d.progress.length ? `${d.progress.at(-1)?.summary}…` : 'Thinking…'}</p>}
+            {d.asking && (
+              <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                {d.progress.length > 0 && (
+                  <ol aria-label="What the agent is doing" className="flex flex-col gap-1">
+                    {d.progress.map((t, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: a turn's calls only grow; a call's place is who it is.
+                      <li key={`${i}-${t.tool}`}>
+                        <CallCard card={t} />
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {/* The text as it is written is not read out: the live region below says the answer once it is whole (review of #402). */}
+                {d.streaming ? (
+                  <p aria-hidden className="whitespace-pre-wrap text-foreground">
+                    {d.streaming}
+                  </p>
+                ) : (
+                  <p>{d.progress.length ? 'Working…' : 'Thinking…'}</p>
+                )}
+              </div>
+            )}
             <p role="status" aria-live="polite" className="sr-only">
               {heard}
             </p>

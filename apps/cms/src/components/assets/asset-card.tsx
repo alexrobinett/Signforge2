@@ -17,9 +17,9 @@ function AssetThumb({ asset }: { asset: AssetView }) {
   const word = STATUS_WORD[asset.status];
   const svg = asset.type === 'image/svg+xml';
   return (
-    <div className="flex aspect-video items-center justify-center overflow-hidden bg-[#0e0f12] text-white">
+    <div className="flex aspect-video items-center justify-center overflow-hidden bg-stage text-stage-foreground">
       {word ? (
-        <span className="px-3 text-center text-sm text-[#b4b6be]">{word}</span>
+        <span className="px-3 text-center text-sm text-stage-muted-foreground">{word}</span>
       ) : (
         <img src={sessionBlobPath(asset.sha256)} alt="" loading="lazy" className={cn('size-full', svg ? 'object-contain p-4' : 'object-cover')} />
       )}
@@ -40,7 +40,7 @@ export function AssetCard({ asset, children }: { asset: AssetView; children?: Re
           {children}
         </div>
         <span className="text-xs text-muted-foreground tabular-nums">{assetFacts(asset)}</span>
-        <span className={cn('text-[13px]', asset.usageCount ? 'text-foreground/85' : 'text-muted-foreground')}>{usageText(asset.usageCount)}</span>
+        <span className={cn('text-meta', asset.usageCount ? 'text-foreground/85' : 'text-muted-foreground')}>{usageText(asset.usageCount)}</span>
       </div>
     </>
   );

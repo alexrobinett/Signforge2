@@ -3,22 +3,22 @@
  * filled, amber for one to check, grey for one it did not fill, with why; and the banner with the
  * counts and what to do next. A link the agent read is shown in full and never added.
  */
+import { Badge } from '~/components/ui/badge';
 import type { FieldMark } from '@signforge/api/agent-inline';
 import { SparklesIcon } from 'lucide-react';
 import { Button } from '~/components/ui/button';
-import { cn } from '~/lib/utils';
 
-const MARK: Record<FieldMark['state'], { word: string; className: string }> = {
-  filled: { word: 'Filled', className: 'bg-actor-agent-muted text-actor-agent' },
-  check: { word: 'Check', className: 'bg-status-updating-muted text-status-updating-foreground' },
-  missing: { word: 'Not filled', className: 'bg-status-offline-muted text-status-offline-foreground' },
+const MARK: Record<FieldMark['state'], { word: string; variant: 'agent' | 'updating' | 'offline' }> = {
+  filled: { word: 'Filled', variant: 'agent' },
+  check: { word: 'Check', variant: 'updating' },
+  missing: { word: 'Not filled', variant: 'offline' },
 };
 
 export function MarkPill({ mark }: { mark: FieldMark }) {
   return (
-    <span data-mark={mark.state} className={cn('rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap', MARK[mark.state].className)}>
+    <Badge data-mark={mark.state} variant={MARK[mark.state].variant}>
       {MARK[mark.state].word}
-    </span>
+    </Badge>
   );
 }
 

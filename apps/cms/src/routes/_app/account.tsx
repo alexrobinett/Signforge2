@@ -74,7 +74,7 @@ function AccountPage() {
             <div className="grid gap-1.5">
               <Label htmlFor={`${id}-email`}>Email</Label>
               <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
-              <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
+              <p id={`${id}-email-help`} className="text-meta text-muted-foreground">
                 Your sign-in address. Changing it is not offered yet.
               </p>
             </div>

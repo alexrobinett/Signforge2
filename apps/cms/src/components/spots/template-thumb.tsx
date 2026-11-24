@@ -21,7 +21,7 @@ export function TemplateThumb({ version, className }: { version: Pick<TemplateVe
   ) : (
     // Clipped and clamped, so a long name keeps the frame 16:9 in a row's 64 px slot as on a card.
     <span aria-hidden className={cn(FRAME, '@container grid place-items-center overflow-hidden px-1 text-center font-medium text-muted-foreground', className)}>
-      <span className="line-clamp-2 text-[10px] leading-tight break-words @[8rem]:text-xs">{version.manifest.name}</span>
+      <span className="line-clamp-2 text-2xs leading-tight break-words @[8rem]:text-xs">{version.manifest.name}</span>
     </span>
   );
 }

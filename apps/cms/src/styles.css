@@ -86,6 +86,26 @@
   /* An editor's height: the viewport under the page's header and the editor's own (#363), which wraps to two
      lines from 1024 px; its stage column fills it, its status line inside the window before any scroll. */
   --editor-height: calc(100dvh - 10rem);
+
+  /* A screen's dark surround (the editors' stage #363, screen and asset thumbnails), the same in both
+     themes: .dark does not set them. */
+  --stage: #18181a;
+  --stage-foreground: #e8e8e8;
+  --stage-muted-foreground: #c8c8c8;
+  --stage-asleep: #a5b4fc;
+  --stage-control: #2a2a2d;
+  --stage-edge: #3a3a3d;
+  --stage-ring: #8fa3ff;
+  --stage-warning: #fdb022;
+
+  /* Toasts: dark in both themes, the action a light button on it. */
+  --toast: #101828;
+  --toast-foreground: #ffffff;
+  --toast-muted-foreground: #d0d5dd;
+  --toast-edge: #101828;
+  --toast-link: #c7d2fe;
+  --toast-action: #ffffff;
+  --toast-action-foreground: #101828;
   color-scheme: light;
 }
 
@@ -149,6 +169,14 @@
   --org-saturation: 60%;
   --org-lightness: 66%;
   --org-foreground: #0b0d12;
+
+  --toast: #262b36;
+  --toast-foreground: #ffffff;
+  --toast-muted-foreground: #d0d5dd;
+  --toast-edge: #3a4150;
+  --toast-link: #c7d2fe;
+  --toast-action: #ffffff;
+  --toast-action-foreground: #101828;
   color-scheme: dark;
 }
 
@@ -203,14 +231,26 @@
   --color-actor-agent: var(--actor-agent);
   --color-actor-agent-muted: var(--actor-agent-muted);
   --color-actor-device: var(--actor-device);
-  /* The editors' stage (#363): a screen's dark surround, the same in light and dark. */
-  --color-stage: #18181a;
-  --color-stage-foreground: #e8e8e8;
-  --color-stage-muted-foreground: #c8c8c8;
-  --color-stage-control: #2a2a2d;
-  --color-stage-edge: #3a3a3d;
-  --color-stage-ring: #8fa3ff;
-  --color-stage-warning: #fdb022;
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
+  --color-stage-muted-foreground: var(--stage-muted-foreground);
+  --color-stage-asleep: var(--stage-asleep);
+  --color-stage-control: var(--stage-control);
+  --color-stage-edge: var(--stage-edge);
+  --color-stage-ring: var(--stage-ring);
+  --color-stage-warning: var(--stage-warning);
+  --color-toast: var(--toast);
+  --color-toast-foreground: var(--toast-foreground);
+  --color-toast-muted-foreground: var(--toast-muted-foreground);
+  --color-toast-edge: var(--toast-edge);
+  --color-toast-link: var(--toast-link);
+  --color-toast-action: var(--toast-action);
+  --color-toast-action-foreground: var(--toast-action-foreground);
+  /* Type steps between Tailwind's (#372): row and meta lines, large controls and lead text, and the
+     smallest labels on a thumbnail. Every size in the CMS is one of these or Tailwind's own. */
+  --text-2xs: 0.6875rem;
+  --text-meta: 0.8125rem;
+  --text-md: 0.9375rem;
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

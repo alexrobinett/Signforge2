@@ -20,7 +20,7 @@ export function CommandInput({ className, children, ...props }: ComponentProps<t
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          'flex h-full w-full bg-transparent text-[17px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-full w-full bg-transparent text-lg outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}
@@ -62,7 +62,7 @@ export function CommandItem({ className, ...props }: ComponentProps<typeof Comma
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        'relative flex min-h-11 cursor-default items-center gap-3 rounded-[10px] px-2.5 py-1.5 text-[15px] outline-none select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0',
+        'relative flex min-h-11 cursor-default items-center gap-3 rounded-lg px-2.5 py-1.5 text-md outline-none select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0',
         className,
       )}
       {...props}

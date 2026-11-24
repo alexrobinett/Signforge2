@@ -20,6 +20,7 @@ import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
+import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
 import { publishOrg, type DraftPin } from './publishing';
 import { manifestKey } from './r2';
@@ -98,13 +99,15 @@ async function switchScreens(
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
  * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
  * approved request (`exact`: nothing removed that it does not pin; `brand`, the brand state it was
- * asked under, which the manifests must be compiled with, held to the commit).
+ * asked under, which the manifests must be compiled with, held to the commit). `ifDefault`: the
+ * default the manifests must be compiled with, held to the commit too.
  */
 export async function runPublish(
   ctx: ToolContext<unknown>,
   drafts: readonly DraftPin[] | undefined,
   end: readonly string[] = [],
   approval?: { brand: string },
+  ifDefault?: string,
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
   const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined);
@@ -112,9 +115,14 @@ export async function runPublish(
   // would pass a second read, and its batch then guards the very rows the manifests were made from.
   if (approval && result.brand !== approval.brand)
     throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
-  // The pins' guards, and the brand state's, go with the batch whether or not anything else is written.
+  // `ifDefault` against the default as compiled, not as read before: one switched and switched back
+  // while it compiled would pass a check made first, and its manifests fall back to the other.
+  const moved = ifDefault === undefined ? undefined : defaultConflict(result.read.defaultPlaylist, ifDefault);
+  if (moved) throw moved;
+  // The pins' guards, the brand state's and the default's go with the batch whether or not anything else is written.
   write({ row: undefined, writes: result.pinGuards });
   if (approval) write(org.brandKits.stage.unchanged(result.brand));
+  if (ifDefault !== undefined) write(org.settings.stage.defaultIs(ifDefault));
   const screens = result.screens.map((s) => ({
     screenId: s.screenId,
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
@@ -158,6 +166,11 @@ const publish = defineTool({
   mutates: true,
   publishes: true,
   input: z.object({
+    ifDefault: id('playlist')
+      .optional()
+      .describe(
+        "Publish only while this playlist is the organization's default: for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
+      ),
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
       .max(500)
@@ -171,7 +184,10 @@ const publish = defineTool({
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
-  handler: (ctx) => runPublish(ctx, ctx.input.drafts),
+  handler: async (ctx) => {
+    const { input } = ctx;
+    return runPublish(ctx, input.drafts, [], undefined, input.ifDefault);
+  },
 });
 
 const endTakeover = defineTool({

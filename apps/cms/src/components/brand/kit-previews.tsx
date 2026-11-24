@@ -57,7 +57,7 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
           />
         )}
       </div>
-      <figcaption className="flex flex-wrap justify-between gap-x-2 text-[13px]">
+      <figcaption className="flex flex-wrap justify-between gap-x-2 text-meta">
         <Link to="/spots/$spotId" params={{ spotId: spot.id }} className="font-semibold underline-offset-4 hover:underline">
           {spot.name}
         </Link>
@@ -90,7 +90,7 @@ export function KitPreviews({
           Your spots, with this kit
         </h2>
         {spots.length > 0 && (
-          <span className="text-[13px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {spots.length} of {total} · each one is the player your screens run, re-theming as you edit
           </span>
         )}

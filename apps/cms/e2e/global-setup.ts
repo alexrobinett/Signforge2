@@ -63,11 +63,12 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 }
 
 /**
- * The drawer's scripted turn. On a spot's page (#268): read the spot, draft a punchier headline and a
- * QR link from its data as read, then `STUB_DRAFTED`. Anywhere else (#267): read the screens' status,
- * then `STUB_CARD`.
+ * The drawer's scripted turn: a tool to call, or the answer's card (#350: the card as JSON text, the
+ * structured output asked with the tools). On a spot's page (#268): read the spot, draft a punchier
+ * headline and a QR link from its data as read, then `STUB_DRAFTED`. Anywhere else (#267): read the
+ * screens' status, then `STUB_CARD`.
  */
-function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } {
+function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } | { card: object } {
   // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
   const content = messages[0]?.content;
   const first = typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: { text?: string }) => b.text ?? '').join('') : '';
@@ -77,7 +78,7 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
   const result = Array.isArray(last) && last[0]?.type === 'tool_result' ? String(last[0].content) : undefined;
   const asked = messages.at(-2)?.content;
   const lastCall = Array.isArray(asked) ? asked.find((b: { type: string }) => b.type === 'tool_use')?.name : undefined;
-  if (!spotId) return result ? { name: 'answer', input: STUB_CARD } : { name: 'list_screen_status', input: {} };
+  if (!spotId) return result ? { card: STUB_CARD } : { name: 'list_screen_status', input: {} };
   if (!result) return { name: 'get_spot', input: { spotId } };
   if (lastCall === 'get_spot') {
     const read = JSON.parse(
@@ -88,7 +89,7 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
     );
     return { name: 'update_spot', input: { spotId, data: { ...read.spot.data, ...STUB_DRAFT } } };
   }
-  return { name: 'answer', input: STUB_DRAFTED };
+  return { card: { groups: [], steps: [], ...STUB_DRAFTED } };
 }
 
 /** One answer as Anthropic's Messages API streams it (the adapter asks streaming, #349): its one block, then `stop`. */
@@ -126,7 +127,7 @@ function streamed(
  * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
  * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
  * Promo template, or, asked to update a Menu Board (#264), with `STUB_MENU`; and the drawer's tool
- * loop (#267), a read of the screens' status and then `STUB_CARD`. On a free port, so the run never reaches the internet or spends a token.
+ * turn (#267, #350), a read of the screens' status and then `STUB_CARD`. On a free port, so the run never reaches the internet or spends a token.
  */
 async function anthropicStub(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
@@ -139,10 +140,11 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
       });
       req.on('end', () => {
         const asked = JSON.parse(body);
-        // The drawer's tool loop (#267): first a read, then the answer, as `STUB_CARD`. A fill offers no tools.
+        // The drawer's turn (#267, #350): first a read, then the answer, as `STUB_CARD`. A fill offers no tools.
         if (asked.tools?.length) {
-          const call = drawerStep(asked.messages);
-          return void streamed(res, asked.model, { type: 'tool_use', id: `toolu_${asked.messages.length}`, ...call }, 'tool_use');
+          const step = drawerStep(asked.messages);
+          if ('card' in step) return void streamed(res, asked.model, { type: 'text', text: JSON.stringify(step.card) }, 'end_turn');
+          return void streamed(res, asked.model, { type: 'tool_use', id: `toolu_${asked.messages.length}`, ...step }, 'tool_use');
         }
         const keys: string[] = asked.output_config.format.schema.properties.template.enum;
         const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0] ?? '';

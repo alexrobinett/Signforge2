@@ -129,7 +129,7 @@ function IntegrationsPage() {
         <div
           role="status"
           className={cn(
-            'flex items-start gap-3 rounded-xl border px-4 py-3 text-[15px]',
+            'flex items-start gap-3 rounded-xl border px-4 py-3 text-md',
             search.connectionError ? 'border-destructive/40 bg-card' : 'border-status-online/40 bg-card',
           )}
         >
@@ -158,7 +158,7 @@ function IntegrationsPage() {
         <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
-            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-[15px]">
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md">
               {SHOW.map((s) => (
                 <button
                   key={s}
@@ -184,7 +184,7 @@ function IntegrationsPage() {
               placeholder="Find an integration"
               defaultValue={q}
               onChange={(e) => set({ q: e.target.value || undefined })}
-              className="w-full sm:w-56 md:text-[15px]"
+              className="w-full sm:w-56 md:text-md"
             />
           </div>
 
@@ -195,7 +195,7 @@ function IntegrationsPage() {
                   <h2 id={`group-${g.name}`} className="text-xl font-semibold tracking-tight">
                     {g.name}
                   </h2>
-                  <span className="text-[15px] text-muted-foreground">{g.why}</span>
+                  <span className="text-md text-muted-foreground">{g.why}</span>
                 </div>
                 <ul>
                   {g.items.map((c) => (
@@ -208,10 +208,7 @@ function IntegrationsPage() {
             <p className="text-muted-foreground">No integration matches.</p>
           )}
         </div>
-        <section
-          aria-labelledby="missing-h"
-          className="lg:col-start-2 lg:row-start-2 flex flex-col gap-2 self-start rounded-[14px] border bg-card p-4 text-[15px]"
-        >
+        <section aria-labelledby="missing-h" className="lg:col-start-2 lg:row-start-2 flex flex-col gap-2 self-start rounded-xl border bg-card p-4 text-md">
           <h2 id="missing-h" className="text-lg font-semibold tracking-tight">
             Missing one?
           </h2>
@@ -259,11 +256,11 @@ function ConnectorRow({
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <strong className="text-base font-semibold">{c.name}</strong>
-          <span className={cn('text-[13px] font-semibold', c.state === 'built' ? 'text-status-online-foreground' : 'text-muted-foreground')}>
+          <span className={cn('text-meta font-semibold', c.state === 'built' ? 'text-status-online-foreground' : 'text-muted-foreground')}>
             {STATE_WORD[c.state]}
           </span>
         </span>
-        <span className="text-[15px] text-muted-foreground">{c.does}</span>
+        <span className="text-md text-muted-foreground">{c.does}</span>
       </span>
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
@@ -273,7 +270,7 @@ function ConnectorRow({
           {kind && action && (
             <Button
               variant={primary ? 'default' : 'outline'}
-              className="min-h-10 px-3.5 text-[15px] font-semibold"
+              className="min-h-10 px-3.5 text-md font-semibold"
               aria-label={`${action} ${c.name}`}
               onClick={() => openSources(kind, { adding: action === 'Connect' })}
             >
@@ -337,7 +334,7 @@ function FeedingNow({
   heardAt: number;
 }) {
   return (
-    <section aria-labelledby="now-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
+    <section aria-labelledby="now-h" className="flex flex-col gap-2.5 rounded-xl border bg-card p-4">
       <h2 id="now-h" className="text-lg font-semibold tracking-tight">
         Feeding screens now
       </h2>
@@ -353,7 +350,7 @@ function FeedingNow({
         )}
       </div>
       {sources.length ? (
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-[15px]">
+        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-md">
           {sources.map((s) => {
             const state = sourceState(s, clock);
             return (
@@ -361,7 +358,7 @@ function FeedingNow({
                 <dt className="min-w-0 break-words">
                   {KIND_WORD[s.format]} · {s.name}
                 </dt>
-                <dd className={cn('m-0 font-mono text-[13px]', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+                <dd className={cn('m-0 font-mono text-meta', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                   {state.word}
                 </dd>
               </div>
@@ -404,12 +401,12 @@ function Accounts({
   const busy = (id: string, doing: 'connect' | 'disconnect') => connecting?.id === id && connecting.doing === doing;
 
   return (
-    <section aria-labelledby="accounts-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
+    <section aria-labelledby="accounts-h" className="flex flex-col gap-2.5 rounded-xl border bg-card p-4">
       <h2 id="accounts-h" className="text-lg font-semibold tracking-tight">
         Connected accounts
       </h2>
       {connections.length ? (
-        <ul className="flex flex-col gap-3 text-[15px]">
+        <ul className="flex flex-col gap-3 text-md">
           {connections.map((c) => (
             <li key={c.id} className="flex flex-col gap-1.5">
               <span className="flex flex-wrap items-baseline justify-between gap-x-3">
