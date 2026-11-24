@@ -341,7 +341,7 @@ test('a spot no playlist plays is deleted after its confirmation, at desktop and
   await hydrated(page);
   await expect(page.getByRole('link', { name: /Old opening hours/ })).toHaveCount(0);
   const { entries } = await tool(page, 'list_audit_log', { limit: 5 });
-  expect(entries[0]).toMatchObject({ action: 'delete_spot', targetId: spotId });
+  expect(entries[0]).toMatchObject({ action: 'delete_spot', target: { kind: 'spot', id: spotId } });
 });
 
 test('a spot a playlist plays is refused, naming the playlist with a link to it, and kept (#242)', async () => {
