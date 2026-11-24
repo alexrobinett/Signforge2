@@ -363,7 +363,8 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await expect(publish).toBeFocused();
   // At phone width the question's buttons stay in view; its words scroll within it.
   await page.setViewportSize({ width: 390, height: 844 });
-  await publish.click();
+  // Publish still has focus, given back by the question: Enter asks again.
+  await publish.press('Enter');
   await expect(ask.getByRole('button', { name: 'Publish anyway' })).toBeInViewport();
   await axe(page);
   await shots(page, '35-publish-sample-text-phone');

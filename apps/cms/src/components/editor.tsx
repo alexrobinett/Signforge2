@@ -111,10 +111,13 @@ export function DeleteButton({ onAsk }: { onAsk: () => void }) {
   );
 }
 
-/** Publishes what the editor has open; while one is on its way, says so. */
+/**
+ * Publishes what the editor has open; while one is on its way, says so. Not disabled then (README,
+ * React rules): focus stays on it, so a question the publish asks (#360) gives focus back to it.
+ */
 export function PublishButton({ pending, disabled, onPublish }: { pending: boolean; disabled: boolean; onPublish: () => void }) {
   return (
-    <Button disabled={pending || disabled} onClick={onPublish}>
+    <Button disabled={disabled} aria-disabled={pending || undefined} className={pending ? 'opacity-60' : undefined} onClick={() => !pending && onPublish()}>
       {pending ? 'Publishing…' : 'Publish'}
     </Button>
   );
