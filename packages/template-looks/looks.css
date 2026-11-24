@@ -453,8 +453,9 @@
 }
 /* A photo drifting across a portrait screen's width took the kit's test template over 1% of frames
    dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until a portrait
-   template measures it under 1%. */
+   template measures it under 1%. Held still, it needs no layer of its own. */
 :root[data-orientation='portrait'] .lk-drift {
+  will-change: auto;
   animation: none;
 }
 .lk-wobble {

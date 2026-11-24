@@ -409,7 +409,11 @@ async function expectSameAsFresh(hst: Host, html: string, a: Data, b: Data, asse
   await hst.init('reset', a, assetsA);
   await hst.waitFor('reset', 'ready', 1);
   await hst.post('reset', 'play');
-  await hst.page.waitForTimeout(200);
+  // The reset must undo a play under way: wait until the frame has drawn some of it.
+  await hst.page
+    .mainFrame()
+    .childFrames()
+    [frameOrder.get('reset')!]!.waitForFunction(() => document.getAnimations().some((a) => a.playState === 'running' && Number(a.currentTime) > 0));
   await hst.post('reset', 'reset');
   await hst.waitFor('reset', 'loaded', 2);
   await hst.init('reset', b, assetsB);
