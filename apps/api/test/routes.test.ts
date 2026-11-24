@@ -15,7 +15,7 @@ import { Client, email, testApp } from './client';
  * itself on `/v1/device` (M3-07's sync) goes here too, as a deliberate decision.
  */
 const WRITERS: Record<string, string> = {
-  'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations',
+  'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations, and the OAuth consent for agents (#110)',
   'POST /api/tools/:name': 'the tool registry, through the dispatcher',
   'POST /api/agent/inline/keep':
     "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",

@@ -14,6 +14,7 @@ import { createAgentSlice, type AgentSlice } from './agent';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
 import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
+import { createConnectSlice, type ConnectSlice } from './connect';
 import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
@@ -44,6 +45,7 @@ export type AppState = UiSlice &
   ScheduleSlice &
   TargetPickerSlice &
   GroupsSlice &
+  ConnectSlice &
   AgentSlice;
 export type AppStore = StoreApi<AppState>;
 
@@ -76,6 +78,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createScheduleSlice(set, get, deps),
     ...createTargetPickerSlice(set, get, deps),
     ...createGroupsSlice(set, get, deps),
+    ...createConnectSlice(set, get, deps),
     ...createAgentSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {

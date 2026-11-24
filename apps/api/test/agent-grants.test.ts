@@ -37,8 +37,9 @@ async function sha256Base64Url(text: string) {
 const check = async (accessToken: string) => agentGrantForToken(env.DB, await sha256Base64Url(accessToken), RESOURCE, Date.now());
 
 /** Registers a public client by open registration, as an MCP client does. */
-async function register(t: App) {
-  const res = await t.app.request(
+/** An open registration as an MCP client sends it, with `metadata` over the defaults. */
+const registration = (t: App, metadata: Record<string, unknown> = {}) =>
+  t.app.request(
     `${ORIGIN}/api/auth/oauth2/register`,
     {
       method: 'POST',
@@ -49,24 +50,29 @@ async function register(t: App) {
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
+        ...metadata,
       }),
     },
     env,
     createExecutionContext(),
   );
-  expect(res.status).toBe(201);
+
+/** Registers a public client by open registration, as an MCP client does. */
+async function register(t: App, metadata: Record<string, unknown> = {}) {
+  const res = await registration(t, metadata);
+  expect(res.status, await res.clone().text()).toBe(201);
   return (await res.json<{ client_id: string }>()).client_id;
 }
 
 const ALL_SCOPES = 'content:read content:draft content:publish screens:manage org:manage offline_access';
 
 /** The person, signed in as `c`, opens `clientId`'s authorize URL: the provider sends them to the consent page with its signed query. */
-async function consentPage(c: Client, clientId: string, scope = ALL_SCOPES) {
+async function consentPage(c: Client, clientId: string, scope = ALL_SCOPES, redirect = REDIRECT) {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
-    redirect_uri: REDIRECT,
+    redirect_uri: redirect,
     scope,
     state: 'st',
     code_challenge: await sha256Base64Url(verifier),
@@ -313,7 +319,8 @@ describe('a consent the provider gives no code for', () => {
     });
     const res = await owner.get(`/api/auth/oauth2/authorize?${params}`, { accept: 'text/html' });
     const signIn = new URL(res.headers.get('location') ?? (await res.json<{ url: string }>()).url, ORIGIN);
-    expect(signIn.pathname).toBe('/sign-in');
+    // The provider's login page is the consent page, which sends a signed-out person through sign-in.
+    expect(signIn.pathname).toBe('/connect');
     // The page is skipped and the signed query consented to with the old session.
     const decided = await owner.post('/api/auth/agent-grants/consent', {
       oauth_query: signIn.search.slice(1),
@@ -351,6 +358,66 @@ describe('consent from another site', () => {
       expect(res.status, String(origin)).toBe(403);
     }
     expect(await scoped(env.DB, org.id).agentGrants.list()).toEqual([]);
+  });
+});
+
+describe("the consent page's request", () => {
+  it("names the client, the host its code goes to, and each of the person's orgs with the scopes it may offer there", async () => {
+    const { t, owner, editor, org } = await team();
+    expect((await owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    const own = await editor.createOrg('Editor Owns This');
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(editor, clientId);
+    const res = await editor.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ client: unknown; user: { email: string }; orgs: { orgId: string; name: string; role: string; scopes: string[] }[] }>();
+    expect(body.client).toEqual({ id: clientId, name: 'Test agent', verified: false, redirect: { kind: 'web', host: '127.0.0.1:33418' } });
+    // By name. An editor while editors may not publish: no content:publish, and no org:manage.
+    expect(body.orgs).toEqual([
+      { orgId: own.id, name: 'Editor Owns This', role: 'owner', scopes: ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] },
+      { orgId: org.id, name: 'Grants Co', role: 'editor', scopes: ['content:read', 'content:draft', 'screens:manage'] },
+    ]);
+  });
+
+  it("withholds an unverified app's scheme that reads as SignForge's (the lists: client-names.test.ts)", async () => {
+    const { t, owner } = await team();
+    const redirect = 'signforge://SignForge-CLI/callback';
+    const clientId = await register(t, { client_name: 'Test agent', redirect_uris: [redirect] });
+    const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+      client: { name: string | null; redirect: unknown };
+    }>();
+    expect(body.client).toMatchObject({ name: 'Test agent', redirect: { kind: 'app', target: null } });
+  });
+
+  it('marks the first-party CLI as verified', async () => {
+    const { owner } = await team();
+    // sf-cli's registered loopback callback, on the port this run picked (RFC 8252).
+    const { oauthQuery } = await consentPage(owner, 'sf-cli', ALL_SCOPES, 'http://127.0.0.1:40123/callback');
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{ client: unknown }>();
+    expect(body.client).toEqual({ id: 'sf-cli', name: 'SignForge CLI', verified: true, redirect: { kind: 'web', host: '127.0.0.1:40123' } });
+  });
+
+  it('offers only what the client asked for', async () => {
+    const { t, owner, org } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId, 'content:read offline_access');
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+      orgs: { orgId: string; scopes: string[] }[];
+    }>();
+    expect(body.orgs).toEqual([expect.objectContaining({ orgId: org.id, scopes: ['content:read'] })]);
+  });
+
+  it('is refused for a query that is not signed, or signed for other parameters, and for no session', async () => {
+    const { t, owner } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId);
+    const forged = new URLSearchParams(oauthQuery);
+    forged.set('redirect_uri', 'https://evil.test/cb');
+    for (const q of [forged.toString(), `client_id=${clientId}&scope=content%3Aread`]) {
+      expect((await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: q })}`)).status, q).toBe(400);
+    }
+    expect((await new Client(t).get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).status).toBe(401);
   });
 });
 
@@ -407,6 +474,36 @@ describe('a membership ending', () => {
 });
 
 describe('client registration', () => {
+  /** Each refusal's words, by why the name is refused. */
+  const REFUSED = {
+    hides: 'client_name must not contain control, format, bidirectional or invisible characters',
+    blank: 'client_name must not be blank',
+    long: 'client_name must be at most 80 characters',
+  };
+  /** What registering under `name` is refused for, or its status if it is not refused. */
+  const refusalOf = async (t: App, name: string) => {
+    const res = await registration(t, { client_name: name });
+    if (res.status !== 400) return res.status;
+    const { error, error_description: why } = (await res.json()) as { error: string; error_description: string };
+    expect(error, JSON.stringify(name)).toBe('invalid_client_metadata');
+    return Object.entries(REFUSED).find(([, words]) => words === why)?.[0] ?? why;
+  };
+
+  it('refuses a blank name, one too long for the heading, and characters that hide text (the lists: client-names.test.ts)', async () => {
+    const t = testApp();
+    for (const [name, why] of [
+      ['\u00A0', 'blank'],
+      ['A'.repeat(81), 'long'],
+      ['Sign\u3164Forge', 'hides'],
+    ] as const) {
+      expect(await refusalOf(t, name), JSON.stringify(name)).toBe(why);
+    }
+  });
+
+  it("registers a name that reads as SignForge's: registration is not the place", async () => {
+    expect(await refusalOf(testApp(), 'SignForge CLI')).toBe(201);
+  });
+
   it('refuses a confidential client, or one that names no method', async () => {
     const t = testApp();
     for (const method of ['client_secret_post', 'client_secret_basic', undefined]) {
@@ -458,5 +555,21 @@ describe('client registration', () => {
       statuses.push(res.status);
     }
     expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+  });
+});
+
+describe("the consent page's name for a client", () => {
+  it('withholds a name that reads as SignForge, and shows Claude Code with its server named after it (the lists: client-names.test.ts)', async () => {
+    const { t, owner } = await team();
+    for (const [name, shown] of [
+      ['SI6NFOR6E', null],
+      ['Claude Code (signforge)', 'Claude Code (signforge)'],
+    ] as const) {
+      const { oauthQuery } = await consentPage(owner, await register(t, { client_name: name }));
+      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+        client: { name: string | null; verified: boolean };
+      }>();
+      expect(body.client, name).toMatchObject({ name: shown, verified: false });
+    }
   });
 });

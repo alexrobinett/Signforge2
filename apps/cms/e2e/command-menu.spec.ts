@@ -172,6 +172,8 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(takeover.getByText(/^Sent now:/)).toBeVisible();
   await takeover.getByRole('button', { name: 'Cancel' }).click();
   await expect(takeover).toBeHidden();
+  // Its focus goes back a task after it closes: a ⌘K before that has the next keys typed into the page (#310).
+  await expect(page.locator('#main')).toBeFocused();
 
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');

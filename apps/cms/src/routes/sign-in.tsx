@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
+import { NOT_FRAMED } from '~/lib/connect';
 import { safeRedirect } from '~/lib/paths';
 import { backToPage } from '~/server/form-post.server';
 import { getShell, getSignInOptions, type SignInOptions } from '~/server/shell.functions';
@@ -18,6 +19,8 @@ export const Route = createFileRoute('/sign-in')({
     if (await getShell()) throw redirect({ href: safeRedirect(search.redirect) });
   },
   loader: () => getSignInOptions(),
+  // Part of an agent's connection (/connect sends a signed-out person here): never framed.
+  headers: () => NOT_FRAMED,
   head: () => ({ meta: [{ title: 'Sign in · SignForge' }] }),
   component: SignInPage,
 });
