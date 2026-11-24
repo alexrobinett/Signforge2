@@ -266,73 +266,34 @@ describe('the agent drawer, in the store', () => {
       why: null,
       expiresAt: 1,
     };
-    /** A turn that pauses at the card: the card, then the run's end with its pause, as the API sends them. */
-    const pausing = (run: { runId: string; threadId: string }) => {
-      const input = { screenId: 'scr_1' };
-      const pause = {
-        id: 'approval_t1',
-        reason: 'tool_call',
-        message: 'Approval required to run restart_screen',
-        toolCallId: 't1',
-        // As TanStack AI makes them for a tool whose input is { screenId: string }, hashes included.
-        responseSchema: {
-          oneOf: [
-            {
-              type: 'object',
-              properties: { approved: { const: true }, editedArgs: { type: 'object', properties: { screenId: { type: 'string' } } } },
-              required: ['approved'],
-              additionalProperties: false,
-            },
-            { type: 'object', properties: { approved: { const: false } }, required: ['approved'], additionalProperties: false },
-          ],
-        },
-        metadata: {
-          kind: 'approval',
-          toolName: 'restart_screen',
-          input,
-          'tanstack:interruptBinding': {
-            v: 1,
-            kind: 'tool-approval',
-            interruptId: 'approval_t1',
-            toolName: 'restart_screen',
-            toolCallId: 't1',
-            originalArgs: input,
-            inputSchemaHash: 'sha256:a12d7b7bf5d3d1ced9ab2538df07c51523ed67b00e74acfe0fad8585010097a5',
-            approvalSchemaHash: 'sha256:22f76d9a1c618a3cfaa891208a14f6e5e6ab1be4ff1c38cc8a8cd1e8fd0c0e4e',
-            responseSchemaHash: 'sha256:798f93d0ac0f26be753adac2de78ff20f2e4c302b9e054cf52e4858388d72e90',
-            interruptedRunId: run.runId,
-            generation: 0,
-          },
-        },
-      };
-      return stream(
-        ...[
-          { type: 'RUN_STARTED', ...run },
-          { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: CONFIRM },
-          { type: 'RUN_FINISHED', ...run, finishReason: 'tool_calls', outcome: { type: 'interrupt', interrupts: [pause] } },
-        ].map((e) => `data: ${JSON.stringify({ timestamp: 1, ...e })}\n\n`),
+    const sse = (run: { runId: string; threadId: string }, ...events: object[]) =>
+      stream(...events.map((e) => `data: ${JSON.stringify({ timestamp: 1, ...run, ...e })}\n\n`));
+    /** A turn that pauses at the card: the card, then the run's end, which carries no pause and no model input. */
+    const pausing = (run: { runId: string; threadId: string }) =>
+      sse(run, { type: 'RUN_STARTED' }, { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: CONFIRM }, { type: 'RUN_FINISHED', finishReason: 'tool_calls' });
+    const DONE: AnswerCard = { ...CARD, text: 'Bayside door restarted.', trace: [{ tool: 'restart_screen', title: 'Restart screen', summary: 'Restarted a screen', ok: true }] };
+    /** A press's run: what the action did (`done`), then the model's answer, or its end without one. */
+    const pressed = (done: { ok: boolean; message: string }, answered: boolean) => (run: { runId: string; threadId: string }) =>
+      sse(
+        run,
+        { type: 'RUN_STARTED' },
+        { type: 'CUSTOM', name: CHAT_EVENTS.done, value: { tool: 'restart_screen', ...done } },
+        ...(answered
+          ? [{ type: 'CUSTOM', name: CHAT_EVENTS.answer, value: DONE }, { type: 'RUN_FINISHED', finishReason: 'stop' }]
+          : [{ type: 'RUN_ERROR', code: 'unreadable', message: 'The model gave no answer it could show. Ask again.' }]),
       );
-    };
-    const DONE: AnswerCard = {
-      ...CARD,
-      text: 'Bayside door restarted.',
-      trace: [{ tool: 'restart_screen', title: 'Restart screen', summary: 'Restarted a screen', ok: true }],
-    };
 
-    it('holds the turn at the card; pressed, resumes it with the token, once, and shows the answer', async () => {
+    it('pressed, sends the question again with the card\'s token and nothing of the call, once, and shows the answer', async () => {
       const { store } = drawerStore();
       answer = pausing;
       await store.getState().askAgent('Restart the Bayside door');
       expect(store.getState().agentDrawer).toMatchObject({ asking: false, messages: [{ role: 'user' }, { role: 'confirm', card: CONFIRM, press: 'offered' }] });
-      answer = answering(DONE);
+      answer = pressed({ ok: true, message: 'Restarted a screen' }, true);
       await store.getState().pressConfirm(1);
-      const pressed = sent.at(-1)?.body;
-      expect(pressed).toMatchObject({
-        parentRunId: sent[0]?.body.runId,
-        resume: [{ interruptId: 'approval_t1', status: 'resolved', payload: { approved: true } }],
-        forwardedProps: { confirm: 'tok_1', page: { path: '/screens/scr_1' } },
-      });
-      expect(pressed.resume[0].payload).not.toHaveProperty('editedArgs');
+      const body = sent.at(-1)?.body;
+      expect(body).toMatchObject({ messages: [{ role: 'user', content: 'Restart the Bayside door' }], forwardedProps: { confirm: 'tok_1', page: { path: '/screens/scr_1' } } });
+      expect(body).not.toHaveProperty('resume');
+      expect(body.messages).toHaveLength(1);
       expect(store.getState().agentDrawer).toMatchObject({
         asking: false,
         messages: [{ role: 'user' }, { role: 'confirm', press: 'done' }, { role: 'assistant', card: DONE }],
@@ -342,7 +303,23 @@ describe('the agent drawer, in the store', () => {
       expect(sent).toHaveLength(2);
     });
 
-    it('sends nothing when let go, and says why a press was refused', async () => {
+    it('says done or not from what the action did, never from the model: refused with an answer after it, done with none (review of #406)', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      answer = pressed({ ok: false, message: 'Not done: the screen is gone. This card is spent: ask again for a new one.' }, true);
+      await store.getState().pressConfirm(1);
+      expect(store.getState().agentDrawer.messages[1]).toMatchObject({ press: 'refused', error: 'Not done: the screen is gone. This card is spent: ask again for a new one.' });
+
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      answer = pressed({ ok: true, message: 'Restarted a screen' }, false);
+      await store.getState().pressConfirm(4);
+      expect(store.getState().agentDrawer.messages[4]).toMatchObject({ press: 'done', error: null });
+      expect(store.getState().agentDrawer.asking).toBe(false);
+    });
+
+    it('sends nothing when let go, and says why a press was refused before it ran', async () => {
       const { store } = drawerStore();
       answer = pausing;
       await store.getState().askAgent('Restart it');
@@ -354,11 +331,7 @@ describe('the agent drawer, in the store', () => {
       await store.getState().askAgent('Restart it');
       answer = () => Response.json({ error: 'stale_card', message: 'This card has run out. Ask again for a new one.' }, { status: 409 });
       await store.getState().pressConfirm(3);
-      expect(store.getState().agentDrawer.messages[3]).toMatchObject({
-        role: 'confirm',
-        press: 'refused',
-        error: 'This card has run out. Ask again for a new one.',
-      });
+      expect(store.getState().agentDrawer.messages[3]).toMatchObject({ role: 'confirm', press: 'refused', error: 'This card has run out. Ask again for a new one.' });
       expect(store.getState().agentDrawer.asking).toBe(false);
     });
 

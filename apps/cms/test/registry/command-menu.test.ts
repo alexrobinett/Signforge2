@@ -11,6 +11,7 @@ import {
   parseToolList,
   pointerMovesSelection,
   readsAsSentence,
+  asksFirst,
   resultText,
   selectedItem,
   targetActions,
@@ -26,8 +27,9 @@ const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: 
 const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {
-  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review).
-  const PER_SCREEN = ['restart_screen'];
+  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review);
+  // publish_takeover is the takeover dialog's own work, which the menu's takeover row opens (#351).
+  const PER_SCREEN = ['restart_screen', 'publish_takeover'];
 
   it('lists every tool an owner may use: the whole registry, but for Restart', () => {
     expect(toolNames('owner').sort()).toEqual(
@@ -251,16 +253,22 @@ describe("what counts as the member moving ⌘K's selection (#180)", () => {
 });
 
 describe('Ask agent in ⌘K (#270)', () => {
-  it('reads a question or a request as a sentence for the agent; one or two words, and a short command, still find pages, records and tools first', () => {
-    for (const q of ['screens', 'bayside door', '  rename   ', 'publish now', 'pair a screen', 'take over Bayside now', 'go to screens'])
+  it('reads a question or a request as a sentence for the agent; one or two words, and a command however long, still find pages, records and tools first', () => {
+    for (const q of ['screens', 'bayside door', '  rename   ', 'publish now', 'pair a screen', 'take over Bayside now', 'Bayside closes at 2 for the storm'])
       expect(readsAsSentence(q), q).toBe(false);
-    for (const q of ['why are screens behind', 'Which screens need me?', 'behind screens?', 'show me what plays now', 'Bayside closes at 2 for the storm'])
-      expect(readsAsSentence(q), q).toBe(true);
-    expect(askEntry('  why are screens behind ')).toMatchObject({
-      kind: 'ask',
-      label: 'Ask agent: why are screens behind',
-      question: 'why are screens behind',
-    });
+    for (const q of ['why are screens behind', 'Which screens need me?', 'behind screens?', 'show me what plays now']) expect(readsAsSentence(q), q).toBe(true);
+    expect(askEntry('  why are screens behind ', true)).toMatchObject({ kind: 'ask', id: 'ask:typed', label: 'Ask agent: why are screens behind', question: 'why are screens behind' });
+    expect(askEntry('screens', false)).toMatchObject({ id: 'ask:typed:last' });
+  });
+
+  it('puts the agent first only when nothing listed matches what was typed well, by its name or the start of it (review of #406)', () => {
+    const names = ['Why Not Bakery front window', 'Go to Screens', 'Breakfast'];
+    expect(asksFirst('why are screens behind', names)).toBe(true);
+    // A screen named as typed, or starting with it: found first.
+    expect(asksFirst('Why not bakery front window', names)).toBe(false);
+    expect(asksFirst('why not bakery', names)).toBe(false);
+    // Not a question or a request: never first.
+    expect(asksFirst('bakery front window lights', [])).toBe(false);
   });
 
   it('lists the developer tools for an owner only, marked to go under Developer', () => {

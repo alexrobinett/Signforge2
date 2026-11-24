@@ -209,8 +209,8 @@ const context = z
 const chatRequest = z.object({
   threadId: z.string().min(1).max(100),
   runId: z.string().min(1).max(100),
-  messages: z.tuple([z.object({ role: z.literal('user'), content: z.string().trim().min(1).max(CHAT_MESSAGE_CHARS), toolCalls: z.undefined() })]),
-  resume: z.undefined(),
+  messages: z.tuple([z.object({ role: z.literal('user'), content: z.string().trim().min(1).max(CHAT_MESSAGE_CHARS), toolCalls: z.never().optional() })]),
+  resume: z.never().optional(),
   forwardedProps: context,
 });
 
@@ -606,7 +606,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       /**
        * The run paused at a tool behind a card (#269): the card, read from the org now, its record kept
        * under a one-use token for this member (none when they may not press it: `why` says who may),
-       * then the run's end, whose pause the client resumes when the person presses.
+       * then the run's end, without its pause: the press sends the token, and the API resumes the call here.
        */
       async function* paused(asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
         const [one] = asked;

@@ -1,11 +1,18 @@
 // The agent's confirmation cards (#269) and Ask agent in ⌘K (#270), against the Anthropic stub's
 // scripted turns (e2e/global-setup.ts): asked about the storm, it takes every screen over, which stops
 // at a card until the person presses it. No test reaches a real model.
-import { expect, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, STUB_CARD, STUB_TAKEN } from './servers';
 
 const ADDRESS = '192.0.2.193';
+
+/** Keys only: from the question, Shift+Tab back up the drawer until `target` has focus. */
+async function tabTo(page: Page, target: Locator) {
+  await page.getByLabel('Ask about your screens and content').click();
+  for (let i = 0; i < 20 && !(await target.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Shift+Tab');
+  await expect(target).toBeFocused();
+}
 
 test('a member asks the agent to put up the storm closure, sees the takeover card, presses it by keyboard, and ends it from the Schedule (#269)', async ({
   page,
@@ -32,7 +39,7 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
 
   // The card: what happens, to how many screens, until when, and how it is undone. Nothing is done yet.
-  const card = drawer.getByRole('region', { name: 'Take over screens' });
+  const card = drawer.getByRole('region', { name: 'Take over screens' }).first();
   await expect(card).toContainText('Plays Storm closure on every screen (0 screens), over anything scheduled.');
   await expect(card).toContainText('Publishes Storm closure too: it was never published.');
   await expect(card).toContainText('End it early with End now on the Schedule.');
@@ -41,15 +48,27 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await shots(page, '102-confirm-card');
 
   // Pressed by keyboard: it runs, once, and the agent says what it did.
-  await card.getByRole('button', { name: 'Take over' }).focus();
+  // By keyboard alone: Tab from the question to the card's button, then Enter.
+  await tabTo(page, card.getByRole('button', { name: 'Take over' }));
   await page.keyboard.press('Enter');
   await expect(card).toContainText('Done.');
   await expect(drawer.getByRole('article').last()).toContainText(STUB_TAKEN.text);
   await expect(card.getByRole('button', { name: 'Take over' })).toHaveCount(0);
   const [entry] = (await tool(page, 'list_schedule_entries', {})).entries;
   expect(entry).toMatchObject({ endsAt: expect.any(String) });
-  const [audit] = (await tool(page, 'list_audit_log', { limit: 5 })).entries.filter((e: { action: string }) => e.action === 'start_takeover');
+  const [audit] = (await tool(page, 'list_audit_log', { limit: 5 })).entries.filter((e: { action: string }) => e.action === 'publish_takeover');
   expect(audit).toMatchObject({ actor: { kind: 'user', clientId: 'cms-agent' } });
+
+  // Another card, let go by keyboard: focus goes on to the question, and the live region says it was cancelled.
+  await drawer.getByLabel('Ask about your screens and content').fill('The storm is worse: put the closure up again');
+  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  const again = drawer.getByRole('region', { name: 'Take over screens' }).last();
+  await expect(again.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await tabTo(page, again.getByRole('button', { name: 'Cancel' }));
+  await page.keyboard.press('Enter');
+  await expect(again).toContainText('Cancelled: nothing was done.');
+  await expect(drawer.getByLabel('Ask about your screens and content')).toBeFocused();
+  await expect(drawer.getByRole('status')).toHaveText('Cancelled: nothing was done.');
 
   // On a phone the card fits the sheet, and axe passes there too.
   await page.setViewportSize({ width: 390, height: 844 });

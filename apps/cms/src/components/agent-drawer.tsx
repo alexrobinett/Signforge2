@@ -232,7 +232,16 @@ function ConfirmCardView({ index }: { index: number }) {
             <Button type="button" size="sm" disabled={asking} onClick={() => void press(index)}>
               {card.press}
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => dismiss(index)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                dismiss(index);
+                // The card's buttons go with it: focus goes on to the question, where the person goes next.
+                document.getElementById('agent-question')?.focus();
+              }}
+            >
               Cancel
             </Button>
           </div>
@@ -328,7 +337,13 @@ export function AgentDrawer() {
     : last?.role === 'assistant'
       ? last.card.text
       : last?.role === 'confirm'
-        ? `${last.card.title}. ${last.card.lines.join(' ')} ${last.card.token ? `Press ${last.card.press} to do it, or Cancel.` : (last.card.why ?? '')}`
+        ? last.press === 'dismissed'
+          ? 'Cancelled: nothing was done.'
+          : last.press === 'refused'
+            ? (last.error ?? 'It was not done.')
+            : last.press === 'done'
+              ? 'Done.'
+              : `${last.card.title}. ${last.card.lines.join(' ')} ${last.card.token ? `Press ${last.card.press} to do it, or Cancel.` : (last.card.why ?? '')}`
         : last?.role === 'error'
           ? last.text
           : '';

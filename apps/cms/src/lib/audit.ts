@@ -114,6 +114,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
+  publish_takeover: { group: 'Schedule', words: 'Takeover made and published' },
   update_schedule_entry: { group: 'Schedule', words: 'Schedule changed' },
   delete_schedule_entry: { group: 'Schedule', words: 'Unscheduled' },
   end_takeover: { group: 'Schedule', words: 'Takeover ended' },

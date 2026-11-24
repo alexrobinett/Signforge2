@@ -334,18 +334,19 @@ test('the command menu tells a screen reader the row that is selected, after eac
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();
-  await pointsAtSelected('Go to Overview');
+  // Empty, the page's questions for the agent come first (#270, #358).
+  await pointsAtSelected('Which screens need me, and why?');
   // Moved by key onto a row, then typing filters that row out: the pointer follows the selection to a row still listed.
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
-  await pointsAtSelected('Go to Spots');
+  await pointsAtSelected('What is on screen now?');
   await page.keyboard.type('playl');
   await pointsAtSelected('Go to Playlists');
   await axe(page);
   // Cleared, the first row is selected again, and named.
   await search.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
-  await pointsAtSelected('Go to Overview');
+  await pointsAtSelected('Which screens need me, and why?');
   await page.keyboard.press('End');
   await page.keyboard.type('spots');
   await pointsAtSelected('Go to Spots');

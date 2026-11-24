@@ -1,12 +1,15 @@
 /**
- * The agent's drawer (#267, #350, docs/proposals/cms-agent.md): open or not, the conversation, and
+ * The agent's drawer (#267, #350, #351, docs/proposals/cms-agent.md): open or not, the conversation, and
  * the turn on its way, which is asked with the page shown when it is asked. A turn is TanStack AI's
  * `ChatClient` (`@tanstack/ai-client`), driven from here rather than by `useChat`, so the drawer keeps
  * the CMS's state rules: it posts to `POST /api/agent/chat` and reads its server-sent events, the
  * API's own (`CHAT_EVENTS`): each tool call's card as it runs, the card's text as it is written (read
  * by the API from the answer alone), then the answer's card, or why it ended. Text shown of a turn
- * that then fails is dropped: only a whole card is kept. The cards are the drawer's own, kept here, never rebuilt from the client's messages (a pause would turn them back to
- * raw JSON, #346). The conversation lives only here, so a reload forgets it; each question sends it
+ * that then fails is dropped: only a whole card is kept. The cards are the drawer's own, kept here,
+ * never rebuilt from the client's messages (a pause would turn them back to raw JSON, #346). A turn
+ * may stop at a confirmation card (#269, #351): pressed, the question goes again with the card's token,
+ * and the API runs the action; what it did comes back as its own event (`signforge.done`), which the
+ * card says, never the model's answer after it. The conversation lives only here, so a reload forgets it; each question sends it
  * back, the last `CHAT_HISTORY` turns of it, each answer its card's text, groups and notes.
  *
  * An answer may hold drafts (#268): changes the agent proposes, written only when the person saves
@@ -27,6 +30,7 @@ import {
   type ChatContext,
   type ChatTurn,
   type ConfirmCard,
+  type ConfirmDone,
   type ProposedCall,
   type ToolCard,
 } from '@signforge/api/agent-chat';
@@ -72,13 +76,14 @@ type DrawerMessage =
   /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI & agents. */
   | { role: 'error'; text: string; inSettings: boolean };
 
-/** What a run of a turn said: its answer's card, a confirmation card, why it ended, or how it failed; `settled` wakes a press waiting on it. */
+/** What a run of a turn said: its answer's card, a confirmation card, what a press did, why it ended, or how it failed. */
 interface Got {
   card: AnswerCard | undefined;
   confirm: ConfirmCard | undefined;
+  /** What a press did, from the action's own result. */
+  done: ConfirmDone | undefined;
   ended: { code: string | undefined; message: string } | undefined;
   failure: Error | undefined;
-  settled: (() => void) | undefined;
 }
 
 type AgentOpener = 'sidebar' | 'top-bar';
@@ -227,17 +232,17 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
   let conversation = 0;
   /**
-   * The turns paused at a confirmation card (#269), by its token: each `ChatClient` holds its run's pause,
-   * which a press resumes. Held until pressed, let go, or the drawer is forgotten.
+   * The confirmation cards waiting for a press (#269), by token: the question and context of the turn that
+   * paused at each, which its press sends again with the token. Held until pressed, let go, or the drawer is forgotten.
    */
-  const paused = new Map<string, { turn: ChatClient; got: Got; context: ChatContext }>();
+  const waiting = new Map<string, { question: string; context: ChatContext }>();
 
   /**
    * A turn's client, sending `context` with each run (`forwardedProps`), and what its run said, in `got`:
    * each tool's card and the answer's text as they come, then the answer's card, a confirmation card, or why not.
    */
   function turnOf(context: ChatContext) {
-    const got: Got = { card: undefined, confirm: undefined, ended: undefined, failure: undefined, settled: undefined };
+    const got: Got = { card: undefined, confirm: undefined, done: undefined, ended: undefined, failure: undefined };
     const turn: ChatClient = new ChatClient({
       threadId: thread ?? crypto.randomUUID(),
       forwardedProps: context,
@@ -253,6 +258,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           ours(turn, (d) => ({ ...d, streaming: text }));
         } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.answer) got.card = chunk.value;
         else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.confirm) got.confirm = chunk.value;
+        else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.done) got.done = chunk.value;
         else if (chunk.type === 'RUN_ERROR') got.ended = { code: chunk.code, message: chunk.message };
       },
       onError: (err) => {
@@ -260,11 +266,6 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         let cause: unknown = err;
         while (cause instanceof Error && !(cause instanceof Refusal)) cause = cause.cause;
         got.failure = cause instanceof Refusal ? cause : err;
-        got.settled?.();
-      },
-      // A run of a press settles here: `resolveInterrupt` starts it, and does not wait for it.
-      onRunIdChange: (id) => {
-        if (id === null) got.settled?.();
       },
     });
     return { turn, got };
@@ -276,10 +277,10 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   }
 
   /**
-   * What a run of `turn` said, said in the drawer: its answer's card, its confirmation card (the turn
-   * then held for the press), or why there is none. The text it streamed goes either way.
+   * What a run of `turn` said, said in the drawer: its answer's card, its confirmation card (its question
+   * and context kept for the press), or why there is none. The text it streamed goes either way.
    */
-  async function told(turn: ChatClient, got: Got, context: ChatContext) {
+  async function told(turn: ChatClient, got: Got, question: string, context: ChatContext) {
     const say = (message: DrawerMessage) => ours(turn, (d) => ({ ...d, messages: [...d.messages, message] }));
     const { card, confirm, ended, failure } = got;
     ours(turn, (d) => ({ ...d, streaming: '' }));
@@ -292,7 +293,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       if (drafts) await summarizeAt(get().agentDrawer.messages.length - 1);
     } else if (confirm) {
       say({ role: 'confirm', card: confirm, press: 'offered', error: null });
-      if (confirm.token && running === turn) paused.set(confirm.token, { turn, got, context });
+      if (confirm.token && running === turn) waiting.set(confirm.token, { question, context });
     } else if (failure instanceof Refusal) say({ role: 'error', text: toolMessage(failure), inSettings: IN_SETTINGS.has(failure.code) });
     // Why the API ended it, in its words; the client ends a stream that broke off as one too, in its own, which are not said.
     else if (ended && CHAT_PROBLEMS.some((p) => p === ended.code)) say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
@@ -300,8 +301,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     ours(turn, (d) => ({ ...d, asking: false, progress: [] }));
     // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
     if (running === turn) running = null;
-    // Held for its press, or done with.
-    if (![...paused.values()].some((held) => held.turn === turn)) turn.dispose();
+    turn.dispose();
   }
 
   /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
@@ -522,9 +522,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running = null;
       thread = null;
       conversation++;
-      // The cards still waiting for a press were the old org's: their turns go, and their tokens run out unused.
-      for (const held of paused.values()) held.turn.dispose();
-      paused.clear();
+      // The cards still waiting for a press were the old org's: they go, and their tokens run out unused.
+      waiting.clear();
       const { open } = get().agentDrawer;
       set({ agentDrawer: closed() });
       if (open) get().setRightPanel(false);
@@ -557,48 +556,38 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running = turn;
       await turn.sendMessage(question);
       if (running !== turn) return turn.dispose();
-      await told(turn, got, context);
+      await told(turn, got, question, context);
     },
 
     async pressConfirm(index) {
       const m = get().agentDrawer.messages[index];
       const token = m?.role === 'confirm' && m.press === 'offered' ? m.card.token : null;
-      const held = token ? paused.get(token) : undefined;
+      const held = token ? waiting.get(token) : undefined;
       if (!token || !held || get().agentDrawer.asking) return;
-      paused.delete(token);
+      waiting.delete(token);
       const press = (press: Press, error: string | null = null) =>
         drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press, error } : x)) }));
       press('pressing');
-      const { turn, got, context } = held;
-      Object.assign(got, { card: undefined, confirm: undefined, ended: undefined, failure: undefined });
       drawer((d) => ({ ...d, asking: true, progress: [], streaming: '' }));
+      // The question again, with the card's token: the API resumes the call it paused, from the card's record, and runs it then.
+      const { turn, got } = turnOf({ ...held.context, confirm: token });
       running = turn;
-      // The card's token, with the run's own pause, resumes it: the API runs the tool then, as the person, checked as they press.
-      turn.updateOptions({ forwardedProps: { ...context, confirm: token } });
-      const settled = new Promise<void>((resolve) => {
-        got.settled = resolve;
-      });
-      // The client declares no tools, so the server's approval reaches it as a generic interrupt, answered as approved.
-      const [pause] = turn.getInterrupts();
-      if (pause?.kind === 'generic') {
-        pause.resolveInterrupt({ approved: true });
-        await settled;
-      } else got.failure = new Error('This card can no longer be pressed. Ask again for a new one.');
+      await turn.sendMessage(held.question);
       if (running !== turn) return turn.dispose();
-      const refused = got.failure instanceof Refusal ? toolMessage(got.failure) : got.ended && !got.card ? got.ended.message : null;
-      press(got.card ? 'done' : 'refused', got.card ? null : (refused ?? 'It was not done. Ask again.'));
+      // Done or not, from the action's own result (`signforge.done`), never from the model's answer after it.
+      const { done } = got;
+      if (done?.ok) press('done');
+      else press('refused', done?.message ?? (got.failure instanceof Refusal ? toolMessage(got.failure) : (got.ended?.message ?? 'It was not done. Ask again.')));
       // Every page reads again what the press changed: the Schedule lists a takeover it started.
       const orgId = orgOnScreen(router);
-      if (got.card && orgId) await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
-      await told(turn, got, context);
+      if (done?.ok && orgId) await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+      await told(turn, got, held.question, held.context);
     },
 
     dismissConfirm(index) {
       const m = get().agentDrawer.messages[index];
       if (m?.role !== 'confirm' || m.press !== 'offered') return;
-      const held = m.card.token ? paused.get(m.card.token) : undefined;
-      if (m.card.token) paused.delete(m.card.token);
-      held?.turn.dispose();
+      if (m.card.token) waiting.delete(m.card.token);
       drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press: 'dismissed' } : x)) }));
     },
   };

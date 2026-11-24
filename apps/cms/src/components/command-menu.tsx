@@ -20,7 +20,7 @@ import {
   orgCommands,
   pageQuestions,
   pointerMovesSelection,
-  readsAsSentence,
+  asksFirst,
   selectedItem,
   targetActions,
   targetItemKey,
@@ -34,7 +34,9 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
 import { retryUnlessRedirect } from '~/queries/retry';
+import { playlistsQuery } from '~/queries/playlists';
 import { screensQuery } from '~/queries/screens';
+import { spotsQuery } from '~/queries/spots';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -58,13 +60,13 @@ const focusSearch = (input: HTMLInputElement | null) => input?.focus();
 const TARGET = /^(screen|group):/;
 /**
  * A question for the agent always shows: what was typed, or the page's own (#270). What was typed ranks
- * first only as a sentence; one or two words rank below every page, record and tool they find.
+ * first only when the menu put it first (`asksFirst`); otherwise below every page, record and tool found.
  */
 const filter = (value: string, search: string, keywords?: string[]) =>
   value.startsWith('ask:')
-    ? value !== 'ask:typed' || readsAsSentence(search)
-      ? 1
-      : Number.MIN_VALUE
+    ? value === 'ask:typed:last'
+      ? Number.MIN_VALUE
+      : 1
     : TARGET.test(value)
       ? matchesQuery(search, keywords ?? [])
         ? 1
@@ -358,6 +360,9 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const failed = fleet.isError && !fleet.isFetching;
   const screens = fleet.data?.screens ?? [];
   const groups = fleet.data?.groups ?? [];
+  // The spots and playlists the pages have read, from their cache: a name typed in full is found, not asked about.
+  const spots = useQuery({ ...spotsQuery(orgId), enabled: false });
+  const playlists = useQuery({ ...playlistsQuery(orgId), enabled: false });
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
   const shownSelection = selectedItem(selection, found, moved);
@@ -376,8 +381,17 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
 
   const entries = [...commandEntries(tools, owner), ...orgCommands(shell.organizations.length)];
   // What was typed, for the agent: first when it reads as a sentence, else last, below what it found (#270).
-  const asked = searching ? askEntry(query) : undefined;
-  const sentence = searching && readsAsSentence(query);
+  // First only when it reads as a question or request and nothing listed matches it well (review of #406).
+  const sentence =
+    searching &&
+    asksFirst(query, [
+      ...screens.map((x) => x.name),
+      ...groups.map((x) => x.name),
+      ...(spots.data?.spots ?? []).map((x) => x.name),
+      ...(playlists.data?.playlists ?? []).map((x) => x.name),
+      ...entries.map((e) => e.label),
+    ]);
+  const asked = searching ? askEntry(query, sentence) : undefined;
   const questions = searching ? [] : pageQuestions(path);
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go' || e.kind === 'agent');
@@ -439,6 +453,8 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       <CommandList>
         <CommandEmpty>No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.</CommandEmpty>
         {asked && sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}
+        {/* Empty, the page's questions first, above Go to (#358). */}
+        {questions.length > 0 && <CommandGroup heading="Ask the agent">{questions.map(item)}</CommandGroup>}
         {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
         {searching && screens.length > 0 && (
           <CommandGroup heading="Screens">
@@ -478,7 +494,6 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
           </CommandGroup>
         )}
         <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
-        {questions.length > 0 && <CommandGroup heading="Ask the agent">{questions.map(item)}</CommandGroup>}
         <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
         {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
         {developer.length > 0 && <CommandGroup heading="Developer">{developer.map(item)}</CommandGroup>}

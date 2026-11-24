@@ -35,7 +35,11 @@ export type CommandEntry =
   /** A question for the agent (#270): what was typed, or one suggested for the page. */
   | { kind: 'ask'; id: string; label: string; question: string; keywords: string[] };
 
-/** Tools for building on SignForge, not for running signage: under Developer, for owners only (#270). */
+/**
+ * Tools for building on SignForge, not for running signage: under Developer, for owners only (#270).
+ * Menu curation only: the API's permissions are unchanged, and an editor may still call them through
+ * `/api/tools` or an agent, as their role allows. The menu just leaves them out of an editor's list.
+ */
 const DEVELOPER_TOOLS: ReadonlySet<string> = new Set(['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places']);
 
 /** Words a question or a request to the agent starts with. */
@@ -43,21 +47,31 @@ const ASKING =
   /^(why|what|which|who|whose|when|where|how|is|are|was|were|do|does|did|can|could|should|would|will|has|have|tell|show|explain|help|please|find out|list)\b/i;
 
 /**
- * Whether what was typed reads as a sentence, a question for the agent rather than a page, record or
- * tool to find (#270): one that ends with a question mark; three words or more that start as a question
- * or a request ("why are two screens behind"); or five words or more. One or two words, and a short
- * command ("pair a screen", "take over Bayside now"), still find pages, records and tools first.
+ * Whether what was typed reads as a question or a request for the agent rather than a page, record or
+ * tool to find (#270): two words or more ending with a question mark, or three or more starting as a
+ * question or a request ("why are two screens behind", "show me what plays"). A short command ("pair a
+ * screen", "take over Bayside now") does not, however long.
  */
 export function readsAsSentence(query: string): boolean {
   const q = query.trim();
   const words = q.split(/\s+/).filter(Boolean).length;
-  return (words >= 2 && q.endsWith('?')) || (words >= 3 && ASKING.test(q)) || words >= 5;
+  return (words >= 2 && q.endsWith('?')) || (words >= 3 && ASKING.test(q));
 }
 
-/** The row that asks the agent what was typed. */
-export const askEntry = (query: string): CommandEntry => ({
+/**
+ * Whether the agent's row goes first (#270, review of #406): only when what was typed reads as a question
+ * or a request and nothing listed matches it well, none of `names` (screens, groups, spots, playlists and
+ * the menu's own rows) being it or starting with it. A five-word screen name is found, not asked about.
+ */
+export function asksFirst(query: string, names: readonly string[]): boolean {
+  const q = query.trim().toLowerCase();
+  return readsAsSentence(query) && !names.some((n) => n.toLowerCase().startsWith(q));
+}
+
+/** The row that asks the agent what was typed: `first` above what was found, else below it (`asksFirst`). */
+export const askEntry = (query: string, first: boolean): CommandEntry => ({
   kind: 'ask',
-  id: 'ask:typed',
+  id: first ? 'ask:typed' : 'ask:typed:last',
   label: `Ask agent: ${query.trim()}`,
   question: query.trim(),
   keywords: [query],
@@ -152,7 +166,8 @@ export function commandEntries(tools: ToolListing[], owner = true): CommandEntry
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
     { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
     ...tools
-      .filter((t) => t.name !== 'restart_screen' && (owner || !DEVELOPER_TOOLS.has(t.name)))
+      // The takeover dialog already makes and publishes one at once (`takeover`): publish_takeover, the agent drawer's, is not listed beside it.
+      .filter((t) => t.name !== 'restart_screen' && t.name !== 'publish_takeover' && (owner || !DEVELOPER_TOOLS.has(t.name)))
       .map((tool): CommandEntry => {
         const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
         return tool.name === 'start_takeover' && publishes

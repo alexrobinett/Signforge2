@@ -276,8 +276,8 @@ export async function dispatch<D extends DataScope>(
       });
     } catch (err) {
       if (err instanceof ToolError) {
-        // A refusal that changed something is recorded too, with what was refused.
-        if (err.changed) {
+        // A refusal that changed something is recorded too, with what was refused; so is a person's press of a card (#269), done or not.
+        if (err.changed || caller.confirmed) {
           try {
             await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
           } catch (commitErr) {

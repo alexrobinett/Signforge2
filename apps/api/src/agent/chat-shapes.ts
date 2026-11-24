@@ -81,7 +81,8 @@ export interface AnswerCard {
  * The names of the `CUSTOM` events the route sends: a tool call's card (`ToolCard`), the answer's text
  * as far as it is written (`{ text }`, '' when a message turned out not to be the answer), and the
  * answer's card (`AnswerCard`), or, for a tool only a press may run, its confirmation card
- * (`ConfirmCard`, #269), the run paused for it. With `RUN_STARTED`, `RUN_FINISHED` and `RUN_ERROR`,
+ * (`ConfirmCard`, #269), the run paused for it, and, after a press, what the action did (`ConfirmDone`).
+ * With `RUN_STARTED`, `RUN_FINISHED` (never a pause in it) and `RUN_ERROR`,
  * nothing else of the run reaches the browser.
  */
 export const CHAT_EVENTS = {
