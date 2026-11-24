@@ -316,7 +316,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
             <div className="relative">
               <ScreenThumb screen={s} />
               <ScreenStatus screen={s} now={now} className="absolute top-2.5 left-2.5" />
-              <span className="absolute right-2.5 bottom-2.5 rounded-md bg-black/80 px-1.5 py-0.5 font-mono text-[11px] text-white">
+              <span className="absolute top-2.5 right-2.5 rounded-md bg-black/80 px-1.5 py-0.5 font-mono text-[11px] text-white">
                 {s.orientation === 'portrait' ? '9:16' : '16:9'}
               </span>
             </div>

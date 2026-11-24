@@ -172,6 +172,24 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await page.getByRole('link', { name: 'Spots' }).first().click();
   await expect(page.getByRole('link', { name: /Lobby clock/ })).toContainText('Clock · Draft, never published');
   await expect(page.getByRole('link', { name: /Lobby clock/ }).locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  // A template the player drew no thumbnail for: its name, clamped, in a frame that stays 16:9 in the row's 64 px slot.
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const fixture = templates.find((t: { name: string }) => t.name === 'Weather and headlines (test)').versions.at(-1).id;
+  const { spot: undrawn } = await tool(page, 'create_spot', { name: 'Undrawn', kind: 'template', templateVersionId: fixture });
+  await page.reload();
+  await hydrated(page);
+  const frame = page
+    .getByRole('link', { name: /Undrawn/ })
+    .locator('span[aria-hidden]')
+    .first();
+  await expect(frame).toContainText('Weather and headlines (test)');
+  expect(
+    await frame.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { ratio: Math.round((r.width / r.height) * 100) / 100, fits: el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1 };
+    }),
+  ).toEqual({ ratio: 1.78, fits: true });
+  await tool(page, 'delete_spot', { spotId: undrawn.id });
 });
 
 test('a change someone else made while the editor was open is not overwritten', async () => {

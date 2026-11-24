@@ -129,7 +129,7 @@ export interface SpotEditorSlice {
   seeStage: (inView: boolean) => void;
   openNewSpot: (open: boolean) => void;
   /** New spot from a template in the empty Spots page's gallery (#362): that version picked, and focus back on its card when the dialog closes. */
-  startSpotFrom: (templateVersionId: string) => void;
+  startSpotFrom: (templateVersionId: string, card: HTMLElement) => void;
   /** New spot closed (its `onCloseAutoFocus`): back to the gallery card that opened it; else Radix returns focus to its trigger. */
   newSpotFocusBack: (e: Event) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
@@ -216,7 +216,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
   let hearing = false;
   /** The gallery card that opened New spot: outside state, nothing renders it. */
-  let galleryCard: Element | null = null;
+  let galleryCard: HTMLElement | null = null;
 
   const savedSpot = (orgId: string, spotId: string) => queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
 
@@ -422,14 +422,15 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       if (open) galleryCard = null;
       editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() }));
     },
-    startSpotFrom(templateVersionId) {
-      galleryCard = document.activeElement;
+    startSpotFrom(templateVersionId, card) {
+      // The card itself, not document.activeElement: Safari leaves focus on <body> after a click.
+      galleryCard = card;
       editor((e) => ({ ...e, newSpot: { ...newSpotDraft(), open: true, templateVersionId } }));
     },
     newSpotFocusBack(e) {
       const card = galleryCard;
       galleryCard = null;
-      if (!(card instanceof HTMLElement) || !card.isConnected) return;
+      if (!card?.isConnected) return;
       e.preventDefault();
       card.focus();
     },

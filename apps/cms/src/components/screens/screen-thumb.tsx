@@ -7,6 +7,7 @@
  */
 import { sessionBlobPath } from '@signforge/contract';
 import { MoonIcon } from 'lucide-react';
+import { isRetired } from '~/lib/screen-status';
 import type { ScreenView } from '~/lib/screen-types';
 import { templateThumbnail } from '~/lib/template-thumbnail';
 import { cn } from '~/lib/utils';
@@ -20,23 +21,29 @@ export function ScreenThumb({
   className?: string;
   size?: 'tile' | 'row';
 }) {
-  const s = screen.showing;
+  // A revoked screen plays nothing, whatever its last manifest says.
+  const retired = isRetired(screen);
+  const s = retired ? null : screen.showing;
   const portrait = screen.orientation === 'portrait';
   const dim = screen.state.kind === 'asleep' ? 'opacity-35' : screen.state.kind === 'unreachable' ? 'opacity-80' : '';
   const drawn = s?.spot?.template ? templateThumbnail(s.spot.template) : undefined;
   const updating = screen.desiredManifestId !== null && screen.reportedManifestId !== screen.desiredManifestId;
-  const label = !s
-    ? 'Nothing published yet'
-    : s.asleep
-      ? 'Asleep for display hours'
-      : s.spot
-        ? `${updating ? 'Updating to' : 'Playing'}: ${s.spot.name}`
-        : 'Nothing to show';
+  const label = retired
+    ? 'Revoked: plays nothing'
+    : !s
+      ? 'Nothing published yet'
+      : s.asleep
+        ? 'Asleep for display hours'
+        : s.spot
+          ? `${updating ? 'Updating to' : 'Playing'}: ${s.spot.name}`
+          : 'Nothing to show';
   return (
     <div className={cn('relative flex aspect-video justify-center overflow-hidden bg-stage text-stage-foreground', className)} role="img" aria-label={label}>
       <div className={cn('flex h-full items-center justify-center', portrait ? 'aspect-[9/16]' : 'w-full', dim)}>
         {!s ? (
-          <span className={cn('px-3 text-center text-stage-muted-foreground', size === 'row' ? 'text-[10px]' : 'text-sm')}>Nothing published yet</span>
+          <span className={cn('px-3 text-center text-stage-muted-foreground', size === 'row' ? 'text-[10px]' : 'text-sm')}>
+            {retired ? 'Revoked' : 'Nothing published yet'}
+          </span>
         ) : s.asleep ? (
           <span className={cn('flex items-center gap-1.5 font-semibold text-[#a5b4fc]', size === 'row' ? 'text-[10px]' : 'text-sm')}>
             <MoonIcon className={size === 'row' ? 'size-3' : 'size-4'} aria-hidden /> Asleep

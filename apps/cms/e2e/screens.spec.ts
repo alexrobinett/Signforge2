@@ -193,6 +193,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await page.getByRole('menuitem', { name: 'Revoke…' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByText(/credential was revoked/)).toBeVisible();
+  // Its thumbnail does not say it plays anything (#362).
+  await expect(page.getByRole('img', { name: 'Revoked: plays nothing' })).toBeVisible();
   const refused = await request.post(`${DEVICE}/sync`, { headers: { authorization: `Bearer ${credential}` }, data: {} });
   expect(refused.status()).toBe(401);
 });

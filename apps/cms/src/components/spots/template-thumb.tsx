@@ -19,8 +19,9 @@ export function TemplateThumb({ version, className }: { version: Pick<TemplateVe
   return drawn ? (
     <img src={drawn} alt="" width={480} height={270} loading="lazy" className={cn(FRAME, className)} />
   ) : (
-    <span aria-hidden className={cn(FRAME, 'grid place-items-center px-2 text-center text-xs font-medium text-muted-foreground', className)}>
-      {version.manifest.name}
+    // Clipped and clamped, so a long name keeps the frame 16:9 in a row's 64 px slot as on a card.
+    <span aria-hidden className={cn(FRAME, '@container grid place-items-center overflow-hidden px-1 text-center font-medium text-muted-foreground', className)}>
+      <span className="line-clamp-2 text-[10px] leading-tight break-words @[8rem]:text-xs">{version.manifest.name}</span>
     </span>
   );
 }

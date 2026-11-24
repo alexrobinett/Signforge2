@@ -122,7 +122,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
                       />
                       <TemplateThumb version={u.version} />
-                      <span className="line-clamp-2 px-0.5">{u.template.name}</span>
+                      <span className="line-clamp-2 px-0.5">{u.version.manifest.name}</span>
                     </label>
                   ))}
                 </div>
