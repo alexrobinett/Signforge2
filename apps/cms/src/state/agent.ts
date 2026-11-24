@@ -59,6 +59,8 @@ interface Filled {
   before?: Record<string, unknown>;
   /** How many fields the update changed. */
   changed?: number;
+  /** What Keep wrote in each changed field: Undo puts a field back only while it still holds this. */
+  wrote?: Record<string, unknown>;
   /** An update's changed rows on other spots, each offered the same review. */
   alsoOn?: AlsoOn[];
   photo: File | null;
@@ -312,6 +314,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         agent((a) => {
           const { [spotId]: _kept, ...rest } = a.reviews;
           const before = Object.fromEntries(changed.map((f) => [f, r.before[f]]));
+          const wrote = Object.fromEntries(changed.map((f) => [f, r.data[f]]));
           return {
             ...a,
             reviews: rest,
@@ -321,6 +324,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
                 kind: 'update',
                 marks: keptMarks(fields, r),
                 before,
+                wrote,
                 changed: changed.length,
                 alsoOn: r.alsoOn,
                 photo: null,
@@ -403,8 +407,16 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
     },
 
     undoUpdate(orgId, spotId) {
-      const before = get().agent.filled[spotId]?.before;
-      if (before) get().editSpot(orgId, spotId, (d) => ({ ...d, data: { ...d.data, ...before } }));
+      const f = get().agent.filled[spotId];
+      // Only a field as Keep left it: not one bound to a source since, nor one changed since by any path (the form,
+      // the Source section's fallback rows, a binding), so Undo never puts back over the person's work.
+      if (f?.before)
+        get().editSpot(orgId, spotId, (d) => {
+          const back = Object.entries(f.before ?? {}).filter(
+            ([k]) => !Object.hasOwn(d.bindings, k) && JSON.stringify(d.data[k]) === JSON.stringify(f.wrote?.[k]),
+          );
+          return { ...d, data: { ...d.data, ...Object.fromEntries(back) } };
+        });
       filled(spotId, () => undefined);
     },
   };

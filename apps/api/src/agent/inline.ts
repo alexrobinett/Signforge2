@@ -22,8 +22,8 @@
  * An update keeps each field the material does not show. A list it shows is matched row by row with
  * the spot's (`matchRows`, by the first text column): a row it shows again is changed in place, keeping
  * its other columns, a new one is added after them, and one it no longer shows is removed. Keep writes
- * only text, number, choice, date and list values: a link, a colour, a switch, a photo or a binding it
- * may not change, and Keep refuses a `data` that does.
+ * only text, number, date and list values: a link, a colour, a switch, a choice, a photo or a binding
+ * it may not change, and Keep refuses a `data` that does.
  *
  * Budget per call, inside the Free plan's 50 of each (test/agent-inline.test.ts): at most 15 D1
  * statements (13 for an owner; an editor's role check reads the org's settings), 2 calls to the
@@ -611,7 +611,7 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     const spot = await spotToFill(c.var.org, spotId);
     if ('problem' in spot) return refuse(c, spot.problem, spot.message);
     const problem = keepProblem(spot.offer, spot.data, data);
-    if (problem) return refuse(c, 'invalid_input', `${problem}: it changes only text, numbers, choices, dates and lists`);
+    if (problem) return refuse(c, 'invalid_input', `${problem}: it changes only text, numbers, dates and lists`);
     const kept = await dispatch(registry, 'update_spot', { spotId, data, ifVersion }, caller);
     if (!kept.ok) return c.json({ error: kept.error, message: kept.message }, STATUS[kept.error]);
     return c.json({ spot: outputs.update_spot.parse(kept.output).spot });

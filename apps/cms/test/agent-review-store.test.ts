@@ -58,17 +58,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+/** The editor's draft, as Undo's edit reads it. */
+type Draft = { data: Record<string, unknown>; bindings: Record<string, unknown> };
+
 type Store = AgentSlice & {
   spotEditor: { drafts: Record<string, { orgId: string; status: string }> };
   saveSpotDraft: (id: string) => Promise<void>;
   redrawStage: () => void;
   reloadSpot: (o: string, id: string) => Promise<void>;
-  editSpot: (o: string, id: string, change: (d: { data: Record<string, unknown> }) => { data: Record<string, unknown> }) => void;
+  editSpot: (o: string, id: string, change: (d: Draft) => Draft) => void;
   openNewSpot: (open: boolean) => void;
 };
 
-/** A store whose drafts save as `saves` says (saved, unless named): as the editor's versioned drafts leave them. */
-function agentStore(saves: Record<string, string> = {}) {
+/**
+ * A store whose drafts save as `saves` says (saved, unless named), as the editor's versioned drafts
+ * leave them; its spot's draft, as an edit sees it, is `draft` (AFTER with its title edited since, unless given).
+ */
+function agentStore(saves: Record<string, string> = {}, draft: Draft = { data: { ...AFTER, title: 'Edited since' }, bindings: {} }) {
   const saved: string[] = [];
   const edits: Record<string, unknown>[] = [];
   const queryClient = new QueryClient();
@@ -81,7 +87,7 @@ function agentStore(saves: Record<string, string> = {}) {
     },
     redrawStage: () => {},
     reloadSpot: async () => {},
-    editSpot: (_o, _id, change) => void edits.push(change({ data: { ...AFTER, title: 'Edited since' } }).data),
+    editSpot: (_o, _id, change) => void edits.push(change(draft).data),
     openNewSpot: () => {},
   }));
   store.getState().editFill({ link: 'https://cafe.example/menu' });
@@ -146,21 +152,42 @@ describe('an update from a photo or link, in the store', () => {
     expect(store.getState().agent.reviews).toEqual({});
   });
 
-  it('leaves out of Undo a field edited since Keep: the person fixed a row, so the items stay as they made them (review of #319)', async () => {
-    const { store, edits } = agentStore();
+  describe('Undo leaves what the person changed since Keep, by any path (review of #319)', () => {
     const both = { ...AFTER, title: 'Lunch' };
-    answers.push(
-      Response.json({ review: { spotId: SPOT, version: 7, before: BEFORE, data: both, marks: {} } }),
-      Response.json({ spot: { id: SPOT, data: both, version: 8 } }),
-    );
-    await store.getState().reviewFill(ORG, SPOT, FIELDS);
-    await store.getState().keepReview(SPOT, FIELDS);
-    expect(store.getState().agent.filled[SPOT]).toMatchObject({ changed: 2, before: { title: 'Morning', items: BEFORE.items } });
-    // The person fixes a row of the items.
-    store.getState().clearFillMark(SPOT, 'items');
-    store.getState().undoUpdate(ORG, SPOT);
-    // Undo puts back the title only: the items stay as the person's draft has them (the stub's draft holds AFTER's).
-    expect(edits).toEqual([{ ...AFTER, title: 'Morning' }]);
+    const FIXED = [{ name: 'Latte', price: '$4.70' }, ...AFTER.items.slice(1)];
+    /** Keep of both the title and the items, then Undo, with the draft as the person left it since. */
+    async function keptThenUndone(draft: Draft, edited?: string) {
+      const { store, edits } = agentStore({}, draft);
+      answers.push(
+        Response.json({ review: { spotId: SPOT, version: 7, before: BEFORE, data: both, marks: {} } }),
+        Response.json({ spot: { id: SPOT, data: both, version: 8 } }),
+      );
+      await store.getState().reviewFill(ORG, SPOT, FIELDS);
+      await store.getState().keepReview(SPOT, FIELDS);
+      expect(store.getState().agent.filled[SPOT]).toMatchObject({ changed: 2, before: { title: 'Morning', items: BEFORE.items }, wrote: both });
+      if (edited) store.getState().clearFillMark(SPOT, edited);
+      store.getState().undoUpdate(ORG, SPOT);
+      return edits;
+    }
+
+    it('a row fixed in the Content form: the items stay as fixed, the title goes back', async () => {
+      expect(await keptThenUndone({ data: { ...both, items: FIXED }, bindings: {} }, 'items')).toEqual([{ ...both, items: FIXED, title: 'Morning' }]);
+    });
+
+    it('the items connected to a source in the Source section, with fallback rows typed there: they stay, though no mark was cleared', async () => {
+      const fallback = [{ name: 'Soup', price: '$6' }];
+      const bound = { data: { ...both, items: fallback }, bindings: { items: { dataSourceId: 'dsrc_menu', path: 'rows' } } };
+      expect(await keptThenUndone(bound)).toEqual([{ ...both, items: fallback, title: 'Morning' }]);
+    });
+
+    it('the items bound to a source, still holding what Keep wrote: the source has them now, so they stay', async () => {
+      const bound = { data: both, bindings: { items: { dataSourceId: 'dsrc_menu', path: 'rows' } } };
+      expect(await keptThenUndone(bound)).toEqual([{ ...both, title: 'Morning' }]);
+    });
+
+    it('a field edited by any path whose mark was never cleared: it stays as edited', async () => {
+      expect(await keptThenUndone({ data: { ...both, items: FIXED }, bindings: {} })).toEqual([{ ...both, items: FIXED, title: 'Morning' }]);
+    });
   });
 
   it('reviews the same row on another spot from that spot as it is now, after saving its draft, and not while its draft does not save (review of #319)', async () => {
