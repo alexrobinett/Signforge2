@@ -39,22 +39,19 @@ const CARD: AnswerCard = {
   drafts: [],
 };
 
-/** The turn's events as the API streams them (TanStack AI's, and ours): `answered` the card, else `error` why not. */
+/**
+ * The turn's events as the API streams them (#350): its start, a tool's card, the card's text as it is
+ * written (`signforge.text`, read by the API from the answer alone), then `answered` the card, else
+ * `error` why not. Nothing else of the run reaches the browser.
+ */
 function events(run: { runId: string; threadId: string }, turn: { text: string; answered?: AnswerCard; error?: { code: string; message: string } }) {
-  const id = 'msg_1';
-  // Cut within the card's text, as a model writes it: `{"text":"` and a few words, then the rest.
-  const half = 20;
   return [
     { type: 'RUN_STARTED', ...run },
     { type: 'CUSTOM', name: CHAT_EVENTS.call, value: CALL },
-    { type: 'CUSTOM', name: 'structured-output.start', value: { messageId: id } },
-    { type: 'TEXT_MESSAGE_START', messageId: id, role: 'assistant' },
-    { type: 'TEXT_MESSAGE_CONTENT', messageId: id, delta: turn.text.slice(0, half) },
-    { type: 'TEXT_MESSAGE_CONTENT', messageId: id, delta: turn.text.slice(half) },
-    { type: 'TEXT_MESSAGE_END', messageId: id },
+    { type: 'CUSTOM', name: CHAT_EVENTS.text, value: { text: turn.text.slice(0, 12) } },
+    { type: 'CUSTOM', name: CHAT_EVENTS.text, value: { text: turn.text } },
     ...(turn.answered
       ? [
-          { type: 'CUSTOM', name: 'structured-output.complete', value: { object: JSON.parse(turn.text), raw: turn.text } },
           { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: turn.answered },
           { type: 'RUN_FINISHED', ...run, finishReason: 'stop' },
         ]
@@ -75,8 +72,7 @@ const stream = (...chunks: string[]) =>
   );
 
 /** The model answers with `card`: its JSON streamed, then the card. */
-const answering = (card: AnswerCard) => (run: { runId: string; threadId: string }) =>
-  stream(...events(run, { text: JSON.stringify({ text: card.text, groups: card.groups, steps: card.steps }), answered: card }));
+const answering = (card: AnswerCard) => (run: { runId: string; threadId: string }) => stream(...events(run, { text: card.text, answered: card }));
 
 function drawerStore() {
   const panel: boolean[] = [];
@@ -153,7 +149,7 @@ describe('the agent drawer, in the store', () => {
     answer = (run) =>
       stream(
         ...events(run, {
-          text: '{"text":"Restart every screen now","groups":',
+          text: 'Restart every screen now',
           error: { code: 'unreadable', message: 'The model gave no answer it could show. Ask again.' },
         }),
       );
@@ -204,7 +200,7 @@ describe('the agent drawer, in the store', () => {
       new Response(
         new ReadableStream({
           start(c) {
-            c.enqueue(new TextEncoder().encode(events(run, { text: '{"text":"Late"}', answered: CARD }).slice(0, 5).join('')));
+            c.enqueue(new TextEncoder().encode(events(run, { text: 'Late', answered: CARD }).slice(0, 3).join('')));
             // As fetch does: its body fails once the request is aborted.
             signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
           },
@@ -234,8 +230,8 @@ describe('the agent drawer, in the store', () => {
           start(c) {
             c.enqueue(
               new TextEncoder().encode(
-                events(run, { text: '{"text":"Half', error: { code: 'unused', message: 'unused' } })
-                  .slice(0, 5)
+                events(run, { text: 'Half', error: { code: 'unused', message: 'unused' } })
+                  .slice(0, 3)
                   .join(''),
               ),
             );

@@ -30,7 +30,7 @@
  */
 import { scoped } from '@signforge/db';
 import { CMS_AGENT_CLIENT_ID, type Caller, describeTools, dispatch, grantOf, type Grant, registry } from '@signforge/tools';
-import { chat, EventType, maxIterations, type StreamChunk, toServerSentEventsResponse } from '@tanstack/ai';
+import { chat, EventType, maxIterations, parsePartialJSON, type StreamChunk, toServerSentEventsResponse } from '@tanstack/ai';
 import type { Hono } from 'hono';
 import { z } from 'zod';
 import type { ApiEnv } from '../api';
@@ -143,20 +143,23 @@ export const drawerTools = (grant: Grant) =>
   );
 
 /** The model's answer, every field required: prose alone, or a lone `{ text }`, is not one (#350). */
-const answerInput = z.object({
-  text: z.string().trim().min(1).max(4000).describe('Your answer, in plain words, briefly'),
-  groups: z
-    .array(z.object({ title: z.string().max(200), screens: z.array(z.string().max(200)).max(100), why: z.string().max(800) }))
-    .max(12)
-    .describe('Groups of screens with one cause, as "Bayside, silent since 09:14", their names and why; [] when none'),
-  steps: z
-    .array(z.object({ label: z.string().max(80), note: z.string().max(2000) }))
-    .max(3)
-    .describe('At most 3 notes the person could copy and send, each with a label such as "Copy a note for the store"; [] when none'),
-});
+const answerInput = z
+  .object({
+    text: z.string().trim().min(1).max(4000).describe('Your answer, in plain words, briefly'),
+    groups: z
+      .array(z.object({ title: z.string().max(200), screens: z.array(z.string().max(200)).max(100), why: z.string().max(800) }).strict())
+      .max(12)
+      .describe('Groups of screens with one cause, as "Bayside, silent since 09:14", their names and why; [] when none'),
+    steps: z
+      .array(z.object({ label: z.string().max(80), note: z.string().max(2000) }).strict())
+      .max(3)
+      .describe('At most 3 notes the person could copy and send, each with a label such as "Copy a note for the store"; [] when none'),
+  })
+  // Nothing else: a field of the model's own (a "thought") fails the card, whatever the provider enforced (review of #402).
+  .strict();
 
 /** An earlier answer sent back: its text, groups and notes, as the browser remembers them; never a trace or drafts (review of #402). */
-const shownCard = answerInput.strict();
+const shownCard = answerInput;
 
 const context = z
   .object({
@@ -470,36 +473,27 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       /** The run's last `RUN_FINISHED`: sent after the answer's card, so the run ends with it. */
       let finished: StreamChunk | undefined;
       /**
-       * Each message's text, held until it is known to be the answer: the card is JSON, so text that
-       * starts with `{` is (then sent, with what was held of it), and any other (a preamble before a
-       * tool call) is the model's own, never sent.
+       * The answer's text as the browser sees it: only the card's `text`, read from each message's partial
+       * JSON (`parsePartialJSON`), never the model's own text. Prose, a preamble that is not the card's JSON,
+       * other fields and what follows the JSON are never sent; a message that turns out to call a tool
+       * takes back what it showed. The run's own text and structured-output events stay on the server.
        */
-      const messages = new Map<string, { held: StreamChunk[]; text: string; is: 'held' | 'answer' | 'prose' }>();
-      const messageOf = (id: string) => {
-        const m = messages.get(id) ?? { held: [], text: '', is: 'held' as const };
-        messages.set(id, m);
-        return m;
+      const written = new Map<string, string>();
+      let shownText = '';
+      const textOf = (text: string): StreamChunk => {
+        shownText = text;
+        return { type: 'CUSTOM', name: CHAT_EVENTS.text, value: { text }, timestamp: Date.now() };
       };
-      /** What of `chunk` the browser gets: the run's start, the answer's text and its card; nothing else of the run. */
       function* allowed(chunk: StreamChunk): Generator<StreamChunk> {
         if (chunk.type === 'RUN_STARTED') yield chunk;
-        else if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.start') messageOf(String(chunk.value.messageId)).held.push(chunk);
-        else if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') yield chunk;
-        else if (chunk.type === 'TEXT_MESSAGE_START') messageOf(chunk.messageId).held.push(chunk);
         else if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
-          const m = messageOf(chunk.messageId);
-          if (m.is === 'answer') yield chunk;
-          if (m.is !== 'held') return;
-          m.text += chunk.delta;
-          const start = m.text.trimStart();
-          if (!start) m.held.push(chunk);
-          else if (start.startsWith('{')) {
-            m.is = 'answer';
-            yield* m.held.splice(0);
-            yield chunk;
-          } else m.is = 'prose';
-        } else if (chunk.type === 'TEXT_MESSAGE_END' && messages.get(chunk.messageId)?.is === 'answer') yield chunk;
-        // Anything else is the run's own: tool calls (their cards say them), reasoning, snapshots and steps.
+          const json = (written.get(chunk.messageId) ?? '') + chunk.delta;
+          written.set(chunk.messageId, json);
+          const partial: unknown = parsePartialJSON(json);
+          const text = typeof partial === 'object' && partial !== null && 'text' in partial && typeof partial.text === 'string' ? partial.text : undefined;
+          if (text !== undefined && text !== shownText) yield textOf(text);
+        } else if (chunk.type === 'TOOL_CALL_START' && shownText) yield textOf('');
+        // Anything else is the run's own: tool calls (their cards say them), reasoning, its structured output, snapshots and steps.
       }
       try {
         for await (const chunk of run.value) {
@@ -514,7 +508,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             finished = chunk;
             continue;
           }
-          if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') answer = answerInput.parse(chunk.value.object);
+          // The card as the server parsed it, every field checked; sent re-serialized from that, never as the model wrote it.
+          if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') answer = answerInput.safeParse(chunk.value.object).data;
           yield* allowed(chunk);
         }
       } catch (err) {

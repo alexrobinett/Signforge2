@@ -201,7 +201,7 @@ describe('POST /api/agent/chat', () => {
       { type: 'answer', card: { ...CARD, trace: [shown('list_screens', 'Listed 3 screens')], drafts: [] } },
     ]);
     // The card's text streamed as it was written, and the run ends after the answer's card.
-    expect(all.some((e) => e.type === 'CUSTOM' && e.name === 'structured-output.complete')).toBe(true);
+    expect(all.some((e) => e.type === 'CUSTOM' && e.name === CHAT_EVENTS.text && e.value.text === CARD.text)).toBe(true);
     expect(all.at(-1)).toMatchObject({ type: 'RUN_FINISHED' });
     // The tools' own events stay on the server: their cards say them, and their outputs are the model's alone.
     expect(all.filter((e) => String(e.type).startsWith('TOOL_CALL_'))).toEqual([]);
@@ -293,14 +293,53 @@ describe('POST /api/agent/chat', () => {
     expect(await s.scope.auditLog.list({ limit: 50 })).toEqual(before);
   });
 
-  it("sends the browser the answer alone: never a preamble before a tool call, nor an endpoint's reasoning (review of #402)", async () => {
-    const preamble = await setup({ steps: [{ text: 'Let me check the screens first, PREAMBLE.', calls: [{ name: 'list_screens', input: {} }] }, ANSWER] });
-    const sent = await (await preamble.ask()).text();
-    expect(sent).not.toContain('PREAMBLE');
-    expect(sent).toContain(`"name":"${CHAT_EVENTS.answer}"`);
-    // The answer's own text streams.
-    expect(sent).toContain('"type":"TEXT_MESSAGE_CONTENT"');
+  /** Only these reach the browser: the run's start and end, why it ended, and our own events. */
+  const PUBLIC_EVENTS = new Set([
+    'RUN_STARTED',
+    'RUN_FINISHED',
+    'RUN_ERROR',
+    `CUSTOM:${CHAT_EVENTS.call}`,
+    `CUSTOM:${CHAT_EVENTS.text}`,
+    `CUSTOM:${CHAT_EVENTS.answer}`,
+  ]);
+  const kinds = (all: any[]) => all.map((e) => (e.type === 'CUSTOM' ? `CUSTOM:${e.name}` : e.type));
 
+  it("streams only the card's text, after a tool step too, then the card as the server parsed it: never a preamble, `{` first or not (review of #402)", async () => {
+    for (const preamble of ['Let me check the screens first, PREAMBLE.', '{Note to self: PREAMBLE, then call the tool}']) {
+      const s = await setup({ steps: [{ text: preamble, calls: [{ name: 'list_screens', input: {} }] }, ANSWER] });
+      const all = await raw(await s.ask());
+      expect(JSON.stringify(all), preamble).not.toContain('PREAMBLE');
+      expect(
+        kinds(all).filter((k) => !PUBLIC_EVENTS.has(k)),
+        preamble,
+      ).toEqual([]);
+      // The card's text, after the tool's card, then the card.
+      const order = kinds(all);
+      const text = all.filter((e) => e.name === CHAT_EVENTS.text).map((e) => e.value.text);
+      expect(text.at(-1), preamble).toBe(CARD.text);
+      expect(order.indexOf(`CUSTOM:${CHAT_EVENTS.call}`)).toBeLessThan(order.lastIndexOf(`CUSTOM:${CHAT_EVENTS.text}`));
+      expect(all.find((e) => e.name === CHAT_EVENTS.answer)?.value).toEqual({ ...CARD, trace: [shown('list_screens', 'Listed 3 screens')], drafts: [] });
+    }
+  });
+
+  it("refuses a card with a field of the model's own, and never sends it or prose after the card (review of #402)", async () => {
+    for (const text of [JSON.stringify({ ...CARD, thought: 'SECRET-THOUGHT' }), `${JSON.stringify(CARD)} TRAILING-PROSE about SECRET-THOUGHT`]) {
+      const s = await setup({ steps: [{ text }] });
+      const all = await raw(await s.ask());
+      expect(JSON.stringify(all), text).not.toMatch(/SECRET-THOUGHT|TRAILING-PROSE/);
+      expect(
+        kinds(all).filter((k) => !PUBLIC_EVENTS.has(k)),
+        text,
+      ).toEqual([]);
+      expect(
+        all.some((e) => e.name === CHAT_EVENTS.answer),
+        text,
+      ).toBe(false);
+      expect(all.at(-1), text).toMatchObject({ type: 'RUN_ERROR', code: 'unreadable' });
+    }
+  });
+
+  it("never sends an endpoint's reasoning", async () => {
     let n = 0;
     const guards: FetchGuards = {
       resolve: async () => [PUBLIC],
@@ -309,14 +348,10 @@ describe('POST /api/agent/chat', () => {
           ? completionStream({ reasoning: 'SECRET-REASONING', toolCalls: [{ id: 'c1', name: 'list_screens', arguments: '{}' }] }, 'tool_calls')
           : completionStream({ reasoning: 'SECRET-REASONING', content: JSON.stringify(CARD) }, 'stop'),
     };
-    const reasoning = await setup({ guards, save: ENDPOINT });
-    const all = await raw(await reasoning.ask());
+    const s = await setup({ guards, save: ENDPOINT });
+    const all = await raw(await s.ask());
     expect(JSON.stringify(all)).not.toContain('SECRET-REASONING');
-    expect(
-      all
-        .map((e) => e.type)
-        .filter((t) => !['RUN_STARTED', 'CUSTOM', 'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END', 'RUN_FINISHED'].includes(t)),
-    ).toEqual([]);
+    expect(kinds(all).filter((k) => !PUBLIC_EVENTS.has(k))).toEqual([]);
     expect(all.some((e) => e.type === 'CUSTOM' && e.name === CHAT_EVENTS.answer)).toBe(true);
   });
 

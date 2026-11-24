@@ -3,9 +3,9 @@
  * drawer's `ChatClient` (`@tanstack/ai-client`) sends AG-UI's `RunAgentInput`: the question as its
  * one message, and in `forwardedProps` the page it was asked on and the conversation so far, each
  * earlier answer its card's answer. The answer streams back as server-sent events (TanStack AI's
- * `toServerSentEventsResponse`): the card's text as it is written (`structured-output.*`), and the
- * events below, `CUSTOM` ones named `CHAT_EVENTS`: each tool call as a card, then the answer's card;
- * or a `RUN_ERROR` whose `code` is a `ChatProblem` and `message` says it in a sentence. Types and
+ * `toServerSentEventsResponse`), only the run's start and end and our own `CUSTOM` events
+ * (`CHAT_EVENTS`): each tool call as a card, the card's text as it is written, then the answer's
+ * card; or a `RUN_ERROR` whose `code` is a `ChatProblem` and `message` says it in a sentence. Types and
  * limits only, so the CMS imports it without the API's code or schemas; the route parses a request
  * with its own (./chat.ts).
  */
@@ -75,8 +75,13 @@ export interface AnswerCard {
   drafts: ProposedCall[];
 }
 
-/** The names of the `CUSTOM` events the route adds to the stream. */
-export const CHAT_EVENTS = { call: 'signforge.call', answer: 'signforge.answer' } as const;
+/**
+ * The names of the `CUSTOM` events the route sends: a tool call's card (`ToolCard`), the answer's text
+ * as far as it is written (`{ text }`, '' when a message turned out not to be the answer), and the
+ * answer's card (`AnswerCard`). With `RUN_STARTED`, `RUN_FINISHED` and `RUN_ERROR`, nothing else of
+ * the run reaches the browser.
+ */
+export const CHAT_EVENTS = { call: 'signforge.call', text: 'signforge.text', answer: 'signforge.answer' } as const;
 
 /** What a save of the drafts did: each written in order, the first refused stopping the rest. */
 export interface ApplyAnswer {

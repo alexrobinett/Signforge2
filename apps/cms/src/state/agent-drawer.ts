@@ -3,9 +3,9 @@
  * the turn on its way, which is asked with the page shown when it is asked. A turn is TanStack AI's
  * `ChatClient` (`@tanstack/ai-client`), driven from here rather than by `useChat`, so the drawer keeps
  * the CMS's state rules: it posts to `POST /api/agent/chat` and reads its server-sent events, the
- * card's text as it is written, each tool call's card as it runs, then the answer's card, or why it
- * ended. Text shown of a turn that then fails is dropped: only a whole card is kept. The cards are the
- * drawer's own, kept here, never rebuilt from the client's messages (a pause would turn them back to
+ * API's own (`CHAT_EVENTS`): each tool call's card as it runs, the card's text as it is written (read
+ * by the API from the answer alone), then the answer's card, or why it ended. Text shown of a turn
+ * that then fails is dropped: only a whole card is kept. The cards are the drawer's own, kept here, never rebuilt from the client's messages (a pause would turn them back to
  * raw JSON, #346). The conversation lives only here, so a reload forgets it; each question sends it
  * back, the last `CHAT_HISTORY` turns of it, each answer its card's text, groups and notes.
  *
@@ -188,16 +188,6 @@ function historyOf(messages: readonly DrawerMessage[]): ChatTurn[] {
     .slice(-CHAT_HISTORY);
   while (turns[0] && (turns[0].role === 'assistant' || JSON.stringify(turns).length > CHAT_HISTORY_CHARS)) turns = turns.slice(1);
   return turns;
-}
-
-/** The answer's text as far as the client has read it: the `text` of its card's partial JSON. */
-function streamedText(client: ChatClient): string {
-  const part = client
-    .getSnapshot()
-    .messages.at(-1)
-    ?.parts.find((p) => p.type === 'structured-output');
-  const partial = part?.type === 'structured-output' ? part.partial : undefined;
-  return typeof partial === 'object' && partial !== null && 'text' in partial && typeof partial.text === 'string' ? partial.text : '';
 }
 
 /** A fetch that says a refused request in the API's own words (`no_model`, `rate_limited`…), as a `Refusal`. */
@@ -464,6 +454,10 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.call) {
             const shown: ToolCard = chunk.value;
             mine((d) => ({ ...d, progress: [...d.progress, shown] }));
+          } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.text) {
+            // The card's text as far as it is written, which the API reads from the answer alone ('' takes it back).
+            const text: string = chunk.value.text;
+            mine((d) => ({ ...d, streaming: text }));
           } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.answer) card = chunk.value;
           else if (chunk.type === 'RUN_ERROR') ended = { code: chunk.code, message: chunk.message };
         },
@@ -480,15 +474,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         if (running === turn) drawer(change);
       }
       const say = (message: DrawerMessage) => mine((d) => ({ ...d, messages: [...d.messages, message] }));
-      const unsubscribe = turn.subscribeSnapshot(() => {
-        const text = streamedText(turn);
-        mine((d) => (d.streaming === text ? d : { ...d, streaming: text }));
-      });
-      try {
-        await turn.sendMessage(question, context);
-      } finally {
-        unsubscribe();
-      }
+      await turn.sendMessage(question, context);
       if (running !== turn) return turn.dispose();
       // What streamed goes: the answer is its whole card, or there is none.
       mine((d) => ({ ...d, streaming: '' }));
