@@ -116,7 +116,8 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
           </Button>
         </div>
       )}
-      <nav aria-label="Main" className="flex-1">
+      {/* The list scrolls in a short window, so what is below it (Publish, Fold, the account) stays in reach. */}
+      <nav aria-label="Main" className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
         <ul className="space-y-1">
           {SECTIONS.map(({ to, label, icon: Icon }) => {
             const b = badges[to];
