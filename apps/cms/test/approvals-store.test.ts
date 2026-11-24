@@ -9,10 +9,9 @@ import type { ApprovalItem } from '../src/lib/approvals';
 import { callTool, Refusal } from '../src/lib/tools';
 import { type ApprovalsSlice, createApprovalsSlice } from '../src/state/approvals';
 
-vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
+// The stages' reads: not reached here, no player being attached.
+vi.mock('~/queries/spots', () => ({ assetsQuery: vi.fn(), spotPreviewQuery: vi.fn(), templatesQuery: vi.fn() }));
 vi.mock('~/lib/tools', async (original) => ({ ...(await original<typeof import('../src/lib/tools')>()), callTool: vi.fn() }));
-vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
-vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 
 const ORG = 'org_1';
 

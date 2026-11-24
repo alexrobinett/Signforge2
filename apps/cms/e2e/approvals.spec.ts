@@ -25,7 +25,6 @@ async function pairScreen(page: Page, name: string) {
     data: { code, name, timezone: 'UTC', orientation: 'landscape' },
   });
   expect(claimed.status(), await claimed.text()).toBe(200);
-  return ((await claimed.json()) as { screen: { id: string } }).screen.id;
 }
 
 test('an agent asks, the owner approves what it pinned and the rollout starts; another is declined, put back and declined; one who may not publish sees no actions', async ({
@@ -34,7 +33,7 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
 }) => {
   await signInAs(page, `e2e-approvals-${Date.now()}@example.com`, ADDRESS.owner);
   await createOrg(page, 'Saltmarsh Deli', ADDRESS.owner);
-  const screenId = await pairScreen(page, 'Deli counter');
+  await pairScreen(page, 'Deli counter');
   // The soup board, on a default playlist, published: the screen plays it.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
