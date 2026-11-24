@@ -66,10 +66,11 @@ export function DisplayHoursEditor({
 
       {value && (
         <>
-          <ul className="space-y-3">
+          {/* Each window set apart by a rule and space, not a box in the form (#377). */}
+          <ul className="divide-y">
             {value.weekly.map((w, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
-              <li key={i} className="space-y-2 rounded-lg border p-3">
+              <li key={i} className="space-y-2 py-3 first:pt-0">
                 <fieldset className="flex flex-wrap gap-1">
                   <legend className="sr-only">Days for window {i + 1}</legend>
                   {DAYS.map(([d, short, long]) => {
@@ -116,7 +117,7 @@ export function DisplayHoursEditor({
               Dates with other hours
             </h3>
             <p className="text-xs text-muted-foreground">A holiday or an event: the date's hours replace the weekly ones.</p>
-            <ul aria-labelledby={`${id}-ex`} className="space-y-2">
+            <ul aria-labelledby={`${id}-ex`} className="divide-y">
               {(value.exceptions ?? []).map((e, i) => {
                 const all = value.exceptions ?? [];
                 const set = (next: (typeof all)[number]) => setExceptions(all.map((x, j) => (j === i ? next : x)));
@@ -125,7 +126,7 @@ export function DisplayHoursEditor({
                 const date = e.date || 'this date';
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: a dated exception is edited in place, date included.
-                  <li key={i} className="space-y-2 rounded-lg border p-3">
+                  <li key={i} className="space-y-2 py-3 first:pt-0">
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="grid gap-1 text-xs font-medium">
                         <label htmlFor={`${id}-date-${i}`}>Date</label>
