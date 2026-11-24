@@ -54,11 +54,19 @@ const mcpUrl = () => `${new URL(getRequest().url).origin}/mcp`;
 export const getAgents = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(
     async () => {
-      const [grants, toolList, people, calls] = await Promise.all([all('list_agent_grants', (p) => p.grants), tools(), names(), usage()]);
+      const [grants, toolList, people, calls, requests] = await Promise.all([
+        all('list_agent_grants', (p) => p.grants),
+        tools(),
+        names(),
+        usage(),
+        all('list_publish_requests', (p) => p.requests, { pending: true }),
+      ]);
       const week = calls && Object.fromEntries(calls.grants.map((u) => [u.grantId, u]));
-      return { grants, tools: toolList, names: people, week, mcpUrl: mcpUrl(), at: Date.now() };
+      // The agents' publish requests waiting (#115): the banner's count, for a member who may approve them.
+      const waiting = requests.filter((r) => r.requestedBy.kind === 'agent').length;
+      return { grants, tools: toolList, names: people, week, mcpUrl: mcpUrl(), at: Date.now(), waiting };
     },
-    { grants: [], tools: [], names: {}, week: null, mcpUrl: '', at: 0 },
+    { grants: [], tools: [], names: {}, week: null, mcpUrl: '', at: 0, waiting: 0 },
   ),
 );
 

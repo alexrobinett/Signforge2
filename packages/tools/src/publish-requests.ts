@@ -18,15 +18,16 @@
  * same however many members there are. The same pins asked again while the first waits get the
  * first request; an asker has at most `MAX_PENDING` waiting.
  */
-import type { OrgScope, PublishRequestRow } from '@signforge/db';
+import { contentJson, type OrgScope, type PublishRequestRow } from '@signforge/db';
 import { z } from 'zod';
 import { grantClient } from './agent-grants';
 import { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 import { id, idempotencyKey } from './fields';
 import { AUDIENCE_ROLES, draftPin, outputs, type PublishRequestView } from './outputs';
 import { keysetPage, pageInput } from './paging';
+import { sha256Hex } from './dispatch';
 import { peopleAllowSample, runPublish, sampleAcks } from './publish';
-import type { DraftPin } from './publishing';
+import { type DraftPin, dryPublish } from './publishing';
 import { orgSettings } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
 
@@ -43,10 +44,38 @@ const statusOf = (row: PublishRequestRow, now: number) => (row.status === 'pendi
 // Written by `request_publish` from its parsed input.
 const pinsOf = (row: PublishRequestRow): DraftPin[] => JSON.parse(row.draftsJson);
 
-const view = (row: PublishRequestRow, now: number): PublishRequestView => ({
+/** Who asked, by name: members by user id, connected agents by grant id (with the member who connected each); and the members as read. */
+interface Names {
+  rows: Awaited<ReturnType<OrgScope['members']['list']>>;
+  members: Map<string, string>;
+  agents: Map<string, { name: string | null; connectedBy: string | null }>;
+}
+
+/** The names a view of requests shows: one read of the members, and one of the connected agents if an agent asked. */
+async function namesOf(org: OrgScope, rows: readonly PublishRequestRow[]): Promise<Names> {
+  const [members, connected] = await Promise.all([
+    org.members.list(),
+    rows.some((r) => r.requestedByKind === 'agent') ? org.agentGrants.connected() : Promise.resolve([]),
+  ]);
+  const byUser = new Map(members.map((m) => [m.userId, m.name]));
+  return {
+    rows: members,
+    members: byUser,
+    agents: new Map(connected.map((c) => [c.grant.id, { name: grantClient(c).name, connectedBy: byUser.get(c.grant.userId) ?? null }])),
+  };
+}
+
+const view = (row: PublishRequestRow, now: number, names: Names): PublishRequestView => ({
   id: row.id,
   status: statusOf(row, now),
-  requestedBy: { kind: row.requestedByKind, id: row.requestedBy, clientId: row.clientId },
+  requestedBy: {
+    kind: row.requestedByKind,
+    id: row.requestedBy,
+    clientId: row.clientId,
+    ...(row.requestedByKind === 'agent'
+      ? (names.agents.get(row.requestedBy) ?? { name: null, connectedBy: null })
+      : { name: names.members.get(row.requestedBy) || null, connectedBy: null }),
+  },
   drafts: pinsOf(row),
   reason: row.reason,
   createdAt: row.createdAt,
@@ -83,27 +112,30 @@ export const approves = (role: string, editorsPublish: boolean) => role === 'own
  * and some member it names may approve (not the asker): the delivery run sends it to each of them
  * (apps/api src/deliveries.ts). Returns the deliveries to send once committed.
  */
-async function announce(ctx: Pick<ToolContext<unknown>, 'org' | 'write'>, row: PublishRequestRow, now: number): Promise<string[]> {
-  const { org, write } = ctx;
-  const [settings, members, channels, orgName] = await Promise.all([orgSettings(org), org.members.list(), org.alertChannels.list(), org.name()]);
+async function announce(ctx: Pick<ToolContext<unknown>, 'org' | 'write' | 'services'>, row: PublishRequestRow, now: number, names: Names): Promise<string[]> {
+  const { org, write, services } = ctx;
+  const members = names.rows;
+  const [settings, channels, orgName] = await Promise.all([orgSettings(org), org.alertChannels.list(), org.name()]);
   const rule = settings.alerts.publish_requested;
   const roles: readonly string[] = AUDIENCE_ROLES[rule.who];
   const email = rule.email && members.some((m) => roles.includes(m.role) && approves(m.role, settings.editorsPublish) && m.userId !== row.requestedBy);
   const sendTo = [...channels.map((c) => c.kind).filter((kind) => rule[kind]), ...(email ? (['email'] as const) : [])];
   if (!sendTo.length) return [];
-  let name: string | null;
-  if (row.requestedByKind === 'agent') {
-    const [connected] = await org.agentGrants.connected({ grantId: row.requestedBy });
-    name = connected ? grantClient(connected).name : null;
-  } else name = members.find((m) => m.userId === row.requestedBy)?.name || null;
+  const { name } = view(row, now, names).requestedBy;
+  const { cmsOrigin } = services;
   const event: AlertEvent = {
     type: 'publish.requested',
     id: `evt_publish_requested_${row.id}`,
     occurredAt: new Date(now).toISOString(),
     org: { id: org.orgId, name: orgName },
     data: {
-      // No page shows a request yet: the approvals queue (#115) gives it one, and this its link.
-      request: { id: row.id, url: null, drafts: pinsOf(row).length, expiresAt: new Date(row.expiresAt).toISOString() },
+      // The approvals queue (#115), at the request; none where the API does not know the CMS's origin (dev, or one origin for both).
+      request: {
+        id: row.id,
+        url: cmsOrigin ? `${cmsOrigin}/approvals#${row.id}` : null,
+        drafts: pinsOf(row).length,
+        expiresAt: new Date(row.expiresAt).toISOString(),
+      },
       by: { kind: row.requestedByKind, id: row.requestedBy, name },
     },
   };
@@ -165,14 +197,14 @@ const requestPublish = defineTool({
     if (same) return new ToolError('conflict', `the same drafts were asked for at the same moment: request ${same.id} is waiting`, { requestId: same.id });
     return waiting.length >= MAX_PENDING ? new ToolError('conflict', tooMany, { pending: waiting.length }) : undefined;
   },
-  handler: async ({ org, actor, input, write, deliverNow }) => {
+  handler: async ({ org, actor, input, write, deliverNow, services }) => {
     await checkPins(org, input.drafts);
     const now = Date.now();
     const draftsJson = JSON.stringify(sortedPins(input.drafts));
     const waiting = await org.publishRequests.pendingBy(actor.id, now);
     // Asked again while it waits: the same request, and no second alert.
     const same = waiting.find((r) => r.draftsJson === draftsJson);
-    if (same) return { request: view(same, now) };
+    if (same) return { request: view(same, now, await namesOf(org, [same])) };
     if (waiting.length >= MAX_PENDING) throw new ToolError('conflict', tooMany, { pending: waiting.length });
     const row = write(
       org.publishRequests.stage.insert(
@@ -190,8 +222,9 @@ const requestPublish = defineTool({
         MAX_PENDING,
       ),
     );
-    for (const delivery of await announce({ org, write }, row, now)) deliverNow(delivery);
-    return { request: view(row, now) };
+    const names = await namesOf(org, [row]);
+    for (const delivery of await announce({ org, write, services }, row, now, names)) deliverNow(delivery);
+    return { request: view(row, now, names) };
   },
 });
 
@@ -212,7 +245,8 @@ const listPublishRequests = defineTool({
       (after, take) => org.publishRequests.list({ after, take, pendingAt: input.pending ? now : undefined }),
       (r) => [r.createdAt, r.id],
     );
-    return { requests: rows.map((r) => view(r, now)), next };
+    const names = await namesOf(org, rows);
+    return { requests: rows.map((r) => view(r, now, names)), next };
   },
 });
 
@@ -229,7 +263,7 @@ const getPublishRequest = defineTool({
   handler: async ({ org, input }) => {
     const row = await org.publishRequests.get(input.publishRequestId);
     if (!row) throw notFound('publish request', input.publishRequestId);
-    return { request: view(row, Date.now()) };
+    return { request: view(row, Date.now(), await namesOf(org, [row])) };
   },
 });
 
@@ -287,7 +321,7 @@ const approvePublishRequest = defineTool({
     // Its time is taken last, nearest the batch, whose guard refuses it past the request's expiry.
     const now = Date.now();
     const decided = write(org.publishRequests.stage.decide(row, { status: 'approved', by: actor.id, now, publishId: published.publish?.id ?? null }));
-    return { request: view(decided, now), published };
+    return { request: view(decided, now, await namesOf(org, [decided])), published };
   },
 });
 
@@ -307,8 +341,126 @@ const declinePublishRequest = defineTool({
   handler: async ({ org, actor, input, write }) => {
     const now = Date.now();
     const row = await pending(org, input.publishRequestId, now);
-    return { request: view(write(org.publishRequests.stage.decide(row, { status: 'declined', by: actor.id, now })), now) };
+    const declined = write(org.publishRequests.stage.decide(row, { status: 'declined', by: actor.id, now }));
+    return { request: view(declined, now, await namesOf(org, [declined])) };
   },
 });
 
-export const publishRequestTools = [requestPublish, listPublishRequests, getPublishRequest, approvePublishRequest, declinePublishRequest];
+const reopenPublishRequest = defineTool({
+  name: 'reopen_publish_request',
+  description:
+    'Put a declined publish request back to pending, undecided: the Undo of a decline. Only the person who declined it, or someone who may decide it now. Refused with a conflict, details { status }, if it is not declined, or has expired; and if it is reopened or decided by someone else meanwhile. No alert is sent again. People only. Returns { request }.',
+  // The decliner may undo their own decline though they could no longer decide it; deciding it again needs content:publish.
+  scope: 'content:draft',
+  minRole: 'editor',
+  mutates: true,
+  people: true,
+  input: z.object({ publishRequestId: id('publish request') }),
+  output: outputs.reopen_publish_request,
+  example: { publishRequestId: 'prq_example' },
+  target: (input) => ({ kind: 'publish_request', id: input.publishRequestId }),
+  auditDetail: (output) => ({ requestedBy: output.request.requestedBy }),
+  handler: async ({ org, actor, role, input, write }) => {
+    const now = Date.now();
+    const row = await org.publishRequests.get(input.publishRequestId);
+    if (!row) throw notFound('publish request', input.publishRequestId);
+    // Past its expiry it could not be decided again: said so, whatever it was.
+    const status = row.expiresAt <= now ? 'expired' : statusOf(row, now);
+    if (status !== 'declined') throw new ToolError('conflict', `publish request ${row.id} is ${status}`, { status });
+    if (row.decidedBy !== actor.id && !approves(role, (await orgSettings(org)).editorsPublish))
+      throw new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back');
+    const reopened = write(org.publishRequests.stage.reopen(row, now));
+    return { request: view(reopened, now, await namesOf(org, [reopened])) };
+  },
+});
+
+/** A pinned draft's fields that differ from its published version: a template spot's data, assets and bindings by field key, else by column. */
+function changedFields(draft: Record<string, unknown>, live: Record<string, unknown>): string[] {
+  const fields = new Set<string>();
+  for (const key of new Set([...Object.keys(draft), ...Object.keys(live)])) {
+    if (JSON.stringify(draft[key]) === JSON.stringify(live[key])) continue;
+    const [a, b] = [draft[key], live[key]];
+    // A JSON column of fields (a spot's data, assets, bindings): each field that differs.
+    const inner = (v: unknown): Record<string, unknown> | undefined => {
+      if (typeof v !== 'string' || !key.endsWith('Json')) return undefined;
+      const parsed: unknown = JSON.parse(v);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed)) : undefined;
+    };
+    const [x, y] = [inner(a), inner(b)];
+    if ((x || a === null) && (y || b === null) && (x || y)) {
+      for (const k of new Set([...Object.keys(x ?? {}), ...Object.keys(y ?? {})])) if (JSON.stringify(x?.[k]) !== JSON.stringify(y?.[k])) fields.add(k);
+    } else fields.add(key.replace(/Json$/, ''));
+  }
+  return [...fields].sort();
+}
+
+const checkPublishRequest = defineTool({
+  name: 'check_publish_request',
+  description:
+    "What approving a publish request would do now, writing nothing: the screens it would switch, by name; the pinned drafts that fail their checks; the pinned spots still holding their template's sample text, as approve_publish_request's allowSample takes them; what each pinned draft changes; and why approving it would be refused now, if it would (not pending, a pin changed since, the brand kits changed since it was asked, a draft held). Returns { request, refused, screens, held, samples, changes }.",
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: z.object({ publishRequestId: id('publish request') }),
+  output: outputs.check_publish_request,
+  example: { publishRequestId: 'prq_example' },
+  handler: async ({ org, input }) => {
+    const now = Date.now();
+    const row = await org.publishRequests.get(input.publishRequestId);
+    if (!row) throw notFound('publish request', input.publishRequestId);
+    const request = view(row, now, await namesOf(org, [row]));
+    const pins = pinsOf(row);
+    const [spots, playlists, entries] = await Promise.all([org.spots.list(), org.playlists.list(), org.scheduleEntries.list()]);
+    const changes = await Promise.all(
+      pins.map(async (p) => {
+        const draft = p.kind === 'spot' ? spots.find((x) => x.id === p.id) : p.kind === 'playlist' ? playlists.find((x) => x.id === p.id) : entries.find((x) => x.id === p.id);
+        const items = p.kind === 'playlist' ? await org.playlists.items(p.id) : undefined;
+        // Both as `published_json` holds content (`contentJson`): the draft's now, and the published one's.
+        const now: Record<string, unknown> | undefined = draft && JSON.parse(contentJson(draft, items));
+        const was: Record<string, unknown> | undefined = draft?.publishedJson ? JSON.parse(draft.publishedJson) : undefined;
+        return {
+          kind: p.kind,
+          id: p.id,
+          name: draft && 'name' in draft ? draft.name : p.id,
+          fresh: !was,
+          fields: now && was ? changedFields(now, was) : [],
+        };
+      }),
+    );
+    const empty = { request, screens: [], held: [], samples: [], changes };
+    const refusal = (err: ToolError) => ({ ...empty, refused: { error: err.code, message: err.message } });
+    if (request.status !== 'pending') return refusal(new ToolError('conflict', `publish request ${row.id} is ${request.status}`));
+    if ((await org.brandKits.state()) !== row.brandState)
+      return refusal(new ToolError('conflict', 'the brand kits have changed since it was asked for, and would go live with it'));
+    // Worked out as approving would publish it (`exact`), writing nothing; sample text named, then acknowledged, as the approval would take it.
+    let dry: Awaited<ReturnType<typeof dryPublish>>;
+    try {
+      dry = await dryPublish(org, { hash: sha256Hex, now: new Date(now) }, pins, true);
+    } catch (err) {
+      if (err instanceof ToolError) return refusal(err);
+      throw err;
+    }
+    const { result, samples } = dry;
+    const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
+    const held = result.drafts.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));
+    const names = new Map(result.read.screens.map((x) => [x.id, x.name]));
+    return {
+      request,
+      refused: held.length ? { error: 'conflict', message: 'not every draft it asks for can be published' } : null,
+      screens: result.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [{ id: x.screenId, name: names.get(x.screenId) ?? x.screenId }] : [])),
+      held,
+      samples: samples.map((x) => ({ spotId: x.id, name: x.name, version: x.version, fields: x.fields })),
+      changes,
+    };
+  },
+});
+
+export const publishRequestTools = [
+  requestPublish,
+  listPublishRequests,
+  getPublishRequest,
+  checkPublishRequest,
+  approvePublishRequest,
+  declinePublishRequest,
+  reopenPublishRequest,
+];

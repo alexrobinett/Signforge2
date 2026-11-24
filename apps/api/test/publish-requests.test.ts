@@ -221,11 +221,12 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     // deliveries and the audit row in one batch; then, sent at once, the email's fan-out to the 31 is one
     // batch more (its 31 statements count once). Its one RPC is the agent's write limit (#107).
     expect(asking).toEqual({ statements: 60, queries: 24, rpcs: ['write'] });
-    expect(reading).toEqual({ statements: 3, queries: 3, rpcs: [] });
-    expect(listing).toEqual({ statements: 3, queries: 3, rpcs: [] });
-    expect(declining).toEqual({ statements: 7, queries: 4, rpcs: [] });
+    // Reading, listing and deciding also read who asked by name (#115): the members, and the connected agents, two queries.
+    expect(reading).toEqual({ statements: 5, queries: 5, rpcs: [] });
+    expect(listing).toEqual({ statements: 5, queries: 5, rpcs: [] });
+    expect(declining).toEqual({ statements: 9, queries: 6, rpcs: [] });
     // A person's approval is a publish, under the org's lock: acquire and release are its two RPCs.
-    expect(approving).toEqual({ statements: 29, queries: 20, rpcs: ['acquire', 'release'] });
+    expect(approving).toEqual({ statements: 31, queries: 22, rpcs: ['acquire', 'release'] });
     for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
   });
 

@@ -49,6 +49,7 @@ import {
 import { renditionView } from './assets';
 import { kitColors } from './brand';
 import { ended } from './schedule';
+import { z } from 'zod';
 import { ToolError } from './tool';
 
 type Orientation = Screen['orientation'];
@@ -520,6 +521,26 @@ export interface SampleAck {
   spotId: string;
   version: number;
   fields: string[];
+}
+
+/** What a publish refused for sample text names (#360): each spot, at its version, and its fields still holding the sample. */
+const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) })) });
+
+/**
+ * A publish worked out as `publishOrg` works it out, writing nothing, for a person to see before they
+ * press (the agent drawer's publish card, #351; the approvals queue, #115): the spots it would refuse
+ * for their template's sample text are named, and it is worked out again acknowledging exactly those,
+ * as the person's press does. Any other refusal is thrown.
+ */
+export async function dryPublish(org: OrgScope, opts: CompileOptions, pins: readonly DraftPin[], exact: boolean) {
+  const run = (allow: SampleAck[]) => publishOrg(org, opts, pins, [], exact, allow);
+  try {
+    return { result: await run([]), samples: [] };
+  } catch (err) {
+    if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
+    const { spots } = sampleRefusal.parse(err.details);
+    return { result: await run(spots.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields }))), samples: spots };
+  }
 }
 
 /**
