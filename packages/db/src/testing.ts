@@ -372,6 +372,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
       expiresAt: SEED_HOUR + 100 * 365 * 24 * 3_600_000,
     },
     SEED_HOUR,
+    10,
   );
   await o.commit(publishRequest.writes);
 

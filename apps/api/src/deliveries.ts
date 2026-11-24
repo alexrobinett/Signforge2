@@ -115,7 +115,7 @@ export async function deliverAlert(env: DeliveryEnv, email: EmailSender, orgId: 
 async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, now: number): Promise<AttemptResult> {
   const event: AlertEvent = JSON.parse(row.eventJson);
   try {
-    return { ok: true, httpStatus: await send(env, email, guards, reach, row, event) };
+    return { ok: true, httpStatus: await send(env, email, guards, reach, row, event, now) };
   } catch (e) {
     const failure =
       e instanceof Undeliverable
@@ -134,13 +134,34 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
 }
 
 /** Send it on its channel; the receiver's HTTP status, or null for email. */
-async function send(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, event: AlertEvent): Promise<number | null> {
+async function send(
+  env: DeliveryEnv,
+  email: EmailSender,
+  guards: FetchGuards,
+  reach: Reach,
+  row: AlertDeliveryRow,
+  event: AlertEvent,
+  now: number,
+): Promise<number | null> {
   if (row.channel === 'email') {
     const members = await reach.members(row.orgId);
-    const to = row.toUserId === null ? await approversOf(env, members, event) : members.filter((m) => m.userId === row.toUserId);
-    if (!to.length) throw new Undeliverable('no-member');
-    // One send each: a member who cannot be reached fails the delivery, which is tried again, as one member's is.
-    for (const m of to) await email.send({ to: m.email, subject: `SignForge: ${summary(event)}`, text: emailText(event) });
+    if (row.toUserId === null) {
+      // Addressed to those who may approve now: one delivery each, queued in one batch, each sent and
+      // retried on its own by the next run, so one mailbox that fails stops no other, and a retry sends
+      // to no one twice. This one is then done.
+      const to = await approversOf(env, members, event);
+      if (!to.length) throw new Undeliverable('no-member');
+      await scoped(env.DB, row.orgId).alertDeliveries.queueEmails(
+        { id: event.id, type: event.type, json: row.eventJson },
+        to.map((m) => m.userId),
+        now,
+        row.giveUpAt,
+      );
+      return null;
+    }
+    const member = members.find((m) => m.userId === row.toUserId);
+    if (!member) throw new Undeliverable('no-member');
+    await email.send({ to: member.email, subject: `SignForge: ${summary(event)}`, text: emailText(event) });
     return null;
   }
   const channel = reach.channel(row.orgId, row.channel);

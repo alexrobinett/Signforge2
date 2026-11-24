@@ -443,7 +443,7 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * checked changed before the commit): called when the commit fails, it says whether the guard
    * refused, as a `ToolError`. Undefined means a real failure, which is thrown. Nothing was written.
    */
-  refuseFailedCommit?: (ctx: { org: D; input: z.output<S> }) => Promise<ToolError | undefined>;
+  refuseFailedCommit?: (ctx: { org: D; input: z.output<S>; actor: Actor }) => Promise<ToolError | undefined>;
 }
 
 /** Declare a tool, keeping its input and output types. */

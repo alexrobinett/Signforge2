@@ -181,7 +181,7 @@ export const publishRequestOutput = z.object({
     .string()
     .nullable()
     .describe(
-      'The publish its approval made; null until then, and when there was nothing to publish: every pin already live at its version and no screen to change',
+      'The publish its approval made; null until then, and when it made none: no draft to promote and no screen to change (an approval that only removed a pinned ended takeover makes none)',
     ),
   version: version.describe('Moves on when it is decided'),
 });

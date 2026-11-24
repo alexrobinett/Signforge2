@@ -219,6 +219,7 @@ mcp.post('/mcp', refuseSession, async (c) => {
     services: agentServices(c, grant),
     publishLock: publishLock(c.env, grant.orgId),
     agentLimiter: agentLimiter(c.env),
+    member: grant.userId,
   };
   // One message a request: a batch (which 2025-06-18 took out of the protocol) would run its calls at once.
   const body = await readRequestBody(c.req.raw.clone(), BODY_MAX);

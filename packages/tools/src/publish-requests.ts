@@ -125,6 +125,8 @@ async function announce(ctx: Pick<ToolContext<unknown>, 'org' | 'write'>, row: P
   );
 }
 
+const tooMany = `${MAX_PENDING} of your publish requests are waiting: wait for one to be decided or to expire`;
+
 /** Pins in one order, so the same drafts asked for are the same text (`drafts_json`). */
 const sortedPins = (pins: readonly DraftPin[]): DraftPin[] =>
   pins.map(({ kind, id, version }) => ({ kind, id, version })).toSorted((a, b) => (a.kind === b.kind ? (a.id < b.id ? -1 : 1) : a.kind < b.kind ? -1 : 1));
@@ -156,6 +158,13 @@ const requestPublish = defineTool({
   output: outputs.request_publish,
   example: { drafts: [{ kind: 'spot', id: 'spt_example', version: 1 }], reason: 'Weekend opening hours on the lobby screens' },
   target: (_input, output) => ({ kind: 'publish_request', id: output.request.id }),
+  // Its batch refused as it ran: another call of the asker's, made at the same moment, got there first.
+  refuseFailedCommit: async ({ org, input, actor }) => {
+    const waiting = await org.publishRequests.pendingBy(actor.id, Date.now());
+    const same = waiting.find((r) => r.draftsJson === JSON.stringify(sortedPins(input.drafts)));
+    if (same) return new ToolError('conflict', `the same drafts were asked for at the same moment: request ${same.id} is waiting`, { requestId: same.id });
+    return waiting.length >= MAX_PENDING ? new ToolError('conflict', tooMany, { pending: waiting.length }) : undefined;
+  },
   handler: async ({ org, actor, input, write, deliverNow }) => {
     await checkPins(org, input.drafts);
     const now = Date.now();
@@ -164,10 +173,7 @@ const requestPublish = defineTool({
     // Asked again while it waits: the same request, and no second alert.
     const same = waiting.find((r) => r.draftsJson === draftsJson);
     if (same) return { request: view(same, now) };
-    if (waiting.length >= MAX_PENDING)
-      throw new ToolError('conflict', `${MAX_PENDING} of your publish requests are waiting: wait for one to be decided or to expire`, {
-        pending: waiting.length,
-      });
+    if (waiting.length >= MAX_PENDING) throw new ToolError('conflict', tooMany, { pending: waiting.length });
     const row = write(
       org.publishRequests.stage.insert(
         {
@@ -180,6 +186,8 @@ const requestPublish = defineTool({
           expiresAt: now + PUBLISH_REQUEST_TTL_MS,
         },
         now,
+        // Checked again as the batch runs, so two asked at once cannot both get past the same pins or the cap.
+        MAX_PENDING,
       ),
     );
     for (const delivery of await announce({ org, write }, row, now)) deliverNow(delivery);
@@ -256,10 +264,8 @@ const approvePublishRequest = defineTool({
   handler: async (ctx) => {
     const { org, actor, input, write } = ctx;
     const row = await pending(org, input.publishRequestId, Date.now());
-    if ((await org.brandKits.state()) !== row.brandState)
-      throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
     const pins = pinsOf(row);
-    const published = await runPublish(ctx, pins, [], true);
+    const published = await runPublish(ctx, pins, [], { brand: row.brandState });
     // All or nothing: a pin held by its checks publishes none of them (the batch is not committed).
     const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
     const held = published.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));
@@ -271,7 +277,6 @@ const approvePublishRequest = defineTool({
           held,
         },
       );
-    write(org.brandKits.stage.unchanged(row.brandState));
     // Its time is taken last, nearest the batch, whose guard refuses it past the request's expiry.
     const now = Date.now();
     const decided = write(org.publishRequests.stage.decide(row, { status: 'approved', by: actor.id, now, publishId: published.publish?.id ?? null }));

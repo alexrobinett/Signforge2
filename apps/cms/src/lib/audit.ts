@@ -120,7 +120,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   publish: { group: 'Publishes', words: 'Published' },
   roll_back_publish: { group: 'Publishes', words: 'Rolled back' },
   request_publish: { group: 'Publishes', words: 'Asked to publish' },
-  approve_publish_request: { group: 'Publishes', words: 'Request approved and published' },
+  approve_publish_request: { group: 'Publishes', words: 'Request approved' },
   decline_publish_request: { group: 'Publishes', words: 'Request declined' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
   renew_asset_upload: { group: 'Assets', words: 'Upload renewed' },

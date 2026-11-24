@@ -122,7 +122,25 @@ function staleGuard(db: Db, orgId: string, id: string, version: number, holds: S
     .select({ ok: sql`json(CASE WHEN ${holds} THEN '1' ELSE 'stale version' END)` })
     .from(s.organization)
     .where(eq(s.organization.id, orgId));
-  return guard(check, { id, version, stale });
+  return guard(check, { id, version, holds, stale });
+}
+
+/**
+ * The org's brand state as `brandKits.state` reads it, from rows already read: what the compiler used
+ * (`loadOrg`), so a publish guards exactly those (`brandKits.stage.unchanged`). Kits by id, then the
+ * assignments by target and group or screen id, as the SQL orders them.
+ */
+export function brandStateOf(kits: readonly { id: string; rowVersion: number }[], assignments: readonly (typeof s.brandAssignments.$inferSelect)[]): string {
+  const by = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const k = [...kits].sort((a, b) => by(a.id, b.id)).map((x) => `${x.id}:${x.rowVersion}`);
+  const key = (a: (typeof assignments)[number]) => [a.target, a.groupId ?? '', a.screenId ?? ''] as const;
+  const as = [...assignments]
+    .sort((a, b) => {
+      const [x, y] = [key(a), key(b)];
+      return by(x[0], y[0]) || by(x[1], y[1]) || by(x[2], y[2]);
+    })
+    .map((a) => `${a.target}:${a.groupId ?? ''}:${a.screenId ?? ''}:${a.brandKitId}`);
+  return `${k.join(',')}|${as.join(',')}`;
 }
 
 /**
@@ -1405,6 +1423,34 @@ export function scoped(d1: D1Database, orgId: string) {
       settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
         await settleStatement(db, orgId, id, attempt, now, result).run();
       },
+      /**
+       * One email delivery of `event` per member in `userIds`, each its own row to send and retry (a
+       * delivery addressed to approvers, fanned out when it is sent, M4-09): its event id names the
+       * member, as one delivery per event and channel is kept, so a member already queued is left as it is.
+       */
+      queueEmails: async (event: QueuedAlert['event'], userIds: readonly string[], now: number, giveUpAt: number): Promise<void> => {
+        const [first, ...rest] = userIds.map((toUserId) =>
+          db
+            .insert(ad)
+            .values(
+              fullRow(ad, {
+                id: newId('dlv'),
+                orgId,
+                channel: 'email',
+                eventId: `${event.id}:${toUserId}`,
+                eventType: event.type,
+                eventJson: event.json,
+                toUserId,
+                nextAttemptAt: now,
+                giveUpAt,
+                createdAt: now,
+                updatedAt: now,
+              }) as never,
+            )
+            .onConflictDoNothing(),
+        );
+        if (first) await db.batch([first, ...rest]);
+      },
       /** Queues `alert` for each of its channels now, on its own (an agent's refusals, M4-08); an event already queued for a channel is left as it is. */
       queue: async (alert: QueuedAlert, now: number): Promise<void> => {
         const [first, ...rest] = queueAlert(alert, now, sql`1`);
@@ -1518,10 +1564,16 @@ export function scoped(d1: D1Database, orgId: string) {
           .where(and(eq(pr.orgId, orgId), eq(pr.requestedBy, requestedBy), eq(pr.status, 'pending'), gt(pr.expiresAt, now)))
           .all(),
       stage: {
-        /** A new request, made at `now`: its `created_at`, which its expiry is counted from. */
-        insert: (values: NewRow<typeof pr>, now: number): Staged<PublishRequestRow> => {
+        /**
+         * A new request, made at `now`: its `created_at`, which its expiry is counted from. The batch is
+         * refused (`StaleVersionError`, id `publish_request`) if, as it runs, the asker already has one
+         * waiting with the same pins, or `maxPending` waiting: two asked at once cannot both get past.
+         */
+        insert: (values: NewRow<typeof pr>, now: number, maxPending: number): Staged<PublishRequestRow> => {
           const row = fullRow(pr, { ...strip(values), id: newId('prq'), orgId, createdAt: now }) as PublishRequestRow;
-          return staged(row, db.insert(pr).values(row));
+          const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${row.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
+          const holds = sql`NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${row.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
+          return { row, writes: [staleGuard(db, orgId, 'publish_request', 0, holds, async () => 0), ...staged(row, db.insert(pr).values(row)).writes] };
         },
         /**
          * Decided: approved (with the publish it made, if any) or declined, by `by` at `now`. The batch
@@ -1539,11 +1591,13 @@ export function scoped(d1: D1Database, orgId: string) {
             decidedAt: decision.now,
             publishId: decision.publishId ?? null,
           });
-          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now})`;
-          // Changed since, or past its expiry when decided: either way not the request that was read.
+          // Not expired at its decision's time, nor by the database's own clock as the batch runs: a
+          // decision whose batch runs late (a publish that took long) commits nothing past the expiry.
+          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER))`;
+          // Changed since, or past its expiry: either way not the request that was read.
           const stale = async () => {
             const row = await publishRequests.get(current.id);
-            return row && row.rowVersion === current.rowVersion && row.expiresAt > decision.now ? undefined : (row?.rowVersion ?? 0);
+            return row && row.rowVersion === current.rowVersion && row.expiresAt > Math.max(decision.now, Date.now()) ? undefined : (row?.rowVersion ?? 0);
           };
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
@@ -2000,6 +2054,23 @@ export function scoped(d1: D1Database, orgId: string) {
     members: {
       list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),
       get: (memberId: string) => memberRows(eq(s.member.id, memberId)).get(),
+      /** The user's role here now, or undefined if they are no longer a member. */
+      roleOf: async (userId: string) => (await memberRows(eq(s.member.userId, userId)).get())?.role,
+      stage: {
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `member`) unless, as it runs,
+         * `userId` is still a member in one of `roles`, and, when `editorsOnlyWhilePublishing`, an editor
+         * only while the org lets editors publish. The right a change was checked for, held to its commit.
+         */
+        stillMay: (userId: string, roles: readonly string[], editorsOnlyWhilePublishing: boolean): Staged => {
+          const m = s.member;
+          const setting = sql`COALESCE((SELECT ${os.editorsPublish} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = 1`;
+          const holds = sql`EXISTS (SELECT 1 FROM ${m} WHERE ${m.organizationId} = ${orgId} AND ${m.userId} = ${userId} AND ${inArray(m.role, [...roles])}${
+            editorsOnlyWhilePublishing ? sql` AND (${m.role} <> 'editor' OR ${setting})` : sql``
+          })`;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'member', 0, holds, async () => 0)] };
+        },
+      },
     },
     /** The org's invitations (Better Auth's `invitation` rows), read only, as `members` is. */
     invitations: {

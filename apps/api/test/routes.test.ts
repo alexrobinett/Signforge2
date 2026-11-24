@@ -146,6 +146,7 @@ describe('requests', () => {
         expiresAt: Date.UTC(2100, 0, 1),
       },
       Date.UTC(2026, 10, 24),
+      10,
     );
     await testScope(env.DB, org.id).commit(asked.writes);
     publishRequestId = asked.row.id;

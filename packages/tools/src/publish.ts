@@ -97,16 +97,24 @@ async function switchScreens(
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
  * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
- * approved request (`exact`: nothing removed that it does not pin).
+ * approved request (`exact`: nothing removed that it does not pin; `brand`, the brand state it was
+ * asked under, which the manifests must be compiled with, held to the commit).
  */
 export async function runPublish(
   ctx: ToolContext<unknown>,
   drafts: readonly DraftPin[] | undefined,
   end: readonly string[] = [],
-  exact = false,
+  approval?: { brand: string },
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, exact);
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined);
+  // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
+  // would pass a second read, and its batch then guards the very rows the manifests were made from.
+  if (approval && result.brand !== approval.brand)
+    throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
+  // The pins' guards, and the brand state's, go with the batch whether or not anything else is written.
+  write({ row: undefined, writes: result.pinGuards });
+  if (approval) write(org.brandKits.stage.unchanged(result.brand));
   const screens = result.screens.map((s) => ({
     screenId: s.screenId,
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),

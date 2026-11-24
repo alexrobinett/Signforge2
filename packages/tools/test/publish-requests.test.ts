@@ -16,8 +16,11 @@ const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: asy
 let orgs = 0;
 let o: SeededOrg;
 let delivered: string[];
-/** When each test starts: every time in the file is counted from it. */
-const START = Date.UTC(2026, 10, 24, 9);
+/**
+ * When each test starts: every time in the file is counted from it. In 2100, as a decision is also
+ * refused past its expiry by the database's own clock, which a faked Date does not move.
+ */
+const START = Date.UTC(2100, 0, 4, 9);
 
 /** A user who is a member of the org with `role`, as Better Auth's organization endpoints leave one. */
 async function addMember(role: Role) {
@@ -461,5 +464,69 @@ describe('asking again (review of #386)', () => {
         error: 'invalid_input',
       });
     }
+  });
+});
+
+describe('the second re-check of #386', () => {
+  /** An approver who is a member, whose role the dispatcher reads again under the lock and holds to the commit. */
+  const asMember = (role: Role): Caller => ({ ...person(role), member: `${o.orgId}-${role === 'owner' ? 'owner' : role}` });
+  const demote = (role: Role, to: string) =>
+    env.DB.prepare('UPDATE member SET role = ? WHERE organizationId = ? AND userId = ?').bind(to, o.orgId, `${o.orgId}-${role}`).run();
+
+  it('refuses an editor demoted while the approval waits for the lock, and one demoted between its read and its batch', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const waited: Caller = { ...asMember('editor'), publishLock: async (run) => (await demote('editor', 'viewer'), run()) };
+    expect(await approve(waited, request.id)).toMatchObject({ ok: false, error: 'forbidden' });
+    await demote('editor', 'editor');
+    expect(
+      await approve(
+        racing(asMember('editor'), () => demote('editor', 'viewer')),
+        request.id,
+      ),
+    ).toMatchObject({ ok: false, error: 'forbidden' });
+    await pendingStill(request.id);
+    expect(published((await scope().spots.get(o.templateSpot))!)).toBeUndefined();
+  });
+
+  it('refuses when the default kit was another while it compiled, though it is back as it was by the batch', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const night = await scope().brandKits.insert({ name: 'Night', colorsJson: (await scope().brandKits.get(o.brandKit))!.colorsJson, shape: 'soft' });
+    const setDefault = async (kit: string) => scope().commit((await scope().brandKits.assignments.stage.set({ target: 'org' }, kit)).writes);
+    // The compiler reads the assignments with the default B; by the time anything else reads it, it is A again.
+    const base = person('owner');
+    const org = base.org as OrgScope;
+    const assignments = {
+      ...org.brandKits.assignments,
+      list: async () => (await setDefault(night.id), await org.brandKits.assignments.list().finally(() => setDefault(o.brandKit))),
+    };
+    const flipping: Caller = { ...base, org: new Proxy(org, { get: (t, k) => (k === 'brandKits' ? { ...t.brandKits, assignments } : Reflect.get(t, k)) }) };
+    expect(await approve(flipping, request.id)).toMatchObject({ ok: false, error: 'conflict', details: { brand: true } });
+    await pendingStill(request.id);
+  });
+
+  it('holds the pins to the commit when every pin is already live and no screen changes', async () => {
+    await call(person('owner'), 'publish', { drafts: [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }] });
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }]);
+    const edited = racing(person('owner'), () => scope().spots.update(o.templateSpot, { durationMs: 20_000 }));
+    expect(await approve(edited, request.id)).toMatchObject({ ok: false, error: 'conflict', details: { id: o.templateSpot } });
+    await pendingStill(request.id);
+  });
+
+  it('lets one of two asks made at the same moment through: the other is told the request that is waiting', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const pins = [{ kind: 'spot', id: o.templateSpot, version }];
+    let second: string | undefined;
+    // The second ask commits between the first's read and its batch.
+    const first = racing(agent(), async () => {
+      second = (await ask(agent(), pins)).request.id;
+    });
+    expect(await dispatch(registry, 'request_publish', { drafts: pins, reason: 'At once' }, first)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { requestId: second },
+    });
+    expect((await scope().publishRequests.pendingBy(o.agentGrant, Date.now())).filter((r) => r.draftsJson.includes(`"version":${version}`))).toHaveLength(1);
   });
 });

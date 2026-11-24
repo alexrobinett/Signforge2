@@ -76,11 +76,18 @@ export interface Caller<D extends DataScope = OrgScope> {
   publishLock?: <T>(run: () => Promise<T>) => Promise<T>;
   /** Counts an agent's calls against its grant's limits. Required when the actor is an agent: dispatch throws without it. */
   agentLimiter?: AgentLimiter;
+  /**
+   * The user whose membership `role` is: the session's, or an agent's grant's (the API sets it). A
+   * publish reads that role again under the org's lock, on every attempt, and its batch holds the
+   * role and the org's `editorsPublish` to the commit, so a member demoted meanwhile publishes nothing.
+   */
+  member?: string;
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
 
 const rank = (r: Role) => ROLES.indexOf(r);
+const isRole = (r: unknown): r is Role => ROLES.some((x) => x === r);
 
 /** A caller's role and grant, and whether its org lets editors publish (`editorsPublish` in its settings). */
 export type Grant = Pick<Caller, 'role' | 'scopes'> & { editorsPublish: boolean };
@@ -160,8 +167,13 @@ export async function dispatch<D extends DataScope>(
   };
   const refused = refusedBy(grant);
   if (refused) return refused;
-  // An editor publishes only while editors publish: the batch checks it again as it runs, so turning it off meanwhile fails it.
-  const onlyWhileEditorsPublish = caller.role === 'editor' && tool.scope === 'content:publish' && 'settings' in caller.org;
+  // The right to publish, held to the commit: the member still in a role that may (and an editor only while
+  // editors publish), checked by the batch as it runs; without a member to read, the setting alone.
+  const publishRight = (): Write[] => {
+    if (!tool.mutates || tool.scope !== 'content:publish' || !('settings' in caller.org)) return [];
+    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(tool.minRole)), true).writes;
+    return caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
+  };
 
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
@@ -222,8 +234,7 @@ export async function dispatch<D extends DataScope>(
       targetId: target?.id ?? null,
       detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
     });
-    const setting = onlyWhileEditorsPublish && 'settings' in caller.org ? caller.org.settings.stage.editorsPublish().writes : [];
-    await caller.org.commit([...setting, ...writes, ...audit.writes]);
+    await caller.org.commit([...publishRight(), ...writes, ...audit.writes]);
   };
 
   /** What the handler asked to undo if the call does not succeed (`onDiscard`). Best effort: a failure is logged. */
@@ -231,13 +242,14 @@ export async function dispatch<D extends DataScope>(
   const onDiscard = (undo: () => Promise<void>) => {
     discards.push(undo);
   };
-  /** A commit that failed: a refusal, if a guard or the tool says what refused it. */
+  /** A commit that failed: a refusal, the tool's own words for it first, then a guard's. */
   const refusedCommit = async (err: unknown): Promise<DispatchResult | undefined> => {
+    const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data, actor: caller.actor });
+    if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
-    const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data });
-    return refusal && fail(refusal.code, refusal.message, refusal.details);
+    return undefined;
   };
 
   const run = async (): Promise<DispatchResult> => {
@@ -303,8 +315,10 @@ export async function dispatch<D extends DataScope>(
     for (let attempt = 1; ; attempt++) {
       writes.length = 0;
       notices.length = 0;
-      // Under the lock and on every attempt: a setting changed while it waited or lost a race takes effect.
-      const now = refusedBy(await grantOf(caller));
+      // Under the lock and on every attempt: a role or a setting changed while it waited or lost a race takes effect.
+      const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
+      if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
+      const now = refusedBy(await grantOf({ ...caller, role }));
       if (now) return now;
       try {
         return await run();

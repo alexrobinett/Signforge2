@@ -28,6 +28,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import {
+  brandStateOf,
   draftChanged,
   published,
   type Asset,
@@ -535,6 +536,10 @@ export async function publishOrg(
 ): Promise<{
   writes: Write[];
   removals: Write[];
+  /** A pin's guard that it is still the version pinned, for the ones not promoted: commit them whatever else is, as `removals`. */
+  pinGuards: Write[];
+  /** The org's brand state as this publish read it (`brandStateOf`): what its manifests were compiled with. */
+  brand: string;
   drafts: DraftReport;
   screens: ScreenPublish[];
   revision: number;
@@ -560,16 +565,18 @@ export async function publishOrg(
   const { writes: promotions, removals, drafts } = promoted;
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
   // A pin that needs no promotion (live as it is) or is held is still pinned at its version: an edit
-  // of it that lands before the batch fails it, as one of a promoted pin does.
+  // of it that lands before the batch fails it, as one of a promoted pin does, even when nothing else is written.
+  const pinGuards: Write[] = [];
   if (pins) {
     const acted = new Set([...drafts.promoted, ...drafts.removed].map((d) => pinKey(d.kind, d.id)));
     for (const p of pins) {
       if (acted.has(pinKey(p.kind, p.id))) continue;
-      if (p.kind === 'spot') writes.push(...org.spots.stage.unchanged(read.spots.find((r) => r.id === p.id)!).writes);
-      if (p.kind === 'playlist') writes.push(...org.playlists.stage.unchanged(read.playlists.find((r) => r.id === p.id)!).writes);
-      if (p.kind === 'schedule_entry') writes.push(...org.scheduleEntries.stage.unchanged(read.entries.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'spot') pinGuards.push(...org.spots.stage.unchanged(read.spots.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'playlist') pinGuards.push(...org.playlists.stage.unchanged(read.playlists.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'schedule_entry') pinGuards.push(...org.scheduleEntries.stage.unchanged(read.entries.find((r) => r.id === p.id)!).writes);
     }
   }
+  const brand = brandStateOf([...read.brandKits.values()], read.brandAssignments);
   // With no default playlist no screen can be compiled, and a new org's first schedule entry would
   // reach none (#243): one on every screen at all hours makes its playlist the default, in the same batch.
   // Guarded by the settings' version as read: a default set by hand since (set_default_playlist moves
@@ -600,7 +607,7 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+  return { writes, removals, pinGuards, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
 }
 
 /** Whether an entry plays on every screen at all hours, always: what a default playlist does. */

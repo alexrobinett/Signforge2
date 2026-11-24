@@ -338,6 +338,8 @@ describe('alerts to Slack and webhooks', () => {
     const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
     const start = Date.now();
     const request = await ask('menu');
+    // The first run sends Slack and the webhook, and fans the email out to each approver; the next sends those.
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
     await deliverAlerts(env, outbox, { now: start + MIN, guards });
     const asks = (addr: string) => outbox.messages.filter((m) => m.to === addr && m.subject.includes('asks to publish'));
     for (const addr of [ownerEmail, other.email]) {
@@ -370,8 +372,23 @@ describe('alerts to Slack and webhooks', () => {
     await owner.ok('/api/tools/update_org_settings', { editorsPublish: false });
     await ask('specials');
     await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
+    await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
     expect(asks(ownerEmail)).toHaveLength(2);
     expect(asks(other.email)).toHaveLength(1);
+
+    // One mailbox that fails stops no other, and its retry sends to it alone (re-check of #386).
+    await owner.ok('/api/tools/update_org_settings', { editorsPublish: true });
+    const failing = {
+      send: async (m: { to: string; subject: string; text: string }) => (m.to === other.email ? Promise.reject(new Error('mailbox full')) : outbox.send(m)),
+    };
+    await ask('lunch');
+    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
+    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(1);
+    await deliverAlerts(env, outbox, { now: start + 3 * MIN + HOUR, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(2);
   });
 
   it("sends an agent's repeated refusals to Slack and the webhook once an hour, naming its client as a page does (M4-08)", async () => {
