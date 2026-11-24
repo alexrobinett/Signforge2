@@ -315,7 +315,8 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
 });
 
 test('an Announcement with its photo off draws once the stage is in view, and the player is not asked to draw it out of view (#342)', async () => {
-  await page.setViewportSize({ width: 1280, height: 720 });
+  // On a phone the stage follows the form; beside it, on a wide screen, it stays in view (#363).
+  await page.setViewportSize({ width: 390, height: 844 });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const announcement = templates.find((t: { key: string }) => t.key.endsWith('announcement') || t.key === 'announcement');
   const { spot } = await tool(page, 'create_spot', {
@@ -329,13 +330,14 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   page.on('console', listen);
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
-  // The form is long: at 720 px the stage starts below the fold, where a browser runs no animation frames.
+  // The form is long: the stage starts below the fold, where a browser runs no animation frames.
   const stage = page.getByRole('region', { name: 'Live preview' });
   expect(await stage.evaluate((el) => el.getBoundingClientRect().top > innerHeight)).toBe(true);
   await stage.scrollIntoViewIfNeeded();
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   page.off('console', listen);
   expect(skipped).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   // #359: the photo turned on says nothing under its field until Publish, then says it in words; the choice by its label.
   await expect(page.getByLabel('Look').locator('option:checked')).toHaveText('Pop');
@@ -351,6 +353,52 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 720 });
+});
+
+test("an editor gives the stage the room: the sidebar folded to its rail, the stage filling its column, and the template's thumbnail with Drawing… until the player draws (#363)", async () => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const announcement = templates.find((t: { key: string }) => t.key === 'announcement');
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'Room to draw',
+    kind: 'template',
+    templateVersionId: announcement.versions.at(-1).id,
+    data: { showPhoto: false },
+  });
+  // The player is held back, so the stage shows what it shows while it waits.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/player/index.html*', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'Unfold the sidebar' })).toHaveAttribute('aria-expanded', 'false');
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  await expect(stage.getByText('Drawing…').first()).toBeVisible();
+  await expect(stage.locator('img[src="/template-thumbnails/announcement.webp"]')).toBeVisible();
+  // The column is the editor's height, and the stage fills it.
+  const fills = await stage.evaluate((el) => {
+    const column = el.parentElement!.getBoundingClientRect();
+    const own = el.getBoundingClientRect();
+    return Math.abs(own.height - column.height) < 1 && column.height > innerHeight / 2;
+  });
+  expect(fills).toBe(true);
+  await axe(page);
+  await shots(page, '92-spot-editor-drawing');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  release();
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await page.unroute('**/player/index.html*');
+
+  // Unfolded here, it stays open on this visit; the list beside it keeps the person's own choice.
+  await page.getByRole('button', { name: 'Unfold the sidebar' }).click();
+  await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toHaveAttribute('aria-expanded', 'true');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
+  await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toBeVisible();
 });
 
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;

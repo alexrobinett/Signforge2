@@ -7,10 +7,11 @@ import { connectUi, createUiSlice, isFolded, type UiSlice } from '../src/state/u
 
 vi.mock('~/lib/theme', () => ({ applyTheme: vi.fn(), onSystemThemeChange: vi.fn(), readStoredTheme: () => 'system', storeTheme: vi.fn() }));
 
-const router = { subscribe: vi.fn() };
+/** The page shown: the router the store reads the path from when the fold button is pressed. */
+const router = { subscribe: vi.fn(), state: { location: { pathname: '/screens' } } };
 function uiStore() {
   const store = createStore<UiSlice>()((set, get) => createUiSlice(set as never, get as never, { router } as never));
-  return { store, folded: () => isFolded(store.getState().ui) };
+  return { store, folded: () => isFolded(store.getState().ui, router.state.location.pathname) };
 }
 
 /** A browser's localStorage, as a Map. */
@@ -20,7 +21,10 @@ function storage(saved: Record<string, string> = {}) {
   return map;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  router.state.location.pathname = '/screens';
+});
 
 describe('the sidebar fold', () => {
   it('is the person’s choice, kept for the next visit', () => {
@@ -88,5 +92,37 @@ describe('the sidebar fold', () => {
     store.getState().showTip('Spots');
     store.getState().setRightPanel(false);
     expect(store.getState().ui.tip).toBeNull();
+  });
+
+  it("folds in a spot's or a playlist's editor by default, for the stage's room, unfolds there for that visit, and never saves the editor's fold (#363)", () => {
+    const saved = storage();
+    const { store, folded } = uiStore();
+    for (const path of ['/spots/spt_1', '/playlists/pls_1']) {
+      router.state.location.pathname = path;
+      expect(folded(), path).toBe(true);
+    }
+    router.state.location.pathname = '/spots';
+    expect(folded()).toBe(false);
+
+    router.state.location.pathname = '/spots/spt_1';
+    store.getState().toggleSidebar();
+    expect(folded()).toBe(false);
+    expect(saved.get('sf-sidebar-folded')).toBe('false');
+    // Another editor starts folded; so does this one on the next visit.
+    router.state.location.pathname = '/spots/spt_2';
+    expect(folded()).toBe(true);
+    connectUi(store as never, { router } as never);
+    const navigated = router.subscribe.mock.calls.at(-1)?.[1] as (e: { pathChanged: boolean }) => void;
+    navigated({ pathChanged: true });
+    router.state.location.pathname = '/spots/spt_1';
+    expect(folded()).toBe(true);
+    store.getState().toggleSidebar();
+    expect(folded()).toBe(false);
+    router.state.location.pathname = '/spots/spt_1';
+    store.getState().toggleSidebar();
+    expect(folded()).toBe(true);
+    expect(saved.get('sf-sidebar-folded')).toBe('false');
+    router.state.location.pathname = '/screens';
+    expect(folded()).toBe(false);
   });
 });

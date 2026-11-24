@@ -13,7 +13,7 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -145,7 +145,7 @@ function PlaylistEditor() {
   const kitId = search.kit ?? brandKits.find((k) => k.isDefault)?.id ?? null;
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
+    <div className="flex min-h-(--editor-height) flex-col overflow-clip rounded-xl border">
       <EditorHeader
         back={{ to: '/playlists', label: 'Playlists' }}
         title={draft.name || playlist.name}
@@ -355,7 +355,7 @@ function PlaylistEditor() {
           </EditorFields>
         </form>
         {/* The form can be far longer than a spot's, so the stage stays in view beside it as it scrolls. */}
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col bg-[#18181a] lg:sticky lg:top-0 lg:h-[calc(100dvh-8rem)] lg:self-start">
+        <div className={STAGE_COLUMN}>
           {draft.spotIds.length ? (
             <PlayerStage
               target={{ orgId, playlistId, orientation: search.o ?? 'landscape', brandKitId: search.kit }}
@@ -365,7 +365,7 @@ function PlaylistEditor() {
               onSearch={setSearch}
             />
           ) : (
-            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-[#18181a] p-8 text-center text-[#c8c8c8]">
+            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-stage p-8 text-center text-stage-muted-foreground">
               Add spots and the player plays the loop here.
             </section>
           )}
