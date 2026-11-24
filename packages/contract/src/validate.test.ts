@@ -1367,6 +1367,20 @@ describe('network check', () => {
     expect(problems('<style>/* see "https://openfontlicense.org" */</style>')).toEqual(refused);
     expect(problems('<style>.live::before{content:"// live"}</style>')).toEqual(refused);
   });
+
+  // Out of step with the browser, the strip can start a comment at an address's own slash, leaving
+  // "/" where Chromium fetches https://%2A.t.example/p.gif?*/ (#324 review).
+  it('refuses an address that a comment marker starts inside', () => {
+    for (const [before, address] of [
+      ['.a{x:\\"}', '//*.t.example/p.gif?*/'],
+      ['.a{content:"x\f}', '//*.t.example/p.gif?*/'],
+      ['.a{background:url(x")}', '//*.t.example/p.gif?*/'],
+      ['.a{x:\\"}', 'https:/*.t.example/p.gif?*/'],
+    ]) {
+      const css = `${before}.b{background-image:image-set("${address}" 1x)}`;
+      expect(problems(`<style>${css}</style>`), css).toEqual(refused);
+    }
+  });
 });
 
 describe('script check', () => {

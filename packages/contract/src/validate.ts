@@ -1139,19 +1139,26 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
   // In the bundle's styles, any quoted string that is a network address: `image-set("//x" 1x)` is
   // fetched with no url() around it. Comments go first, a font licence notice's addresses with them;
-  // strings are kept whole, so a /* in one opens no comment. A comment that itself quotes an address
-  // stays: wherever this reading and the browser's disagree (an unquoted url(/*), an escape, the HTML
-  // around the style), what it would hide is that quoted address.
+  // strings are kept whole, so a /* in one opens no comment. Where this reading and the browser's
+  // disagree (an escape, an unquoted url(), the HTML around the style), a comment can hide an address
+  // two ways: around it, so a comment that quotes one stays; or from inside it, at its own slash
+  // ("//*" or "https:/*", which the browser fetches), so that is refused in the text as written.
   const quotedAddress = /["']\s*(?:https?:)?\/\//i;
-  const styles = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
-    .map((m) =>
-      m[1]!.replace(
-        /("(?:[^"\\\n]|\\[\s\S])*"?|'(?:[^'\\\n]|\\[\s\S])*'?)|\/\*[\s\S]*?\*\//g,
+  const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!);
+  const styles = css
+    .map((text) =>
+      text.replace(
+        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?\*\//g,
         (c, string?: string) => string ?? (quotedAddress.test(c) ? c : ''),
       ),
     )
     .join('\n');
-  if (/\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) || /url\(\s*["']?(?:https?:)?\/\//i.test(html) || quotedAddress.test(styles))
+  if (
+    /\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) ||
+    /url\(\s*["']?(?:https?:)?\/\//i.test(html) ||
+    quotedAddress.test(styles) ||
+    /["']\s*(?:https?:\/?|\/)\/\*/i.test(css.join('\n'))
+  )
     network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
