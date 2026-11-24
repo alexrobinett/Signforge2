@@ -145,6 +145,17 @@ describe('spot drafts', () => {
     expect(await ok(call('list_spots', {}))).toMatchObject({ spots: [{ id }], next: null });
   });
 
+  it('lists by kind, or the unpublished only, and counts every spot the filters match (#357)', async () => {
+    const { call, version } = await setup('spots-filters');
+    for (const name of ['One', 'Two', 'Three']) await ok(call('create_spot', { name, kind: 'template', templateVersionId: version }));
+    const page = await ok(call('list_spots', { unpublished: true, limit: 2 }));
+    expect(page.spots).toHaveLength(2);
+    expect(page.total).toBe(3);
+    expect(page.next).not.toBeNull();
+    expect(await ok(call('list_spots', { kind: 'template', limit: 1 }))).toMatchObject({ total: 3 });
+    expect(await ok(call('list_spots', { kind: 'image' }))).toMatchObject({ spots: [], total: 0 });
+  });
+
   it('refuses data the contract refuses, naming the field', async () => {
     const { call, version } = await setup('spots-invalid');
     expect(await call('create_spot', { name: 'x', kind: 'template', templateVersionId: version, data: { headline: 'Far too long a headline' } })).toMatchObject(

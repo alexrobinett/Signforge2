@@ -37,6 +37,19 @@ describe('playlist drafts', () => {
     });
   });
 
+  it('lists the default playlist alone, or the unpublished ones, and counts every playlist the filters match (#357)', async () => {
+    const { o, call } = await setup('pl-filters');
+    const lunch = idOf(await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] })));
+    expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [], total: 0 });
+    await ok(call('set_default_playlist', { playlistId: lunch }));
+    expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [{ id: lunch, isDefault: true }], total: 1 });
+    const listed = await ok(call('list_playlists', { unpublished: true }));
+    const playlists = listed.playlists as { id: string; draftChanged: boolean }[];
+    expect(playlists.every((p) => p.draftChanged)).toBe(true);
+    expect(listed.total).toBe(playlists.length);
+    expect(playlists.map((p) => p.id)).toContain(lunch);
+  });
+
   it('reorders, renames and changes the transition with ifVersion, and refuses an edit from an old read', async () => {
     const { o, org, call } = await setup('pl-update');
     const id = idOf(await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot, o.templateSpot] })));

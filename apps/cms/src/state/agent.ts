@@ -28,6 +28,7 @@ import { versionsById, type SpotView } from '~/lib/spots';
 import { MediaError, scaledPhoto, uploadImage } from '@signforge/media';
 import { tabOrgHeaders } from '~/lib/tab-org';
 import { answer, callToolByName, Refusal, toolMessage } from '~/lib/tools';
+import { overviewKey } from '~/lib/overview';
 import { spotKeys, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
@@ -207,6 +208,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         const made = await post<InlineAnswer>('/api/agent/inline', { source, idempotencyKey: key.id, ...(templateVersionId && { templateVersionId }) });
         queryClient.setQueryData(spotKeys.one(orgId, made.spot.id), made.spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         // A retry of a fill that had made its spot gets it back with no marks (they were in the lost answer): nothing to mark.
         const marked = Object.keys(made.marks).length > 0;
         agent((a) => ({
@@ -318,6 +320,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         const { spot } = await post<{ spot: SpotView }>('/api/agent/inline/keep', { spotId, ifVersion: r.version, data: r.data });
         queryClient.setQueryData(spotKeys.one(r.orgId, spotId), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(r.orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(r.orgId) });
         const changed = fillChanges(fields, r.before, r.data).map((c) => c.field);
         agent((a) => {
           const { [spotId]: _kept, ...rest } = a.reviews;

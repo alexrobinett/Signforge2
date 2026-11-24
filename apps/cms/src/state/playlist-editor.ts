@@ -18,6 +18,7 @@ import { playlistDraftOf, rowKeys, type PlaylistDraft, type PlaylistView } from 
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { callTool, isGone, toolMessage } from '~/lib/tools';
+import { overviewKey } from '~/lib/overview';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
@@ -129,6 +130,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
       // A playlist deleted meanwhile has left the cache: it is not written back.
       if (queryClient.getQueryData(key)) queryClient.setQueryData(key, saved);
       void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+      void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
       return { version: saved.version };
     },
     invalid: ({ edit }) => unsaveable(edit),
@@ -256,6 +258,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         const made = (await callTool('create_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, made.id), made);
         void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         await router.navigate({ to: '/playlists/$playlistId', params: { playlistId: made.id } });
         editor((e) => ({ ...e, newPlaylist: closedNew() }));
       } catch (err) {
@@ -274,6 +277,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         await router.navigate({ to: '/playlists' });
         queryClient.removeQueries({ queryKey: playlistKeys.one(orgId, playlistId), exact: true });
         await queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         editor((e) => ({ ...initial, drafts: e.drafts }));
       } catch (err) {
         editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error: toolMessage(err) } }));

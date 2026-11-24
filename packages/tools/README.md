@@ -99,18 +99,18 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `start_connection` | content:draft | editor | `{ provider, connectionId? }` | `{ authorizationId, authorizeUrl, expiresAt }` |
 | `finish_connection` | content:draft | editor | `{ oauthState, code }` | `{ connection }`; 404 for a state that is not pending for the caller |
 | `disconnect` | content:draft | editor | `{ connectionId }` | `{ deleted, dataSourceIds }` |
-| `list_spots` | content:read | viewer | `{ limit?, cursor? }` | `{ spots: Spot[], next }`, most recently edited first |
+| `list_spots` | content:read | viewer | `{ limit?, cursor?, kind?, unpublished? }` | `{ spots: Spot[], next, total }`, most recently edited first; `total` counts every match |
 | `get_spot` | content:read | viewer | `{ spotId }` | `{ spot }` |
 | `create_spot` | content:draft | editor | `{ name, kind, durationMs?, templateVersionId?, data?, assets?, bindings?, assetId?, fit?, url?, idempotencyKey? }` | `{ spot }` |
 | `update_spot` | content:draft | editor | `{ spotId, name?, durationMs?, data?, assets?, bindings?, assetId?, fit?, url?, ifVersion? }` | `{ spot }` |
 | `delete_spot` | content:draft | editor | `{ spotId, ifVersion? }` | `{ deleted }`, or 409 while a playlist plays it in its draft or its published version (`details.playlists`, each `{ id, name }`); people only |
 | `get_spot_preview` | content:read | viewer | `{ orientation, templateVersionId?, brandKitId? }` | `{ preview, brandKitId, problems, timezone }` |
-| `list_playlists` | content:read | viewer | `{ limit?, cursor? }` | `{ playlists: Playlist[], next }`, most recently edited first |
+| `list_playlists` | content:read | viewer | `{ limit?, cursor?, isDefault?, unpublished? }` | `{ playlists: Playlist[], next, total }`, most recently edited first; `total` counts every match |
 | `get_playlist` | content:read | viewer | `{ playlistId }` | `{ playlist }` |
 | `create_playlist` | content:draft | editor | `{ name, transition?, spotIds?, idempotencyKey? }` | `{ playlist }` |
 | `update_playlist` | content:draft | editor | `{ playlistId, name?, transition?, spotIds?, ifVersion? }` | `{ playlist }` |
 | `delete_playlist` | content:draft | editor | `{ playlistId }` | `{ deleted }`, or 409 while it is the default playlist or a schedule entry plays it (an ended takeover does not, and goes with it) |
-| `list_schedule_entries` | content:read | viewer | `{ limit?, cursor? }` | `{ entries: ScheduleEntry[], next }`, by id |
+| `list_schedule_entries` | content:read | viewer | `{ limit?, cursor?, unpublished? }` | `{ entries: ScheduleEntry[], next, total }`, by id; the unpublished only, most recently edited first; `total` counts every match |
 | `create_schedule_entry` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, idempotencyKey? }` | `{ entry }` |
 | `start_takeover` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, startsAt?, endsAt, idempotencyKey? }` | `{ entry }` |
 | `update_schedule_entry` | content:draft | editor | `{ scheduleEntryId, playlistId?, target?, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, startsAt?, endsAt?, ifVersion? }` | `{ entry }` |
