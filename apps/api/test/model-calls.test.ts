@@ -35,7 +35,9 @@ const seen = async (input: RequestInfo | URL, init: RequestInit | undefined, int
 };
 
 /** Anthropic answering each call with `answer`, recording it. */
-function anthropic(answer: (body: any) => Response | Promise<Response> = (b) => anthropicStream('m', b.model, [{ type: 'text', text: '{"headline":"Bake sale"}' }], 'end_turn')) {
+function anthropic(
+  answer: (body: any) => Response | Promise<Response> = (b) => anthropicStream('m', b.model, [{ type: 'text', text: '{"headline":"Bake sale"}' }], 'end_turn'),
+) {
   const asked: Seen[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     await seen(input, init, asked);
