@@ -890,7 +890,11 @@ export const outputs = {
   update_playlist: playlistResult,
   delete_playlist: z.object({ deleted: z.string().describe("The deleted playlist's id") }),
   set_default_playlist: playlistResult,
-  list_schedule_entries: z.object({ entries: z.array(entryOutput), next: nextOutput, total: z.number().describe('How many match the filters, over every page') }),
+  list_schedule_entries: z.object({
+    entries: z.array(entryOutput),
+    next: nextOutput,
+    total: z.number().describe('How many match the filters, over every page'),
+  }),
   create_schedule_entry: entryResult,
   start_takeover: entryResult,
   update_schedule_entry: entryResult,

@@ -177,7 +177,10 @@ const listEntries = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput, unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'), }),
+  input: z.object({
+    ...pageInput,
+    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
+  }),
   output: outputs.list_schedule_entries,
   example: {},
   handler: async ({ org, input }) => {
