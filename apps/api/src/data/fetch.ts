@@ -120,7 +120,7 @@ async function guardedGet<Body>(
 const MODEL_MAX_BYTES = LIMITS.maxBytes;
 
 /** One server-sent event: its `event` field, if any, and its data lines joined. */
-export interface SseEvent {
+interface SseEvent {
   event?: string;
   data: string;
 }
