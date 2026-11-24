@@ -14,11 +14,15 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { SidebarMenuButton } from '~/components/ui/sidebar';
 import { Toaster } from '~/components/ui/sonner';
 import { TooltipProvider } from '~/components/ui/tooltip';
-import { UnpublishedChanges } from '~/components/unpublished-changes';
+import { PublishAllDialog, UnpublishedChanges } from '~/components/unpublished-changes';
+import { NotCurrent } from '~/components/screens/not-current';
 import { UserMenu } from '~/components/user-menu';
 import { orgHues } from '~/lib/paths';
 import { SECTIONS, type Section } from '~/lib/sections';
 import { navCountsQuery } from '~/queries/nav-counts';
+import { screenStatusQuery } from '~/queries/screens';
+import { useNow } from '~/lib/live';
+import { needingYou } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
@@ -39,10 +43,21 @@ interface Badge {
  */
 function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<string, number>; folded?: boolean }) {
   const orgId = shell.organization?.id;
-  const { data: counts } = useQuery({ ...navCountsQuery(orgId ?? ''), enabled: orgId !== undefined });
+  // Not read while the tab switches org: its calls then name the org it is going to, which these keys are not (review of #395).
+  const live = useAppStore((s) => orgId !== undefined && s.orgs.switchingTo === null);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  // Overview and Screens poll what the screens are doing already: the sidebar counts from that poll rather than read the fleet again.
+  const onFleet = path === '/' || path === '/screens';
+  const read = useQuery({ ...navCountsQuery(orgId ?? '', !onFleet), enabled: live });
+  const status = useQuery({ ...screenStatusQuery(orgId ?? ''), enabled: live && onFleet });
+  const counts = read.data;
+  const needsYou = onFleet ? (status.data ? needingYou(status.data.screens) : null) : (counts?.needsYou ?? null);
+  // As Overview says it: a read that failed after the last good one leaves the counts as last read.
+  const heardAt = read.dataUpdatedAt;
+  const now = useNow(heardAt);
   const badges: Partial<Record<Section['to'], Badge>> = counts
     ? {
-        '/screens': { n: counts.needsYou, word: counts.needsYou === 1 ? 'needs you' : 'need you', urgent: true },
+        ...(needsYou !== null && { '/screens': { n: needsYou, word: needsYou === 1 ? 'needs you' : 'need you', urgent: true } }),
         '/spots': { n: counts.spots, word: 'unpublished', urgent: false },
         '/playlists': { n: counts.playlists, word: 'unpublished', urgent: false },
         '/schedule': { n: counts.schedule, word: 'unpublished', urgent: false },
@@ -130,6 +145,7 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
         </ul>
       </nav>
       <div className="flex flex-col gap-2">
+        {!folded && <NotCurrent failing={read.errorUpdatedAt > read.dataUpdatedAt} heardAt={heardAt} now={now} />}
         {orgId && counts && <UnpublishedChanges orgId={orgId} counts={counts} folded={folded} />}
         <SidebarMenuButton folded={folded} tooltip="Unfold the sidebar" className="hidden lg:flex">
           <button type="button" onClick={toggleSidebar} aria-expanded={!folded}>
@@ -230,6 +246,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         <CreateOrgDialog />
         <ScheduleDialogs />
         <SampleCheck />
+        <PublishAllDialog />
         <p role="status" className="sr-only">
           {status}
         </p>

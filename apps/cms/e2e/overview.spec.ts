@@ -11,6 +11,7 @@ import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } fro
 /** This spec's own client address, so its sign-ins and claims have their own rate limits. */
 const ADDRESS = '192.0.2.211';
 const EDITOR_ADDRESS = '192.0.2.212';
+const PHONE_ADDRESS = '192.0.2.213';
 
 /** What the player in the tab says it plays (`window.__sf`). */
 const player = (tab: Page) =>
@@ -207,4 +208,40 @@ test('an editor where only owners publish sees the default as an owner’s step,
   await expect(step).toHaveText(/An owner sets the default \(for an owner\)/);
   await expect(step.getByRole('link')).toHaveCount(0);
   await axe(page);
+});
+
+test('at 390 px the sidebar Publish asks in one dialog a screen reader finds, says what no default means, gives focus back, and a sample spot asks again (#361, #360)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInAs(page, `e2e-overview-phone-${Date.now()}@example.com`, PHONE_ADDRESS);
+  await createOrg(page, 'Kestrel Quay', PHONE_ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  // A spot New spot would make, its sample text recorded by the server: an Alert, which needs nothing else to publish.
+  const alert = templates.find((t: { key: string }) => t.key === 'alert' || t.key.endsWith('/alert'));
+  await tool(page, 'create_spot', { name: 'Fire drill', kind: 'template', templateVersionId: alert.versions.at(-1).id, sample: true });
+  await page.reload();
+  await hydrated(page);
+
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  const opener = page.getByRole('dialog', { name: 'Navigation' }).getByRole('button', { name: '1 unpublished change · Publish' });
+  await opener.click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish 1 unpublished change?' });
+  await expect(ask).toContainText('1 spot, as drafted now');
+  await expect(ask).toContainText('There is no default playlist yet: only the screens a schedule entry reaches will change.');
+  await expect(page.getByRole('alertdialog')).toHaveCount(1);
+  await axe(page);
+  await shots(page, '115-publish-all-phone');
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  // Publish: the spot still holds its sample text, so the server refuses it and the page asks, as every publish does (#360).
+  await opener.click();
+  await ask.getByRole('button', { name: 'Publish', exact: true }).click();
+  const sample = page.getByRole('alertdialog', { name: 'Publish sample text?' });
+  await expect(sample).toContainText('still have sample text. Publish anyway?');
+  await sample.getByRole('button', { name: 'Edit first' }).click();
+  await expect(sample).toBeHidden();
+  expect((await tool(page, 'list_publishes', {})).publishes).toEqual([]);
 });

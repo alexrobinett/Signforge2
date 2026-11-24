@@ -1,11 +1,12 @@
 /**
  * The sidebar's "N unpublished changes · Publish" (#361): drafts left unpublished stay in sight on
- * every page. For a member who may publish it asks first, saying what goes, then publishes every
- * change (`publishAllDrafts`), with the toast every publish gives; for one who may not, it opens
- * Overview's list of them.
+ * every page. For a member who may publish it reads every change now and asks, showing what goes
+ * and what it does with no default playlist (`PublishAllDialog`, one in the shell, outside both
+ * sidebars, so a phone's drawer does not hide it); the publish is exactly what it showed. For one
+ * who may not publish it opens Overview's list.
  */
 import { Link } from '@tanstack/react-router';
-import { SendIcon } from 'lucide-react';
+import { LoaderCircleIcon, SendIcon } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -18,7 +19,9 @@ import {
 import { Button } from '~/components/ui/button';
 import { SidebarMenuButton } from '~/components/ui/sidebar';
 import { useCanPublish } from '~/lib/live';
+import { useOpenerFocus } from '~/lib/opener-focus';
 import { cn } from '~/lib/utils';
+import { MAX_PINS, type PublishAll } from '~/state/publishing';
 import { useAppStore } from '~/state/provider';
 
 export interface DraftCounts {
@@ -28,6 +31,7 @@ export interface DraftCounts {
 }
 
 const count = (n: number, one: string, many: string) => (n ? [`${n} ${n === 1 ? one : many}`] : []);
+const changes = (n: number) => `${n} unpublished ${n === 1 ? 'change' : 'changes'}`;
 
 /** "2 spots, 1 playlist and 1 schedule entry". */
 function whatGoes(c: DraftCounts): string {
@@ -41,13 +45,10 @@ function whatGoes(c: DraftCounts): string {
 
 export function UnpublishedChanges({ orgId, counts, folded }: { orgId: string; counts: DraftCounts; folded: boolean }) {
   const canPublish = useCanPublish();
-  const confirming = useAppStore((s) => s.publishing.confirmingAll);
-  const pending = useAppStore((s) => s.publishing.pending);
   const ask = useAppStore((s) => s.askPublishAll);
-  const publishAll = useAppStore((s) => s.publishAllDrafts);
   const total = counts.spots + counts.playlists + counts.schedule;
   if (!total) return null;
-  const label = `${total} unpublished ${total === 1 ? 'change' : 'changes'}`;
+  const label = changes(total);
 
   if (!canPublish)
     return (
@@ -60,33 +61,75 @@ export function UnpublishedChanges({ orgId, counts, folded }: { orgId: string; c
     );
 
   return (
-    <>
-      {/* Its words wrap rather than truncate: the sidebar is narrower than "12 unpublished changes · Publish". */}
-      <SidebarMenuButton folded={folded} tooltip={`${label} · Publish`} className={cn('text-foreground', !folded && 'h-auto min-h-10 py-2')}>
-        <button type="button" onClick={() => ask(true)}>
-          <SendIcon aria-hidden className="text-primary" />
-          <span className="text-left">
-            {label} · <span className="text-primary">Publish</span>
-          </span>
-        </button>
-      </SidebarMenuButton>
-      <AlertDialog open={confirming} onOpenChange={(open) => !pending && ask(open)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Publish {label}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {whatGoes(counts)}, as drafted now, by everyone in this organization. Screens switch as they hear of it.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            {/* Not disabled while it runs: focus would leave it (README, React rules). */}
-            <Button aria-disabled={pending} className={cn(pending && 'opacity-60')} onClick={() => void publishAll(orgId)}>
-              {pending ? 'Publishing…' : 'Publish'}
+    // Its words wrap rather than truncate: the sidebar is narrower than "12 unpublished changes · Publish".
+    <SidebarMenuButton folded={folded} tooltip={`${label} · Publish`} className={cn('text-foreground', !folded && 'h-auto min-h-10 py-2')}>
+      <button type="button" onClick={() => void ask(orgId)}>
+        <SendIcon aria-hidden className="text-primary" />
+        <span className="text-left">
+          {label} · <span className="text-primary">Publish</span>
+        </span>
+      </button>
+    </SidebarMenuButton>
+  );
+}
+
+/** The sidebar's question, in the shell: open while the store holds one (`publishing.all`). */
+export function PublishAllDialog() {
+  const all = useAppStore((s) => s.publishing.all);
+  return all ? <OpenPublishAll all={all} /> : null;
+}
+
+function OpenPublishAll({ all }: { all: PublishAll }) {
+  const pending = useAppStore((s) => s.publishing.pending);
+  const confirm = useAppStore((s) => s.confirmPublishAll);
+  const cancel = useAppStore((s) => s.cancelPublishAll);
+  const returnFocus = useOpenerFocus();
+  const total = all.pins?.length ?? 0;
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && cancel()}>
+      <AlertDialogContent onCloseAutoFocus={returnFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{all.pins ? `Publish ${changes(total)}?` : 'Publish every unpublished change?'}</AlertDialogTitle>
+          <AlertDialogDescription className="max-h-60 space-y-2 overflow-y-auto">
+            {!all.pins ? (
+              <span className="flex items-center gap-2">
+                <LoaderCircleIcon className="size-4 animate-spin" aria-hidden /> Reading what is not published…
+              </span>
+            ) : all.tooMany ? (
+              <span className="block">
+                {total} changes are not published, more than one publish takes ({MAX_PINS}). Publish them from their own pages, or from Overview's list.
+              </span>
+            ) : (
+              <>
+                <span className="block">
+                  {whatGoes(all.counts)}, as drafted now, by everyone in this organization. Screens switch as they hear of it. A change made after this was read
+                  is not published with it.
+                </span>
+                {all.defaultWords && <span className="block">{all.defaultWords}</span>}
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          {all.tooMany ? (
+            <Button asChild>
+              <Link to="/" hash="unpublished" onClick={cancel}>
+                Open Overview
+              </Link>
             </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+          ) : (
+            // Not disabled while it reads or runs: focus would leave it (README, React rules).
+            <Button
+              aria-disabled={!all.pins || pending}
+              className={cn((!all.pins || pending) && 'opacity-60')}
+              onClick={() => all.pins && !pending && void confirm()}
+            >
+              Publish
+            </Button>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
