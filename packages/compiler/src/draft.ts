@@ -100,10 +100,11 @@ export function startValue(d: ScalarFieldDef): unknown {
 }
 
 /**
- * A new spot's data, as the New spot dialog and the agent's fill (#263) start it: a value for each field the template gives no default, so the draft starts valid
- * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
- * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
- * someone else's words. Other defaults are settings, and stand.
+ * A new spot's data as the agent's fill (#263) starts it, and under `sampleData` New spot's: a value
+ * for each field the template gives no default, so the draft starts valid but for a date to pick.
+ * Text and lists start empty whatever their default: a template's defaults are sample copy for its
+ * preview ("Pier 9 opens on Monday"), which only New spot starts with, marked (#360). Other defaults
+ * are settings, and stand.
  */
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(

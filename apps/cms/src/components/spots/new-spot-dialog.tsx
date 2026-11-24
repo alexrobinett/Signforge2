@@ -18,7 +18,7 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { nextName, usableVersions, type TemplateView } from '~/lib/spots';
+import { nextName, sampleMarksOf, usableVersions, type TemplateView } from '~/lib/spots';
 import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery, spotsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -63,7 +63,12 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
     e.preventDefault();
     if (d.kind === 'template' && chosen && d.templateVersionId !== chosen.version.id) edit({ templateVersionId: chosen.version.id });
     const m = chosen?.version.manifest;
-    void create(orgId, name, d.kind === 'template' && m ? { durationMs: m.duration.defaultMs, data: sampleData(m) } : undefined);
+    const data = m && sampleData(m);
+    void create(
+      orgId,
+      name,
+      d.kind === 'template' && m && data ? { durationMs: m.duration.defaultMs, data, samples: sampleMarksOf(m.fields, data) } : undefined,
+    );
   };
 
   /** Enter on a template creates the spot, or goes to its name while it has none. */

@@ -17,7 +17,7 @@ import { StoreProvider } from '../src/state/provider';
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
-import { draftOf, fieldProblems } from '../src/lib/spots';
+import { draftOf, fieldProblems, sampleLabels } from '../src/lib/spots';
 import { type AgentSlice, createAgentSlice } from '../src/state/agent';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
@@ -663,5 +663,60 @@ describe('deleting a spot (#242)', () => {
     expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [] });
     expect(store.getState().spotEditor.newSpot.open).toBe(true);
     expect(went).toEqual(['/spots']);
+  });
+});
+
+describe('the sample marks in the store', () => {
+  const store = () => {
+    const s = createStore<SpotEditorSlice>()((set, get) =>
+      createSpotEditorSlice(set as never, get as never, { router, queryClient: new QueryClient() } as never),
+    );
+    s.setState((x) => ({
+      spotEditor: {
+        ...x.spotEditor,
+        samples: {
+          s1: {
+            texts: { headline: 'Headline', body: 'Body' },
+            lists: {
+              facts: {
+                label: 'Facts',
+                rows: [
+                  ['label', 'value'],
+                  ['label', 'value'],
+                ],
+              },
+            },
+          },
+        },
+      },
+    }));
+    return s;
+  };
+
+  it('lets a text go when it is edited, and a row once every cell in it is', () => {
+    const s = store();
+    s.getState().editedSample('s1', 'headline');
+    s.getState().editedSample('s1', 'facts', { row: 0, key: 'label' });
+    expect(s.getState().spotEditor.samples.s1).toEqual({
+      texts: { body: 'Body' },
+      lists: { facts: { label: 'Facts', rows: [['value'], ['label', 'value']] } },
+    });
+    s.getState().editedSample('s1', 'facts', { row: 0, key: 'value' });
+    expect(sampleLabels(s.getState().spotEditor.samples.s1!)).toEqual(['Body', 'Facts']);
+  });
+
+  it('drops a removed row, the rows after it moving up; and what the agent wrote', () => {
+    const s = store();
+    s.getState().editedSample('s1', 'facts', { row: 1, key: 'label' });
+    s.getState().removedSampleRow('s1', 'facts', 0);
+    expect(s.getState().spotEditor.samples.s1?.lists.facts?.rows).toEqual([['value']]);
+    s.getState().clearSamples('s1', ['body', 'facts']);
+    expect(s.getState().spotEditor.samples.s1).toEqual({ texts: { headline: 'Headline' }, lists: {} });
+  });
+
+  it('records nothing for a spot New spot did not make', () => {
+    const s = store();
+    s.getState().editedSample('s2', 'headline');
+    expect(s.getState().spotEditor.samples.s2).toBeUndefined();
   });
 });

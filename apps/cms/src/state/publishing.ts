@@ -17,7 +17,7 @@ import type { ToolOutput } from '@signforge/tools/outputs';
 import { problemWords } from '~/lib/field-words';
 import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
-import { type SpotView, versionsById } from '~/lib/spots';
+import { sampleLabels, sampleWords, type SpotView, versionsById } from '~/lib/spots';
 import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
 import { overviewKey } from '~/lib/overview';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
@@ -34,6 +34,11 @@ interface Pin {
 interface PublishingState {
   /** A publish, roll back or default change is on its way. */
   pending: boolean;
+  /**
+   * A publish held to ask first (#360): spots in it still have the sample copy New spot gave them
+   * (`spotEditor.samples`). Publish anyway sends it as it was asked for; Edit first opens the first such spot.
+   */
+  sampleCheck: { orgId: string; pins: Pin[]; undo: boolean; refused: string; words: string; spotId: string } | null;
 }
 
 export interface PublishingSlice {
@@ -60,6 +65,12 @@ export interface PublishingSlice {
   publishEntry: (orgId: string, entryId: string, firstDefault?: string) => Promise<void>;
   /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
   endTakeover: (orgId: string, entryId: string) => Promise<void>;
+  /** The held publish, sent with its sample copy. */
+  publishAnyway: () => Promise<void>;
+  /** The held publish let go, and the first spot with sample copy opened to edit. */
+  editFirst: () => Promise<void>;
+  /** The held publish let go (Escape). */
+  dropSampleCheck: () => void;
 }
 
 const TOAST_ID = 'publish';
@@ -217,8 +228,28 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     ];
   }
 
-  /** Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. */
-  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published') {
+  /**
+   * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. A publish that
+   * carries a spot still holding sample copy asks first (`sampleCheck`), unless `asked`.
+   */
+  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published', asked = false) {
+    const spotIds = [...new Set(pins.filter((p) => p.kind === 'spot').map((p) => p.id))];
+    const withSamples = spotIds.flatMap((id) => {
+      const marks = get().spotEditor.samples[id];
+      const labels = marks ? sampleLabels(marks) : [];
+      // Its name as the pages last read it: the editor's spot, or the list a playlist or schedule publish read.
+      const name =
+        queryClient.getQueryData(spotQuery(orgId, id).queryKey)?.name ??
+        queryClient.getQueryData(spotsQuery(orgId).queryKey)?.spots.find((x) => x.id === id)?.name ??
+        'a spot';
+      return labels.length ? [{ id, name, labels }] : [];
+    });
+    const first = withSamples[0];
+    if (!asked && first) {
+      const words = sampleWords(withSamples, spotIds.length > 1);
+      set((s) => ({ publishing: { ...s.publishing, sampleCheck: { orgId, pins, undo, refused, words, spotId: first.id } } }));
+      return;
+    }
     pending(true);
     try {
       // Once each: a chosen default may be the entry's own playlist.
@@ -235,7 +266,23 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   }
 
   return {
-    publishing: { pending: false },
+    publishing: { pending: false, sampleCheck: null },
+
+    async publishAnyway() {
+      const check = get().publishing.sampleCheck;
+      if (!check) return;
+      set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } }));
+      await publish(check.orgId, check.pins, check.undo, check.refused, true);
+    },
+
+    dropSampleCheck: () => set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } })),
+
+    async editFirst() {
+      const check = get().publishing.sampleCheck;
+      if (!check) return;
+      set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } }));
+      await router.navigate({ to: '/spots/$spotId', params: { spotId: check.spotId } });
+    },
 
     async publishSpot(orgId, spotId) {
       await get().saveSpotDraft(spotId);

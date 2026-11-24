@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ScheduleEntryView } from '../src/lib/schedule';
+import type { SampleMarks } from '../src/lib/spots';
 import { callTool, Refusal } from '../src/lib/tools';
 import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
@@ -23,6 +24,14 @@ vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 
 const ORG = 'org_1';
+
+/** The publishing slice, with the sample copy New spot recorded (#360): none unless a test says. */
+function publishingStore(deps: object, samples: Record<string, SampleMarks> = {}) {
+  return createStore<PublishingSlice & { spotEditor: { samples: Record<string, SampleMarks> } }>()((set, get) => ({
+    ...createPublishingSlice(set as never, get as never, deps as never),
+    spotEditor: { samples },
+  }));
+}
 const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
   id,
   playlistId: 'pls_main',
@@ -77,7 +86,7 @@ beforeEach(() => {
 function setup(entries: ScheduleEntryView[]) {
   vi.mocked(getSchedule).mockResolvedValue({ entries } as never);
   const queryClient = new QueryClient();
-  const store = createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, { router: {}, queryClient } as never));
+  const store = publishingStore({ router: {}, queryClient });
   return store.getState();
 }
 
@@ -157,7 +166,7 @@ describe('one entry published alone (#181)', () => {
   it('says so too when the read before the publish fails, and publishes nothing', async () => {
     vi.mocked(getSchedule).mockRejectedValueOnce(new Refusal('network', 'Could not reach SignForge. Check your connection and try again.'));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const store = createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, { router: {}, queryClient } as never));
+    const store = publishingStore({ router: {}, queryClient });
     vi.mocked(callTool).mockClear();
     await store.getState().publishEntry(ORG, 'sch_mine');
     expect(said()).toContainEqual({ title: 'Saved as a draft, not published', description: 'Could not reach SignForge. Check your connection and try again.' });
@@ -262,9 +271,7 @@ describe('a held publish (#253)', () => {
     vi.mocked(getTemplates).mockResolvedValue({ templates: [promo] } as never);
     vi.mocked(callTool).mockResolvedValueOnce(held(problem) as never);
     const navigate = vi.fn();
-    const store = createStore<PublishingSlice>()((set, get) =>
-      createPublishingSlice(set as never, get as never, { router: { navigate }, queryClient: new QueryClient() } as never),
-    );
+    const store = publishingStore({ router: { navigate }, queryClient: new QueryClient() });
     return { s: store.getState(), navigate };
   }
 
@@ -314,16 +321,10 @@ describe('a held publish (#253)', () => {
       vi.mocked(read)
         .mockClear()
         .mockRejectedValue(down as never);
-    const store = createStore<PublishingSlice>()((set, get) =>
-      createPublishingSlice(
-        set as never,
-        get as never,
-        {
-          router: { navigate: vi.fn() },
-          queryClient: new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } }),
-        } as never,
-      ),
-    );
+    const store = publishingStore({
+      router: { navigate: vi.fn() },
+      queryClient: new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } }),
+    });
     return store.getState();
   }
 
@@ -352,5 +353,54 @@ describe('a held publish (#253)', () => {
       'Each screen switches as it hears of it; the rollout says why any wait. Held back: This spot has no image for photo: choose one.',
     );
     expect(refusals()).toBe(before);
+  });
+});
+
+describe('publishing a spot that still has its sample copy (#360)', () => {
+  /** A schedule publish that carries spot Pier 9, whose Headline and Body New spot recorded as sample. */
+  function withSample(marks: SampleMarks) {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [{ id: 'pls_main', version: 2, spotIds: ['spt_pier'], draftChanged: true }] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [{ id: 'spt_pier', name: 'Pier 9', version: 3, draftChanged: true }] } as never);
+    const navigate = vi.fn();
+    const store = publishingStore({ router: { navigate }, queryClient: new QueryClient() }, { spt_pier: marks });
+    vi.mocked(callTool).mockClear();
+    return { store, navigate };
+  }
+  const sample: SampleMarks = { texts: { headline: 'Headline', body: 'Body' }, lists: {} };
+
+  it('asks first, naming the fields, and sends nothing until Publish anyway', async () => {
+    const { store } = withSample(sample);
+    await store.getState().publishSchedule(ORG);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(store.getState().publishing.sampleCheck?.words).toBe('Headline and Body still have sample text.');
+    await store.getState().publishAnyway();
+    expect(vi.mocked(callTool)).toHaveBeenCalledWith('publish', {
+      drafts: [
+        { kind: 'schedule_entry', id: 'sch_breakfast', version: 1 },
+        { kind: 'playlist', id: 'pls_main', version: 2 },
+        { kind: 'spot', id: 'spt_pier', version: 3 },
+      ],
+    });
+    expect(store.getState().publishing.sampleCheck).toBeNull();
+  });
+
+  it('Edit first sends nothing and opens the spot; Escape only lets it go', async () => {
+    const { store, navigate } = withSample(sample);
+    await store.getState().publishSchedule(ORG);
+    await store.getState().editFirst();
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith({ to: '/spots/$spotId', params: { spotId: 'spt_pier' } });
+    await store.getState().publishSchedule(ORG);
+    store.getState().dropSampleCheck();
+    expect(store.getState().publishing.sampleCheck).toBeNull();
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes at once when every sample has been replaced, a list row by every cell', async () => {
+    const { store } = withSample({ texts: {}, lists: { facts: { label: 'Facts', rows: [[]] } } });
+    await store.getState().publishSchedule(ORG);
+    expect(store.getState().publishing.sampleCheck).toBeNull();
+    expect(vi.mocked(callTool)).toHaveBeenCalledWith('publish', expect.anything());
   });
 });

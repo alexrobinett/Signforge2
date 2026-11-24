@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { draftCheck, sampleData } from '@signforge/compiler/draft';
 import { type FieldDef, type LiveSourceDef, type TemplateManifest, validateSpotData } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { nextName } from '../src/lib/spots';
+import { nextName, sampleLabels, sampleMarksOf, sampleWords } from '../src/lib/spots';
 
 const root = new URL('../../../templates/', import.meta.url);
 const templates = readdirSync(root).map((d): TemplateManifest => JSON.parse(readFileSync(new URL(`${d}/template.json`, root), 'utf8')));
@@ -48,5 +48,53 @@ describe('a new spot’s name', () => {
     expect(nextName('Announcement', [])).toBe('Announcement');
     expect(nextName('Announcement', [{ name: 'Announcement' }])).toBe('Announcement 2');
     expect(nextName('Announcement', [{ name: 'Announcement' }, { name: 'Announcement 2' }, { name: 'Announcement 4' }])).toBe('Announcement 3');
+  });
+
+  it('is trimmed, and cut so its number still fits in 100 characters', () => {
+    expect(nextName('Announcement ', [])).toBe('Announcement');
+    expect(nextName(' Menu  ', [{ name: 'Menu' }])).toBe('Menu 2');
+    const long = 'x'.repeat(99);
+    expect(nextName(long, [])).toBe(long);
+    const second = nextName(long, [{ name: long }]);
+    expect(second).toBe(`${'x'.repeat(98)} 2`);
+    expect(second).toHaveLength(100);
+    expect(nextName('y'.repeat(120), [])).toHaveLength(100);
+  });
+});
+
+describe('what New spot records as sample, and what Publish says of it', () => {
+  it('records each text with words and each list row, every cell, and leaves empty values out', () => {
+    const fields: Record<string, FieldDef> = {
+      headline: { type: 'text', label: 'Headline', default: 'Doors open' },
+      greeting: { type: 'text', label: 'Greeting', default: '' },
+      facts: {
+        type: 'list',
+        label: 'Facts',
+        item: { label: { type: 'text', label: 'Label' }, value: { type: 'text', label: 'Value' } },
+        default: [{ label: 'A', value: 'B' }],
+      },
+      items: { type: 'list', label: 'Items', item: { name: { type: 'text', label: 'Name' } } },
+    };
+    expect(sampleMarksOf(fields, sampleData({ fields }))).toEqual({
+      texts: { headline: 'Headline' },
+      lists: { facts: { label: 'Facts', rows: [['label', 'value']] } },
+    });
+  });
+
+  it('names the fields, and each spot when the publish carries more than one', () => {
+    expect(sampleWords([{ name: 'Pier', labels: ['Headline', 'Body'] }], false)).toBe('Headline and Body still have sample text.');
+    expect(
+      sampleWords(
+        [
+          { name: 'Pier', labels: ['Headline'] },
+          { name: 'Alert', labels: ['Headline', 'Issued by', 'Instructions'] },
+        ],
+        true,
+      ),
+    ).toBe('In Pier, Headline still has sample text. In Alert, Headline, Issued by and Instructions still have sample text.');
+    expect(sampleLabels({ texts: { a: 'Headline' }, lists: { f: { label: 'Facts', rows: [[]] }, g: { label: 'Items', rows: [['name']] } } })).toEqual([
+      'Headline',
+      'Items',
+    ]);
   });
 });

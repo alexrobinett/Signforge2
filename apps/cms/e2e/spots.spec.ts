@@ -333,12 +333,28 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
     return false;
   };
   expect(await qr()).toBe(false);
-  // Its label starts empty, as all its text does (#253).
+  // No address, no code: it appears once the address is typed.
   await page.getByLabel('QR code label').fill('Scan for the floor plan');
   await page.getByLabel('QR code link').fill('https://example.com/pier-9');
   await expect.poll(qr, { timeout: 10_000 }).toBe(true);
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
+
+  // Its other sample copy is still there: Publish asks first, naming it, and Edit first sends nothing (#360).
+  const publishes = (await tool(page, 'list_publishes', {})).publishes.length;
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish sample text?' });
+  await expect(ask).toContainText('Eyebrow, Body, Posted by and QR code label still have sample text. Publish anyway?');
+  await axe(page);
+  await shots(page, '35-publish-sample-text');
+  await ask.getByRole('button', { name: 'Edit first' }).click();
+  await expect(ask).toBeHidden();
+  expect((await tool(page, 'list_publishes', {})).publishes).toHaveLength(publishes);
+  // Publish anyway sends it, as it was asked for.
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await ask.getByRole('button', { name: 'Publish anyway' }).click();
+  await expect(ask).toBeHidden();
+  await expect(page.locator('[data-sonner-toast]').filter({ hasText: /Published|No screen|Not published/ })).toBeVisible();
 });
 
 test('an Announcement with its photo off draws once the stage is in view, and the player is not asked to draw it out of view (#342)', async () => {

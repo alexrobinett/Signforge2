@@ -8,7 +8,7 @@ import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
 import { sampleData, startData } from '@signforge/compiler/draft';
 import { typedFields } from '../src/lib/live-data';
-import { fieldProblems, type SpotDraft } from '../src/lib/spots';
+import { fieldProblems, sampleMarksOf, type SampleMarks, type SpotDraft } from '../src/lib/spots';
 import { StoreProvider } from '../src/state/provider';
 
 // The image field's picker asks the page's router for the member's role, which a static render has none of.
@@ -18,13 +18,16 @@ vi.mock('~/lib/live', async (real) => ({ ...(await real<typeof import('../src/li
  * The form's markup, as the spot editor draws it for spot `s1`: inside a store with only what the
  * form reads, `checks` saying which fields were touched and whether Publish was pressed.
  */
-function formHtml(props: Omit<ComponentProps<typeof FieldForm>, 'spotId' | 'onChange'>, checks?: { touched: string[]; all: boolean }) {
+function formHtml(props: Omit<ComponentProps<typeof FieldForm>, 'spotId' | 'onChange'>, checks?: { touched: string[]; all: boolean }, marks?: SampleMarks) {
+  const samples = marks ? { s1: marks } : {};
   const store = createStore(() => ({
-    spotEditor: { picking: null, checks: checks ? { s1: checks } : {} },
+    spotEditor: { picking: null, checks: checks ? { s1: checks } : {}, samples },
     assets: { pickerQuery: '' },
     pickImageFor: () => {},
     searchPicker: () => {},
     touchField: () => {},
+    editedSample: () => {},
+    removedSampleRow: () => {},
   }));
   const form = createElement(FieldForm, { ...props, spotId: 's1', onChange: () => {} });
   // StoreProvider's props name its children; built apart, as createElement's arguments cannot satisfy them.
@@ -238,22 +241,41 @@ describe('a new spot in the editor (#359)', () => {
 describe('a new spot’s sample in the editor (#360)', () => {
   const fields: Record<string, FieldDef> = {
     headline: { type: 'text', label: 'Headline', default: 'Pier 9 opens on Monday' },
-    items: { type: 'list', label: 'Items', item: { name: { type: 'text', label: 'Name' } }, default: [{ name: 'Espresso' }] },
+    items: {
+      type: 'list',
+      label: 'Items',
+      item: { name: { type: 'text', label: 'Name' }, price: { type: 'text', label: 'Price' } },
+      default: [{ name: 'Espresso', price: '3' }],
+    },
   };
-  const html = (data: Record<string, unknown>) => {
+  const data = sampleData({ fields });
+  const html = (marks?: SampleMarks) => {
     const draft: SpotDraft = { name: 'Pier', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
-    return formHtml({ fields, shown: fields, draft, assets: [] });
+    return formHtml({ fields, shown: fields, draft, assets: [] }, undefined, marks);
   };
+  const input = (markup: string, id: string) => new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(markup)?.[0] ?? '';
 
-  it('is marked as sample, and the mark describes the field, until it is replaced', () => {
-    const sample = html(sampleData({ fields }));
-    expect(sample).toContain('Sample text. Replace it before you publish.');
-    expect(sample).toContain('Sample rows. Replace them before you publish.');
-    expect(/<input[^>]*id="field-headline"[^>]*>/.exec(sample)?.[0]).toContain('aria-describedby="field-headline-sample"');
+  it('marks what New spot recorded as sample, and ties every cell of a sample row to the note', () => {
+    const marked = html(sampleMarksOf(fields, data));
+    expect(marked).toContain('Sample text. Replace it before you publish.');
+    expect(marked).toContain('Sample rows. Replace them before you publish.');
+    expect(marked).toContain('Row 1 · sample');
+    expect(input(marked, 'field-headline')).toContain('aria-describedby="field-headline-sample"');
+    expect(input(marked, 'field-items-0-name')).toContain('aria-describedby="field-items-sample"');
+    expect(input(marked, 'field-items-0-price')).toContain('aria-describedby="field-items-sample"');
+  });
 
-    const edited = html({ headline: 'Pier 9 opens on Tuesday', items: [{ name: 'Tea' }] });
-    expect(edited).not.toContain('Sample text');
-    expect(edited).not.toContain('Sample rows');
-    expect(html({ headline: 'Opens Tuesday', items: [] })).not.toContain('Sample rows');
+  it('marks nothing on a spot without a record, though its values equal the sample: they may be the person’s choice', () => {
+    const plain = html();
+    expect(plain).not.toContain('Sample');
+    expect(input(plain, 'field-headline')).not.toContain('aria-describedby');
+  });
+
+  it('keeps a row marked until every cell in it is edited', () => {
+    const half = html({ texts: {}, lists: { items: { label: 'Items', rows: [['price']] } } });
+    expect(half).toContain('Row 1 · sample');
+    const done = html({ texts: {}, lists: { items: { label: 'Items', rows: [[]] } } });
+    expect(done).not.toContain('Sample rows');
+    expect(input(done, 'field-items-0-name')).not.toContain('aria-describedby');
   });
 });

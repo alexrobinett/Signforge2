@@ -203,13 +203,64 @@ const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
 export const spotWhat = (s: Pick<SpotView, 'kind' | 'templateVersionId'>, versions: Map<string, TemplateVersionView>) =>
   s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
-/** A new spot's name from its template's (#360): the name itself while no spot has it, else the first free "Name 2", "Name 3", … */
-export function nextName(base: string, spots: readonly { name: string }[]): string {
+/**
+ * The sample copy a spot was made with in this session (#360), until each piece is edited: a text's
+ * label by field; a list's label and, per row, the cells not edited yet (a row is sample while any
+ * are). Recorded by New spot, never worked out from values: a value equal to the sample may be the
+ * person's choice. A spot opened later, or made elsewhere, has none.
+ */
+export interface SampleMarks {
+  texts: Record<string, string>;
+  lists: Record<string, { label: string; rows: string[][] }>;
+}
+
+/** A spot's name, as `create_spot` takes it: at most this many characters. */
+const NAME_MAX = 100;
+
+/**
+ * A new spot's name from its template's (#360): the name itself while no spot has it, else the
+ * first free "Name 2", "Name 3", …; trimmed, and cut so the number still fits in a name's length.
+ */
+export function nextName(template: string, spots: readonly { name: string }[]): string {
+  const base = template.trim();
   const taken = new Set(spots.map((s) => s.name));
-  if (!taken.has(base)) return base;
+  const named = (suffix: string) => `${base.slice(0, NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+  if (!taken.has(named(''))) return named('');
   let n = 2;
-  while (taken.has(`${base} ${n}`)) n += 1;
-  return `${base} ${n}`;
+  while (taken.has(named(` ${n}`))) n += 1;
+  return named(` ${n}`);
+}
+
+/**
+ * What New spot records as sample copy (#360) for a spot it makes with `data` (`sampleData`): each
+ * text holding words, and each list's rows, every cell in each. A live field starts empty, so none is.
+ */
+export function sampleMarksOf(fields: Record<string, FieldDef>, data: Record<string, unknown>): SampleMarks {
+  const marks: SampleMarks = { texts: {}, lists: {} };
+  for (const [name, def] of Object.entries(fields)) {
+    const v = data[name];
+    if (def.type === 'text' && typeof v === 'string' && v !== '') marks.texts[name] = def.label;
+    if (def.type === 'list' && Array.isArray(v) && v.length) marks.lists[name] = { label: def.label, rows: v.map(() => Object.keys(def.item)) };
+  }
+  return marks;
+}
+
+/** The fields of `marks` still holding sample copy, by their labels: texts, then lists with a sample row. */
+export const sampleLabels = (marks: SampleMarks) => [
+  ...Object.values(marks.texts),
+  ...Object.values(marks.lists)
+    .filter((l) => l.rows.some((r) => r.length > 0))
+    .map((l) => l.label),
+];
+
+const and = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
+
+/**
+ * What Publish asks before sample copy reaches screens (#360): "Headline and Body still have sample
+ * text." for one spot, each spot named when the publish carries more than one.
+ */
+export function sampleWords(spots: readonly { name: string; labels: string[] }[], named: boolean): string {
+  return spots.map(({ name, labels }) => `${named ? `In ${name}, ` : ''}${and(labels)} still ${labels.length === 1 ? 'has' : 'have'} sample text.`).join(' ');
 }
 
 /** Whether screens have it, in words. */
