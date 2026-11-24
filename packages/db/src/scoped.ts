@@ -36,7 +36,7 @@ import * as s from './schema';
 import { contentJson } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
-import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, unreferencedFeedImage } from './retention';
+import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
@@ -630,22 +630,6 @@ export function scoped(d1: D1Database, orgId: string) {
     ).map((part) => db.insert(pi).values(part));
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
-  const fi = s.feedImages;
-  const fid = s.feedImageDeletes;
-  const storyCopyDiffers = (index: SQL, file: SQLiteColumn | string | null, thumb: SQLiteColumn | string | null) => sql`(
-    json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.file') IS NOT ${file}
-    OR json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.thumb') IS NOT ${thumb}
-  )`;
-  const holdFeedImages = async (sourceId: string, chosen: SQL, now: number, until: number): Promise<string[]> => {
-    const rows = await db.all<{ url: string }>(sql`
-      INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
-      SELECT ${orgId}, url, ${sourceId}, ${until}, ${now}, ${now} FROM (${chosen})
-      WHERE true
-      ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
-      WHERE ${fi.nextCheckAt} <= ${now}
-      RETURNING url`);
-    return rows.map((r) => r.url);
-  };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
   /** The org's member rows with their user's name and address, narrowed by `where`. */
@@ -1604,7 +1588,8 @@ export function scoped(d1: D1Database, orgId: string) {
         },
         update: async (current: typeof s.dataSources.$inferSelect, patch: RowPatch<typeof s.dataSources>, ifVersion?: number) => {
           await checkConnection(patch.connectionId);
-          return dataSources.stage.update(current, patch, ifVersion);
+          const clean = strip(patch);
+          return dataSources.stage.update(current, { ...sourceEdited(current, clean), ...clean }, ifVersion);
         },
         /**
          * Delete each of these sources, with its snapshot, made before `madeBefore`, that no spot
@@ -1720,83 +1705,52 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
-       * Returns false if an RSS source edit made the result stale. Throws `NotInOrgError`
-       * if the source does not belong to this org without an extra read.
+       * A news source's poll also passes `photos` (./feed-photos.ts): its writes and optional photo
+       * holds then stand only if the source is still the row the poll read, and a reread is left due
+       * if not. Returns whether the poll's writes stood and the photo URLs held for queueing. Throws
+       * `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
-        poll: {
-          source: RowPatch<typeof s.dataSources> & { nextPollAt: number };
-          snapshot?: Snapshot;
-          checkedAt?: number;
-          photoRead?: { rowVersion: number; generation: number; now: number };
-        },
-      ) => {
+        poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number; photos?: PollPhotos },
+      ): Promise<{ stood: boolean; held: string[] }> => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
-        // The version advances even when two edits restore the original Photos setting.
-        const sameVersion = poll.photoRead && eq(ds.rowVersion, poll.photoRead.rowVersion);
-        const current = sameVersion && sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${sameVersion})`;
+        const photos = poll.photos && pollSave(db, orgId, dataSourceId, poll.photos);
         const check = db
           .select({
             ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
           })
-          .from(s.organization)
-          .where(eq(s.organization.id, orgId));
+          .from(sql`(SELECT 1)`);
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
-        const writes = staged(
-          undefined,
-          check,
-          db
-            .update(ds)
-            .set(updateSet(ds, strip(poll.source)))
-            .where(and(mine, sameVersion)),
-        ).writes;
+        const sourceWrite = db
+          .update(ds)
+          .set(updateSet(ds, strip({ ...poll.source, ...photos?.patch })))
+          .where(and(mine, photos?.sameVersion));
+        type BatchQuery = Parameters<Db['batch']>[0][number];
+        const queries: BatchQuery[] = [check, sourceWrite];
         if (poll.snapshot) {
           const { version, fetchedAt, checkedAt, dataJson } = poll.snapshot;
           const fields = { version, fetchedAt, checkedAt, dataJson };
-          writes.push(
-            ...staged(
-              undefined,
-              db
-                .insert(snap)
-                .select(sql`SELECT ${orgId}, ${dataSourceId}, ${version}, ${fetchedAt}, ${checkedAt}, ${dataJson} WHERE ${current ?? sql`1`}`)
-                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
-            ).writes,
+          queries.push(
+            db
+              .insert(snap)
+              .select(sql`SELECT ${orgId}, ${dataSourceId}, ${version}, ${fetchedAt}, ${checkedAt}, ${dataJson} WHERE ${photos?.current ?? sql`1`}`)
+              .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
           );
         } else if (poll.checkedAt !== undefined) {
-          writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, current))).writes);
+          queries.push(db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, photos?.current)));
         }
-        if (poll.photoRead) {
-          // A first-seen URL can change before a delivery knows this source uses it.
-          const changedCopy = poll.source.photoUrlsJson
-            ? sql`EXISTS (
-                SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
-                JOIN ${fi} ON ${fi.orgId} = ${orgId} AND ${fi.url} = story.value
-                JOIN ${snap} ON ${mineSnap}
-                WHERE ${fi.fileSha256} IS NOT NULL AND ${fi.thumbSha256} IS NOT NULL
-                AND ${storyCopyDiffers(sql`story.key`, fi.fileSha256, fi.thumbSha256)}
-              )`
-            : undefined;
-          writes.push(
-            ...staged(
-              undefined,
-              db
-                .update(ds)
-                .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${poll.photoRead.now})` })
-                .where(and(mine, or(ne(ds.rowVersion, poll.photoRead.rowVersion), ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
-            ).writes,
-          );
-        }
+        const holdAt = photos?.hold ? queries.push(photos.hold) - 1 : undefined;
+        if (photos) queries.push(photos.reread);
         try {
-          const changes = await commit(db, writes);
-          const updated = changes[1];
-          // A version mismatch skips the poll writes and leaves a reread due via the final update.
-          if (!updated && !(poll.photoRead && changes.at(-1))) throw new NotInOrgError('data source', dataSourceId);
-          return Boolean(updated);
+          const [first, ...rest] = queries;
+          const results = await db.batch([first!, ...rest]);
+          const stood = ((results[1] as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+          const held = holdAt !== undefined ? (results[holdAt] as { url: string }[]).map((r) => r.url) : [];
+          return { stood, held };
         } catch (err) {
-          if (err instanceof NotInOrgError) throw err;
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
           if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });
           throw err;
@@ -1804,247 +1758,8 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
-    /** The photos the org's news sources name, by URL (`feed_images` in ./schema.ts). Written by the poller, not by tools. */
-    feedImages: {
-      /** Look up any number of photo URLs in this org in a single D1 query. */
-      get: async (urls: readonly string[]) =>
-        urls.length
-          ? db
-              .select()
-              .from(fi)
-              .where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify([...urls])}))`))
-              .all()
-          : [],
-      /**
-       * Held until `until`: queued to be fetched, so a poll before then does not queue them again. A
-       * URL new to the org gets its row, with no image yet, made `now` and counted against
-       * `sourceId`'s daily budget (`madeSince`). Returns only URLs newly held by this call.
-       */
-      hold: (urls: readonly string[], { until, now, sourceId }: { until: number; now: number; sourceId: string }) =>
-        urls.length ? holdFeedImages(sourceId, sql`SELECT value AS url FROM json_each(${JSON.stringify(urls)})`, now, until) : Promise.resolve([]),
-      /**
-       * Atomically hold `again` (due rechecks) plus as many of `fresh` as fit within `maxSource`
-       * and `maxOrg` rows made since `since`, in one D1 statement. Returns the exact URLs held.
-       */
-      holdWithinBudget: async (
-        sourceId: string,
-        {
-          again,
-          fresh,
-          until,
-          now,
-          since,
-          maxSource,
-          maxOrg,
-        }: { again: readonly string[]; fresh: readonly string[]; until: number; now: number; since: number; maxSource: number; maxOrg: number },
-      ): Promise<string[]> => {
-        if (!again.length && !fresh.length) return [];
-        const alreadyKnown = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = jobs.value)`;
-        const chosen = sql`
-          WITH counts AS (
-            SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${sourceId}), 0) AS src_n
-            FROM ${fi}
-            WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${since}
-          )
-          SELECT jobs.value AS url FROM json_each(${JSON.stringify([...again, ...fresh])}) AS jobs WHERE ${alreadyKnown}
-          UNION ALL
-          SELECT value FROM (
-            SELECT jobs.value FROM json_each(${JSON.stringify(fresh)}) AS jobs
-            WHERE NOT ${alreadyKnown}
-            ORDER BY jobs.key
-            LIMIT (SELECT MAX(0, MIN(${maxSource} - src_n, ${maxOrg} - org_n)) FROM counts)
-          )`;
-        return holdFeedImages(sourceId, chosen, now, until);
-      },
-      /** How many rows were made at or after `since`: the org's, and of those, the ones `sourceId` made. */
-      madeSince: async (since: number, sourceId: string) => {
-        const row = await db
-          .select({ org: sql<number>`count(*)`, source: sql<number>`coalesce(sum(${fi.sourceId} = ${sourceId}), 0)` })
-          .from(fi)
-          .where(and(eq(fi.orgId, orgId), gte(fi.createdAt, since)))
-          .get();
-        return { org: row?.org ?? 0, source: row?.source ?? 0 };
-      },
-      /** Another row in this org that already stored copies for these exact fetched bytes. */
-      bySourceSha: (sourceSha256: string) =>
-        db
-          .select({ fileSha256: fi.fileSha256, thumbSha256: fi.thumbSha256 })
-          .from(fi)
-          .where(and(eq(fi.orgId, orgId), eq(fi.sourceSha256, sourceSha256), isNotNull(fi.fileSha256), isNotNull(fi.thumbSha256)))
-          .limit(1)
-          .get(),
-      /**
-       * Cancel any unleased pending deletes for `shas` before writing or reusing those blobs in
-       * `o/<org>/f/`. Returns `false` if a cleanup run currently holds an active `deleting_until`
-       * lease on any of `shas` (so the consumer retries rather than racing R2 put against delete).
-       */
-      claimForWrite: async (shas: readonly string[], now: number): Promise<boolean> => {
-        const unique = [...new Set(shas)];
-        if (!unique.length) return true;
-        const inList = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`;
-        const [, active] = await db.batch([
-          db.delete(fid).where(and(eq(fid.orgId, orgId), inList, lte(fid.deletingUntil, now))),
-          db
-            .select({ sha256: fid.sha256 })
-            .from(fid)
-            .where(and(eq(fid.orgId, orgId), inList)),
-        ]);
-        return active.length === 0;
-      },
-      /**
-       * Expire these rows, keeping any whose copy the org's latest snapshots still name (a source
-       * whose polls fail keeps playing its last good one). Deleted rows' hashes are durably queued
-       * in `feed_image_deletes` in the same batch; R2 deletion runs after the grace window via
-       * `claimDeletes` and `finishDeletes`. Returns how many rows were deleted.
-       */
-      forget: async (urls: readonly string[], now: number): Promise<number> => {
-        if (!urls.length) return 0;
-        // The candidate scan may predate a new hold, replacement or snapshot.
-        const expired = and(
-          eq(fi.orgId, orgId),
-          lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS),
-          sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify(urls)}))`,
-          unreferencedFeedImage,
-        );
-        const [, deleted] = await db.batch([
-          db
-            .insert(fid)
-            .select(sql`SELECT DISTINCT ${orgId}, copy.value, ${now}, 0
-              FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS copy
-              WHERE ${expired} AND copy.value IS NOT NULL`)
-            .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` } }),
-          db.delete(fi).where(expired).returning({ url: fi.url }),
-        ]);
-        return deleted.length;
-      },
-      /**
-       * Check pending delete candidates against snapshots and `feed_images` in batched SQL:
-       * - Hashes still referenced by `feed_images` are removed from `feed_image_deletes` (that row owns them).
-       * - Hashes still named by a `data_snapshots` row (and no `feed_images` row) stay in
-       *   `feed_image_deletes` with `queued_at = now` so they wait for the snapshot to move on without
-       *   being lost or starving other deletes.
-       * - Remaining unreferenced hashes are atomically leased (`deleting_until = now + leaseMs`) for
-       *   R2 deletion. Returns the exact hashes claimed.
-       */
-      claimDeletes: async (shas: readonly string[], { now, leaseMs }: { now: number; leaseMs: number }): Promise<string[]> => {
-        const unique = [...new Set(shas)];
-        if (!unique.length) return [];
-        const due = and(
-          eq(fid.orgId, orgId),
-          sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`,
-          lte(fid.queuedAt, now - FEED_IMAGE_DELETE_GRACE_MS),
-          lte(fid.deletingUntil, now),
-        );
-        const feedRef = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId}
-          AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
-        const snapshotRef = sql`EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${orgId} AND instr(${snap.dataJson}, ${fid.sha256}) > 0)`;
-        const claim = db
-          .update(fid)
-          .set({ deletingUntil: now + leaseMs })
-          .where(and(due, sql`NOT ${feedRef}`, sql`NOT ${snapshotRef}`))
-          .returning({ sha256: fid.sha256 });
-        const [claimed] = await db.batch([
-          claim,
-          db.delete(fid).where(and(due, feedRef)),
-          db.update(fid).set({ queuedAt: now, deletingUntil: 0 }).where(and(due, snapshotRef)),
-        ]);
-        return claimed.map((r) => r.sha256);
-      },
-      /** Remove claimed delete records once R2 deletion succeeded. */
-      finishDeletes: async (shas: readonly string[]): Promise<void> => {
-        if (!shas.length) return;
-        await db
-          .delete(fid)
-          .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify([...shas])}))`))
-          .run();
-      },
-      /** Pending delete records for this org, ordered by hash. */
-      pendingDeletes: () => db.select().from(fid).where(eq(fid.orgId, orgId)).orderBy(asc(fid.sha256)).all(),
-      /**
-       * What fetching `url` found: on success its hashes and validators (atomically queuing any
-       * replaced hashes into `feed_image_deletes` and invalidating RSS sources that need the copy).
-       * A fetch that did not store a new copy updates metadata only over the row it checked.
-       */
-      save: async (
-        url: string,
-        found: RowPatch<typeof s.feedImages> & { nextCheckAt: number },
-        {
-          now = Date.now(),
-          sourceId,
-          checked,
-        }: { now?: number; sourceId?: string; checked?: Pick<typeof fi.$inferSelect, 'sourceSha256' | 'etag' | 'lastModified' | 'nextCheckAt'> } = {},
-      ) => {
-        const mine = and(
-          eq(fi.orgId, orgId),
-          eq(fi.url, url),
-          checked && sql`${fi.sourceSha256} IS ${checked.sourceSha256}`,
-          checked && sql`${fi.etag} IS ${checked.etag} AND ${fi.lastModified} IS ${checked.lastModified}`,
-          checked && eq(fi.nextCheckAt, checked.nextCheckAt),
-        );
-        const updateRow = db
-          .update(fi)
-          .set(updateSet(fi, strip(found)))
-          .where(mine);
-        const replacesHashes = found.fileSha256 !== undefined || found.thumbSha256 !== undefined;
-        if (!sourceId && !replacesHashes) {
-          await updateRow.run();
-          return;
-        }
-        const file = found.fileSha256 === undefined ? fi.fileSha256 : found.fileSha256;
-        const thumb = found.thumbSha256 === undefined ? fi.thumbSha256 : found.thumbSha256;
-        const ds = s.dataSources;
-        const changed = sql`${fi.fileSha256} IS NOT ${file} OR ${fi.thumbSha256} IS NOT ${thumb}`;
-        const namesPhoto = sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`;
-        // A flat URL list can't identify the story. One full read upgrades it to snapshot order.
-        const missingCopy = or(
-          and(sql`json_type(${ds.photoUrlsJson}) = 'array'`, namesPhoto),
-          sql`EXISTS (
-            SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
-            LEFT JOIN ${snap} ON ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
-            WHERE story.value = ${url} AND ${storyCopyDiffers(sql`story.key`, file, thumb)}
-          )`,
-        );
-        const readAfresh = sourceId
-          ? db
-              .update(ds)
-              .set(updateSet(ds, { etag: null, lastModified: null, photoGeneration: sql`${ds.photoGeneration} + 1` }))
-              .where(
-                and(
-                  eq(ds.orgId, orgId),
-                  eq(ds.format, 'rss'),
-                  eq(ds.photos, true),
-                  or(eq(ds.id, sourceId), namesPhoto),
-                  sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${mine} AND ${file} IS NOT NULL AND ${thumb} IS NOT NULL
-                  AND ((${changed}) OR ((${ds.etag} IS NOT NULL OR ${ds.lastModified} IS NOT NULL) AND ${missingCopy})))`,
-                ),
-              )
-          : undefined;
-        const queueDisplaced = replacesHashes
-          ? db
-              .insert(fid)
-              .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
-                FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS old
-                WHERE ${mine} AND old.value IS NOT NULL AND old.value IS NOT ${file} AND old.value IS NOT ${thumb}`)
-              .onConflictDoUpdate({
-                target: [fid.orgId, fid.sha256],
-                set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` },
-              })
-          : undefined;
-        const clearActive = replacesHashes
-          ? db.delete(fid).where(
-              and(
-                eq(fid.orgId, orgId),
-                lte(fid.deletingUntil, now),
-                sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = ${url}
-                AND (${fid.sha256} = ${fi.fileSha256} OR ${fid.sha256} = ${fi.thumbSha256}))`,
-              ),
-            )
-          : undefined;
-        // Use the hashes in D1 immediately before the update: another delivery may have stored a copy during this fetch.
-        const statements = [readAfresh, queueDisplaced, updateRow, clearActive].filter((q) => q !== undefined);
-        await commit(db, staged(undefined, ...statements).writes);
-      },
-    },
+    /** The photos the org's news sources name (./feed-photos.ts). Written by the poller and the photos queue, not by tools. */
+    feedPhotos: feedPhotos(db, orgId),
 
     connections: {
       ...connectionRows,

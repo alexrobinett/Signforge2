@@ -4,11 +4,11 @@
  * credential), `/mcp` for agents (OAuth access token, src/mcp). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
  * Two queue consumers: one tells the screens a publish switched (src/publish.ts), the other stores
- * the photos of news feeds' stories that the poller queues (src/data/images.ts).
+ * the photos of news feeds' stories that the poller queues (src/data/feed-photos.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
  * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's 01:00 UTC run
- * forgets unneeded feed photos (src/data/images.ts).
+ * sweeps unneeded feed photos (src/data/feed-photos.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -22,7 +22,7 @@ import { mcp } from './mcp';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys, pruneUnconsentedClients } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
-import { type FeedImageJob, forgetFeedImages, storeFeedImages } from './data/images';
+import { type FeedImageJob, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -52,7 +52,7 @@ const FEED_IMAGE_CLEANUP_MS = 60 * 60_000;
 /** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
-  '* * * * *': (env, now) => (now % DAY_MS === FEED_IMAGE_CLEANUP_MS ? forgetFeedImages(env, now) : pollDataSources(env, { now })),
+  '* * * * *': (env, now) => (now % DAY_MS === FEED_IMAGE_CLEANUP_MS ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now) : pollDataSources(env, { now })),
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
@@ -91,7 +91,7 @@ const isNotices = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is 
 export default {
   fetch: app.fetch,
   queue: async (batch, env) => {
-    if (isFeedImages(batch)) return storeFeedImages(batch, env);
+    if (isFeedImages(batch)) return storeFeedImages(batch, env.DB, photoDeps(env, Date.now()));
     if (isNotices(batch)) return deliverNotices(batch, env);
     throw new Error(`No consumer for queue "${batch.queue}"`);
   },

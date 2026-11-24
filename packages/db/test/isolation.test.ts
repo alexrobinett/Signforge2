@@ -1,6 +1,17 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
+import {
+  DeleteInFlightError,
+  FEED_IMAGE_DELETE_GRACE_MS,
+  FEED_IMAGE_TTL_MS,
+  findMembership,
+  NEW_PER_ORG_PER_DAY,
+  NEW_PER_SOURCE_PER_DAY,
+  NotInOrgError,
+  organizationExists,
+  platform,
+  scoped,
+} from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -489,87 +500,103 @@ describe('the audit log', () => {
   });
 });
 
-describe('feed images', () => {
+describe('feed photos', () => {
+  const sha = (c: string) => c.repeat(64);
+  const copy = (c: string) => ({ file: sha(c), thumb: sha(c) });
+  const validators = { etag: null, lastModified: null };
+  const hold = async (org: Seeded['a'], sourceId: string, urls: { again: readonly string[]; fresh: readonly string[] }, now: number) => {
+    const row = (await org.scope.dataSources.get(sourceId))!;
+    const { held } = await org.scope.dataSources.savePoll(sourceId, {
+      source: { nextPollAt: now + 300_000, failures: 0, lastError: null },
+      photos: { read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] }, hold: urls },
+    });
+    return held;
+  };
+  const ensureSource = async (org: Seeded['a'], id: string) => {
+    if (!(await org.scope.dataSources.get(id))) {
+      await org.scope.dataSources.insert({ id, name: id, format: 'rss', urlEncrypted: 'enc', refreshS: 300 });
+    }
+  };
+
   it("keep each org's copy of a URL both name apart", async () => {
     const url = 'https://news.example/photo.jpg';
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
-    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null });
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
+    await ensureSource(s.b, 'news');
+    await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), etag: '"a"', nextCheckAt: 20 });
     expect(await b.get([url])).toEqual([]);
     // Org B's own fetch of it, and its failures, touch only its own row.
-    await b.save(url, { fileSha256: 'c'.repeat(64), nextCheckAt: 30 });
-    await b.hold([url], { until: 40, now: 1, sourceId: 'news' });
-    await b.save(url, { lastError: 'timeout', nextCheckAt: 50 });
-    expect(await a.get([url])).toEqual([
-      expect.objectContaining({ orgId: 'org-a', fileSha256: 'a'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null }),
-    ]);
-    expect(await b.get([url])).toEqual([expect.objectContaining({ orgId: 'org-b', fileSha256: null, nextCheckAt: 50, lastError: 'timeout' })]);
+    expect(await hold(s.b, 'news', { again: [], fresh: [url] }, 1)).toEqual([url]);
+    const [held] = await b.get([url]);
+    await b.delivered(url, { result: 'failed', now: 2, checked: held!, error: 'timeout', passing: true });
+    expect(await a.get([url])).toEqual([expect.objectContaining({ orgId: 'org-a', fileSha256: sha('a'), etag: '"a"', nextCheckAt: 20, lastError: null })]);
+    expect(await b.get([url])).toEqual([expect.objectContaining({ orgId: 'org-b', fileSha256: null, lastError: 'timeout', failures: 1 })]);
   });
 
-  it('holds a URL it already has without losing its image', async () => {
+  it('holds a URL it already has without losing its copy', async () => {
     const url = 'https://news.example/kept.jpg';
-    const a = s.a.scope.feedImages;
-    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
-    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: 20 });
-    await a.hold([url, 'https://news.example/new.jpg'], { until: 30, now: 20, sourceId: 'other' });
-    expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256, r.nextCheckAt])).toEqual(
+    const a = s.a.scope.feedPhotos;
+    await ensureSource(s.a, 'other');
+    await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), nextCheckAt: 20 });
+    expect(await hold(s.a, 'other', { again: [url], fresh: ['https://news.example/new.jpg'] }, 20)).toEqual([url, 'https://news.example/new.jpg']);
+    expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256])).toEqual(
       expect.arrayContaining([
-        [url, 'a'.repeat(64), 30],
-        ['https://news.example/new.jpg', null, 30],
+        [url, sha('a')],
+        ['https://news.example/new.jpg', null],
       ]),
     );
   });
 
   it('holds a fresh URL only once, including when two polls both planned it as fresh', async () => {
-    const photos = s.a.scope.feedImages;
+    const photos = s.a.scope.feedPhotos;
     const url = 'https://news.example/hold-once.jpg';
-    expect(await photos.hold([url], { until: 30, now: 20, sourceId: 'news' })).toEqual([url]);
-    expect(await photos.hold([url], { until: 31, now: 21, sourceId: 'other' })).toEqual([]);
-    const budget = { again: [], fresh: [url], until: 32, now: 22, since: 0, maxSource: 100, maxOrg: 100 };
-    expect(await photos.holdWithinBudget('other', budget)).toEqual([]);
-    expect(await photos.holdWithinBudget('other', { ...budget, now: 30 })).toEqual([url]);
-    expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20, nextCheckAt: 32 })]);
+    await ensureSource(s.a, 'news');
+    await ensureSource(s.a, 'other');
+    expect(await hold(s.a, 'news', { again: [], fresh: [url] }, 20)).toEqual([url]);
+    expect(await hold(s.a, 'other', { again: [], fresh: [url] }, 21)).toEqual([]);
+    expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20 })]);
   });
 
-  it("counts the rows a day's polls made, the org's and one source's, in its own org only", async () => {
-    const t = 1_000_000;
-    const a = s.a.scope.feedImages;
-    await a.hold(['https://count.example/1.jpg', 'https://count.example/2.jpg'], { until: t + 10, now: t, sourceId: 'one' });
-    await a.hold(['https://count.example/3.jpg'], { until: t + 10, now: t + 5, sourceId: 'two' });
-    await a.hold(['https://count.example/old.jpg'], { until: t + 10, now: t - 1, sourceId: 'one' });
-    // Held again: still made when first named, by the source that first named it.
-    await a.hold(['https://count.example/1.jpg'], { until: t + 20, now: t + 6, sourceId: 'two' });
-    expect(await a.madeSince(t, 'one')).toEqual({ org: 3, source: 2 });
-    expect(await a.madeSince(t, 'two')).toEqual({ org: 3, source: 1 });
-    expect(await s.b.scope.feedImages.madeSince(t, 'one')).toEqual({ org: 0, source: 0 });
+  it("counts the day's new photos against the source and the org that named them, in its own org only", async () => {
+    const t = 1_000_000_000;
+    const urls = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://budget.example/${tag}-${i}.jpg`);
+    for (const id of ['one', 'two', 'three']) await ensureSource(s.a, id);
+    await ensureSource(s.b, 'one');
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one', NEW_PER_SOURCE_PER_DAY + 2) }, t)).toEqual(urls('one', NEW_PER_SOURCE_PER_DAY));
+    expect(await hold(s.a, 'two', { again: [], fresh: urls('two', NEW_PER_SOURCE_PER_DAY) }, t)).toHaveLength(NEW_PER_ORG_PER_DAY - NEW_PER_SOURCE_PER_DAY);
+    expect(await hold(s.a, 'three', { again: [], fresh: urls('three', 1) }, t)).toEqual([]);
+    // Org B's day is its own.
+    expect(await hold(s.b, 'one', { again: [], fresh: urls('one', 1) }, t)).toEqual(urls('one', 1));
   });
 
-  it('finds existing renditions by content hash within the same org only', async () => {
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    const sha = (c: string) => c.repeat(64);
-    await a.hold(['https://dedupe.example/one.jpg', 'https://dedupe.example/pending.jpg'], { until: 10, now: 1, sourceId: 'news' });
-    await a.save('https://dedupe.example/one.jpg', { sourceSha256: sha('a'), fileSha256: sha('f'), thumbSha256: sha('t'), nextCheckAt: 20 });
-    // A row with sourceSha256 but no stored renditions is ignored.
-    await a.save('https://dedupe.example/pending.jpg', { sourceSha256: sha('p'), nextCheckAt: 20 });
-    expect(await a.bySourceSha(sha('a'))).toEqual({ fileSha256: sha('f'), thumbSha256: sha('t') });
-    expect(await a.bySourceSha(sha('p'))).toBeUndefined();
-    expect(await b.bySourceSha(sha('a'))).toBeUndefined();
+  it('finds the copies of the same bytes within the same org only', async () => {
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
+    await a.put({
+      url: 'https://dedupe.example/one.jpg',
+      sourceId: 'news',
+      sourceSha256: sha('a'),
+      fileSha256: sha('f'),
+      thumbSha256: sha('t'),
+      nextCheckAt: 20,
+    });
+    // A row with sourceSha256 but no stored copies is ignored.
+    await a.put({ url: 'https://dedupe.example/pending.jpg', sourceId: 'news', sourceSha256: sha('p'), nextCheckAt: 20 });
+    expect(await a.copyOf(sha('a'))).toEqual({ file: sha('f'), thumb: sha('t') });
+    expect(await a.copyOf(sha('p'))).toBeUndefined();
+    expect(await b.copyOf(sha('a'))).toBeUndefined();
   });
 
-  it('forgets rows, queues orphaned hashes durably, guards concurrent writes with leases, and stays isolated per org', async () => {
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    const sha = (c: string) => c.repeat(64);
+  it('expires rows, queues their hashes, guards deliveries with leases, and stays isolated per org', async () => {
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
     const urls = ['https://gc.example/alone.jpg', 'https://gc.example/shared.jpg', 'https://gc.example/twin.jpg', 'https://gc.example/shown.jpg'];
-    await a.hold(urls, { until: 1, now: 1, sourceId: 'news' });
-    await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
+    await a.put({ url: urls[0]!, sourceId: 'news', fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
     // Its file is a distinct hash not held by other rows, and its thumbnail is shared with twin.
-    await a.save(urls[1]!, { fileSha256: sha('d'), thumbSha256: sha('5'), nextCheckAt: 1 });
-    await a.save(urls[2]!, { fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
+    await a.put({ url: urls[1]!, sourceId: 'news', fileSha256: sha('d'), thumbSha256: sha('5'), nextCheckAt: 1 });
+    await a.put({ url: urls[2]!, sourceId: 'news', fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
     // The source's latest snapshot still names this one.
-    await a.save(urls[3]!, { fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
+    await a.put({ url: urls[3]!, sourceId: 'news', fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
     await s.a.scope.dataSources.putSnapshot(s.a.dataSource, {
       version: 'gc',
       fetchedAt: 1,
@@ -577,34 +604,48 @@ describe('feed images', () => {
       dataJson: JSON.stringify({ items: [{ image: { file: sha('7') } }] }),
     });
     // Org B holds the same hash: not org A's to keep or delete.
-    await b.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
-    await b.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
+    await b.put({ url: urls[0]!, sourceId: 'news', fileSha256: sha('1'), nextCheckAt: 1 });
 
-    // Forgetting alone, shared, and shown deletes alone + shared (shown stays), queueing their hashes durably.
-    const forgetAt = 100 + FEED_IMAGE_TTL_MS;
-    expect(await a.forget(urls.slice(0, 2).concat(urls[3]!), forgetAt)).toBe(2);
+    // Expiring alone, shared, and shown removes alone + shared (shown stays), queueing their hashes.
+    const expireAt = 100 + FEED_IMAGE_TTL_MS;
+    expect(await a.expire(urls.slice(0, 2).concat(urls[3]!), expireAt)).toBe(2);
     expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
     expect(await b.get([urls[0]!])).toHaveLength(1);
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
-    expect(await b.pendingDeletes()).toEqual([]);
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
+    expect(await b.deletes()).toEqual([]);
 
-    // Claiming deletes drops sha('5') (still referenced by twin), leases sha('1'), sha('2'), sha('d').
-    const claimAt = forgetAt + FEED_IMAGE_DELETE_GRACE_MS;
-    const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: claimAt, leaseMs: 1_000 })).sort();
-    expect(claimed).toEqual([sha('1'), sha('2'), sha('d')].sort());
-    // While leased, claimForWrite returns false so a consumer retries rather than racing R2 delete.
-    expect(await a.claimForWrite([sha('1')], claimAt + 300)).toBe(false);
-    // Org B's claimForWrite is unaffected by org A's lease.
-    expect(await b.claimForWrite([sha('1')], claimAt + 300)).toBe(true);
-    // Once finished, the durable records are gone.
-    await a.finishDeletes(claimed);
-    expect(await a.pendingDeletes()).toEqual([]);
+    // Deleting drops sha('5') from the queue (twin names it) and leases sha('1'), sha('2'), sha('d').
+    const deleteAt = expireAt + FEED_IMAGE_DELETE_GRACE_MS;
+    const removed: string[] = [];
+    const leased = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const deleting = a.deleteBlobs([sha('1'), sha('2'), sha('5'), sha('d')], deleteAt, async (shas) => {
+      removed.push(...shas);
+      leased.resolve();
+      await finish.promise;
+    });
+    await leased.promise;
+    expect(removed.sort()).toEqual([sha('1'), sha('2'), sha('d')].sort());
+    // While leased, a delivery naming one of them is refused, so it is tried again rather than racing the delete.
+    const reuse = { result: 'reused', now: deleteAt + 300, sourceId: 'news', sourceSha256: sha('s'), copy: copy('1'), validators } as const;
+    await expect(a.delivered('https://gc.example/again.jpg', reuse)).rejects.toThrow(DeleteInFlightError);
+    // Org B's delivery is unaffected by org A's lease.
+    await b.delivered('https://gc.example/again.jpg', reuse);
+    finish.resolve();
+    expect(await deleting).toBe(3);
+    expect(await a.deletes()).toEqual([]);
 
-    // Replacing hashes at the same URL durably queues the old ones and cancels active ones.
-    await a.save(urls[2]!, { fileSha256: sha('9'), thumbSha256: sha('9'), nextCheckAt: 300 }, { now: 300 });
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
-    // Unleased pending delete is cancelled by claimForWrite when the hash is reused.
-    expect(await a.claimForWrite([sha('6')], 300)).toBe(true);
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5')]);
+    // Replacing the copies at a URL queues the old hashes, and naming a queued hash again takes it off the queue.
+    await a.delivered(urls[2]!, { result: 'reused', now: 300, sourceId: 'news', sourceSha256: sha('s'), copy: copy('9'), validators });
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
+    await a.delivered(urls[3]!, {
+      result: 'reused',
+      now: 300,
+      sourceId: 'news',
+      sourceSha256: sha('s'),
+      copy: { file: sha('6'), thumb: sha('8') },
+      validators,
+    });
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('7')]);
   });
 });

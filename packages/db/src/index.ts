@@ -24,10 +24,25 @@ export {
   expireAuditRows,
   expiredFeedImages,
   expireIdempotencyKeys,
-  FEED_IMAGE_DELETE_GRACE_MS,
-  FEED_IMAGE_TTL_MS,
   pendingFeedImageDeletes,
 } from './retention';
+export {
+  DELETE_LEASE_MS,
+  DeleteInFlightError,
+  type Delivery,
+  FAIL_WAIT_MS,
+  FEED_IMAGE_DELETE_GRACE_MS,
+  FEED_IMAGE_TTL_MS,
+  HOLD_MS,
+  NEW_PER_ORG_PER_DAY,
+  NEW_PER_SOURCE_PER_DAY,
+  PHOTOS_PER_SOURCE,
+  type PhotoRead,
+  photoRead,
+  type PollPhotos,
+  RECHECK_MS,
+  RETRY_MS,
+} from './feed-photos';
 export { alertChannelsOf, claimDueAlertDeliveries, settleAlertDeliveries, type AttemptResult } from './deliveries';
 
 // Row shapes, as types only.

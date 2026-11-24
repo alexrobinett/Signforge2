@@ -1,14 +1,15 @@
 /**
  * Retention (F13, #41): cross-org deletes by age, run daily from the API's Cron Trigger. They
  * read no row and name no org: idempotency keys and alert deliveries (the delivery log, #88) go
- * after 7 days, audit rows after each org's `org_settings.audit_retention_days`.
+ * after 7 days, audit rows after each org's `org_settings.audit_retention_days`. The feed photos
+ * sweep's finders are here too, with the rules of ./feed-photos.ts.
  */
-import { and, lt, lte, type SQL, sql } from 'drizzle-orm';
+import { lt, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { deleteDue, expiredRow } from './feed-photos';
 import * as s from './schema';
 
 const fi = s.feedImages;
-const snap = s.dataSnapshots;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -83,43 +84,22 @@ async function deleteInBatches(db: ReturnType<typeof drizzle>, batch: SQL): Prom
   return deleted;
 }
 
-/** A feed photo no poll has named for this long after it was due is forgotten: past any screen's stale snapshot (`SNAPSHOT_STALE_MS`, a day). */
-export const FEED_IMAGE_TTL_MS = 7 * DAY_MS;
-
-/** Grace period between queueing a feed photo blob for deletion and deleting it from R2: longer than any in-flight poll or consumer invocation. */
-export const FEED_IMAGE_DELETE_GRACE_MS = 15 * 60_000;
-
-/** Match a feed image only when no snapshot in its org names either copy. */
-export const unreferencedFeedImage = sql`NOT EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${fi.orgId}
-  AND (instr(${snap.dataJson}, ${fi.fileSha256}) > 0 OR instr(${snap.dataJson}, ${fi.thumbSha256}) > 0))`;
-
 /**
- * Each org's unreferenced feed photos due a check more than FEED_IMAGE_TTL_MS before `now`,
- * oldest first, at most `limit`. Protected rows are excluded before the limit so they cannot
- * starve expiry in other orgs. `feedImages.forget` rechecks eligibility and queues the hashes.
+ * Each org's feed photos that may expire at `now` (`expiredRow`, ./feed-photos.ts), oldest first,
+ * at most `limit`. Rows a snapshot names are excluded before the limit so they cannot starve
+ * expiry in other orgs. `feedPhotos.expire` checks each again as it expires it. A named exception
+ * to org isolation: the daily sweep reads every org's rows, by the module's rule.
  */
 export async function expiredFeedImages(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; url: string }[]> {
-  return drizzle(d1)
-    .select({ orgId: fi.orgId, url: fi.url })
-    .from(fi)
-    .where(and(lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS), unreferencedFeedImage))
-    .orderBy(fi.nextCheckAt)
-    .limit(limit)
-    .all();
+  return drizzle(d1).select({ orgId: fi.orgId, url: fi.url }).from(fi).where(expiredRow(now)).orderBy(fi.nextCheckAt).limit(limit).all();
 }
 
 /**
- * Every org's feed photo blob hashes in `feed_image_deletes` whose grace window has elapsed
- * (`queued_at <= now - FEED_IMAGE_DELETE_GRACE_MS`) and whose delete lease is free
- * (`deleting_until <= now`), oldest first, at most `limit`.
+ * Every org's queued feed photo deletes past their grace window and with no lease on them
+ * (`deleteDue`, ./feed-photos.ts), oldest first, at most `limit`. `feedPhotos.deleteBlobs`
+ * checks each again as it leases it. A named exception to org isolation, as above.
  */
 export async function pendingFeedImageDeletes(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; sha256: string }[]> {
   const fid = s.feedImageDeletes;
-  return drizzle(d1)
-    .select({ orgId: fid.orgId, sha256: fid.sha256 })
-    .from(fid)
-    .where(and(lte(fid.queuedAt, now - FEED_IMAGE_DELETE_GRACE_MS), lte(fid.deletingUntil, now)))
-    .orderBy(fid.queuedAt)
-    .limit(limit)
-    .all();
+  return drizzle(d1).select({ orgId: fid.orgId, sha256: fid.sha256 }).from(fid).where(deleteDue(now)).orderBy(fid.queuedAt).limit(limit).all();
 }

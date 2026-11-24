@@ -91,8 +91,16 @@ describe('storing a feed photo', () => {
     await a.scope.dataSources.update(a.dataSource, { format: 'rss', etag: '"a"', lastModified: 'Mon', nextPollAt: NOW + 5, failures: 2 });
     await b.scope.dataSources.update(b.dataSource, { format: 'rss', etag: '"b"', lastModified: 'Tue', photoUrlsJson });
     const before = (await a.scope.dataSources.get(a.dataSource))!;
-    await a.scope.feedImages.hold([url], { until: NOW + 1, now: NOW, sourceId: a.dataSource });
-    await a.scope.feedImages.save(url, { fileSha256: hash, thumbSha256: hash, nextCheckAt: NOW + 20 }, { sourceId: a.dataSource, now: NOW });
+    await a.scope.feedPhotos.put({ url, sourceId: a.dataSource, nextCheckAt: NOW });
+    const validators = { etag: null, lastModified: null };
+    await a.scope.feedPhotos.delivered(url, {
+      result: 'reused',
+      now: NOW,
+      sourceId: a.dataSource,
+      sourceSha256: hash,
+      copy: { file: hash, thumb: hash },
+      validators,
+    });
     expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({
       etag: null,
       lastModified: null,

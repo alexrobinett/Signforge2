@@ -54,7 +54,7 @@ async function source(format: 'json' | 'ical' | 'rss', url: string, extra: { ref
 }
 
 /** Run the poller at `at`, on this org's due sources only. A news source's photos go nowhere: test/feed-images.test.ts follows them. */
-const poll = (guards: FetchGuards, at = NOW) => pollDataSources({ ...env, FEED_IMAGES: { sendBatch: async () => {} } } as unknown as Env, { now: at, guards });
+const poll = (guards: FetchGuards, at = NOW) => pollDataSources(env, { now: at, guards, photoQueue: { enqueue: async () => {} } });
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'poller-org');
