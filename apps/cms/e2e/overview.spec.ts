@@ -6,8 +6,7 @@
 // where only owners publish sees the default as an owner's step; a failing poll says so. Axe at
 // desktop and phone width, light and dark.
 import { expect, test, type Page } from '@playwright/test';
-import { CMS_URL } from './servers';
-import { axe, createOrg, d1, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
 
 /** This spec's own client address, so its sign-ins and claims have their own rate limits. */
 const ADDRESS = '192.0.2.211';
@@ -155,18 +154,7 @@ test('an editor where only owners publish sees the default as an owner’s step,
   await signInAs(owner, `e2e-overview-owner-${stamp}@example.com`, ADDRESS);
   await createOrg(owner, 'Kestrel Mews', ADDRESS);
   await tool(owner, 'update_org_settings', { editorsPublish: false });
-  const editorEmail = `e2e-overview-editor-${stamp}@example.com`;
-  const invited = await owner.request.post('/api/auth/organization/invite-member', {
-    headers: { origin: CMS_URL },
-    data: { email: editorEmail, role: 'editor' },
-  });
-  expect(invited.status(), await invited.text()).toBe(200);
-  const { id: invitationId } = (await invited.json()) as { id: string };
-  await owner.close();
-
-  await signInAs(page, editorEmail, EDITOR_ADDRESS);
-  const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
-  expect(accepted.status(), await accepted.text()).toBe(200);
+  await joinAsEditor(owner, page, `e2e-overview-editor-${stamp}@example.com`, EDITOR_ADDRESS);
   await page.goto('/');
   await hydrated(page);
   const setup = page.getByRole('region', { name: 'Get your first spot on a screen' });

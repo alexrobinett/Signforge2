@@ -45,7 +45,7 @@ export function setupSteps(d: {
   defaultPlaylist: Pick<PlaylistView, 'published' | 'spotIds'> | null;
   screens: readonly Screen[];
 }): Record<SetupStep, boolean> {
-  const def = d.defaultPlaylist !== null && d.defaultPlaylist.published && d.defaultPlaylist.spotIds.length > 0;
+  const def = d.defaultPlaylist?.published === true && d.defaultPlaylist.spotIds.length > 0;
   return {
     spot: d.templateSpot,
     default: def,

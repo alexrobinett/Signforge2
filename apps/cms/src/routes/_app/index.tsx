@@ -79,7 +79,11 @@ function Section({ id, title, children }: { id: string; title: ReactNode; childr
 const STEPS: { key: SetupStep; title: string; body: string }[] = [
   { key: 'spot', title: 'Make a spot from a template', body: 'Pick a template and put in your words and pictures.' },
   { key: 'default', title: 'Put it in a playlist and make that the default', body: 'Every screen plays the default playlist when nothing is scheduled.' },
-  { key: 'screen', title: 'Pair a screen, or use the test screen', body: 'Pair a display by the code it shows, or open the test screen in this browser, then publish so it plays.' },
+  {
+    key: 'screen',
+    title: 'Pair a screen, or use the test screen',
+    body: 'Pair a display by the code it shows, or open the test screen in this browser, then publish so it plays.',
+  },
 ];
 
 /**

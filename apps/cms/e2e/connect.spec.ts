@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { expect, request as playwrightRequest, test } from '@playwright/test';
 import { base64url, callbackOf, challengeOf, RESOURCE, stubClient } from './agent-stub';
-import { axe, createOrg, disabledOnServer, fromAddress, hydrated, shots, signIn, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, fromAddress, hydrated, joinAsEditor, shots, signIn, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -123,17 +123,7 @@ test('an editor in an org where only owners publish is not offered publishing', 
   await signInAs(owner, ownerEmail, ADDRESS.owner);
   await createOrg(owner, 'Owners Publish', ADDRESS.owner);
   await tool(owner, 'update_org_settings', { editorsPublish: false });
-  const invited = await owner.request.post('/api/auth/organization/invite-member', {
-    headers: { origin: CMS_URL },
-    data: { email: editorEmail, role: 'editor' },
-  });
-  expect(invited.status(), await invited.text()).toBe(200);
-  const { id: invitationId } = (await invited.json()) as { id: string };
-  await owner.close();
-
-  await signInAs(page, editorEmail, ADDRESS.editor);
-  const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
-  expect(accepted.status(), await accepted.text()).toBe(200);
+  await joinAsEditor(owner, page, editorEmail, ADDRESS.editor);
   const stub = await stubClient('Editor agent', ADDRESS.stub);
   await page.goto(stub.authorizeUrl);
   await expect(page.getByRole('heading', { name: '“Editor agent” wants to work in SignForge' })).toBeVisible();
