@@ -35,7 +35,7 @@ const seen = async (input: RequestInfo | URL, init: RequestInit | undefined, int
 };
 
 /** Anthropic answering each call with `answer`, recording it. */
-function anthropic(answer: (body: any) => Response = (b) => anthropicStream('m', b.model, [{ type: 'text', text: '{"headline":"Bake sale"}' }], 'end_turn')) {
+function anthropic(answer: (body: any) => Response | Promise<Response> = (b) => anthropicStream('m', b.model, [{ type: 'text', text: '{"headline":"Bake sale"}' }], 'end_turn')) {
   const asked: Seen[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     await seen(input, init, asked);
@@ -216,13 +216,10 @@ describe('failures, each one word', () => {
   });
 
   it('refuses an answer that closes before its last event: Anthropic with no message_stop, an endpoint with no finish_reason and no [DONE]', async () => {
-    const cut = anthropic(() => {
+    const cut = anthropic(async () => {
       const whole = anthropicStream('m', 'claude-sonnet-5-5', [{ type: 'tool_use', id: 't1', name: 'list_screens', input: {} }], 'tool_use');
-      return new Response(
-        // Everything but the last event: its stop reason came, its message_stop did not.
-        whole.text().then((t) => t.replace(/event: message_stop[\s\S]*$/, '')),
-        { headers: { 'content-type': 'text/event-stream' } },
-      );
+      // Everything but the last event: its stop reason came, its message_stop did not.
+      return new Response((await whole.text()).replace(/event: message_stop[\s\S]*$/, ''), { headers: { 'content-type': 'text/event-stream' } });
     });
     expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), cut.reach, step, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
     const open = endpoint(
