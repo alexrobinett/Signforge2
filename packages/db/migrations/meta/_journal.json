@@ -274,6 +274,13 @@
       "when": 1795534060153,
       "tag": "0038_spot_sample_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1795541381068,
+      "tag": "0039_draft_published_version",
+      "breakpoints": true
     }
   ]
 }

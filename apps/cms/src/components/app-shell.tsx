@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon, SparklesIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -8,21 +9,61 @@ import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
 import { ScheduleDialogs } from '~/components/schedule/schedule-dialogs';
 import { SampleCheck } from '~/components/spots/sample-check';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
 import { SidebarMenuButton } from '~/components/ui/sidebar';
 import { Toaster } from '~/components/ui/sonner';
 import { TooltipProvider } from '~/components/ui/tooltip';
+import { PublishAllDialog, UnpublishedChanges } from '~/components/unpublished-changes';
+import { NotCurrent } from '~/components/screens/not-current';
 import { UserMenu } from '~/components/user-menu';
 import { orgHues } from '~/lib/paths';
-import { SECTIONS } from '~/lib/sections';
+import { SECTIONS, type Section } from '~/lib/sections';
+import { navCountsQuery } from '~/queries/nav-counts';
+import { screenStatusQuery } from '~/queries/screens';
+import { useNow } from '~/lib/live';
+import { needingYou } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 import { isFolded } from '~/state/ui';
 
-/** The sidebar; `folded` (wide screens only) is an icon rail, each item named and with a tooltip. */
+interface NavCount {
+  n: number;
+  /** What the number counts, after it: "needs you", "unpublished". */
+  word: string;
+  /** Needs you is the one red. */
+  urgent: boolean;
+}
+
+/**
+ * The sidebar; `folded` (wide screens only) is an icon rail, each item named and with a tooltip.
+ * Screens, Spots, Playlists and Schedule carry counts (#361): screens that need someone, in the one
+ * red, and drafts not published; folded, a dot and the tooltip say so.
+ */
 function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<string, number>; folded?: boolean }) {
+  const orgId = shell.organization?.id;
+  // Not read while the tab switches org: its calls then name the org it is going to, which these keys are not (review of #395).
+  const live = useAppStore((s) => orgId !== undefined && s.orgs.switchingTo === null);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  // Overview and Screens poll what the screens are doing already: the sidebar counts from that poll rather than read the fleet again.
+  const onFleet = path === '/' || path === '/screens';
+  const read = useQuery({ ...navCountsQuery(orgId ?? '', !onFleet), enabled: live });
+  const status = useQuery({ ...screenStatusQuery(orgId ?? ''), enabled: live && onFleet });
+  const counts = read.data;
+  const needsYou = onFleet ? (status.data ? needingYou(status.data.screens) : null) : (counts?.needsYou ?? null);
+  // As Overview says it: a read that failed after the last good one leaves the counts as last read.
+  const heardAt = read.dataUpdatedAt;
+  const now = useNow(heardAt);
+  const badges: Partial<Record<Section['to'], NavCount>> = counts
+    ? {
+        ...(needsYou !== null && { '/screens': { n: needsYou, word: needsYou === 1 ? 'needs you' : 'need you', urgent: true } }),
+        '/spots': { n: counts.spots, word: 'unpublished', urgent: false },
+        '/playlists': { n: counts.playlists, word: 'unpublished', urgent: false },
+        '/schedule': { n: counts.schedule, word: 'unpublished', urgent: false },
+      }
+    : {};
   const openCommandMenu = useAppStore((s) => s.openCommandMenu);
   const openAgent = useAppStore((s) => s.openAgentDrawer);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -74,19 +115,34 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
       )}
       <nav aria-label="Main" className="flex-1">
         <ul className="space-y-1">
-          {SECTIONS.map(({ to, label, icon: Icon }) => (
-            <li key={to}>
-              <SidebarMenuButton folded={folded} tooltip={label}>
-                <Link to={to} activeOptions={{ exact: to === '/' }}>
-                  <Icon aria-hidden />
-                  <span>{label}</span>
-                </Link>
-              </SidebarMenuButton>
-            </li>
-          ))}
+          {SECTIONS.map(({ to, label, icon: Icon }) => {
+            const b = badges[to];
+            const shown = b && b.n > 0 ? b : undefined;
+            return (
+              <li key={to}>
+                <SidebarMenuButton folded={folded} tooltip={shown ? `${label}, ${shown.n} ${shown.word}` : label} className="relative">
+                  <Link to={to} activeOptions={{ exact: to === '/' }}>
+                    <Icon aria-hidden />
+                    <span className="flex-1">{label}</span>
+                    {shown && (
+                      <Badge variant={shown.urgent ? 'needs-you' : 'outline'} className="tabular-nums">
+                        {shown.n}
+                        <span className="sr-only"> {shown.word}</span>
+                      </Badge>
+                    )}
+                    {shown && folded && (
+                      <i aria-hidden className={cn('absolute top-1.5 right-1.5 size-2 rounded-full', shown.urgent ? 'bg-status-needs-you' : 'bg-primary')} />
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </li>
+            );
+          })}
         </ul>
       </nav>
       <div className="flex flex-col gap-2">
+        {!folded && <NotCurrent failing={read.errorUpdatedAt > read.dataUpdatedAt} heardAt={heardAt} now={now} />}
+        {orgId && counts && <UnpublishedChanges orgId={orgId} counts={counts} folded={folded} />}
         <SidebarMenuButton folded={folded} tooltip="Unfold the sidebar" className="hidden lg:flex">
           <button type="button" onClick={toggleSidebar} aria-expanded={!folded}>
             <FoldIcon aria-hidden />
@@ -186,6 +242,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         <CreateOrgDialog />
         <ScheduleDialogs />
         <SampleCheck />
+        <PublishAllDialog />
         <p role="status" className="sr-only">
           {status}
         </p>

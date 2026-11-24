@@ -89,6 +89,10 @@ export const reachable = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason
  */
 export const isRetired = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason'> }) => s.state.kind === 'needs_you' && s.state.reason === 'revoked';
 
+/** How many screens need someone: retired ones play nothing and are left out, as the Screens page leaves them out. */
+export const needingYou = (screens: readonly { state: Pick<ScreenView['state'], 'kind' | 'reason'> }[]) =>
+  screens.filter((s) => s.state.kind === 'needs_you' && !isRetired(s)).length;
+
 /** Most urgent first. Asleep is on purpose, so it is never a problem and ranks below online. */
 export const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
 

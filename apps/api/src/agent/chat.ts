@@ -129,6 +129,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   list_playlists: { title: 'Playlists', did: 'Listed {n} playlists' },
   get_playlist: { title: 'A playlist', did: 'Read a playlist' },
   list_schedule_entries: { title: 'Schedule', did: 'Read {n} schedule entries' },
+  count_drafts: { title: 'Unpublished drafts', did: 'Counted unpublished drafts' },
   list_audit_log: { title: 'Audit log', did: 'Read {n} audit entries' },
   list_members: { title: 'Members', did: 'Listed {n} members' },
   // The drafting tools (#268): a proposal, never a write.

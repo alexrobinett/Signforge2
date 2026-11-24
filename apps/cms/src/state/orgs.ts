@@ -48,7 +48,7 @@ const emptyDraft: CreateOrgDraft = { name: '', pending: false, error: null };
  * (`reloadAs`), so only one runs at a time, from any menu or form: a second's reload would be
  * refused as a tab on the old org.
  */
-const busy = (orgs: OrgsState) => orgs.switchingTo !== null || Object.values(orgs.drafts).some((d) => d.pending);
+export const changingOrg = (orgs: OrgsState) => orgs.switchingTo !== null || Object.values(orgs.drafts).some((d) => d.pending);
 
 export const initialOrgs: OrgsState = {
   switchingTo: null,
@@ -66,9 +66,10 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      // The drawer's conversation, and a turn on its way, are this org's: none of it goes to the next.
+      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes to the next.
       get().forgetAgentDrawer();
-      if (busy(get().orgs)) return;
+      get().cancelPublishAll();
+      if (changingOrg(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {
@@ -96,12 +97,13 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     editOrgName: (form, name) => draft(form, { name }),
 
     async createOrg(form) {
-      if (busy(get().orgs)) return;
+      if (changingOrg(get().orgs)) return;
       const name = get().orgs.drafts[form].name.trim();
       if (!name) return draft(form, { error: 'Enter a name.' });
       draft(form, { pending: true, error: null });
       // Creating makes the new org active: the drawer's conversation stays with the org it was in, as on a switch.
       get().forgetAgentDrawer();
+      get().cancelPublishAll();
       try {
         await createOrganization(router, name);
         get().forgetOrgSettings();

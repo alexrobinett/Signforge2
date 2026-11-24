@@ -1,5 +1,6 @@
 // ⌘K's found screens and groups in the store (#180): what is typed, the actions shown, and an
 // action run (a tool call, through a stubbed `fetch`, or a navigation). Nothing waits on a clock.
+import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { CommandEntry, TargetAction } from '../src/lib/command-menu';
@@ -8,6 +9,7 @@ import { toast } from 'sonner';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
 
 let calls: { name: string; input: unknown }[] = [];
 let reply: { status: number; body: unknown } = { status: 200, body: {} };
@@ -184,12 +186,13 @@ describe('a tool refused for sample text (#360)', () => {
       state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }] },
     };
     const askSampleText = vi.fn(async (_orgId: string, _spots: unknown) => yes);
+    const queryClient = new QueryClient();
     const store = createStore<CommandMenuSlice & { ui: object; askSampleText: typeof askSampleText }>()((set, get) => ({
       ui: {},
       askSampleText,
-      ...createCommandMenuSlice(set as never, get as never, { router } as never),
+      ...createCommandMenuSlice(set as never, get as never, { router, queryClient } as never),
     }));
-    return { store, askSampleText };
+    return { store, askSampleText, queryClient };
   }
   const spots = [{ id: 'spt_pier', name: 'Pier 9', version: 3, fields: ['headline'] }];
   const later = [{ id: 'spt_dock', name: 'Dock', version: 1, fields: ['title'] }];
@@ -240,6 +243,15 @@ describe('a tool refused for sample text (#360)', () => {
         { spotId: 'spt_dock', version: 1, fields: ['title'] },
       ],
     });
+  });
+
+  it('a publish from ⌘K counts the sidebar again: Overview and its counts are read again (#361)', async () => {
+    const { store, queryClient } = sampleStore(true);
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    store.getState().openCommandMenu();
+    await store.getState().chooseCommand(entry('publish'));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'overview'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'screenStatus'] });
   });
 
   it('Edit first runs nothing more, and says nothing went wrong', async () => {

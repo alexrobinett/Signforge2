@@ -65,6 +65,7 @@ describe('the registry', () => {
       'assign_brand_kit',
       'cancel_invitation',
       'claim_screen',
+      'count_drafts',
       'create_asset_upload',
       'create_brand_kit',
       'create_data_source',
@@ -243,6 +244,7 @@ describe('roles and scopes', () => {
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes, editorsPublish: true }).map((t) => t.name);
     expect(names('viewer').sort()).toEqual([
+      'count_drafts',
       'find_places',
       'get_agent_grant',
       'get_agent_grant_usage',

@@ -143,13 +143,17 @@ describe('one entry published alone (#181)', () => {
     } as never);
     const s = setup([mine, theirs]);
     await s.publishEntry(ORG, 'sch_mine');
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
-      drafts: [
-        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
-        { kind: 'playlist', id: 'pls_holiday', version: 3 },
-        { kind: 'spot', id: 'spt_new', version: 2 },
-      ],
-    });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
+      'publish',
+      {
+        drafts: [
+          { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+          { kind: 'playlist', id: 'pls_holiday', version: 3 },
+          { kind: 'spot', id: 'spt_new', version: 2 },
+        ],
+      },
+      ORG,
+    );
     expect(undoOf()).toMatchObject({ label: 'Undo' });
   });
 
@@ -158,7 +162,7 @@ describe('one entry published alone (#181)', () => {
     vi.mocked(getSpots).mockResolvedValue({ spots: [list('spt_new', { published: false })] } as never);
     const s = setup([mine]);
     await s.publishEntry(ORG, 'sch_mine');
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] }, ORG);
   });
 
   /** The toasts sonner holds, as title and description. */
@@ -202,12 +206,12 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
       playlists: [list('pls_holiday', {}), list('pls_all_day', { isDefault: true, published: false, version: 2, spotIds: ['spt_open'] })],
     } as never);
     vi.mocked(getSpots).mockResolvedValue({ spots: [list('spt_open', { published: false, version: 3 })] } as never);
-    const alone = [['publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] }]];
+    const alone = [['publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] }, ORG]];
     // Ticked: "Publish All day too".
     vi.mocked(callTool).mockClear();
     await setup([mine]).publishEntry(ORG, 'sch_mine', { publishDefault: true });
     expect(names()).toEqual(['publish']);
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault);
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault, ORG);
     // Confirmed for its own playlist, the box left unticked: the entry alone, whatever choice the dialog carried.
     for (const withDefault of [{}, { choice: 'pls_holiday' }, { choice: 'pls_holiday', publishDefault: false }]) {
       vi.mocked(callTool).mockClear();
@@ -343,7 +347,7 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
     await setup([mine]).publishEntry(ORG, 'sch_mine', { choice: 'pls_all_day' });
     expect(names()).toEqual(['set_default_playlist', 'publish']);
     expect(vi.mocked(callTool)).toHaveBeenNthCalledWith(1, 'set_default_playlist', { playlistId: 'pls_all_day', ifDefault: null });
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault);
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault, ORG);
   });
 
   it('pins its own playlist once when the default chosen is it', async () => {
@@ -351,13 +355,17 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
     vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
     vi.mocked(callTool).mockClear();
     await setup([mine]).publishEntry(ORG, 'sch_mine', { choice: 'pls_holiday' });
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
-      ifDefault: 'pls_holiday',
-      drafts: [
-        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
-        { kind: 'playlist', id: 'pls_holiday', version: 3 },
-      ],
-    });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
+      'publish',
+      {
+        ifDefault: 'pls_holiday',
+        drafts: [
+          { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+          { kind: 'playlist', id: 'pls_holiday', version: 3 },
+        ],
+      },
+      ORG,
+    );
   });
 
   it('publishes without one when none was chosen, or the org has one since', async () => {
@@ -529,13 +537,17 @@ describe('sample text the server refuses (#360)', () => {
     const done = store.getState().publishSchedule(ORG);
     await asked(store);
     // The templates could not be read here: the fields are named as they are.
-    expect(store.getState().publishing.sampleCheck?.words).toBe('headline and body still have sample text.');
+    expect(store.getState().publishing.sampleCheck?.words).toBe('In Pier 9, headline and body still have sample text.');
     store.getState().publishAnyway();
     expect(await done).toBe(true);
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
-      drafts: [{ kind: 'schedule_entry', id: 'sch_breakfast', version: 1 }],
-      allowSample: [PIER_ACK],
-    });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
+      'publish',
+      {
+        drafts: [{ kind: 'schedule_entry', id: 'sch_breakfast', version: 1 }],
+        allowSample: [PIER_ACK],
+      },
+      ORG,
+    );
     expect(store.getState().publishing.sampleCheck).toBeNull();
   });
 
@@ -700,7 +712,156 @@ describe('sample text the server refuses (#360)', () => {
           ],
           allowSample: [{ spotId: 'spt_pier', version: 4, fields: ['headline'] }],
         },
+        ORG,
       ],
     ]);
+  });
+});
+
+describe("the sidebar's Publish (#361)", () => {
+  const ORG_ROUTER = { navigate: vi.fn(), state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
+  type Orgs = { switchingTo: string | null; drafts: Record<string, { pending: boolean }> };
+  /** The publishing slice on a page of org_1, `switchingTo` the tab's own switch on its way, or null; `creating` an org being made. */
+  function sidebarStore(switchingTo: string | null = null, creating = false) {
+    return createStore<PublishingSlice & { orgs: Orgs }>()((set, get) => ({
+      ...createPublishingSlice(set as never, get as never, { router: ORG_ROUTER, queryClient: new QueryClient() } as never),
+      orgs: { switchingTo, drafts: { dialog: { pending: creating } } },
+    }));
+  }
+  const spot = (id: string, version: number, over: object = {}) => ({ id, name: id, version, draftChanged: true, published: false, ...over });
+  /** What the drafts read answers: spots, and the rest empty. */
+  function drafts(spots: object[], playlists: object[] = [], entries: ScheduleEntryView[] = []) {
+    vi.mocked(getSpots).mockResolvedValue({ spots } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists } as never);
+    vi.mocked(getSchedule).mockResolvedValue({ entries } as never);
+  }
+  beforeEach(() =>
+    vi
+      .mocked(callTool)
+      .mockReset()
+      .mockImplementation(async () => published(++revision) as never),
+  );
+
+  it('publishes exactly what it read and showed, at those versions, naming the org it read', async () => {
+    drafts([spot('spt_a', 3), spot('spt_b', 1, { draftChanged: false })]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ pins: [{ kind: 'spot', id: 'spt_a', version: 3 }], counts: { spots: 1 } });
+    // Edited and added since it was read: neither is what was shown.
+    drafts([spot('spt_a', 4), spot('spt_new', 1)]);
+    expect(await store.getState().confirmPublishAll()).toBe(true);
+    expect(vi.mocked(callTool)).toHaveBeenCalledExactlyOnceWith('publish', { drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }] }, ORG);
+  });
+
+  it('fails, publishing nothing, when a draft it showed was edited since: the server refuses the old version', async () => {
+    drafts([spot('spt_a', 3)]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(new Refusal('conflict', 'changed', { id: 'spt_a', version: 4 }));
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+  });
+
+  it('Cancel while it reads: the read lands on nothing, and nothing is published', async () => {
+    let answer!: (v: unknown) => void;
+    vi.mocked(getSpots).mockImplementation(() => new Promise((r) => (answer = r)) as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [] } as never);
+    const store = sidebarStore();
+    const asking = store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ pins: null });
+    store.getState().cancelPublishAll();
+    answer({ spots: [spot('spt_a', 3)] });
+    await asking;
+    expect(store.getState().publishing.all).toBeNull();
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+
+  it('is refused while the tab switches org, reading nothing', async () => {
+    drafts([spot('spt_a', 3)]);
+    vi.mocked(getSpots).mockClear();
+    const store = sidebarStore('org_2');
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toBeNull();
+    expect(vi.mocked(getSpots)).not.toHaveBeenCalled();
+  });
+
+  it('is refused while the tab makes a new org, reading nothing', async () => {
+    drafts([spot('spt_a', 3)]);
+    vi.mocked(getSpots).mockClear();
+    const store = sidebarStore(null, true);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toBeNull();
+    expect(vi.mocked(getSpots)).not.toHaveBeenCalled();
+  });
+
+  it('offers no publish for more than one publish takes', async () => {
+    drafts(Array.from({ length: 501 }, (_, i) => spot(`spt_${i}`, 1)));
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ tooMany: true });
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+
+  it('says what it does with no default playlist, as the server decides: it makes the first default, or no screen changes', async () => {
+    const lunch = { id: 'pls_main', name: 'Lunch', isDefault: false, draftChanged: false };
+    drafts([], [lunch], [{ ...entry('sch_1', false), target: 'group', groupId: 'grp_1' }]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    // No entry on every screen at all hours: the server compiles no screen without a default.
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: null });
+    drafts([], [lunch], [entry('sch_2', false)]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: 'Lunch' });
+    // Every day spelled out, seven distinct days, is every day, as the server reads it; six is not.
+    drafts([], [lunch], [{ ...entry('sch_3', false), days: [0, 1, 2, 3, 4, 5, 6] }]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: 'Lunch' });
+    drafts([], [lunch], [{ ...entry('sch_4', false), days: [1, 2, 3, 4, 5, 6] }]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: null });
+    drafts([], [{ ...lunch, isDefault: true }], [entry('sch_2', false)]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toBeNull();
+  });
+
+  it('finds nothing to publish: says so, counts again, and never sends an empty publish', async () => {
+    drafts([spot('spt_a', 3, { draftChanged: false })]);
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const store = createStore<PublishingSlice & { orgs: Orgs }>()((set, get) => ({
+      ...createPublishingSlice(set as never, get as never, { router: ORG_ROUTER, queryClient } as never),
+      orgs: { switchingTo: null, drafts: {} },
+    }));
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ pins: [] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', ORG, 'overview'] });
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+
+  it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins acknowledging exactly what it showed (#360)', async () => {
+    drafts([spot('spt_a', 3)]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(new Refusal('sample_text', 'sample', { spots: [{ id: 'spt_a', name: 'Pier 9', version: 3, fields: ['headline'] }] }))
+      .mockImplementation(async () => published(++revision) as never);
+    const done = store.getState().confirmPublishAll();
+    await vi.waitFor(() => expect(store.getState().publishing.sampleCheck).not.toBeNull());
+    store.getState().publishAnyway();
+    expect(await done).toBe(true);
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
+      'publish',
+      {
+        drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }],
+        allowSample: [{ spotId: 'spt_a', version: 3, fields: ['headline'] }],
+      },
+      ORG,
+    );
   });
 });

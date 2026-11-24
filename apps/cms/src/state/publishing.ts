@@ -16,13 +16,16 @@ import { toast } from 'sonner';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import { problemWords } from '~/lib/field-words';
 import type { PlaylistView } from '~/lib/playlists';
+import type { ScheduleEntryView } from '~/lib/schedule';
 import { versionName } from '~/lib/publishes';
 import { sampleWords, type SpotView, versionsById } from '~/lib/spots';
+import { orgOnScreen } from '~/lib/live';
 import { callTool, isConflict, isStale, Refusal, sampleAcks, sampleTextOf, toolMessage, type SampleSpot } from '~/lib/tools';
 import { overviewKey } from '~/lib/overview';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { assetsQuery, brandKitsQuery, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
+import { changingOrg } from './orgs';
 import type { SliceCreator } from './store';
 
 interface Pin {
@@ -41,7 +44,32 @@ interface PublishingState {
    * for Edit first or Escape, which change nothing.
    */
   sampleCheck: { words: string; spotId: string; answer: (publish: boolean) => void } | null;
+  /** The sidebar's "Publish every unpublished change?" (#361), open while not null (`PublishAll`). */
+  all: PublishAll | null;
 }
+
+/**
+ * What the sidebar's Publish read and shows (#361): every draft with changes, pinned at the version
+ * read, published exactly as shown, so an edit since makes the publish fail rather than go out
+ * unseen, and a draft made since stays a draft. `pins` is null while reading, and empty when the
+ * read finds nothing to publish, which is said and not offered. `tooMany`: more than one publish
+ * takes, so none is offered. `noDefault`: with no default playlist yet, the playlist this publish
+ * makes the default (`makes`), or null when it makes none and so changes no screen.
+ */
+export interface PublishAll {
+  orgId: string;
+  /** Which asking this is: a read answered for an asking cancelled, or replaced, is dropped. */
+  asked: number;
+  pins: Pin[] | null;
+  counts: { spots: number; playlists: number; schedule: number };
+  tooMany: boolean;
+  noDefault: { makes: string | null } | null;
+  /** A takeover goes with it: no Undo, as on the Schedule page. */
+  takeover: boolean;
+}
+
+/** The most drafts one publish pins (`publish`'s `drafts`, at most 500). */
+export const MAX_PINS = 500;
 
 /**
  * What a Schedule dialog showed the person of the default, and what they kept (#243, #336, #393).
@@ -102,6 +130,15 @@ export interface PublishingSlice {
   checkSampleText: (orgId: string, would: { playlistId: string; alone: boolean; withDefault: DefaultChoice; refused: string }) => Promise<SampleSpot[] | null>;
   /** Asks about the spots a `sample_text` refusal named, as ⌘K's tools are refused: true for Publish anyway. */
   askSampleText: (orgId: string, spots: [SampleSpot, ...SampleSpot[]]) => Promise<boolean>;
+  /**
+   * The sidebar's Publish pressed (#361): reads every draft with changes in `orgId` now and shows them
+   * (`all`). Refused while the tab is switching org, or shows another.
+   */
+  askPublishAll: (orgId: string) => Promise<void>;
+  /** Publishes exactly what `all` shows, at the versions read; whether it was published. */
+  confirmPublishAll: () => Promise<boolean>;
+  /** The sidebar's question let go, its read too if it is still on its way. */
+  cancelPublishAll: () => void;
 }
 
 const TOAST_ID = 'publish';
@@ -116,8 +153,41 @@ const OWN = new Set(['brand kit', 'template version', 'asset']);
 
 const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
 
+/**
+ * Whether an entry plays on every screen at all hours, always, exactly as the server's
+ * `everywhereAlways` (packages/tools/src/publishing.ts) decides it: every day is no days or all
+ * seven, once each, and a takeover's times rule it out.
+ */
+const playsEverywhereAlways = (e: ScheduleEntryView) =>
+  e.target === 'org' &&
+  (e.days === null || new Set(e.days).size === 7) &&
+  !e.from &&
+  !e.to &&
+  !e.startDate &&
+  !e.endDate &&
+  e.startsAt === null &&
+  e.endsAt === null;
+
+/**
+ * With no default playlist yet, what a publish of `entries` does about it, as the server decides
+ * (#243, `firstDefault`): when the entries it makes live that play on every screen at all hours all
+ * play one playlist, that becomes the default. Otherwise no screen can be compiled, so none
+ * changes until there is a default. Null when there is one.
+ */
+function noDefaultOf(playlists: readonly PlaylistView[], entries: readonly ScheduleEntryView[]): PublishAll['noDefault'] {
+  if (playlists.some((p) => p.isDefault)) return null;
+  const ids = new Set(entries.filter((e) => !e.deleted && playsEverywhereAlways(e)).map((e) => e.playlistId));
+  const only = ids.size === 1 ? playlists.find((p) => ids.has(p.id)) : undefined;
+  return { makes: only?.name ?? null };
+}
+
 export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, { queryClient, router }) => {
   const pending = (on: boolean) => set((s) => ({ publishing: { ...s.publishing, pending: on } }));
+  const showAll = (all: PublishAll | null) => set((s) => ({ publishing: { ...s.publishing, all } }));
+  /** The sidebar's askings so far: each read belongs to one. */
+  let asked = 0;
+  /** Whether the tab shows `orgId`, with no switch or create of its own on the way: what the sidebar's publish needs (#361). */
+  const showing = (orgId: string) => !changingOrg(get().orgs) && orgOnScreen(router) === orgId;
   /** Everything a publish can change: drafts' published state, playlists, screens and the rollout. */
   const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: ['org', orgId] });
   const viewRollout = (id: string) => ({ label: 'View rollout', onClick: () => void router.navigate({ to: '/publishes', search: { id } }) });
@@ -301,17 +371,14 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         : [],
     );
 
-  /** Whether more than one spot is pinned: the question then names the spot. */
-  const manySpots = (pins: readonly Pin[]) => pins.filter((p) => p.kind === 'spot').length > 1;
-
   /**
    * Asks about the `spots` that `acks` does not cover (the same spot, version and fields), and gives
    * the acknowledgement to publish with: `acks` with them for Publish anyway, null for Edit first or Escape.
    */
-  async function acknowledge(orgId: string, spots: readonly SampleSpot[], acks: SampleSpot[], named: boolean): Promise<SampleSpot[] | null> {
+  async function acknowledge(orgId: string, spots: readonly SampleSpot[], acks: SampleSpot[]): Promise<SampleSpot[] | null> {
     const [first, ...more] = spots.filter((s) => !acks.some((a) => a.id === s.id && a.version === s.version && s.fields.every((f) => a.fields.includes(f))));
     if (!first) return acks;
-    return (await ask(orgId, [first, ...more], named || more.length > 0)) ? [...acks, first, ...more] : null;
+    return (await ask(orgId, [first, ...more])) ? [...acks, first, ...more] : null;
   }
 
   /**
@@ -335,7 +402,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
    * answer: true for Publish anyway. Labels come from the templates as the pages read them; a field
    * whose template cannot be read is named as it is.
    */
-  async function ask(orgId: string, spots: [SampleSpot, ...SampleSpot[]], named: boolean) {
+  async function ask(orgId: string, spots: [SampleSpot, ...SampleSpot[]]) {
     const once = { staleTime: Number.POSITIVE_INFINITY, retry: false } as const;
     const none = () => undefined;
     const [templates, list] = await Promise.all([
@@ -349,7 +416,6 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         const fields = (v && versions.get(v)?.manifest.fields) || {};
         return { name: s.name, labels: s.fields.map((f) => fields[f]?.label ?? f) };
       }),
-      named,
     );
     return new Promise<boolean>((answer) => set((s) => ({ publishing: { ...s.publishing, sampleCheck: { words, spotId: spots[0].id, answer } } })));
   }
@@ -380,7 +446,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   ) {
     const plan = defaultPlan(withDefault, drafts);
     const all = [...pins, ...plan.pins];
-    const allowed = await acknowledge(orgId, sampleIn(drafts.spots, all), acks, manySpots(all));
+    const allowed = await acknowledge(orgId, sampleIn(drafts.spots, all), acks);
     if (!allowed) return false;
     if (plan.set && !(await setDefault(plan.set.id, refused))) return false;
     return send(all, { made: plan.made, ifDefault: plan.ifDefault }, allowed);
@@ -408,7 +474,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       // Once each: a chosen default may be the entry's own playlist.
       const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
       const allowSample = acks.length ? { allowSample: sampleAcks(acks) } : {};
-      const r = await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...allowSample });
+      // Named: the org the pins were read in, not the one a switch is taking the tab to (#361).
+      const r = await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...allowSample }, orgId);
       await told(orgId, r, undo, refused, made);
       await refresh(orgId);
       // Held back, or nothing to publish: no publish was made, which the toast says.
@@ -417,7 +484,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       const sample = sampleTextOf(err);
       if (sample?.length) {
         pending(false);
-        const next = await acknowledge(orgId, sample, acks, manySpots(pins));
+        const next = await acknowledge(orgId, sample, acks);
         if (!next) return false;
         // Only spots it did not cover: once more, with them. One it did would be refused for good, said below.
         if (next.length > acks.length) return publish(orgId, pins, undo, refused, byDefault, next);
@@ -440,7 +507,57 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   }
 
   return {
-    publishing: { pending: false, sampleCheck: null },
+    publishing: { pending: false, sampleCheck: null, all: null },
+
+    async askPublishAll(orgId) {
+      if (!showing(orgId)) {
+        toast.error('Not published', { description: 'The organization is changing. Publish once it shows.' });
+        return;
+      }
+      const mine = ++asked;
+      showAll({ orgId, asked: mine, pins: null, counts: { spots: 0, playlists: 0, schedule: 0 }, tooMany: false, noDefault: null, takeover: false });
+      const drafts = await readDrafts(orgId, 'Not published');
+      // Cancelled, or asked again, meanwhile: this read is no one's.
+      if (get().publishing.all?.asked !== mine) return;
+      if (!drafts || !showing(orgId)) {
+        showAll(null);
+        return;
+      }
+      const spots = drafts.spots.filter((x) => x.draftChanged);
+      const playlists = drafts.playlists.filter((x) => x.draftChanged);
+      const entries = drafts.entries.filter((x) => x.draftChanged);
+      const pins = [
+        ...spots.map((x): Pin => ({ kind: 'spot', id: x.id, version: x.version })),
+        ...playlists.map((x): Pin => ({ kind: 'playlist', id: x.id, version: x.version })),
+        ...entries.map((x): Pin => ({ kind: 'schedule_entry', id: x.id, version: x.version })),
+      ];
+      showAll({
+        orgId,
+        asked: mine,
+        pins,
+        counts: { spots: spots.length, playlists: playlists.length, schedule: entries.length },
+        tooMany: pins.length > MAX_PINS,
+        noDefault: noDefaultOf(drafts.playlists, entries),
+        takeover: entries.some((e) => e.takeover),
+      });
+      // Nothing to publish after all: the counts were behind, so they are read again.
+      if (!pins.length) void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
+    },
+
+    async confirmPublishAll() {
+      const all = get().publishing.all;
+      // Never an empty publish: `drafts: []` would compile every screen again for nothing.
+      if (!all?.pins?.length || all.tooMany) return false;
+      showAll(null);
+      if (!showing(all.orgId)) {
+        toast.error('Not published', { description: 'The organization is changing. Publish once it shows.' });
+        return false;
+      }
+      // Exactly what was shown, at the versions read: one edited since refuses it as changed. Sample text asks as any publish does (#360).
+      return publish(all.orgId, all.pins, !all.takeover);
+    },
+
+    cancelPublishAll: () => showAll(null),
 
     publishAnyway: () => void answer(true),
 
@@ -454,7 +571,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       await router.navigate({ to: '/spots/$spotId', params: { spotId: check.spotId } });
     },
 
-    askSampleText: (orgId, spots) => ask(orgId, spots, spots.length > 1),
+    askSampleText: (orgId, spots) => ask(orgId, spots),
 
     async checkSampleText(orgId, { playlistId, alone, withDefault, refused }) {
       // Pending from the first click: a second, while this reads or asks, starts nothing.
@@ -464,7 +581,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         const drafts = await readDrafts(orgId, refused);
         if (!drafts) return null;
         const pins = [...playlistPins(drafts, playlistId, alone), ...defaultPlan(withDefault, drafts).pins];
-        return await acknowledge(orgId, sampleIn(drafts.spots, pins), [], manySpots(pins));
+        return await acknowledge(orgId, sampleIn(drafts.spots, pins), []);
       } finally {
         pending(false);
       }

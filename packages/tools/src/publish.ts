@@ -401,4 +401,24 @@ const getPublish = defineTool({
   },
 });
 
-export const publishTools = [publishManifestToScreen, publish, endTakeover, publishTakeover, rollBackPublish, listPublishes, getPublish];
+const countDrafts = defineTool({
+  name: 'count_drafts',
+  description:
+    'Count the drafts with changes screens do not have yet, by kind: never published, or edited since (one put back as it was still counts). One count each, for a badge; list them with list_spots, list_playlists or list_schedule_entries and unpublished. Returns { spots, playlists, scheduleEntries }.',
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: z.object({}),
+  output: outputs.count_drafts,
+  example: {},
+  handler: async ({ org }) => {
+    const [spots, playlists, scheduleEntries] = await Promise.all([
+      org.spots.countUnpublished(),
+      org.playlists.countUnpublished(),
+      org.scheduleEntries.countUnpublished(),
+    ]);
+    return { spots, playlists, scheduleEntries };
+  },
+});
+
+export const publishTools = [publishManifestToScreen, publish, endTakeover, publishTakeover, rollBackPublish, listPublishes, getPublish, countDrafts];

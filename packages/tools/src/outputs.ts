@@ -829,6 +829,7 @@ export const outputs = {
   decline_publish_request: publishRequestResult,
   roll_back_publish: z.object({ publish: madeOutput }),
   list_publishes: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
+  count_drafts: z.object({ spots: z.number(), playlists: z.number(), scheduleEntries: z.number() }),
   get_publish: z.object({
     publish: publishOutput.nullable(),
     screens: z.array(

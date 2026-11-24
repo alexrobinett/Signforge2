@@ -17,6 +17,8 @@ import {
   type ToolListing,
 } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
+import { overviewKey } from '~/lib/overview';
+import { screenStatusQuery } from '~/queries/screens';
 import { callTool, callToolByName, sampleAcks, sampleTextOf, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
@@ -88,7 +90,7 @@ const CLOSED: CommandMenuState = {
 /** The menu closed: what outlives an opening (a call on its way, the last one that failed, the count) stays. */
 const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening, pending: m.pending });
 
-export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
+export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router, queryClient }) => {
   /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
   const start = (change: (m: CommandMenuState) => Partial<CommandMenuState> = () => ({})) => {
     if (get().commandMenu.running) return null;
@@ -110,7 +112,16 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       const output = await callToolByName(tool.name, input);
       finish(from, true, null);
       toast.success(label, { description: resultText(output) });
-      if (tool.mutates) await router.invalidate();
+      if (tool.mutates) {
+        // A publish, or any draft written, changes Overview and the sidebar's counts (#361), and a
+        // publish or a revoke what screens are doing, which no loader reads.
+        const orgId = orgOnScreen(router);
+        if (orgId) {
+          void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
+          void queryClient.invalidateQueries({ queryKey: screenStatusQuery(orgId).queryKey });
+        }
+        await router.invalidate();
+      }
     } catch (err) {
       // Refused for sample text (#360): the menu closes for the question, and Publish anyway runs it
       // again acknowledging exactly the spots shown, at the versions shown, with any acknowledged
