@@ -7,7 +7,6 @@
  *   uses `openaiCompatible` instead of Anthropic; `?model=` picks the model id.
  * - `POST /api/fill`: one structured answer from a flyer's text and photo, `chat({ outputSchema,
  *   stream: false })`, to compare with apps/api's inline fill.
- * - `POST /api/seed`: with the stub model only, seeds the spike's org (packages/db's test seed).
  * - Anything else: the page (public/, built from src/page).
  *
  * The key is opened per call (here from a Worker secret, `ANTHROPIC_KEY`; in apps/api, from the
@@ -15,7 +14,6 @@
  * from `process.env`. With `MODEL_STUB=on` the guards' fetch is the scripted model and no key is used.
  */
 import { scoped } from '@signforge/db';
-import { seedOrg } from '@signforge/db/testing';
 import { CMS_AGENT_CLIENT_ID, type Caller } from '@signforge/tools';
 import { type AnyTextAdapter, chat, chatParamsFromRequest, type FetchWrapper, maxIterations, toServerSentEventsResponse } from '@tanstack/ai';
 import { ANTHROPIC_MODELS, createAnthropicChat } from '@tanstack/ai-anthropic';
@@ -163,10 +161,6 @@ export default {
         }),
       );
       return Response.json(fill);
-    }
-    if (request.method === 'POST' && url.pathname === '/api/seed' && stub(env)) {
-      await seedOrg(env.DB, env.ORG_ID);
-      return Response.json({ seeded: env.ORG_ID });
     }
     return new Response('not found', { status: 404 });
   },

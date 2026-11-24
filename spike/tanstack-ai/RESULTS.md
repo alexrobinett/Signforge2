@@ -52,7 +52,7 @@ Everything here was run in workerd with the API Worker's compatibility date and 
 To run it:
 
 - `pnpm --filter @signforge/spike-tanstack-ai test`
-- or `pnpm --filter @signforge/spike-tanstack-ai dev`, then `curl -X POST localhost:8788/api/seed` and open the page.
+- or `pnpm --filter @signforge/spike-tanstack-ai dev`, and open the page. The org is empty there: the tests seed it with packages/db's test seed, which the Worker never imports.
 
 The `MODEL_STUB=on` setting in `wrangler.jsonc` keeps it off the network.
 
