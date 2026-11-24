@@ -41,17 +41,26 @@ describe("/mcp's services", () => {
 });
 
 describe('tools/list', () => {
-  it('lists exactly the tools the grant permits but the member tools, each with an object input', () => {
+  it('lists exactly the tools the grant permits but the member tools and the people-only ones, each with an object input', () => {
     for (const grant of GRANTS) {
       const permitted = describeTools(registry, grant).map((t) => t.name);
       const listed = listedTools(grant, AGENT);
-      // Only the member tools drop out: a tool needing any other service would be listed, so losing one fails here.
-      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members'));
+      // Only the member tools and the people-only ones drop out: a tool needing any other service would be listed, so losing one fails here.
+      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members') || registry.get(name)?.people);
       expect(
         listed.map((t) => t.name),
         `${grant.role} ${grant.editorsPublish}`,
       ).toEqual(permitted.filter((name) => !lacking.includes(name)));
       for (const t of listed) expect(t.inputSchema.type, t.name).toBe('object');
+    }
+  });
+
+  it('never lists the agent grant tools: an agent does not manage grants', () => {
+    const people = [...registry.values()].filter((t) => t.people).map((t) => t.name);
+    expect(people).toEqual(expect.arrayContaining(['list_agent_grants', 'get_agent_grant', 'update_agent_grant_scopes', 'revoke_agent_grant']));
+    for (const grant of GRANTS) {
+      const listed = listedTools(grant, AGENT).map((t) => t.name);
+      for (const name of people) expect(listed, name).not.toContain(name);
     }
   });
 

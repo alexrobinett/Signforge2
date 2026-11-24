@@ -14,13 +14,11 @@
  * - **Removal.** A member removed from an org, or leaving it, loses their grants there: revoked,
  *   with the provider's tokens and consents for them, after Better Auth's change.
  */
-import { FIRST_PARTY_CLIENT_IDS } from '@signforge/db';
-import { type Role, SCOPES, type Scope } from '@signforge/tools';
+import { type Role, SCOPES, type Scope, shownClient } from '@signforge/tools';
 import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { BetterAuthPlugin } from 'better-auth';
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, sessionMiddleware } from 'better-auth/api';
 import { z } from 'zod';
-import { plainName } from './client-names';
 
 /** What a client may ask for: the tool scopes, and `offline_access` for a refresh token. */
 export const OAUTH_SCOPES = [...SCOPES, 'offline_access'] as const;
@@ -36,6 +34,8 @@ export interface GrantDeps {
     userId: string;
     clientId: string;
     clientName: string | null;
+    /** The redirect it asked to send the code to: the audit row names a withheld client by its host. */
+    redirectUri: string;
     scopes: Scope[];
   }): Promise<{ ok: true; grantId: string; scopes: Scope[] } | { ok: false; refused: 'not_a_member' | 'no_scopes' }>;
   /** Revokes the user's grants in the org, and their tokens, audited as `by`. */
@@ -73,22 +73,6 @@ const ENDS_MEMBERSHIP: Record<string, (returned: Record<string, unknown>) => unk
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
-/**
- * Where a client's code goes, as the consent page names it: a web callback's host, or for an app's
- * own scheme (`com.example.app:/cb`, `cursor://anysphere.cursor-retrieval/...`) the scheme and what follows it up to the path.
- * An unverified app's scheme and host are a name it chose, so they are shown only when plain (`plainName`):
- * `signforge://SignForge-CLI/cb` is not (target null: the page says an app on this device).
- */
-export function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
-  const url = new URL(redirectUri);
-  if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
-  const scheme = url.protocol.slice(0, -1);
-  // Each alone, and together, as they read in the heading (`sign://forge`).
-  const chosen = url.host ? [scheme, url.host, `${scheme} ${url.host}`] : [scheme];
-  if (!verified && chosen.some((part) => plainName(part) === undefined)) return { kind: 'app', target: null };
-  return { kind: 'app', target: url.host ? `${url.protocol}//${url.host}` : url.protocol };
-}
-
 export function agentGrants(grants: GrantDeps, link: ConsentLink) {
   return {
     id: 'agent-grants',
@@ -113,15 +97,9 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
           const asked = (query.get('scope') ?? '').split(' ');
           const requested = SCOPES.filter((s) => asked.includes(s));
           const { user } = ctx.context.session;
-          const verified = FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId);
           return ctx.json({
-            client: {
-              id: clientId,
-              // An unverified client's name only when it is plain (`plainName`); otherwise none reaches the page.
-              name: verified ? (client.name ?? clientId) : (plainName(client.name ?? '') ?? null),
-              verified,
-              redirect: destinationOf(query.get('redirect_uri') ?? '', verified),
-            },
+            // An unverified client's name only when it is plain (`shownClient`); otherwise none reaches the page.
+            client: shownClient(clientId, client.name, query.get('redirect_uri') ?? ''),
             user: { name: user.name, email: user.email },
             orgs: await grants.offers(user.id, requested),
           });
@@ -143,7 +121,14 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
           const chosen = (ctx.body.scopes ?? []).filter((s) => requested.includes(s));
           const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
           if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
-          const made = await grants.create({ orgId: ctx.body.organizationId, userId: session.user.id, clientId, clientName: client.name, scopes: chosen });
+          const made = await grants.create({
+            orgId: ctx.body.organizationId,
+            userId: session.user.id,
+            clientId,
+            clientName: client.name,
+            redirectUri: query.get('redirect_uri') ?? '',
+            scopes: chosen,
+          });
           if (!made.ok && made.refused === 'not_a_member') throw new APIError('FORBIDDEN', { message: 'you are not a member of that organization' });
           if (!made.ok) throw new APIError('BAD_REQUEST', { message: 'choose at least one scope this client asked for and your role allows' });
           link.grantId = made.grantId;

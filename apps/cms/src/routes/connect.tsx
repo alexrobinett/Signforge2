@@ -8,6 +8,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { BotIcon, TriangleAlertIcon } from 'lucide-react';
 import { useId } from 'react';
+import { AgentName, ClientName } from '~/components/agent-name';
 import { EditorFields } from '~/components/editor';
 import { Logo } from '~/components/logo';
 import { Alert, AlertDescription } from '~/components/ui/alert';
@@ -59,24 +60,6 @@ function ConnectPage() {
   );
 }
 
-/** A long name with no break wraps anywhere rather than widen the page. */
-const NAME_WRAP = '[overflow-wrap:anywhere]';
-
-/**
- * The client in a sentence: SignForge's own by its name; another by its name in quotes, as only its
- * claim; and one whose name the API withholds as "this app" (the heading says where its code goes).
- * `<bdi>` keeps a name from reordering the text around it.
- */
-function ClientName({ client }: { client: ConnectRequest['client'] }) {
-  if (client.verified) return <bdi className={NAME_WRAP}>{client.name}</bdi>;
-  if (client.name === null) return <>this app</>;
-  return (
-    <>
-      “<bdi className={NAME_WRAP}>{client.name}</bdi>”
-    </>
-  );
-}
-
 function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery: string }) {
   const { client, user, orgs } = request;
   const orgFieldId = useId();
@@ -96,7 +79,6 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
   const publishing = chosen.includes('content:publish');
   const busy = pending !== null;
   const cancel = () => void cancelConnection(oauthQuery);
-  const where = client.redirect.kind === 'web' ? client.redirect.host : client.redirect.target;
 
   return (
     <>
@@ -108,21 +90,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
           <div className="flex flex-col gap-0.5">
             {/* The badge is part of the heading, so moving by heading reads it. */}
             <h1 className="text-[22px] font-semibold tracking-tight">
-              {client.name === null ? (
-                <>
-                  An unverified app{' '}
-                  {where === null ? (
-                    'on this device'
-                  ) : (
-                    <>
-                      at <span className="font-mono [overflow-wrap:anywhere]">{where}</span>
-                    </>
-                  )}
-                </>
-              ) : (
-                <ClientName client={client} />
-              )}{' '}
-              wants to work in SignForge
+              <AgentName client={client} /> wants to work in SignForge
               {client.verified ? null : (
                 <>
                   {' '}

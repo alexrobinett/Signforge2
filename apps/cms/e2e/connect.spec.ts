@@ -3,8 +3,9 @@
 // for tokens; Cancel sends `access_denied`. An editor while editors may not publish is not offered it.
 // The first-party CLI shows as verified, and the pages are never framed. An unverified name the page
 // may not show (not plain, or reading as SignForge's) is withheld: the page says an unverified app, at its host.
-import { createHash, randomBytes } from 'node:crypto';
-import { expect, request as playwrightRequest, test, type Page } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
+import { expect, request as playwrightRequest, test } from '@playwright/test';
+import { base64url, callbackOf, challengeOf, RESOURCE, stubClient } from './agent-stub';
 import { axe, createOrg, disabledOnServer, fromAddress, hydrated, shots, signIn, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
@@ -18,72 +19,6 @@ const ADDRESS = {
   namer: '192.0.2.166',
   names: '192.0.2.167',
 };
-/** The stub's loopback callback, as a native MCP client registers one. */
-const CALLBACK = 'http://127.0.0.1:33418/callback';
-const RESOURCE = `${CMS_URL}/mcp`;
-const ALL_SCOPES = 'content:read content:draft content:publish screens:manage org:manage offline_access';
-
-const base64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const challengeOf = (verifier: string) => base64url(createHash('sha256').update(verifier).digest());
-
-/** An MCP client stub: registers by open registration, and builds an authorize URL with S256 PKCE. */
-async function stubClient(name = 'Test agent', address = ADDRESS.stub) {
-  const request = await playwrightRequest.newContext({ extraHTTPHeaders: { 'cf-connecting-ip': address } });
-  const registered = await request.post(`${CMS_URL}/api/auth/oauth2/register`, {
-    data: {
-      client_name: name,
-      redirect_uris: [CALLBACK],
-      token_endpoint_auth_method: 'none',
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-    },
-  });
-  expect(registered.status(), await registered.text()).toBe(201);
-  const { client_id: clientId } = (await registered.json()) as { client_id: string };
-  const verifier = base64url(randomBytes(32));
-  const authorizeUrl = `${CMS_URL}/api/auth/oauth2/authorize?${new URLSearchParams({
-    response_type: 'code',
-    client_id: clientId,
-    redirect_uri: CALLBACK,
-    scope: ALL_SCOPES,
-    state: 'stub-state',
-    code_challenge: challengeOf(verifier),
-    code_challenge_method: 'S256',
-    resource: RESOURCE,
-  })}`;
-  /** The stub's token request for a code: what it gets back. */
-  const exchange = async (code: string) => {
-    const res = await request.post(`${CMS_URL}/api/auth/oauth2/token`, {
-      form: { grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: CALLBACK, client_id: clientId, resource: RESOURCE },
-    });
-    return { status: res.status(), body: (await res.json()) as { scope?: string; access_token?: string } };
-  };
-  /** One JSON-RPC request to /mcp on this host (M4-06), with the stub's access token: its result or its error. */
-  let rpcId = 0;
-  const mcp = async (accessToken: string, method: string, params: unknown = {}) => {
-    const res = await request.post(`${CMS_URL}/mcp`, {
-      headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' },
-      data: { jsonrpc: '2.0', id: ++rpcId, method, params },
-    });
-    expect(res.status(), await res.text()).toBe(200);
-    return (await res.json()) as { result?: any; error?: unknown };
-  };
-  return { clientId, authorizeUrl, exchange, mcp, dispose: () => request.dispose() };
-}
-
-/** The URL the page sends the browser to at the stub's callback, answered by the stub. */
-async function callbackOf(page: Page, act: () => Promise<void>): Promise<URL> {
-  let reached: URL | undefined;
-  await page.route(`${CALLBACK}**`, async (route) => {
-    reached = new URL(route.request().url());
-    await route.fulfill({ status: 200, contentType: 'text/plain', body: 'You can close this window.' });
-  });
-  await act();
-  await expect.poll(() => reached?.href).toBeTruthy();
-  await page.unroute(`${CALLBACK}**`);
-  return reached!;
-}
-
 test('an agent connects: sign in and back, pick an org and scopes, Allow gives the stub a code; Cancel gives access_denied', async ({ page, browser }) => {
   const email = `e2e-connect-${Date.now()}@example.com`;
   // The person, with two orgs: set up in their own browser first.
@@ -93,7 +28,7 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   await createOrg(setup, 'Harbour Café', ADDRESS.person);
   await setup.close();
 
-  const stub = await stubClient();
+  const stub = await stubClient('Test agent', ADDRESS.stub);
   // Signed out: the provider sends the browser to /connect, which sends it through sign-in and back.
   await fromAddress(page, ADDRESS.person);
   await page.goto(stub.authorizeUrl);
@@ -199,7 +134,7 @@ test('an editor in an org where only owners publish is not offered publishing', 
   await signInAs(page, editorEmail, ADDRESS.editor);
   const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
   expect(accepted.status(), await accepted.text()).toBe(200);
-  const stub = await stubClient('Editor agent');
+  const stub = await stubClient('Editor agent', ADDRESS.stub);
   await page.goto(stub.authorizeUrl);
   await expect(page.getByRole('heading', { name: '“Editor agent” wants to work in SignForge' })).toBeVisible();
   await hydrated(page);

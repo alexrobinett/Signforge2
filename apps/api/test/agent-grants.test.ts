@@ -322,6 +322,25 @@ describe("the consent page's request", () => {
   });
 });
 
+describe("a consent's audit row", () => {
+  it('names the client only as a page may: a withheld name is null, with where its code goes', async () => {
+    const { t, owner, org } = await team();
+    for (const name of ['SI6NFOR6E', 'Claude Code (signforge)']) {
+      const clientId = await register(t, { client_name: name });
+      expect((await authorize(owner, clientId, { organizationId: org.id, scopes: ['content:read'] })).back?.searchParams.get('code')).toBeTruthy();
+    }
+    const rows = (await scoped(env.DB, org.id).auditLog.list({ limit: 100 })).filter((e) => e.action === 'create_agent_grant');
+    const details = rows.map((e) => JSON.parse(e.detailJson ?? '{}'));
+    expect(details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientName: null, redirect: { kind: 'web', host: '127.0.0.1:33418' } }),
+        expect.objectContaining({ clientName: 'Claude Code (signforge)' }),
+      ]),
+    );
+    expect(rows.map((e) => e.detailJson).join()).not.toContain('SI6NFOR6E');
+  });
+});
+
 describe('a membership ending', () => {
   it("revokes the member's grants in that org, with their tokens, audited as the person who removed them", async () => {
     const { t, owner, ownerId, editor, editorMemberId, org } = await team();

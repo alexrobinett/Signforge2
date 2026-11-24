@@ -15,6 +15,9 @@ import { z } from 'zod';
 import { displayHours, draftOutput, orientation, version } from './fields';
 import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
 
+/** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
+export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] as const;
+
 /** Why a tool refused: the `error` of its answer, next to `message` and, for some, `details`. */
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
 
@@ -655,6 +658,40 @@ const invitationOutput = z.object({
   createdAt: z.string().describe('ISO 8601'),
 });
 
+// ------------------------------------------------------------------ agent grants (M4-07)
+
+/** An agent's OAuth client as a page may name it (`shownClient`, ./agent-clients.ts). */
+const agentClientOutput = z.object({
+  id: z.string().describe('Its OAuth client id'),
+  name: z
+    .string()
+    .nullable()
+    .describe(
+      "Its name as it registered it, a claim of its own; null when a page may not show it (not plain ASCII, or it reads as SignForge's): name it an unverified app at its redirect",
+    ),
+  verified: z.boolean().describe("SignForge's own app (the sf CLI); every other client named itself"),
+  redirect: z.union([
+    z.object({ kind: z.literal('web'), host: z.string().describe('The host its code goes to') }),
+    z.object({
+      kind: z.literal('app'),
+      target: z.string().nullable().describe("An app's own scheme (com.example.app:); null when it is not plain, as for a name"),
+    }),
+  ]),
+});
+
+/** An agent grant as the grant tools return it. Times are milliseconds since the epoch. */
+const agentGrantOutput = z.object({
+  id: z.string().describe('The grant id: the agent actor id in the audit log'),
+  client: agentClientOutput,
+  scopes: z.array(z.enum(SCOPES)).describe('What it may do, as granted; each call is capped again by the role of the member it acts as'),
+  grantedBy: z.string().describe('The user id of the member who granted it: the agent acts as them, in this organization only'),
+  createdAt: z.number(),
+  lastUsedAt: z.number().nullable().describe('When it last called /mcp, to within the hour (written at most hourly); null if never'),
+  expiresAt: z.number().describe('Unused until then, it stops working: 90 days from its last use'),
+  version,
+});
+export type AgentGrantView = z.infer<typeof agentGrantOutput>;
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
@@ -833,6 +870,10 @@ export const outputs = {
   }),
   list_audit_log: z.object({ entries: z.array(auditEntryOutput), next: nextOutput }),
   list_members: z.object({ members: z.array(memberOutput), next: nextOutput }),
+  list_agent_grants: z.object({ grants: z.array(agentGrantOutput), next: nextOutput }),
+  get_agent_grant: z.object({ grant: agentGrantOutput }),
+  update_agent_grant_scopes: z.object({ grant: agentGrantOutput }),
+  revoke_agent_grant: z.object({ revoked: z.string().describe("The revoked grant's id") }),
   list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
   invite_member: z.object({ invitation: invitationOutput }),
   cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id") }),

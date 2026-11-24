@@ -1,8 +1,8 @@
 // An agent's client's name (#299's reviews): what registration refuses, what the consent page shows,
 // and where an app's code goes, as pure functions. agent-grants.test.ts runs a few of each through the API.
 import { describe, expect, it } from 'vitest';
-import { destinationOf } from '../src/auth/agent-grants';
-import { clientNameRefusal, plainName } from '../src/auth/client-names';
+import { destinationOf, plainName } from '@signforge/tools';
+import { clientNameRefusal } from '../src/auth/client-names';
 
 /** Each refusal's words, by why the name is refused. */
 const REFUSED: Record<string, string> = {

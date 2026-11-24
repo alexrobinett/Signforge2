@@ -153,6 +153,9 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   update_member_role: { group: 'Members', words: 'Role changed' },
   remove_member: { group: 'Members', words: 'Removed' },
   leave_organization: { group: 'Members', words: 'Left' },
+  create_agent_grant: { group: 'Agents', words: 'Agent connected' },
+  update_agent_grant_scopes: { group: 'Agents', words: 'Agent’s scopes changed' },
+  revoke_agent_grant: { group: 'Agents', words: 'Agent disconnected' },
   rate_limited: { group: 'Agents', words: 'Refused: over its limits' },
 };
 

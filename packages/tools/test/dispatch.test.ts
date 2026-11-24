@@ -50,8 +50,10 @@ describe('the registry', () => {
       expect(t.description.length, t.name).toBeGreaterThan(40);
       expect(t.input.safeParse(t.example).success, `${t.name} example`).toBe(true);
       // Reads never need more than content:read, but for the org's pending invitations (invitees' addresses,
-      // owners' to see: M4 plan, Q6); changes always do.
-      expect(t.mutates, t.name).toBe(t.scope !== 'content:read' && t.name !== 'list_invitations');
+      // owners' to see: M4 plan, Q6); changes always do, but for a member's own agent grants, which a
+      // viewer manages too and no agent may (M4-07: the grant tools refuse agents themselves).
+      const peoples = ['update_agent_grant_scopes', 'revoke_agent_grant'].includes(t.name);
+      expect(t.mutates, t.name).toBe((t.scope !== 'content:read' || peoples) && t.name !== 'list_invitations');
     }
     expect(new Set(TOOLS.map((t) => t.name)).size).toBe(TOOLS.length);
   });
@@ -81,6 +83,7 @@ describe('the registry', () => {
       'finalize_video_upload',
       'find_places',
       'finish_connection',
+      'get_agent_grant',
       'get_ai_provider',
       'get_alert_channels',
       'get_asset',
@@ -95,6 +98,7 @@ describe('the registry', () => {
       'get_template',
       'identify_screen',
       'invite_member',
+      'list_agent_grants',
       'list_alert_deliveries',
       'list_assets',
       'list_audit_log',
@@ -126,6 +130,7 @@ describe('the registry', () => {
       'renew_asset_upload',
       'restart_screen',
       'retry_alert_delivery',
+      'revoke_agent_grant',
       'revoke_screen_credential',
       'roll_back_publish',
       'save_ai_provider',
@@ -140,6 +145,7 @@ describe('the registry', () => {
       'start_takeover',
       'test_ai_provider',
       'test_alert_channel',
+      'update_agent_grant_scopes',
       'update_brand_kit',
       'update_data_source',
       'update_member_role',
@@ -229,6 +235,7 @@ describe('roles and scopes', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes, editorsPublish: true }).map((t) => t.name);
     expect(names('viewer').sort()).toEqual([
       'find_places',
+      'get_agent_grant',
       'get_ai_provider',
       'get_alert_channels',
       'get_asset',
@@ -241,6 +248,7 @@ describe('roles and scopes', () => {
       'get_spot',
       'get_spot_preview',
       'get_template',
+      'list_agent_grants',
       'list_alert_deliveries',
       'list_assets',
       'list_audit_log',
@@ -259,6 +267,8 @@ describe('roles and scopes', () => {
       'list_spots',
       'list_templates',
       'read_table',
+      'revoke_agent_grant',
+      'update_agent_grant_scopes',
     ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
