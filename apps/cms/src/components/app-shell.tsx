@@ -34,29 +34,43 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
         </Link>
         {!folded && <OrgSwitcher shell={shell} hues={hues} />}
       </div>
+      {/* The agent beside the search, in the space it already takes: the column has no height to spare in a short window. */}
       {folded ? (
-        <SidebarMenuButton folded tooltip="Search and actions (⌘K)">
-          <button type="button" onClick={openCommandMenu}>
-            <SearchIcon aria-hidden />
-            <span>Search and actions</span>
-          </button>
-        </SidebarMenuButton>
+        <div className="flex flex-col gap-1">
+          <SidebarMenuButton folded tooltip="Search and actions (⌘K)">
+            <button type="button" onClick={openCommandMenu}>
+              <SearchIcon aria-hidden />
+              <span>Search and actions</span>
+            </button>
+          </SidebarMenuButton>
+          <SidebarMenuButton folded tooltip="Ask the agent">
+            <button type="button" data-agent-opener="sidebar" onClick={() => openAgent('sidebar')}>
+              <SparklesIcon aria-hidden className="text-actor-agent" />
+              <span>Ask the agent</span>
+            </button>
+          </SidebarMenuButton>
+        </div>
       ) : (
-        <Button variant="outline" className="justify-start gap-2.5 text-muted-foreground" onClick={openCommandMenu}>
-          <SearchIcon className="size-4" aria-hidden />
-          <span className="flex-1 text-left">Search and actions</span>
-          <kbd className="font-mono text-xs" aria-label="Command K, or Control K">
-            ⌘K
-          </kbd>
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="flex-1 justify-start gap-2.5 text-muted-foreground" onClick={openCommandMenu}>
+            <SearchIcon className="size-4" aria-hidden />
+            <span className="flex-1 text-left">Search and actions</span>
+            <kbd className="font-mono text-xs" aria-label="Command K, or Control K">
+              ⌘K
+            </kbd>
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Ask the agent"
+            title="Ask the agent"
+            data-agent-opener="sidebar"
+            onClick={() => openAgent('sidebar')}
+          >
+            <SparklesIcon className="size-4 text-actor-agent" aria-hidden />
+          </Button>
+        </div>
       )}
-      {/* Not shrunk by a short window, as the column's other items, each wrapped, are not. */}
-      <SidebarMenuButton folded={folded} tooltip="Ask the agent" className="shrink-0">
-        <button type="button" onClick={(e) => openAgent(e.currentTarget)}>
-          <SparklesIcon aria-hidden className="text-actor-agent" />
-          <span>Agent</span>
-        </button>
-      </SidebarMenuButton>
       <nav aria-label="Main" className="flex-1">
         <ul className="space-y-1">
           {SECTIONS.map(({ to, label, icon: Icon }) => (
@@ -127,7 +141,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
               <Logo />
             </Link>
             <div className="ml-auto flex items-center gap-1">
-              <Button variant="ghost" size="icon" aria-label="Ask the agent" onClick={(e) => openAgent(e.currentTarget)}>
+              <Button variant="ghost" size="icon" aria-label="Ask the agent" data-agent-opener="top-bar" onClick={() => openAgent('top-bar')}>
                 <SparklesIcon className="size-5 text-actor-agent" aria-hidden />
               </Button>
               <UserMenu user={shell.user} compact />

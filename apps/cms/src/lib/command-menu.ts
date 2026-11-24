@@ -95,8 +95,8 @@ const labelOf = (description: string) =>
 export function commandEntries(tools: ToolListing[]): CommandEntry[] {
   const publishes = tools.some((t) => t.name === 'publish');
   return [
-    { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
+    { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
     ...tools
       .filter((t) => t.name !== 'restart_screen')
       .map((tool): CommandEntry => {

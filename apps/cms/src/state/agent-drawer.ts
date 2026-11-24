@@ -16,6 +16,8 @@ type DrawerMessage =
   /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI & agents. */
   | { role: 'error'; text: string; inSettings: boolean };
 
+export type AgentOpener = 'sidebar' | 'top-bar';
+
 interface AgentDrawerState {
   open: boolean;
   page: ChatRequestBody['page'];
@@ -24,14 +26,17 @@ interface AgentDrawerState {
   asking: boolean;
   /** The turn's tool calls so far, in words. */
   progress: TraceItem[];
-  /** What opened the drawer, where focus goes back when it closes. */
-  opener: HTMLElement | null;
+  /**
+   * Which button opened the drawer, where focus goes back when it closes: the sidebar's (which the
+   * drawer folds, so its element is another by then) or the top bar's; none from the command menu.
+   */
+  opener: AgentOpener | null;
 }
 
 export interface AgentDrawerSlice {
   agentDrawer: AgentDrawerState;
   /** Opens the drawer on the page now shown, from `opener`; it folds the sidebar to make room. */
-  openAgentDrawer: (opener: HTMLElement | null) => void;
+  openAgentDrawer: (opener: AgentOpener | null) => void;
   closeAgentDrawer: () => void;
   editQuestion: (question: string) => void;
   /** Asks `question`, or the one typed, with the conversation so far. */

@@ -14,7 +14,7 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await hydrated(page);
 
   // Opened from the Agent button: a panel beside the page, which the sidebar folds for.
-  const opener = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Agent' });
+  const opener = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' });
   await opener.click();
   const drawer = page.getByRole('dialog', { name: 'Agent' });
   await expect(drawer).toBeVisible();

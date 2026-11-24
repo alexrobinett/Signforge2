@@ -125,7 +125,9 @@ export function AgentDrawer() {
           onInteractOutside={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => {
             e.preventDefault();
-            (d.opener?.isConnected ? d.opener : document.getElementById('main'))?.focus();
+            // Once the sidebar has unfolded again: the button that opened it is drawn anew by then.
+            const opener = d.opener;
+            requestAnimationFrame(() => (document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`) ?? document.getElementById('main'))?.focus());
           }}
         >
           <header className="flex items-start gap-3 border-b bg-actor-agent-muted px-4 py-3">
