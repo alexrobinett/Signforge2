@@ -18,7 +18,8 @@
  *
  * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
- * the draft is compiled without its bindings, so the stage shows the fallback values.
+ * the draft is compiled without its bindings, so the stage shows the fallback values. While the
+ * agent's review of an update is open (src/state/agent.ts), the stage plays the update instead.
  */
 import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
@@ -196,7 +197,10 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
     if (!spot || !preview || !templates || !assets) return undefined;
-    const draft = spotShown(get().spotEditor, t.orgId, spot) ?? draftOf(spot);
+    const edited = spotShown(get().spotEditor, t.orgId, spot) ?? draftOf(spot);
+    // An update the agent would make (#264) plays while its review is open, before anything is kept.
+    const review = get().agent.reviews[t.spotId];
+    const draft = review ? { ...edited, data: review.data } : edited;
     const result = await compilePreview({
       spot,
       draft,

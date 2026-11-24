@@ -570,7 +570,7 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     if (!('idempotencyKey' in request)) {
       if (!updating) throw new Error('an update with no spot to update');
       return c.json({
-        review: { spotId: updating.spotId, version: updating.version, data: fill.sorted.data, marks: fill.sorted.marks },
+        review: { spotId: updating.spotId, version: updating.version, before: updating.data, data: fill.sorted.data, marks: fill.sorted.marks },
       } satisfies InlineReview);
     }
 

@@ -678,7 +678,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     const res = await m.update({ kind: 'image', mediaType: 'image/jpeg', data: JPEG });
     const body = await res.json<any>();
     expect(res.status, JSON.stringify(body)).toBe(200);
-    expect(body.review).toMatchObject({ spotId: m.spot.id, version: before.version });
+    expect(body.review).toMatchObject({ spotId: m.spot.id, version: before.version, before: MENU_DATA });
     // The spot's rows in their order, the latte changed in place keeping its name, link and switch; the new one after.
     expect(body.review.data).toEqual({
       ...MENU_DATA,

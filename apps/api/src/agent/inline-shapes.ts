@@ -35,7 +35,14 @@ export type InlineRequest = { source: Source; templateVersionId?: string; idempo
  * against the draft at `version`, and the fields' marks. Nothing is written until the person keeps it.
  */
 export interface InlineReview {
-  review: { spotId: string; version: number; data: Record<string, unknown>; marks: Record<string, FieldMark> };
+  review: {
+    spotId: string;
+    version: number;
+    /** The draft's data at `version`, which the change is shown against and Undo puts back. */
+    before: Record<string, unknown>;
+    data: Record<string, unknown>;
+    marks: Record<string, FieldMark>;
+  };
 }
 
 /** Keep (#264): the review's `data`, written to the spot at `ifVersion` and refused if it moved on since. */

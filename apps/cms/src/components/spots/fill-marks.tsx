@@ -76,3 +76,48 @@ export function FillBanner({
     </section>
   );
 }
+
+/** After Keep (#264): how many fields the update changed, the other spots with the same rows, and Undo. */
+export function UpdateBanner({
+  changed,
+  alsoOn,
+  onReview,
+  onUndo,
+  onDone,
+}: {
+  changed: number;
+  alsoOn: { spotId: string; name: string; items: string[] }[];
+  onReview: (spotId: string) => void;
+  onUndo: () => void;
+  onDone: () => void;
+}) {
+  return (
+    <section aria-labelledby="update-banner-title" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b bg-actor-agent-muted px-4 py-3 sm:px-6">
+      <SparklesIcon aria-hidden className="size-5 shrink-0 text-actor-agent" />
+      <div className="min-w-0 flex-1">
+        <h2 id="update-banner-title" className="font-medium text-actor-agent">
+          Updated by the agent
+        </h2>
+        <p className="text-sm text-foreground">
+          {changed} {changed === 1 ? 'field' : 'fields'} changed, in the draft. No screen shows it until you publish.
+        </p>
+        {alsoOn.map((o) => (
+          <p key={o.spotId} className="text-sm text-foreground">
+            {o.items.join(', ')} {o.items.length > 1 ? 'are' : 'is'} also on {o.name}.{' '}
+            <Button type="button" variant="link" className="h-auto p-0" onClick={() => onReview(o.spotId)}>
+              Review {o.name}
+            </Button>
+          </p>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onUndo}>
+          Undo the update
+        </Button>
+        <Button type="button" size="sm" onClick={onDone}>
+          Done
+        </Button>
+      </div>
+    </section>
+  );
+}
