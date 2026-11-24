@@ -23,6 +23,8 @@ import {
   portTaken,
   RUN_DIR,
   STUB_CARD,
+  STUB_DRAFT,
+  STUB_DRAFTED,
   STUB_FILL,
   STUB_MENU,
 } from './servers';
@@ -61,6 +63,33 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 }
 
 /**
+ * The drawer's scripted turn. On a spot's page (#268): read the spot, draft a punchier headline and a
+ * QR link from its data as read, then `STUB_DRAFTED`. Anywhere else (#267): read the screens' status,
+ * then `STUB_CARD`.
+ */
+function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } {
+  const first = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+  const page = /<page>\n(\{.*\})\n<\/page>/.exec(first)?.[1];
+  const spotId: string | undefined = page ? JSON.parse(page).ids?.spotId : undefined;
+  const last = messages.at(-1)?.content;
+  const result = Array.isArray(last) && last[0]?.type === 'tool_result' ? String(last[0].content) : undefined;
+  const asked = messages.at(-2)?.content;
+  const lastCall = Array.isArray(asked) ? asked.find((b: { type: string }) => b.type === 'tool_use')?.name : undefined;
+  if (!spotId) return result ? { name: 'answer', input: STUB_CARD } : { name: 'list_screen_status', input: {} };
+  if (!result) return { name: 'get_spot', input: { spotId } };
+  if (lastCall === 'get_spot') {
+    const read = JSON.parse(
+      result
+        .replace(/^<data>\n/, '')
+        .replace(/\n<\/data>$/, '')
+        .replaceAll('&lt;', '<'),
+    );
+    return { name: 'update_spot', input: { spotId, data: { ...read.spot.data, ...STUB_DRAFT } } };
+  }
+  return { name: 'answer', input: STUB_DRAFTED };
+}
+
+/**
  * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
  * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
  * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
@@ -80,8 +109,7 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
         const asked = JSON.parse(body);
         // The drawer's tool loop (#267): first a read, then the answer, as `STUB_CARD`.
         if (asked.tools) {
-          const read = asked.messages.at(-1)?.content?.[0]?.type === 'tool_result';
-          const call = read ? { name: 'answer', input: STUB_CARD } : { name: 'list_screen_status', input: {} };
+          const call = drawerStep(asked.messages);
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(
             JSON.stringify({
@@ -89,7 +117,7 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
               type: 'message',
               role: 'assistant',
               model: asked.model,
-              content: [{ type: 'tool_use', id: `toolu_${read ? 2 : 1}`, ...call }],
+              content: [{ type: 'tool_use', id: `toolu_${asked.messages.length}`, ...call }],
               stop_reason: 'tool_use',
               stop_sequence: null,
               usage: { input_tokens: 1, output_tokens: 1 },

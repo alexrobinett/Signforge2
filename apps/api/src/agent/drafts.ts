@@ -54,7 +54,7 @@ export function draftTools(grant: Grant) {
   const asked = grant.role === 'viewer' ? { ...grant, role: 'editor' as const } : grant;
   return Object.keys(DRAFTS).flatMap((name) => {
     const tool = registry.get(name);
-    return tool && tool.mutates && !tool.people && permits(asked, tool) ? [tool] : [];
+    return tool?.mutates && !tool.people && permits(asked, tool) ? [tool] : [];
   });
 }
 
