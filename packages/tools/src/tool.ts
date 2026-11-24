@@ -7,7 +7,7 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
-import { type AiProviderName, CMS_AGENT_CLIENT_ID, SCOPES, type ToolErrorCode } from './outputs';
+import { type AgentCall, type AgentUsage, type AiProviderName, CMS_AGENT_CLIENT_ID, SCOPES, type ToolErrorCode } from './outputs';
 
 export { CMS_AGENT_CLIENT_ID };
 import type { UploadSigner } from './upload';
@@ -202,6 +202,20 @@ export interface AiProviders {
 }
 
 /**
+ * The calls an org's agents made over /mcp (M4-08), read back. It reads one org's only: the API
+ * builds it for the caller's org. Never a call's input, output or message: what was called, when,
+ * and how it ended. `since` bounds every read, in ms since the epoch.
+ */
+export interface AgentCallLog {
+  /** Each grant's counts since `since`; a grant with no calls may be left out. */
+  usage(grantIds: readonly string[], since: number): Promise<AgentUsage[]>;
+  /** The grant's latest calls since `since`, newest first, at most `limit`. */
+  recent(grantId: string, since: number, limit: number): Promise<AgentCall[]>;
+  /** The grant's latest refused call since `since`. */
+  lastRefusal(grantId: string, since: number): Promise<AgentCall | null>;
+}
+
+/**
  * Tool services (GLOSSARY.md): what a tool may use beyond its input and the org's data. A caller
  * carries the ones it can provide; a tool names those it uses in `needs`, and dispatch refuses a
  * call that lacks one before the handler runs. The API's constructor (apps/api/src/tool-services.ts)
@@ -231,6 +245,8 @@ export interface ToolServices {
   members?: Members;
   /** Counts attempts against the caller's rate limits: a tool that guards a guessable secret or a third party's allowance. */
   rateLimit?: RateLimiter;
+  /** The calls the org's agents made over /mcp, as recorded (M4-08; the API: Analytics Engine). */
+  agentCalls?: AgentCallLog;
   /**
    * Reaches screens' sockets. Dispatch's own, like `deliverNow`: it sends what a handler queued with
    * `ctx.notify` once the writes are committed. Without it, screens learn of a change at their next sync.
@@ -257,6 +273,7 @@ export const SERVICE_WORDS: Record<ServiceName, string> = {
   aiProviders: 'the AI providers',
   members: 'member management',
   rateLimit: 'a rate limit',
+  agentCalls: "the agents' call log",
 };
 
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */

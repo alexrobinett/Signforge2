@@ -80,7 +80,7 @@ export const isAudience = (v: unknown): v is Audience => AUDIENCES.some((a) => a
 export const ALERTS: { kind: AlertKind; when: string; note: string }[] = [
   { kind: 'screen_offline', when: 'A screen goes offline, and when it is back', note: '' },
   { kind: 'publish_finished', when: 'A publish reaches every screen', note: 'Once every screen it switched plays it, checked every 5 minutes' },
-  { kind: 'agent_refused', when: 'An agent is refused', note: 'Sent once agents can connect' },
+  { kind: 'agent_refused', when: 'An agent is refused', note: 'Refused for a scope it lacks 3 times in an hour; at most once an hour per agent' },
 ];
 
 /** What each role may do: the table on the Members page, matching ROLE_SCOPES, the org's choice of who publishes, and the tools' minimum roles. */

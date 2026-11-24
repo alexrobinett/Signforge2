@@ -20,7 +20,18 @@ import { AGENT_LIMITS, type AgentAllowance, type AgentLimit, type AgentLimiter, 
 import { DurableObject } from 'cloudflare:workers';
 
 const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+
+/** How many `forbidden` refusals within an hour alert the org (M4-08): an agent misconfigured or misled, not one stray call. */
+const REFUSALS_TO_ALERT = 3;
+
+/** The open hour's `forbidden` refusals. */
+interface Refusals {
+  start: number;
+  count: number;
+}
+const REFUSALS_KEY = 'refusals';
 
 /** A window's writes, and whether its refusals' audit row is written. */
 interface Window {
@@ -60,6 +71,21 @@ export class AgentGrantObject extends DurableObject<Env> {
     if (windows[window].start !== start || windows[window].audited) return;
     windows[window].audited = true;
     this.ctx.storage.kv.put(WINDOWS_KEY, windows);
+  }
+
+  /**
+   * A call refused `forbidden` (M4-08), counted in the open hour by the object's clock. `alert` is
+   * true for exactly one refusal an hour, the `REFUSALS_TO_ALERT`th, however many race: the alert
+   * goes at most once per grant an hour. Only a refusal reaches the object; a call it allows never does.
+   */
+  refused(): { alert: boolean; refusals: number; hour: number } {
+    const now = Date.now();
+    const start = now - (now % HOUR_MS);
+    const stored = this.ctx.storage.kv.get<Refusals>(REFUSALS_KEY);
+    const hour = stored?.start === start ? stored : { start, count: 0 };
+    hour.count++;
+    this.ctx.storage.kv.put(REFUSALS_KEY, hour);
+    return { alert: hour.count === REFUSALS_TO_ALERT, refusals: hour.count, hour: start };
   }
 
   /** The open windows at `now`, as stored. */

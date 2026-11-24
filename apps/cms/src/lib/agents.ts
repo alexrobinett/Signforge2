@@ -1,13 +1,19 @@
 /**
  * Settings › API & agents (M4-07, the SettingsApi and AgentDetail boards): connected agents as the
- * grant tools return them, and the tool reference, each tool with its scope and role.
+ * grant tools return them, the tool reference, each tool with its scope and role, and each agent's
+ * calls over the last 7 days in words (M4-08, `get_agent_grant_usage`).
  */
-import type { ToolOutput } from '@signforge/tools/outputs';
+import type { ToolErrorCode, ToolOutput } from '@signforge/tools/outputs';
 import { CONNECT_SCOPES, type ConnectScope } from './connect';
 import { ago } from './screen-status';
 
 /** A connected agent: its grant, with its client as a page may name it. */
 export type AgentGrant = ToolOutput<'list_agent_grants'>['grants'][number];
+
+/** An agent's calls over the last 7 days, as /mcp recorded them. */
+export type AgentUsage = ToolOutput<'get_agent_grant_usage'>['grants'][number];
+/** One recorded call: what it called and how it ended, never what it was given. */
+export type AgentCall = ToolOutput<'get_agent_grant_usage'>['recent'][number];
 
 const ROLES = ['viewer', 'editor', 'owner'] as const;
 
@@ -42,3 +48,27 @@ export function lastActive(lastUsedAt: number | null, now: number): string {
   if (lastUsedAt === null) return 'Never';
   return now - lastUsedAt < HOUR ? 'This hour' : `${ago(now - lastUsedAt)} ago`;
 }
+
+const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+/** The list's "Last 7 days": "12 calls · 3 changes". */
+export const weekWords = (u: Pick<AgentUsage, 'calls' | 'changes'>) => `${count(u.calls, 'call', 'calls')} · ${count(u.changes, 'change', 'changes')}`;
+
+/** How a call ended, in words: a refusal by its code, and what a refused call needed. */
+export function outcome(call: AgentCall): string {
+  if (call.result === 'ok') return call.change ? 'Changed' : 'Read';
+  if (call.result === 'forbidden') return call.needs ? `Refused: needs ${call.needs}` : 'Refused';
+  // A code newer than this page's words: still a refusal.
+  return RESULT_WORDS[call.result] ?? 'Refused';
+}
+
+/** Every other ending's words; the call log's text is looked up here, so any string may come. */
+const RESULT_WORDS: Record<string, string> = {
+  not_found: 'Not found',
+  invalid_input: 'Refused: input not valid',
+  conflict: 'Refused: changed since it read it',
+  rate_limited: 'Refused: over its limit',
+  unknown_tool: 'No such tool',
+  unavailable: 'Not available just then',
+  error: 'Failed',
+} satisfies Record<Exclude<ToolErrorCode, 'forbidden'> | 'error', string>;

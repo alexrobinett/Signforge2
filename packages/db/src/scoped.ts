@@ -1382,6 +1382,11 @@ export function scoped(d1: D1Database, orgId: string) {
       settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
         await settleStatement(db, orgId, id, attempt, now, result).run();
       },
+      /** Queues `alert` for each of its channels now, on its own (an agent's refusals, M4-08); an event already queued for a channel is left as it is. */
+      queue: async (alert: QueuedAlert, now: number): Promise<void> => {
+        const [first, ...rest] = queueAlert(alert, now, sql`1`);
+        if (first) await db.batch([first, ...rest]);
+      },
       stage: {
         insert: alertDeliveries.stage.insert,
         /**

@@ -42,6 +42,20 @@ export type AlertEvent = { id: string; occurredAt: string; org: { id: string; na
        */
       data: { publish: { id: string; revision: number; url: string | null; publishedAt: string }; screens: number; playing: number; replaced: number };
     }
+  | {
+      type: 'agent.refused';
+      /**
+       * An agent refused `forbidden` again and again within the hour (M4-08): sent at most once per
+       * grant an hour. `client.name` is null when a page may not show it (`shownClient`). `tool` and
+       * `needs` are its latest refused call's; `url` is the agent's page in the CMS.
+       */
+      data: {
+        grant: { id: string; url: string | null; client: { id: string; name: string | null } };
+        refusals: number;
+        tool: string;
+        needs: string | null;
+      };
+    }
   | { type: 'test'; data: { message: string } }
 );
 

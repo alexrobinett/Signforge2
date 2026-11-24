@@ -2,8 +2,9 @@
  * One connected agent (M4-07, canvas board AgentDetail): its scopes, which apply from its next call,
  * its recent changes with a link to the audit log filtered to it, and Disconnect. The member who
  * connected it may add any scope they hold themselves and remove any; an owner may remove scopes from
- * anyone's and disconnect it; the tools check both again (`update_agent_grant_scopes`). This week's
- * numbers and the last refusal come with M4-08's call telemetry: the audit log has changes only.
+ * anyone's and disconnect it; the tools check both again (`update_agent_grant_scopes`). Its last 7
+ * days come from the call log (M4-08, `get_agent_grant_usage`): its numbers, its last refusal and its
+ * recent calls, reads included, each change linked to its row in the audit log.
  */
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { ArrowLeftIcon, LoaderCircleIcon } from 'lucide-react';
@@ -21,7 +22,7 @@ import {
   AlertDialogTitle,
 } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
-import { type AgentGrant, grantedOn, lastActive } from '~/lib/agents';
+import { type AgentCall, type AgentGrant, type AgentUsage, grantedOn, lastActive, outcome } from '~/lib/agents';
 import { CONNECT_SCOPES, type ConnectScope, SCOPE_WORDS } from '~/lib/connect';
 import { useOrgId } from '~/lib/live';
 import { ago } from '~/lib/screen-status';
@@ -49,11 +50,12 @@ function AgentPage() {
       </div>
     );
   }
-  const { grant, recent, mine, names, at } = found;
+  const { grant, recent, week, mine, names, at } = found;
   return (
     <>
       <AgentHeader grant={grant} grantedBy={names[grant.grantedBy] ?? 'a former member'} at={at} />
       <Scopes grant={grant} mine={mine} grantedBy={names[grant.grantedBy] ?? 'the member who connected it'} />
+      <LastWeek grantId={grant.id} week={week} at={at} />
       <RecentChanges grantId={grant.id} recent={recent} at={at} />
       <DisconnectDialog grant={grant} />
     </>
@@ -168,6 +170,82 @@ function Scopes({ grant, mine, grantedBy }: { grant: AgentGrant; mine: ConnectSc
   );
 }
 
+function LastWeek({
+  grantId,
+  week,
+  at,
+}: {
+  grantId: string;
+  /** Null when the call log cannot be read. */
+  week: { usage: AgentUsage; calls: AgentCall[]; lastRefusal: AgentCall | null } | null;
+  at: number;
+}) {
+  const id = useId();
+  if (!week) {
+    return (
+      <SettingsSection id={`${id}-week`} title="Last 7 days">
+        <p className="text-sm text-muted-foreground">Its calls are not available just now. Its changes are below, from the audit log.</p>
+      </SettingsSection>
+    );
+  }
+  const { usage, calls, lastRefusal } = week;
+  const numbers = [
+    ['Tool calls', usage.calls],
+    ['Changes', usage.changes],
+    ['Drafts made', usage.drafts],
+    ['Refused', usage.refusals],
+  ] as const;
+  return (
+    <SettingsSection id={`${id}-week`} title="Last 7 days" description="Every call it made: what it called and how that ended, never what it sent or got back.">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {numbers.map(([label, n]) => (
+          <div key={label} className="rounded-md border p-3">
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="text-2xl font-semibold tabular-nums">{n.toLocaleString('en-US')}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="space-y-1 text-sm">
+        <h3 className="font-medium">Last refusal</h3>
+        {lastRefusal ? (
+          <p>
+            {ago(at - lastRefusal.at)} ago, calling <span className="font-mono text-xs">{lastRefusal.tool}</span>: {outcome(lastRefusal)}.
+          </p>
+        ) : (
+          <p className="text-muted-foreground">None in the last 7 days.</p>
+        )}
+      </div>
+      <div className="space-y-1 text-sm">
+        <h3 className="font-medium">Recent calls</h3>
+        {calls.length ? (
+          <ul className="divide-y">
+            {calls.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: two calls can share a millisecond, tool and ending, and the list is never reordered, so a call's place keys it.
+              <li key={i} className="grid gap-1 py-2 sm:grid-cols-[6rem_minmax(0,1fr)_auto] sm:gap-4">
+                <span className="text-muted-foreground">{ago(at - c.at)} ago</span>
+                <span className="min-w-0">
+                  <span className="font-mono text-xs">{c.tool}</span> <span className="text-muted-foreground">{outcome(c)}</span>
+                </span>
+                {c.target && (
+                  <Link
+                    to="/audit"
+                    search={{ who: grantId, target: c.target.kind, targetId: c.target.id }}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    See the change<span className="sr-only"> by {c.tool}</span>
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">No calls in the last 7 days.</p>
+        )}
+      </div>
+    </SettingsSection>
+  );
+}
+
 function RecentChanges({ grantId, recent, at }: { grantId: string; recent: { at: number; action: string; what: string; detail: string }[]; at: number }) {
   const id = useId();
   return (
@@ -176,7 +254,7 @@ function RecentChanges({ grantId, recent, at }: { grantId: string; recent: { at:
       title="Recent changes"
       description={
         <>
-          What it changed, newest first: reads are not recorded.{' '}
+          What it changed, newest first, from the audit log.{' '}
           <Link to="/audit" search={{ who: grantId }} className="font-medium text-foreground underline underline-offset-4">
             Open in the audit log
           </Link>
