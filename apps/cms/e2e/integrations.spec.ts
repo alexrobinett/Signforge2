@@ -66,6 +66,17 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
   await expect(now).toContainText('No data sources yet');
   await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button')).toHaveText(['All 26', 'Connected 0', 'Built 5', 'Planned 17', 'Later 4']);
+  // Selected without colour (#373): under forced colors the pressed filter's edge is thicker than the rest,
+  // and a focused one keeps an outline, which forced colors paints.
+  await owner.emulateMedia({ forcedColors: 'active' });
+  const show = owner.getByRole('group', { name: 'Show' });
+  const edge = (name: string) => show.getByRole('button', { name }).evaluate((b) => getComputedStyle(b).borderTopWidth);
+  expect(await edge('All 26')).not.toBe(await edge('Connected 0'));
+  await show.getByRole('button', { name: 'All 26' }).focus();
+  await owner.keyboard.press('Tab');
+  await expect(show.getByRole('button', { name: 'Connected 0' })).toBeFocused();
+  expect(await show.getByRole('button', { name: 'Connected 0' }).evaluate((b) => getComputedStyle(b).outlineStyle)).not.toBe('none');
+  await owner.emulateMedia({ forcedColors: 'none' });
   // A new org: the first Connect is the page's one filled button.
   await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
 
