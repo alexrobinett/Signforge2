@@ -60,7 +60,15 @@ function endpoint(answer: (url: string) => Response) {
 }
 
 /** A streamed message's start, as Anthropic sends it. */
-const START = { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } };
+const START = {
+  id: 'm',
+  type: 'message',
+  role: 'assistant',
+  model: 'claude-sonnet-5-5',
+  content: [],
+  stop_reason: null,
+  usage: { input_tokens: 1, output_tokens: 1 },
+};
 
 const sealed = (key: typeof ANTHROPIC | typeof ENDPOINT, apiKey = KEY) => aiProviders(DEV).seal(key, apiKey);
 
@@ -329,7 +337,16 @@ describe('the words a fill says, the same as before on both paths (review of #39
     anthropic((b) =>
       b.stream
         ? anthropicStream('m', b.model, [{ type: 'text', text }], stop)
-        : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+        : Response.json({
+            id: 'm',
+            type: 'message',
+            role: 'assistant',
+            model: b.model,
+            content: [{ type: 'text', text }],
+            stop_reason: stop,
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
     );
   const PATHS = ['claude-haiku-5-5', 'claude-haiku-5-5-20261201'];
 

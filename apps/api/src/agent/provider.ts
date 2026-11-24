@@ -287,9 +287,17 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
     asked = true;
     const res = await guarded.fetch(input, init);
     if (res.headers.get('content-type')?.includes('application/json')) {
-      const answer = wholeAnswer.safeParse(await res.clone().json().catch(() => undefined));
+      const answer = wholeAnswer.safeParse(
+        await res
+          .clone()
+          .json()
+          .catch(() => undefined),
+      );
       if (answer.success)
-        whole = { refused: answer.data.stop_reason === 'refusal', text: answer.data.content.flatMap((b) => (b.type === 'text' && b.text ? [b.text] : [])).join('') };
+        whole = {
+          refused: answer.data.stop_reason === 'refusal',
+          text: answer.data.content.flatMap((b) => (b.type === 'text' && b.text ? [b.text] : [])).join(''),
+        };
     }
     return res;
   };
