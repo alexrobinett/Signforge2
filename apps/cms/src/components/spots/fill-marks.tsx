@@ -80,12 +80,15 @@ export function FillBanner({
 /** After Keep (#264): how many fields the update changed, the other spots with the same rows, and Undo. */
 export function UpdateBanner({
   changed,
+  undoable,
   alsoOn,
   onReview,
   onUndo,
   onDone,
 }: {
   changed: number;
+  /** False once every field the update changed has been edited since: there is nothing of it to undo. */
+  undoable: boolean;
   alsoOn: { spotId: string; name: string; items: string[] }[];
   onReview: (spotId: string) => void;
   onUndo: () => void;
@@ -111,9 +114,11 @@ export function UpdateBanner({
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onUndo}>
-          Undo the update
-        </Button>
+        {undoable && (
+          <Button type="button" variant="outline" size="sm" onClick={onUndo}>
+            Undo the update
+          </Button>
+        )}
         <Button type="button" size="sm" onClick={onDone}>
           Done
         </Button>

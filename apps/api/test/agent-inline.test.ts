@@ -625,6 +625,9 @@ const MENU = {
     },
     qr: { type: 'url', label: 'QR code link', default: '' },
     accent: { type: 'color', label: 'Accent', default: '$brand.accent' },
+    // Choices of look and of what shows, which the agent leaves to the person (#264 review).
+    theme: { type: 'select', label: 'Theme', options: ['dark', 'light'], default: 'dark' },
+    ticker: { type: 'select', label: 'Ticker', options: ['on', 'off'], default: 'on' },
   },
   duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
   orientations: ['landscape', 'portrait'],
@@ -804,6 +807,43 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     const bound = await menu({ bindings: { items: { source: 'dsrc_menu', path: 'rows' } } });
     const v = (await bound.stored()).version;
     expect((await bound.keep({ spotId: bound.spot.id, ifVersion: v, data: { ...MENU_DATA, items: ROWS.slice(1) } })).status).toBe(400);
+  });
+
+  it("writes no choice, a look or what shows: the model's theme and ticker are dropped and marked, and refused at Keep (#264 review)", async () => {
+    const m = await menu();
+    m.answer({ title: 'Lunch', theme: 'light', ticker: 'off' });
+    const { review } = await (await m.update()).json<any>();
+    expect(review.data).toEqual({ ...MENU_DATA, title: 'Lunch' });
+    expect(review.marks).toEqual({
+      title: { state: 'filled' },
+      theme: { state: 'missing', note: expect.stringContaining('leaves to you') },
+      ticker: { state: 'missing', note: expect.stringContaining('leaves to you') },
+    });
+    // Not offered: the model is not told of them.
+    expect(m.model.asked[0]!.body.messages[0].content.at(-1).text).not.toMatch(/"theme"|"ticker"/);
+    for (const data of [
+      { ...MENU_DATA, theme: 'light' },
+      { ...MENU_DATA, ticker: 'off' },
+    ])
+      expect((await m.keep({ spotId: m.spot.id, ifVersion: review.version, data })).status, JSON.stringify(data).slice(-30)).toBe(400);
+    expect((await m.stored()).data).toEqual(MENU_DATA);
+    // A new spot's choices are marked for the person to make.
+    m.answer({ title: 'Lunch', theme: 'light' });
+    const made = await (await m.fill({ kind: 'link', url: LINK })).json<any>();
+    expect(made.spot.data.theme).toBeUndefined();
+    expect(made.marks.theme).toMatchObject({ state: 'missing', note: expect.stringContaining('leaves to you') });
+  });
+
+  it('refuses a row key that is no column, from Keep and from update_spot for every caller (#264 review)', async () => {
+    const m = await menu();
+    const v = (await m.stored()).version;
+    const rows = [{ ...ROWS[0], payUrl: 'https://evil.example/pay' }, ...ROWS.slice(1)];
+    const kept = await m.keep({ spotId: m.spot.id, ifVersion: v, data: { ...MENU_DATA, items: rows } });
+    expect(kept.status).toBe(400);
+    expect(await kept.json()).toMatchObject({ message: expect.stringContaining('has no column "payUrl"') });
+    const tool = await m.owner.tool('update_spot', { spotId: m.spot.id, data: { ...MENU_DATA, items: rows }, ifVersion: v });
+    expect(tool.status).toBe(400);
+    expect((await m.stored()).data).toEqual(MENU_DATA);
   });
 
   it('fills only a template spot of its own org, as a member who may change it', async () => {

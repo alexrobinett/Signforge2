@@ -9,7 +9,8 @@
  * In the editor (#264) the same fill reads a spot that exists: the draft is saved first, and the API
  * says what it would change, writing nothing (`reviews`). The stage plays the change while the review
  * is open. Keep writes it (`POST /api/agent/inline/keep`) at the version it was made on: a save made
- * since is kept and the review offers Reload. Undo puts back what Keep changed, as an edit.
+ * since is kept and the review offers Reload. Undo puts back what Keep changed that the person has
+ * not edited since, as an edit.
  */
 import {
   FILL_IMAGE_EDGE,
@@ -21,12 +22,13 @@ import {
   type KeepRequest,
 } from '@signforge/api/agent-inline';
 import type { FieldDef } from '@signforge/contract';
-import { alsoOn, fillChanges, type AlsoOn } from '~/lib/fill-changes';
+import { toast } from 'sonner';
+import { alsoOn, applyRows, fillChanges, type AlsoOn } from '~/lib/fill-changes';
 import { versionsById, type SpotView } from '~/lib/spots';
 import { MediaError, scaledPhoto, uploadImage } from '@signforge/media';
 import { tabOrgHeaders } from '~/lib/tab-org';
 import { answer, callToolByName, Refusal, toolMessage } from '~/lib/tools';
-import { spotKeys, spotsQuery, templatesQuery } from '~/queries/spots';
+import { spotKeys, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 interface FillDraft {
@@ -50,8 +52,13 @@ interface Filled {
   /** A new spot (#263), or one updated by Keep (#264), whose Undo puts back `before`. */
   kind: 'new' | 'update';
   marks: Record<string, FieldMark>;
-  /** An update's changed fields as they were. */
+  /**
+   * An update's changed fields as they were, for Undo: each leaves when the person edits it, so Undo
+   * never puts back over an edit made since.
+   */
   before?: Record<string, unknown>;
+  /** How many fields the update changed. */
+  changed?: number;
   /** An update's changed rows on other spots, each offered the same review. */
   alsoOn?: AlsoOn[];
   photo: File | null;
@@ -214,9 +221,11 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
 
     clearFillMark: (spotId, field) =>
       filled(spotId, (f) => {
-        if (!(field in f.marks)) return f;
+        if (!Object.hasOwn(f.marks, field) && !(f.before && Object.hasOwn(f.before, field))) return f;
         const { [field]: _cleared, ...marks } = f.marks;
-        return { ...f, marks };
+        // A field edited since Keep is the person's now: Undo leaves it as they made it.
+        const before = f.before && Object.fromEntries(Object.entries(f.before).filter(([k]) => k !== field));
+        return { ...f, marks, ...(before && { before }) };
       }),
 
     finishFill: (spotId) => filled(spotId, () => undefined),
@@ -261,8 +270,12 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
       fill((f) => ({ ...f, pending: true, error: null, inSettings: false }));
       const { photo, link } = get().agent.fill;
       try {
-        // What is typed is saved first: the review is of the draft as it is now, and nothing of it is the agent's.
+        // What is typed is saved first: the review is of the draft as it is now, and nothing of it is the agent's. A draft
+        // that does not save (a field marked, a save someone else's overtook) stops it, or Keep would drop what was typed.
         await get().saveSpotDraft(spotId);
+        const draft = get().spotEditor.drafts[spotId];
+        if (draft?.orgId === orgId && draft.status !== 'saved')
+          throw new Refusal('invalid_input', 'Save the draft first: fix what is marked, then fill from a flyer.');
         const source = await sourceOf(photo, link);
         const { review } = await post<InlineReview>('/api/agent/inline', { source, spotId });
         // Where else a changed row is, from the org's spots and templates as the Spots page reads them: a help, so a
@@ -304,7 +317,17 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
             reviews: rest,
             filled: {
               ...a.filled,
-              [spotId]: { kind: 'update', marks: keptMarks(fields, r), before, alsoOn: r.alsoOn, photo: null, link: '', uploading: false, uploadError: null },
+              [spotId]: {
+                kind: 'update',
+                marks: keptMarks(fields, r),
+                before,
+                changed: changed.length,
+                alsoOn: r.alsoOn,
+                photo: null,
+                link: '',
+                uploading: false,
+                uploadError: null,
+              },
             },
           };
         });
@@ -339,11 +362,34 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
     },
 
     async reviewAlsoOn(orgId, fromSpot, other) {
+      // As for any review: that spot's own typing is saved first, and a draft that does not save stops it.
+      await get().saveSpotDraft(other.spotId);
+      const draft = get().spotEditor.drafts[other.spotId];
+      if (draft?.orgId === orgId && draft.status !== 'saved') {
+        toast.error('Not reviewed', { description: `Save the draft of ${other.name} first: fix what is marked, then review it.` });
+        return;
+      }
+      // The rows changed again on the spot as it is now, read fresh: not as it was when this review was offered.
+      let now: AlsoOn | undefined;
+      try {
+        const [spot, templates] = await Promise.all([
+          queryClient.query({ ...spotQuery(orgId, other.spotId), staleTime: 0 }),
+          queryClient.query(templatesQuery(orgId)),
+        ]);
+        now = spot ? applyRows(spot, versionsById(templates.templates), other.rows) : undefined;
+      } catch (err) {
+        toast.error('Not reviewed', { description: toolMessage(err) });
+        return;
+      }
+      if (!now) {
+        toast.info(`Nothing to change on ${other.name}`, { description: `It no longer has ${other.items.join(', ')} as this update left them.` });
+        return;
+      }
       const review: Review = {
         orgId,
-        version: other.version,
-        before: other.before,
-        data: other.data,
+        version: now.version,
+        before: now.before,
+        data: now.data,
         marks: {},
         from: 'spot',
         fromSpot,

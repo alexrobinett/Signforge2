@@ -129,8 +129,15 @@ const SETTINGS = 'Settings, AI & agents';
 
 const refuse = (c: Context<ApiEnv>, error: InlineProblem, message: string) => c.json({ error, message }, STATUSES[error]);
 
-/** The types a fill writes. A colour or a switch is the look's, chosen by a person; an image is picked or uploaded. */
-const WRITES = new Set<FieldDef['type']>(['text', 'number', 'select', 'date', 'datetime', 'list']);
+/**
+ * The types a fill writes. A colour or a switch is the look's, chosen by a person; an image is
+ * picked or uploaded. A choice (`select`) is too, for now: templates use it for their look (a theme,
+ * a crawl's speed), what shows (a ticker on or off) and how loud (an alert's severity) as much as for
+ * content, and nothing in a manifest tells them apart yet (#264 review).
+ */
+const WRITES = new Set<FieldDef['type']>(['text', 'number', 'date', 'datetime', 'list']);
+
+const CHOICE = 'A choice the agent leaves to you: it picks no look, and nothing that shows or hides';
 
 /** A template the model may choose: its newest approved version, and what the model is told of it. */
 interface Offer {
@@ -287,7 +294,7 @@ function rowOf(item: Record<string, ScalarFieldDef>, row: Record<string, unknown
       const v = row[k];
       if (d.type === 'url' && typeof v === 'string' && v.trim() && v.trim() !== was?.[k]) links.push(v.trim().slice(0, MAX_URL_BYTES));
       if (WRITES.has(d.type) && v !== undefined && v !== null) return [k, v];
-      return [k, was && k in was ? was[k] : startValue(d)];
+      return [k, was && Object.hasOwn(was, k) ? was[k] : startValue(d)];
     }),
   );
 }
@@ -323,9 +330,11 @@ function sortFill(offer: Offer, data: Record<string, unknown>, unsure: string[],
   const kept: Record<string, unknown> = {};
   const marks: Record<string, FieldMark> = {};
   const problems: string[] = [];
-  if (!was)
-    for (const [name, def] of Object.entries(offer.manifest.fields))
-      if (def.type === 'image') marks[name] = { state: 'missing', note: 'Choose a photo for it' };
+  for (const [name, def] of Object.entries(offer.manifest.fields)) {
+    if (def.type === 'image' && !was) marks[name] = { state: 'missing', note: 'Choose a photo for it' };
+    // A new spot's choices are marked for the person to make; an update's, only where the model tried to change one.
+    if (def.type === 'select' && (!was || (Object.hasOwn(data, name) && !same(data[name], start[name])))) marks[name] = { state: 'missing', note: CHOICE };
+  }
   for (const [name, def] of Object.entries(offer.fields)) {
     const v = data[name];
     if (def.type === 'url') {
@@ -405,7 +414,7 @@ async function spotToFill(
  */
 function keepProblem(offer: Offer, was: Record<string, unknown>, data: Record<string, unknown>): string | undefined {
   for (const [name, def] of Object.entries(offer.manifest.fields)) {
-    const writes = name in offer.fields && def.type !== 'url';
+    const writes = Object.hasOwn(offer.fields, name) && def.type !== 'url';
     if (!writes) {
       if (!same(data[name], was[name])) return `the agent does not change "${name}"`;
       continue;
@@ -419,7 +428,7 @@ function keepProblem(offer: Offer, was: Record<string, unknown>, data: Record<st
       added.every((j) => same(after[j]?.[k], startValue(def.item[k] ?? { type: 'text', label: k })));
     for (const [k, d] of Object.entries(def.item)) if (!WRITES.has(d.type) && !kept(k)) return `the agent does not change "${name}.${k}"`;
   }
-  for (const name of Object.keys(data)) if (!(name in offer.manifest.fields)) return `unknown field "${name}"`;
+  for (const name of Object.keys(data)) if (!Object.hasOwn(offer.manifest.fields, name)) return `unknown field "${name}"`;
   return undefined;
 }
 
@@ -527,7 +536,7 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
       // The spot's values, as data: so the model names an item as the spot does when it is the same item.
       intro:
         'This updates a spot that has the values in <current> already. Write each field as the material shows it now, and leave out a field it does not show, which keeps its value. Give a list whole, as the material lists it, naming an item as <current> does when it is the same item.',
-      values: Object.fromEntries(Object.keys(updating.offer.fields).flatMap((k) => (k in updating.data ? [[k, updating.data[k]]] : []))),
+      values: Object.fromEntries(Object.keys(updating.offer.fields).flatMap((k) => (Object.hasOwn(updating.data, k) ? [[k, updating.data[k]]] : []))),
     };
     const text = [
       `Today is ${day}.`,

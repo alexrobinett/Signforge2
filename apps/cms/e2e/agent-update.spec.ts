@@ -70,9 +70,18 @@ test("a member updates a menu from today's, sees each row it changes before anyt
   const stage = page.getByTitle(/^Preview, landscape/);
   const keep = review.getByRole('button', { name: 'Keep in the draft' });
   expect((await stage.boundingBox())!.y).toBeLessThan((await review.boundingBox())!.y);
+  await axe(page);
   await review.evaluate((el) => el.scrollIntoView({ block: 'start' }));
-  await expect(keep).toBeInViewport();
   await shots(page, '99-update-review-phone');
+  // A short phone, the review's top in view: Keep in its own place in the page would be below the fold
+  // (measured with the bar not sticking), and with the bar it is wholly in view.
+  await page.setViewportSize({ width: 390, height: 300 });
+  await review.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  const bar = keep.locator('..');
+  await bar.evaluate((el) => el.style.setProperty('position', 'static'));
+  expect((await keep.boundingBox())!.y + (await keep.boundingBox())!.height, 'Keep, its bar not sticking').toBeGreaterThan(300);
+  await bar.evaluate((el) => el.style.removeProperty('position'));
+  await expect(keep).toBeInViewport({ ratio: 1 });
   await page.setViewportSize({ width: 1280, height: 800 });
 
   await keep.click();

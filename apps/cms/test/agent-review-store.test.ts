@@ -13,8 +13,13 @@ vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/queries/spots', () => ({
   spotKeys: { all: (o: string) => ['org', o, 'spots'], one: (o: string, s: string) => ['org', o, 'spots', s] },
   spotsQuery: (o: string) => ({ queryKey: ['org', o, 'spots'], queryFn: async () => ({ spots: [] }) }),
-  templatesQuery: (o: string) => ({ queryKey: ['org', o, 'templates'], queryFn: async () => ({ templates: [] }) }),
+  spotQuery: (o: string, s: string) => ({ queryKey: ['org', o, 'spots', s], queryFn: async () => server.spots[s] ?? null }),
+  templatesQuery: (o: string) => ({ queryKey: ['org', o, 'templates'], queryFn: async () => ({ templates: server.templates }) }),
 }));
+const toasts = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toasts }));
+/** What the server holds, for the reads the store makes fresh. */
+const server = vi.hoisted(() => ({ spots: {} as Record<string, unknown>, templates: [] as unknown[] }));
 
 const ORG = 'org_1';
 const SPOT = 'spt_breakfast';
@@ -54,6 +59,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 type Store = AgentSlice & {
+  spotEditor: { drafts: Record<string, { orgId: string; status: string }> };
   saveSpotDraft: (id: string) => Promise<void>;
   redrawStage: () => void;
   reloadSpot: (o: string, id: string) => Promise<void>;
@@ -61,13 +67,18 @@ type Store = AgentSlice & {
   openNewSpot: (open: boolean) => void;
 };
 
-function agentStore() {
+/** A store whose drafts save as `saves` says (saved, unless named): as the editor's versioned drafts leave them. */
+function agentStore(saves: Record<string, string> = {}) {
   const saved: string[] = [];
   const edits: Record<string, unknown>[] = [];
   const queryClient = new QueryClient();
   const store = createStore<Store>()((set, get) => ({
     ...createAgentSlice(set as never, get as never, { router: { navigate: vi.fn() }, queryClient } as never),
-    saveSpotDraft: async (id) => void saved.push(id),
+    spotEditor: { drafts: {} },
+    saveSpotDraft: async (id) => {
+      saved.push(id);
+      set((s) => ({ spotEditor: { drafts: { ...s.spotEditor.drafts, [id]: { orgId: ORG, status: saves[id] ?? 'saved' } } } }));
+    },
     redrawStage: () => {},
     reloadSpot: async () => {},
     editSpot: (_o, _id, change) => void edits.push(change({ data: { ...AFTER, title: 'Edited since' } }).data),
@@ -125,5 +136,60 @@ describe('an update from a photo or link, in the store', () => {
     store.getState().discardReview(SPOT);
     expect(store.getState().agent.reviews).toEqual({});
     expect(sent.map((s) => s.path)).toEqual(['/api/agent/inline', '/api/agent/inline']);
+  });
+
+  it("stops, sending nothing, when the draft does not save: what was typed is the person's, and Keep would drop it (review of #319)", async () => {
+    const { store } = agentStore({ [SPOT]: 'invalid' });
+    await store.getState().reviewFill(ORG, SPOT, FIELDS);
+    expect(sent).toEqual([]);
+    expect(store.getState().agent.fill.error).toMatch(/fix what is marked/);
+    expect(store.getState().agent.reviews).toEqual({});
+  });
+
+  it('leaves out of Undo a field edited since Keep: the person fixed a row, so the items stay as they made them (review of #319)', async () => {
+    const { store, edits } = agentStore();
+    const both = { ...AFTER, title: 'Lunch' };
+    answers.push(
+      Response.json({ review: { spotId: SPOT, version: 7, before: BEFORE, data: both, marks: {} } }),
+      Response.json({ spot: { id: SPOT, data: both, version: 8 } }),
+    );
+    await store.getState().reviewFill(ORG, SPOT, FIELDS);
+    await store.getState().keepReview(SPOT, FIELDS);
+    expect(store.getState().agent.filled[SPOT]).toMatchObject({ changed: 2, before: { title: 'Morning', items: BEFORE.items } });
+    // The person fixes a row of the items.
+    store.getState().clearFillMark(SPOT, 'items');
+    store.getState().undoUpdate(ORG, SPOT);
+    // Undo puts back the title only: the items stay as the person's draft has them (the stub's draft holds AFTER's).
+    expect(edits).toEqual([{ ...AFTER, title: 'Morning' }]);
+  });
+
+  it('reviews the same row on another spot from that spot as it is now, after saving its draft, and not while its draft does not save (review of #319)', async () => {
+    server.templates = [{ id: 'tpl_menu', versions: [{ id: 'tpv_menu', status: 'approved', manifest: { fields: FIELDS } }] }];
+    const offer = { spotId: 'spt_lunch', name: 'Lunch menu', items: ['Latte'], version: 3, before: {}, data: {}, rows: { latte: { price: '$4.75' } } };
+
+    const refused = agentStore({ spt_lunch: 'invalid' });
+    await refused.store.getState().reviewAlsoOn(ORG, SPOT, offer);
+    expect(refused.saved).toEqual(['spt_lunch']);
+    expect(toasts.error).toHaveBeenCalledWith('Not reviewed', { description: expect.stringContaining('fix what is marked') });
+    expect(refused.store.getState().agent.reviews).toEqual({});
+
+    // Saved since it was offered: someone retitled it, at version 4. The review is of that.
+    server.spots.spt_lunch = {
+      id: 'spt_lunch',
+      name: 'Lunch menu',
+      kind: 'template',
+      templateVersionId: 'tpv_menu',
+      data: { title: 'Their lunch', items: [{ name: 'Latte', price: '$4.50' }] },
+      bindings: null,
+      version: 4,
+    };
+    const { store } = agentStore();
+    await store.getState().reviewAlsoOn(ORG, SPOT, offer);
+    expect(store.getState().agent.reviews.spt_lunch).toMatchObject({
+      version: 4,
+      before: { title: 'Their lunch', items: [{ name: 'Latte', price: '$4.50' }] },
+      data: { title: 'Their lunch', items: [{ name: 'Latte', price: '$4.75' }] },
+      from: 'spot',
+    });
   });
 });

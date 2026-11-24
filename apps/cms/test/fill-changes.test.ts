@@ -87,6 +87,7 @@ describe('alsoOn', () => {
             { name: 'LATTE', price: '$4.75', link: 'https://x.example' },
           ],
         },
+        rows: { latte: { price: '$4.75' } },
       },
     ]);
   });

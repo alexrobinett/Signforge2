@@ -62,8 +62,9 @@ export function FillReview({ spotId, fields }: { spotId: string; fields: Record<
                 </p>
               ) : (
                 <ul className="mt-1 flex flex-col gap-1 text-sm">
-                  {c.changed.map((row) => (
-                    <li key={`c-${row.name}`} data-row="changed">
+                  {c.changed.map((row, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: two rows may share a name; with their place, the keys differ.
+                    <li key={`c-${i}-${row.name}`} data-row="changed">
                       <span className="font-medium">{row.name}</span>
                       {row.cells.map((cell) => (
                         <span key={cell.label} className="block break-words">
@@ -73,14 +74,14 @@ export function FillReview({ spotId, fields }: { spotId: string; fields: Record<
                     </li>
                   ))}
                   {c.added.map((row, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: two new rows may read the same.
-                    <li key={`a-${i}`} data-row="added" className="break-words">
+                    // biome-ignore lint/suspicious/noArrayIndexKey: two rows may read the same; with their place, the keys differ.
+                    <li key={`a-${i}-${row}`} data-row="added" className="break-words">
                       <span className="font-medium text-status-online-foreground">Added</span> {row}
                     </li>
                   ))}
                   {c.removed.map((row, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: two removed rows may read the same.
-                    <li key={`r-${i}`} data-row="removed" className="break-words">
+                    // biome-ignore lint/suspicious/noArrayIndexKey: two rows may read the same; with their place, the keys differ.
+                    <li key={`r-${i}-${row}`} data-row="removed" className="break-words">
                       <span className="font-medium text-destructive">Removed</span> {row}
                     </li>
                   ))}

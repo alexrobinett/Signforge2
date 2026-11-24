@@ -112,7 +112,8 @@ function SpotEditor() {
   const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-xl border">
+    // Clipped, not hidden: an overflow-hidden box is a scroll container, so the review's action bar would stick to it, not the page.
+    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
       <EditorHeader
         back={{ to: '/spots', label: 'Spots' }}
         title={draft.name || spot.name}
@@ -131,7 +132,8 @@ function SpotEditor() {
       {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
       {filled?.kind === 'update' && (
         <UpdateBanner
-          changed={Object.keys(filled.before ?? {}).length}
+          changed={filled.changed ?? 0}
+          undoable={Object.keys(filled.before ?? {}).length > 0}
           alsoOn={filled.alsoOn ?? []}
           onReview={(other) => {
             const o = filled.alsoOn?.find((x) => x.spotId === other);
