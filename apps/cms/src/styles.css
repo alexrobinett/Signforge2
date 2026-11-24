@@ -83,6 +83,9 @@
   --org-saturation: 60%;
   --org-lightness: 29%;
   --org-foreground: #ffffff;
+  /* An editor's height: the viewport under the page's header and the editor's own (#363), which wraps to two
+     lines from 1024 px; its stage column fills it, its status line inside the window before any scroll. */
+  --editor-height: calc(100dvh - 10rem);
   color-scheme: light;
 }
 
@@ -200,6 +203,14 @@
   --color-actor-agent: var(--actor-agent);
   --color-actor-agent-muted: var(--actor-agent-muted);
   --color-actor-device: var(--actor-device);
+  /* The editors' stage (#363): a screen's dark surround, the same in light and dark. */
+  --color-stage: #18181a;
+  --color-stage-foreground: #e8e8e8;
+  --color-stage-muted-foreground: #c8c8c8;
+  --color-stage-control: #2a2a2d;
+  --color-stage-edge: #3a3a3d;
+  --color-stage-ring: #8fa3ff;
+  --color-stage-warning: #fdb022;
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
