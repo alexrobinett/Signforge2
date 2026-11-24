@@ -78,6 +78,46 @@ describe('the transport', () => {
   });
 });
 
+describe('failures and batches', () => {
+  it('answers an unexpected failure as a bare internal error, for tools/list and tools/call, and logs it here', async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const secret = 'sk-live-123 D1_ERROR: select * from secrets';
+    const failing: Env = {
+      ...env,
+      AGENT_CALL_LIMIT: {
+        limit: async () => {
+          throw new Error(secret);
+        },
+      },
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const [method, params] of [
+      ['tools/list', {}],
+      ['tools/call', { name: 'list_screens', arguments: {} }],
+    ] as const) {
+      const res = await post(access_token, { jsonrpc: '2.0', id: 1, method, params }, { bindings: failing });
+      const text = await res.text();
+      expect(text, method).not.toContain('sk-live');
+      expect(text, method).not.toContain('D1_ERROR');
+      expect(JSON.parse(text).error, method).toEqual({ code: -32603, message: 'Internal error' });
+    }
+    expect(logged).toHaveBeenCalledTimes(2);
+    expect(String(logged.mock.calls[0]?.[1])).toContain(secret);
+    logged.mockRestore();
+  });
+
+  it('refuses a batch with 400 before any of it runs', async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
+    const create = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'create_playlist', arguments: { name: `Batched ${id}` } } });
+    const res = await post(access_token, [create(1), create(2)]);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: -32600 } });
+    expect((await scoped(env.DB, org.id).playlists.list()).filter((p) => p.name.startsWith('Batched'))).toEqual([]);
+  });
+});
+
 describe('who may call', () => {
   it('without a token: 401 naming where to get one, with the metadata at both addresses', async () => {
     const res = await post(undefined, { jsonrpc: '2.0', id: 1, method: 'ping' });

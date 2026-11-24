@@ -43,7 +43,7 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 
 - builds the `Caller` from the grant alone: `org: scoped(db, grant.orgId)`, the member's role now, the grant's scopes, `actor: { kind: 'agent', id: <grant id>, clientId: <its OAuth client> }`, `agentLimiter`, and the API's `toolServices` without `members` (an agent has no Better Auth session, so `invite_member` and `cancel_invitation` are not offered);
 - answers `tools/list` with `describeTools` for the grant, less any tool needing a service it lacks, each tool's input schema and hints (`readOnlyHint` from `mutates`, `destructiveHint` for `delete_*` and `revoke_*`, `idempotentHint` for keyed creations). A `tools/list` counts as one call against the grant's limit (`overLimit`), and over it is a JSON-RPC error `-32000` with `rate_limited`, the limit and `retryAfterSeconds` in its data;
-- answers `tools/call` with `dispatch`: the output as `structuredContent` and as JSON text, or a refusal as a result with `isError` and `{ error, message, details }`. JSON-RPC errors are only for faults in the protocol.
+- answers `tools/call` with `dispatch`: the output as `structuredContent` and as JSON text, or a refusal as a result with `isError` and `{ error, message, details }`. JSON-RPC errors are only for faults in the protocol, and an unexpected failure is a bare `-32603 Internal error`, its details only in the log.
 
 ## The tools
 

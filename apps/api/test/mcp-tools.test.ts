@@ -1,13 +1,29 @@
 // The registry as `/mcp` lists it, and what a call answers (M4-06): every tool, for every role and
 // scope, as pure functions, with no request. mcp.test.ts runs a few through the route.
 import { type DispatchResult, describeTools, type Grant, type Members, ROLES, registry, SCOPES, type ToolServices } from '@signforge/tools';
-import { describe, expect, it } from 'vitest';
+import { createExecutionContext } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { Hono } from 'hono';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { agentServices } from '../src/mcp';
 import { callResult, listedTools } from '../src/mcp/tools';
 
 /** Every role with every scope, the org letting editors publish or not. */
 const GRANTS: Grant[] = ROLES.flatMap((role) => [true, false].map((editorsPublish) => ({ role, scopes: [...SCOPES], editorsPublish })));
-/** A caller with every service but the member tools' session, as `/mcp` builds it. */
-const AGENT: ToolServices = {};
+
+/** The services `/mcp` gives an agent, from its own constructor (none is used here: each is built lazily). */
+let AGENT: ToolServices = {};
+beforeAll(async () => {
+  const app = new Hono<{ Bindings: Env }>().get('/', (c) => {
+    AGENT = agentServices(c, { orgId: 'org_listing', userId: 'user_listing' });
+    return c.body(null, 204);
+  });
+  expect((await app.request('https://api.test/', {}, env, createExecutionContext())).status).toBe(204);
+});
+
+/** Every service some tool needs. */
+const NEEDED = [...new Set([...registry.values()].flatMap((t) => t.needs ?? []))];
+
 const members: Members = {
   invite: async () => {
     throw new Error('not called');
@@ -17,12 +33,20 @@ const members: Members = {
   remove: async () => {},
 };
 
+describe("/mcp's services", () => {
+  it('are every service a tool needs but the member tools’ session', () => {
+    expect(NEEDED).toContain('members');
+    for (const need of NEEDED) expect(AGENT[need] === undefined, need).toBe(need === 'members');
+  });
+});
+
 describe('tools/list', () => {
-  it('lists exactly the tools the grant permits that need nothing this caller lacks, each with an object input', () => {
+  it('lists exactly the tools the grant permits but the member tools, each with an object input', () => {
     for (const grant of GRANTS) {
       const permitted = describeTools(registry, grant).map((t) => t.name);
       const listed = listedTools(grant, AGENT);
-      const lacking = permitted.filter((name) => (registry.get(name)?.needs ?? []).length > 0);
+      // Only the member tools drop out: a tool needing any other service would be listed, so losing one fails here.
+      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members'));
       expect(
         listed.map((t) => t.name),
         `${grant.role} ${grant.editorsPublish}`,

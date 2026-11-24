@@ -3,7 +3,7 @@
  * cookie is refused here, as an `Authorization` header is on `/api`, and so is any request with an
  * `Origin` header (MCP's DNS-rebinding rule: no browser belongs here).
  *
- *   POST /mcp                                           one JSON-RPC exchange, answered with JSON
+ *   POST /mcp                                           one JSON-RPC message (no batches), answered with JSON
  *   GET, DELETE /mcp                                    405, before any token is read: no streams, no sessions
  *   GET /.well-known/oauth-protected-resource[/mcp]     where to get a token (RFC 9728)
  *   GET /.well-known/oauth-authorization-server/api/auth  the issuer's metadata at RFC 8414's address
@@ -19,7 +19,15 @@
  * `<host>/.well-known/oauth-*` here, and locally the CMS forwards them.
  */
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider';
-import { createMcpHandler, isLegacyRequest, ProtocolError, Server, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
+import {
+  createMcpHandler,
+  isLegacyRequest,
+  ProtocolError,
+  ProtocolErrorCode,
+  readRequestBody,
+  Server,
+  WebStandardStreamableHTTPServerTransport,
+} from '@modelcontextprotocol/server';
 import { agentGrantForToken, scoped } from '@signforge/db';
 import { type Caller, dispatch, grantOf, overLimit, ROLES, registry, SCOPES } from '@signforge/tools';
 import { type Context, Hono } from 'hono';
@@ -70,17 +78,44 @@ function challenge(c: Context<McpEnv>, error?: 'invalid_token') {
   return c.json({ error: error ?? 'unauthenticated' }, 401, { 'www-authenticate': `Bearer ${parts.join(', ')}` });
 }
 
+/**
+ * A handler's failure as the agent gets it: our own protocol errors as they are, anything else logged
+ * here and answered as a bare internal error. The SDK would send the error's message and data, and a
+ * failing binding's or D1's message may name anything.
+ */
+async function answering<T>(method: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof ProtocolError) throw err;
+    console.error(`[mcp] ${method} failed`, err);
+    // biome-ignore lint/style/useErrorCause: the cause is logged above and must not go to the agent; ProtocolError takes none.
+    throw new ProtocolError(ProtocolErrorCode.InternalError, 'Internal error');
+  }
+}
+
 /** One request's MCP server: the caller's tools, each call through the dispatcher. */
 function serverFor(caller: Caller, version: string): Server {
   const server = new Server({ name: 'signforge', version }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
-  server.setRequestHandler('tools/list', async () => {
-    const refused = await overLimit('tools/list', false, caller);
-    if (refused && !refused.ok) throw new ProtocolError(RATE_LIMITED, refused.message, { error: refused.error, ...(refused.details ?? {}) });
-    return { tools: listedTools(await grantOf(caller), caller.services) };
-  });
-  server.setRequestHandler('tools/call', async (request) => callResult(await dispatch(registry, request.params.name, request.params.arguments ?? {}, caller)));
+  server.setRequestHandler('tools/list', () =>
+    answering('tools/list', async () => {
+      const refused = await overLimit('tools/list', false, caller);
+      if (refused && !refused.ok) throw new ProtocolError(RATE_LIMITED, refused.message, { error: refused.error, ...(refused.details ?? {}) });
+      return { tools: listedTools(await grantOf(caller), caller.services) };
+    }),
+  );
+  server.setRequestHandler('tools/call', (request) =>
+    answering('tools/call', async () => callResult(await dispatch(registry, request.params.name, request.params.arguments ?? {}, caller))),
+  );
   return server;
 }
+
+/**
+ * What an agent's tools may use: the API's services for the grant's org, counted against its member,
+ * with no Better Auth. An agent has no session, so the member tools that act through one (`members`)
+ * are not offered. mcp-tools.test.ts lists the registry against exactly these.
+ */
+export const agentServices = (c: Context<McpEnv>, grant: { orgId: string; userId: string }) => toolServices(c, { orgId: grant.orgId, member: grant.userId });
 
 export const mcp = new Hono<McpEnv>();
 
@@ -123,11 +158,19 @@ mcp.post('/mcp', refuseSession, async (c) => {
     scopes: SCOPES.filter((s) => Array.isArray(granted) && granted.includes(s)),
     actor: { kind: 'agent', id: grant.grantId, clientId: grant.clientId },
     blobs: c.env.BLOBS,
-    // No Better Auth: an agent has no session, so the member tools that act through one are not offered.
-    services: toolServices(c, { orgId: grant.orgId, member: grant.userId }),
+    services: agentServices(c, grant),
     publishLock: publishLock(c.env, grant.orgId),
     agentLimiter: agentLimiter(c.env),
   };
+  // One message a request: a batch (which 2025-06-18 took out of the protocol) would run its calls at once.
+  const body = await readRequestBody(c.req.raw.clone(), BODY_MAX);
+  if (body.tooLarge) return c.json({ error: 'too_large', message: `send at most ${BODY_MAX} bytes` }, 413);
+  if (body.text.trimStart().startsWith('[')) {
+    return c.json(
+      { jsonrpc: '2.0', id: null, error: { code: ProtocolErrorCode.InvalidRequest, message: 'batches are not accepted: send one message a request' } },
+      400,
+    );
+  }
   const server = () => serverFor(caller, c.env.BUILD_VERSION);
   // The SDK's handler answers this era over SSE; its own transport answers in JSON when asked.
   if (await isLegacyRequest(c.req.raw, undefined, { maxRequestBodySize: BODY_MAX })) {
@@ -135,7 +178,6 @@ mcp.post('/mcp', refuseSession, async (c) => {
     await server().connect(transport);
     return transport.handleRequest(c.req.raw);
   }
-  // A body over the cap is never classed as the older era, so the handler answers it 413.
   const handler = createMcpHandler(server, {
     legacy: 'reject',
     responseMode: 'json',
