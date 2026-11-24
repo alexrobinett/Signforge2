@@ -12,15 +12,18 @@
  *   the member switched org in another tab. Callers with no tab (agents, scripts) send none.
  * - `/api/tools` serves the tool registry (./tools.ts). It and the agent's inline fill and its Keep
  *   (`/api/agent/inline` and `/api/agent/inline/keep`, ../agent/inline.ts) are the only routes here
- *   that change data, all only through the dispatcher, but for the OAuth callback (./connections.ts), a GET because a provider
- *   redirects the browser to it, which changes data only by running `finish_connection` through
- *   the dispatcher; test/routes.test.ts fails if another one does.
+ *   that change data, all only through the dispatcher, but for the OAuth callback
+ *   (./connections.ts), a GET because a provider redirects the browser to it, which changes data
+ *   only by running `finish_connection` through the dispatcher; test/routes.test.ts fails if
+ *   another one does. The drawer's turn (`/api/agent/chat`, ../agent/chat.ts) is a POST that
+ *   only reads, which the same test holds it to.
  */
 import { type Context, Hono, type MiddlewareHandler } from 'hono';
 import { findMembership, memberOrgNames, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
 import type { ConnectorDeps } from '../connectors';
+import { mountChat } from '../agent/chat';
 import { type AgentDeps, mountInline } from '../agent/inline';
 import { mountBlobs } from './blobs';
 import { mountConnectionCallback, mountSignedOutCallback } from './connections';
@@ -148,6 +151,7 @@ export function createApi(deps: ApiDeps = {}) {
   api.use('*', requireSession, requireOrg);
   mountTools(api, deps.connectors, deps.email);
   mountInline(api, deps.connectors, deps.agent);
+  mountChat(api, deps.connectors, deps.agent);
   mountConnectionCallback(api, deps.connectors);
   mountBlobs(api);
   return api;

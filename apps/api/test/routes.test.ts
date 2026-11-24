@@ -17,6 +17,8 @@ import { Client, email, testApp } from './client';
 const WRITERS: Record<string, string> = {
   'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations, and the OAuth consent for agents (#110)',
   'POST /api/tools/:name': 'the tool registry, through the dispatcher',
+  'POST /api/agent/chat':
+    "reads only: a turn of the agent's drawer (#267), POST because the body is a conversation; its tool calls are reads through the dispatcher (it writes nothing of ours, checked below)",
   'POST /api/agent/inline/keep':
     "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
   'POST /api/agent/inline':
@@ -79,10 +81,11 @@ describe('the route table', () => {
     expect(unexpected, 'a new route that is not a GET: make it a tool, or list it in WRITERS with a reason').toEqual([]);
   });
 
-  it('allows exactly Better Auth, the tool route, and the inline fill and its Keep to change data on /api', () => {
+  it("allows exactly Better Auth, the tool route, and the agent's routes to change data on /api, the drawer's only reading", () => {
     expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual([
       'POST /api/auth/*',
       'POST /api/tools/:name',
+      'POST /api/agent/chat',
       'POST /api/agent/inline/keep',
       'POST /api/agent/inline',
     ]);
@@ -208,6 +211,32 @@ describe('requests', () => {
     const kept = await member.post('/api/agent/inline/keep', { spotId: made.spot.id, ifVersion: made.spot.version, data: { title: 'Kept' } });
     expect(kept.status, await kept.clone().text()).toBe(200);
     expect(ours()).toEqual(['spots', 'audit_log']);
+  });
+
+  it("to the drawer's turn write nothing of ours, its tools' reads included", async () => {
+    const steps = [
+      { content: [{ type: 'tool_use', id: 'toolu_1', name: 'list_screens', input: {} }], stop_reason: 'tool_use' },
+      { content: [{ type: 'tool_use', id: 'toolu_2', name: 'answer', input: { text: 'Fine.' } }], stop_reason: 'tool_use' },
+    ];
+    let n = 0;
+    const model: typeof fetch = async () =>
+      Response.json({
+        id: `msg_${n}`,
+        type: 'message',
+        role: 'assistant',
+        model: 'm',
+        ...steps[Math.min(n++, 1)],
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    const asking = testApp({ agent: { reach: { fetch: model, guards: { fetch, resolve: async () => ['93.184.215.14'] } } } });
+    const member = new Client(asking, owner.ip, { ...env, DB: recordingD1(env.DB, writes) });
+    for (const [k, v] of owner.jar) member.jar.set(k, v);
+    expect((await owner.tool('save_ai_provider', { provider: 'anthropic', capableModel: 'claude-sonnet-5-5' })).status).toBe(200);
+    writes.length = 0;
+    const res = await member.post('/api/agent/chat', { messages: [{ role: 'user', text: 'How are the screens?' }], page: { path: '/screens', ids: {} } });
+    expect(await res.text()).toContain('"type":"answer"');
+    expect(ours()).toEqual([]);
   });
 });
 

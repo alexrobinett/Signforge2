@@ -200,7 +200,8 @@ const SYSTEM = [
 ].join('\n\n');
 
 /** Untrusted text inside a fence: its closing tag cannot be written from inside. */
-const fenced = (tag: string, text: string) => `<${tag}>\n${text.replace(new RegExp(`<\\s*/?\\s*${tag}`, 'gi'), (m) => m.replace('<', '&lt;'))}\n</${tag}>`;
+export const fenced = (tag: string, text: string) =>
+  `<${tag}>\n${text.replace(new RegExp(`<\\s*/?\\s*${tag}`, 'gi'), (m) => m.replace('<', '&lt;'))}\n</${tag}>`;
 
 /** The page's words, without its markup, scripts or styles. Linear in the page: no pattern here backtracks across it. */
 function pageText(html: string): string {
@@ -433,7 +434,8 @@ function keepProblem(offer: Offer, was: Record<string, unknown>, data: Record<st
 }
 
 /** The day a turn is counted on, `YYYY-MM-DD` in the org's time zone. */
-const dayIn = (timeZone: string, now: number) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+export const dayIn = (timeZone: string, now: number) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
 export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, deps: AgentDeps = {}) {
   api.post('/agent/inline', async (c) => {
