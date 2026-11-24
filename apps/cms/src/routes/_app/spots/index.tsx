@@ -7,7 +7,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { useCanManage, useOrgId } from '~/lib/live';
-import { sectionFor } from '~/lib/sections';
+import { ASK_AN_EDITOR, sectionFor } from '~/lib/sections';
 import { publishWord, spotWhat, versionsById } from '~/lib/spots';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 
@@ -32,8 +32,9 @@ function SpotsPage() {
 
   return (
     <div className="space-y-6">
+      {/* With no spots, New spot is the empty state's own action, the one on the page (#369). */}
       <PageHeader title={section.label} description={section.description}>
-        {canManage && <NewSpotDialog orgId={orgId} templates={templates} />}
+        {canManage && spots.length > 0 && <NewSpotDialog orgId={orgId} templates={templates} />}
       </PageHeader>
       {spots.length ? (
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
@@ -48,7 +49,11 @@ function SpotsPage() {
           ))}
         </ul>
       ) : (
-        <EmptyState icon={section.icon} title={section.empty.title}>
+        <EmptyState
+          icon={section.icon}
+          title={section.empty.title}
+          action={canManage ? <NewSpotDialog orgId={orgId} templates={templates} /> : <p className="text-sm text-muted-foreground">{ASK_AN_EDITOR}</p>}
+        >
           {section.empty.body}
         </EmptyState>
       )}
