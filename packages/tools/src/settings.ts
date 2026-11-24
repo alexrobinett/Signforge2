@@ -2,7 +2,7 @@ import { DEFAULT_AUDIT_RETENTION_DAYS, type OrgScope, type OrgSettings } from '@
 import { z } from 'zod';
 import { displayHours, ifVersion, locale, timezone } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
-import { defineTool } from './tool';
+import { defineTool, isAgent, ToolError } from './tool';
 import { auditRetentionDays, editorsPublish, outputs, rule, type AlertKind, type AlertRule, type SettingsView } from './outputs';
 
 const DEFAULT_ALERTS: Record<AlertKind, AlertRule> = {
@@ -77,7 +77,7 @@ const getOrgSettings = defineTool({
 const updateOrgSettings = defineTool({
   name: 'update_org_settings',
   description:
-    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts changes the given fields of each alert kind's rule (who gets the email, and whether it goes by email, to Slack and to the webhook). editorsPublish false lets only owners publish. auditRetentionDays is how long audit rows are kept, 30 to 3650 days. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
+    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts changes the given fields of each alert kind's rule (who gets the email, and whether it goes by email, to Slack and to the webhook). editorsPublish false lets only owners publish. auditRetentionDays is how long audit rows are kept, 30 to 3650 days. An agent may not change editorsPublish or auditRetentionDays. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -105,7 +105,12 @@ const updateOrgSettings = defineTool({
   output: outputs.update_org_settings,
   example: { unreachableAfterMinutes: 15 },
   target: () => ({ kind: 'org', id: 'settings' }),
-  handler: async ({ org, input, write }) => {
+  handler: async ({ org, actor, input, write }) => {
+    // Who publishes, and how long the audit log keeps its trail, are a person's (owner default on M4 Q7, #122): an agent
+    // could otherwise widen its own publishing or erase the record of what it did. The CMS's own agent is one too.
+    const kept = (['editorsPublish', 'auditRetentionDays'] as const).filter((k) => input[k] !== undefined);
+    if (isAgent(actor) && kept.length)
+      throw new ToolError('forbidden', `an agent cannot change ${kept.join(' or ')}: ask an owner to change it in the CMS`);
     const current = await org.settings.get();
     const row = write(
       await org.settings.stage.set(

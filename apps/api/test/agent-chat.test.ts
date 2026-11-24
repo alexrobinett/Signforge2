@@ -1207,6 +1207,12 @@ describe('the drawer drafting changes (#268)', () => {
     expect(results[0][1]).toMatch(/not its url/);
     expect(results[1][1]).toMatch(/web page spot's address/);
     expect(results[2][1]).toMatch(/not its bindings/);
+    // A refusal can name org content, so its words reach the model fenced as data, as an output does (#122).
+    for (const [, content] of results.slice(0, 4)) {
+      const { error } = JSON.parse(content);
+      expect(error).toMatch(/^refused: <data>\n[\s\S]*\n<\/data>$/);
+      expect(error.match(/<\/data>/g)).toHaveLength(1);
+    }
     // Not offered at all: refused unrun.
     expect(results[4][0]).toBe(true);
   });

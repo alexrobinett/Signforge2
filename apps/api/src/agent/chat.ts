@@ -263,7 +263,10 @@ function parsedJson(text: string): unknown {
   }
 }
 
-/** A tool's output as the model reads it: fenced as data, cut to a length it can read. */
+/**
+ * A tool's output as the model reads it, or a refusal's message: fenced as data, cut to a length it can read. A refusal
+ * can name org content too (a playlist that plays a spot, a spot holding sample text), so it is fenced as an output is (#122).
+ */
 function asData(output: unknown): string {
   const text = JSON.stringify(output);
   return fenced('data', text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)} [cut: the rest was too long]` : text);
@@ -435,7 +438,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             const out = await dispatch(registry, t.name, input, caller);
             return out.ok
               ? { card: card(t.name, summaryOf(t.name, out.output), true), content: asData(out.output) }
-              : { card: card(t.name, `Could not ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${out.message}`, refused: true };
+              : { card: card(t.name, `Could not ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${asData(out.message)}`, refused: true };
           }),
       })),
       ...drafting.map((t) => ({
@@ -467,7 +470,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
                   card: card(t.name, TOOL_CARDS[t.name]?.did ?? '', true),
                   content: `Proposed, not written${joined ? ', with your earlier change to the same thing, as one change' : ''}: the person sees what it changes and saves it, or not.`,
                 }
-              : { card: card(t.name, `Could not draft ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${problem}`, refused: true };
+              : { card: card(t.name, `Could not draft ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${asData(problem)}`, refused: true };
           }),
       })),
       // Behind a card (#269): the run pauses before it runs (`needsApproval`), and it runs only on the person's press.
@@ -502,7 +505,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
             return out.ok
               ? { card: card(name, done.message, true), content: asData(out.output) }
-              : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${out.message}`, refused: true };
+              : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${asData(out.message)}`, refused: true };
           }),
       })),
     ];
