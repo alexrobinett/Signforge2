@@ -134,6 +134,7 @@ export function strip<T extends object>(v: T): T {
     publishRevision: _r,
     publishedJson: _pj,
     publishedAt: _pa,
+    publishedVersion: _pv,
     ...rest
   } = v as Record<string, unknown>;
   return rest as T;

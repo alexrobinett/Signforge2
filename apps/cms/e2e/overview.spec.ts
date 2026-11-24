@@ -11,6 +11,7 @@ import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } fro
 /** This spec's own client address, so its sign-ins and claims have their own rate limits. */
 const ADDRESS = '192.0.2.211';
 const EDITOR_ADDRESS = '192.0.2.212';
+const PHONE_ADDRESS = '192.0.2.213';
 
 /** What the player in the tab says it plays (`window.__sf`). */
 const player = (tab: Page) =>
@@ -68,7 +69,23 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await page.reload();
   await expect(setup).toContainText('1 of 3 done');
   await expect(setup.getByRole('link', { name: 'Open Opening week' })).toBeVisible();
-  await tool(page, 'publish', {});
+
+  // The sidebar counts what is not published (#361), and publishes it all from any page, after asking.
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await expect(nav.getByRole('link', { name: 'Spots 1 unpublished' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Playlists 1 unpublished' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Schedule', exact: true })).toBeVisible();
+  const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+  await sidebar.getByRole('button', { name: '2 unpublished changes · Publish' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish 2 unpublished changes?' });
+  await expect(ask).toContainText('1 spot and 1 playlist, as drafted now');
+  await axe(page);
+  await shots(page, '113-publish-all-changes');
+  await ask.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(ask).toBeHidden();
+  await expect(page.locator('[data-sonner-toast]').filter({ hasText: /Published v\d+/ })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: /unpublished change/ })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Spots', exact: true })).toBeVisible();
   await page.reload();
   await expect(setup).toContainText('2 of 3 done');
 
@@ -105,11 +122,22 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await d1(`UPDATE screens SET last_seen_at = last_seen_at - ${30 * 60_000} WHERE id = '${door.id}'`);
   await page.reload();
   await expect(page.getByRole('region', { name: /Needs you/ }).getByRole('link')).toHaveText([/Door.*Unreachable and behind/]);
+  // On every page: the sidebar's Screens says one needs you, and folded, its tooltip and a dot do (#361).
+  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens 1 needs you' })).toBeVisible();
   // It has not taken the publish, so it is not counted as playing it; the finished checklist stays gone.
   await expect(page.getByRole('region', { name: 'Get your first spot on a screen' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Playing now' })).toContainText('None of the screens is playing its latest publish right now.');
   await expect(page.getByRole('region', { name: 'Latest publish' })).toBeVisible();
   await bothWidths(page, '111-overview-status');
+  await page.getByRole('button', { name: 'Fold the sidebar' }).click();
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: /Screens/ })
+    .hover();
+  await expect(page.getByRole('tooltip', { name: 'Screens, 1 needs you' })).toBeVisible();
+  await axe(page);
+  await shots(page, '114-sidebar-folded-counts');
+  await page.getByRole('button', { name: 'Unfold the sidebar' }).click();
 });
 
 test('a long playlist name wraps on a phone, hiding the checklist keeps it hidden, and a failing poll says so', async ({ page }) => {
@@ -161,7 +189,7 @@ test('a long playlist name wraps on a phone, hiding the checklist keeps it hidde
     new URL(route.request().url()).pathname.startsWith('/_serverFn/getScreenStatus_') ? route.abort('connectionrefused') : route.fallback(),
   );
   await page.reload();
-  await expect(page.getByRole('status').filter({ hasText: 'Status is not current.' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('main').getByRole('status').filter({ hasText: 'Status is not current.' })).toBeVisible({ timeout: 20_000 });
   await axe(page);
   await page.unroute('**/_serverFn/**');
 });
@@ -180,4 +208,44 @@ test('an editor where only owners publish sees the default as an owner’s step,
   await expect(step).toHaveText(/An owner sets the default \(for an owner\)/);
   await expect(step.getByRole('link')).toHaveCount(0);
   await axe(page);
+});
+
+test('at 390 px the sidebar Publish asks in one dialog a screen reader finds, says what no default means, gives focus back, and a sample spot asks again (#361, #360)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInAs(page, `e2e-overview-phone-${Date.now()}@example.com`, PHONE_ADDRESS);
+  await createOrg(page, 'Kestrel Quay', PHONE_ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  // A spot New spot would make, its sample text recorded by the server: an Alert, which needs nothing else to publish.
+  const alert = templates.find((t: { key: string }) => t.key === 'alert' || t.key.endsWith('/alert'));
+  await tool(page, 'create_spot', { name: 'Fire drill', kind: 'template', templateVersionId: alert.versions.at(-1).id, sample: true });
+  await page.reload();
+  await hydrated(page);
+
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  const opener = page.getByRole('dialog', { name: 'Navigation' }).getByRole('button', { name: '1 unpublished change · Publish' });
+  await opener.click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish 1 unpublished change?' });
+  await expect(ask).toContainText('1 spot, as drafted now');
+  // With no default playlist the server compiles no screen: the dialog says so, with the way to choose one.
+  await expect(ask).toContainText("No screen will change until there's a default playlist.");
+  await expect(ask.getByRole('link', { name: 'Choose a default playlist' })).toHaveAttribute('href', '/playlists');
+  await expect(page.getByRole('alertdialog')).toHaveCount(1);
+  await axe(page);
+  await shots(page, '115-publish-all-phone');
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  // Publish: the spot still holds its sample text, so the server refuses it and the page asks, as every publish does (#360).
+  await opener.click();
+  await ask.getByRole('button', { name: 'Publish', exact: true }).click();
+  const sample = page.getByRole('alertdialog', { name: 'Publish sample text?' });
+  // Named, though it is the only one: the sidebar's Publish shows no spot.
+  await expect(sample).toContainText('In Fire drill,');
+  await expect(sample).toContainText('still have sample text. Publish anyway?');
+  await sample.getByRole('button', { name: 'Edit first' }).click();
+  await expect(sample).toBeHidden();
+  expect((await tool(page, 'list_publishes', {})).publishes).toEqual([]);
 });

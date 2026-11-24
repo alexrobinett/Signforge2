@@ -63,16 +63,13 @@ describe('a new spot’s name', () => {
 });
 
 describe('what Publish says of sample text', () => {
-  it('names the fields, and each spot when the publish carries more than one', () => {
-    expect(sampleWords([{ name: 'Pier', labels: ['Headline', 'Body'] }], false)).toBe('Headline and Body still have sample text.');
+  it('names the fields and each spot, even one alone', () => {
+    expect(sampleWords([{ name: 'Pier', labels: ['Headline', 'Body'] }])).toBe('In Pier, Headline and Body still have sample text.');
     expect(
-      sampleWords(
-        [
-          { name: 'Pier', labels: ['Headline'] },
-          { name: 'Alert', labels: ['Headline', 'Issued by', 'Instructions'] },
-        ],
-        true,
-      ),
+      sampleWords([
+        { name: 'Pier', labels: ['Headline'] },
+        { name: 'Alert', labels: ['Headline', 'Issued by', 'Instructions'] },
+      ]),
     ).toBe('In Pier, Headline still has sample text. In Alert, Headline, Issued by and Instructions still have sample text.');
   });
 });

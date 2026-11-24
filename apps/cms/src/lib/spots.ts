@@ -223,11 +223,11 @@ export function nextName(template: string, spots: readonly { name: string }[]): 
 const and = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
 
 /**
- * What Publish asks before sample copy reaches screens (#360): "Headline and Body still have sample
- * text." for one spot, each spot named when the publish carries more than one.
+ * What Publish asks before sample copy reaches screens (#360): "In Pier 9, Headline and Body still
+ * have sample text.", each spot named, even one alone: a publish from ⌘K or the sidebar shows no spot.
  */
-export function sampleWords(spots: readonly { name: string; labels: string[] }[], named: boolean): string {
-  return spots.map(({ name, labels }) => `${named ? `In ${name}, ` : ''}${and(labels)} still ${labels.length === 1 ? 'has' : 'have'} sample text.`).join(' ');
+export function sampleWords(spots: readonly { name: string; labels: string[] }[]): string {
+  return spots.map(({ name, labels }) => `In ${name}, ${and(labels)} still ${labels.length === 1 ? 'has' : 'have'} sample text.`).join(' ');
 }
 
 /** Whether screens have it, in words. */

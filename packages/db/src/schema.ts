@@ -58,6 +58,11 @@ const publishedJson = () => text('published_json');
 const rowVersion = () => integer('row_version').notNull().default(1);
 const publishedAt = () => integer('published_at');
 /**
+ * The `row_version` a publish promoted (#361): the draft has changes screens do not have while it is
+ * behind `row_version`, as every edit moves that on and a publish does not. Null until published.
+ */
+const publishedVersion = () => integer('published_version');
+/**
  * Which row a draft is across delete and make-again: a content id may be chosen again once its
  * row is deleted, and `stage.publish` checks this with the version. Since migration 0020 the
  * version alone tells the rows apart (`draft_tombstones`); this stays as a second check, as
@@ -647,6 +652,7 @@ export const spots = sqliteTable(
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -670,6 +676,7 @@ export const playlists = sqliteTable(
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -726,6 +733,7 @@ export const scheduleEntries = sqliteTable(
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },

@@ -11,6 +11,7 @@ import type { ChatProblem } from '@signforge/api/agent-chat';
 import type { InlineProblem } from '@signforge/api/agent-inline';
 import { ORG_CHANGED } from '@signforge/api/tab-org';
 import type { ToolErrorCode, ToolName, ToolOutput } from '@signforge/tools/outputs';
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { tabOrgHeaders } from './tab-org';
 
 /** The API's own refusals, made before any tool runs (apps/api/src/api/index.ts). */
@@ -49,8 +50,9 @@ export async function answer<T>(res: Response, unread: string): Promise<T> {
   return output;
 }
 
-async function post(name: string, input: unknown): Promise<Response> {
-  const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
+async function post(name: string, input: unknown, org?: string): Promise<Response> {
+  // `org` names the org explicitly, in place of the tab's: a publish names the org it read and showed (#361).
+  const headers = { 'content-type': 'application/json', ...(org ? { [TAB_ORG_HEADER]: org } : await tabOrgHeaders()) };
   try {
     return await fetch(`/api/tools/${name}`, { method: 'POST', headers, body: JSON.stringify(input) });
   } catch (cause) {
@@ -59,9 +61,12 @@ async function post(name: string, input: unknown): Promise<Response> {
   }
 }
 
-/** Calls a tool from the browser, naming the tab's org. */
-export async function callTool<N extends ToolName>(name: N, input: unknown): Promise<ToolOutput<N>> {
-  const res = await post(name, input);
+/**
+ * Calls a tool from the browser, naming the tab's org, or `org`: the API refuses the call unless it
+ * is the session's (#129), so it never acts on an org other than the one named.
+ */
+export async function callTool<N extends ToolName>(name: N, input: unknown, org?: string): Promise<ToolOutput<N>> {
+  const res = await post(name, input, org);
   return answer(res, `Something went wrong (${res.status}).`);
 }
 
