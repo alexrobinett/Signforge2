@@ -2163,7 +2163,8 @@ export function scoped(d1: D1Database, orgId: string) {
     /**
      * The org's members (Better Auth's `member` rows), with each one's name and address. Read only:
      * members change through Better Auth's organization endpoints, which keep its rules (one of our
-     * roles each, never without an owner) and write the audit row (`membershipAudit` in apps/api).
+     * roles each) and write the audit row (`membershipAudit` in apps/api). Migration 0036's triggers
+     * refuse a write that would leave the org without an owner (#292).
      */
     members: {
       list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),
