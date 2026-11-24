@@ -1,5 +1,5 @@
 // The dispatcher: role and scope checks, input validation, and the audit log.
-import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+import { seedOrg, seedTeam, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -24,6 +24,7 @@ import {
   ToolError,
   type ToolServices,
 } from '../src';
+import { racing } from './calls';
 import { fakeServices } from './services';
 
 let o: SeededOrg;
@@ -735,6 +736,41 @@ describe('screen notices', () => {
     // Already revoked: nothing changes, but the screen is told again, in case the first notice never arrived.
     await revoke(cred.id, screens);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
+  });
+
+  it('are not sent, nor audited, for a credential revoked already when its owner was demoted between the read and the batch (#417)', async () => {
+    const { told, screens } = recorder();
+    const cred = await testScope(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
+    expect((await revoke(cred.id, screens)).ok).toBe(true);
+    // The owner a member, beside another owner, as the org must keep one.
+    const { userId } = await seedTeam(env.DB, o.orgId);
+    const now = new Date(0).toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        `${o.orgId}-other`,
+        'Other',
+        `${o.orgId}-other@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(
+        `${o.orgId}-other-member`,
+        o.orgId,
+        `${o.orgId}-other`,
+        now,
+      ),
+    ]);
+    const audited = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
+    const demoted = racing({ ...caller('owner'), member: userId, services: { notify: screens } }, () =>
+      env.DB.prepare("UPDATE member SET role = 'editor' WHERE userId = ? AND organizationId = ?").bind(userId, o.orgId).run(),
+    );
+    // Nothing changes, so the batch is its audit row alone: held to the role all the same.
+    expect(await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, demoted)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
+    expect(told).toHaveLength(1);
+    expect(await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 })).toEqual(audited);
   });
 
   it('are not sent when the change is rolled back', async () => {
