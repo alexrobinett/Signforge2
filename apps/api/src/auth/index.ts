@@ -34,7 +34,7 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
       appUrl,
       audit: (orgId, entry) => scoped(env.DB, orgId).auditLog.append(entry),
       startingOrg: (userId) => startingOrg(env.DB, userId),
-      // On the CMS's host, as the issuer is (`<appUrl>/api/auth`): /mcp is routed to this Worker there (M4-06).
+      // On the CMS's host, as the issuer is (`<appUrl>/api/auth`): /mcp is routed to this Worker there (src/mcp).
       mcpResource: `${appUrl}/mcp`,
       grants: grantStore(env.DB),
       consent,

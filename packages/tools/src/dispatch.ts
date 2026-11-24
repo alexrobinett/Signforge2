@@ -52,7 +52,7 @@ import {
 } from './tool';
 import type { ToolErrorCode } from './outputs';
 
-/** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
+/** Who is calling, resolved by the adapter (the `/api` route, `/admin`, `/mcp`, later WebMCP). */
 export interface Caller<D extends DataScope = OrgScope> {
   /** `scoped(db, orgId)` for the caller's active org: the only org it can reach. For the platform registry, `platform(db)`. */
   org: D;
@@ -64,8 +64,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /**
    * What its tools may use (`ToolServices`). Each adapter builds them with its environment's one
-   * constructor: the API's (apps/api/src/tool-services.ts) for `/api` and `/admin`, and Milestone 4's
-   * `/mcp` through the same; a test's fakes (test/services.ts).
+   * constructor: the API's (apps/api/src/tool-services.ts) for `/api`, `/admin` and `/mcp`; a test's
+   * fakes (test/services.ts).
    */
   services: ToolServices;
   /**
@@ -325,8 +325,9 @@ const OVER: Record<AgentLimit, string> = {
 /**
  * An agent's call counted against its grant's limits, before anything else is read or run. A
  * refused call writes nothing, except the audit row of the first one refused in each window.
+ * `dispatch` counts every tool call through it; `/mcp` counts its `tools/list` too (M4-06).
  */
-async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
+export async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
   if (!caller.agentLimiter) throw new Error(`an agent called ${JSON.stringify(name)} without a limiter for its grant`);
   const allowance = await caller.agentLimiter.take(caller.actor.id, write);
   if (allowance.ok) return undefined;

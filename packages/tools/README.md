@@ -1,6 +1,6 @@
 # @signforge/tools
 
-One registry of operations on an org's data. The CMS calls it over `/api/tools`. In Milestone 4 the MCP server and WebMCP call it too, as thin adapters. Nothing else on `/api` changes data, and `apps/api/test/routes.test.ts` fails if a route tries.
+One registry of operations on an org's data. The CMS calls it over `/api/tools`, and agents over `/mcp` (M4-06); WebMCP will too. Each is a thin adapter. Nothing else on `/api` changes data, and `apps/api/test/routes.test.ts` fails if a route tries.
 
 ## For the CMS: the route
 
@@ -36,6 +36,14 @@ Lists the tools the caller's role may use:
 | 401, 403 | `unauthenticated`, `no_active_organization`, `not_a_member` | Returned by `requireOrg`, before any tool runs. |
 
 The CMS should keep every cookie a response sets (see M3-09). Times in outputs are milliseconds since the epoch.
+
+## For agents: `/mcp`
+
+Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `<CMS host>/mcp`, with an OAuth access token from the agent grant a person consented to (`apps/api/src/mcp`, the backend plan's Agents section). The adapter:
+
+- builds the `Caller` from the grant alone: `org: scoped(db, grant.orgId)`, the member's role now, the grant's scopes, `actor: { kind: 'agent', id: <grant id>, clientId: <its OAuth client> }`, `agentLimiter`, and the API's `toolServices` without `members` (an agent has no Better Auth session, so `invite_member` and `cancel_invitation` are not offered);
+- answers `tools/list` with `describeTools` for the grant, less any tool needing a service it lacks, each tool's input schema and hints (`readOnlyHint` from `mutates`, `destructiveHint` for `delete_*` and `revoke_*`, `idempotentHint` for keyed creations). A `tools/list` counts as one call against the grant's limit (`overLimit`), and over it is a JSON-RPC error `-32000` with `rate_limited`, the limit and `retryAfterSeconds` in its data;
+- answers `tools/call` with `dispatch`: the output as `structuredContent` and as JSON text, or a refusal as a result with `isError` and `{ error, message, details }`. JSON-RPC errors are only for faults in the protocol, and an unexpected failure is a bare `-32603 Internal error`, its details only in the log.
 
 ## The tools
 
@@ -229,7 +237,7 @@ A call that staged nothing changed nothing, and writes nothing: no audit row eit
 
 What a tool may use beyond its input and the org's data (GLOSSARY.md) is one object, `caller.services` (`ToolServices` in `src/tool.ts`, every field optional): `uploads`, `feedUrls`, `alertSecrets`, `places`, `tables`, `templateCheck`, `connectors`, `members`, `rateLimit`, and the two the dispatcher uses itself after the commit, `notify` and `deliverNow`. A tool lists those its handler uses in `needs` (`needs: ['rateLimit', 'places']`), and its handler sees exactly those, each there, as `ctx.services`; the dispatcher passes the caller's object through as it is. A call whose caller lacks one is refused before the handler runs, the same for every tool: `forbidden`, `<tool> needs <the service in words>, and this caller has none` (`SERVICE_WORDS`). A need is per tool, not per call: `update_data_source` needs `feedUrls` though only a new URL is sealed, and `register_template_version` needs `templateCheck` and `rateLimit` in the platform registry too.
 
-Each environment builds them with one constructor: the API's `toolServices` (`apps/api/src/tool-services.ts`), which `/api/tools` takes whole and `/admin` takes only the parts of it needs; Milestone 4's `/mcp` caller will be the third; tests use `fakeServices` (`test/services.ts`). A new service is a field in `ToolServices` with its words in `SERVICE_WORDS`, a line in the API's constructor and one in `fakeServices` (the compiler asks for each), and `needs` on the tools that use it.
+Each environment builds them with one constructor: the API's `toolServices` (`apps/api/src/tool-services.ts`), which `/api/tools` takes whole and `/admin` takes only the parts of it needs; `/mcp` (M4-06) takes all of them but `members`; tests use `fakeServices` (`test/services.ts`). A new service is a field in `ToolServices` with its words in `SERVICE_WORDS`, a line in the API's constructor and one in `fakeServices` (the compiler asks for each), and `needs` on the tools that use it.
 
 ### Agent limits
 

@@ -1,7 +1,7 @@
 /**
  * SignForge API Worker. Three route trees, one per kind of caller, and no credential is accepted
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
- * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
+ * credential), `/mcp` for agents (OAuth access token, src/mcp). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
  * Two queue consumers: one tells the screens a publish switched (src/publish.ts), the other stores
  * the photos of news feeds' stories that the poller queues (src/data/images.ts).
@@ -18,6 +18,7 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
+import { mcp } from './mcp';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys, pruneUnconsentedClients } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
@@ -42,6 +43,7 @@ app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, ver
 app.route('/v1/device', device);
 app.route('/api', createApi());
 app.route('/admin', admin);
+app.route('/', mcp);
 
 const FIVE_MIN_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;

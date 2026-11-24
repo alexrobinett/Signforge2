@@ -58,7 +58,17 @@ async function stubClient(name = 'Test agent', address = ADDRESS.stub) {
     });
     return { status: res.status(), body: (await res.json()) as { scope?: string; access_token?: string } };
   };
-  return { clientId, authorizeUrl, exchange, dispose: () => request.dispose() };
+  /** One JSON-RPC request to /mcp on this host (M4-06), with the stub's access token: its result or its error. */
+  let rpcId = 0;
+  const mcp = async (accessToken: string, method: string, params: unknown = {}) => {
+    const res = await request.post(`${CMS_URL}/mcp`, {
+      headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' },
+      data: { jsonrpc: '2.0', id: ++rpcId, method, params },
+    });
+    expect(res.status(), await res.text()).toBe(200);
+    return (await res.json()) as { result?: any; error?: unknown };
+  };
+  return { clientId, authorizeUrl, exchange, mcp, dispose: () => request.dispose() };
 }
 
 /** The URL the page sends the browser to at the stub's callback, answered by the stub. */
@@ -142,6 +152,22 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   const tokens = await stub.exchange(back.searchParams.get('code')!);
   expect(tokens.status).toBe(200);
   expect(tokens.body.scope?.split(' ').sort()).toEqual(['content:draft', 'content:read', 'offline_access', 'screens:manage']);
+
+  // The token works on /mcp, on this host: the grant's tools only, and a write audited as the agent with its client.
+  const accessToken = tokens.body.access_token!;
+  const listed: string[] = (await stub.mcp(accessToken, 'tools/list')).result.tools.map((t: { name: string }) => t.name);
+  expect(listed).toEqual(expect.arrayContaining(['list_playlists', 'create_playlist', 'rename_screen']));
+  expect(listed).not.toContain('publish');
+  const made = (await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Made by the stub agent' } })).result;
+  expect(made.isError).toBeUndefined();
+  const audit = await stub.mcp(accessToken, 'tools/call', { name: 'list_audit_log', arguments: { action: 'create_playlist', actor: { kind: 'agent' } } });
+  const { entries } = audit.result.structuredContent;
+  expect(entries).toEqual([
+    expect.objectContaining({
+      actor: expect.objectContaining({ kind: 'agent', clientId: stub.clientId }),
+      target: { kind: 'playlist', id: made.structuredContent.playlist.id },
+    }),
+  ]);
 
   // Cancel, for another authorization: access_denied, and no code.
   const refused = await callbackOf(page, async () => {

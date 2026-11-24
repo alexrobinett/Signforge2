@@ -6,7 +6,7 @@ The web app people use to manage their screens: TanStack Start (React 19) with T
 
 The CMS and the API are two Workers on one hostname, so the session cookie is same-origin (docs/backend-plan.md#layout).
 
-- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged. `/v1/device/*` is the same (`src/routes/v1/device/$.ts`), for the test screen.
+- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged. `/v1/device/*` is the same (`src/routes/v1/device/$.ts`), for the test screen. So are `/mcp` and `/.well-known/*` (`src/routes/mcp.ts`, `src/routes/[.]well-known/$.ts`), where agents connect (M4-06).
 - **The test screen** (M3-41) is the player build (`pnpm build:player`, in `dist/player`) at `/test-screen/`: `vite dev` serves it from there and `vite build` copies it into the site's assets (the `playerBuild` plugin in `vite.config.ts`, which serves the same build at `/player/` for the spot editor's stage). It talks to the device API on this origin, never with the session cookie (docs/architecture.md, "Browser test screen").
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
@@ -102,6 +102,8 @@ public/template-thumbnails/  the New spot dialog's base template thumbnails, dra
 src/lib/template-thumbnails.json  the template versions those thumbnails were drawn from
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test screen
+src/routes/mcp.ts         `/mcp` handed to the API Worker: agents' MCP server (M4-06)
+src/routes/[.]well-known/$.ts  `/.well-known/*` handed to the API Worker: the OAuth metadata agents find `/mcp` and its issuer by
 src/server/               server-only: the API binding, the shell's server functions
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI); `sidebar.tsx` is the part of shadcn's sidebar the frame uses, its fold kept in the store
