@@ -49,6 +49,7 @@ import {
   type ChatContext,
   type ChatProblem,
   type ConfirmCard,
+  type ConfirmDone,
   type ProposedCall,
   type ToolCard,
 } from './chat-shapes';
@@ -198,40 +199,20 @@ const context = z
   })
   .strict() satisfies z.ZodType<ChatContext>;
 
-/** AG-UI's `RunAgentInput` as the drawer's `ChatClient` sends it: the question its one message. Its `tools`, `state` and `context` are never read. */
-/** A message as the client sends it: the person's question first; on a press, the call it paused at too, read only to compare with the card. */
-const wireMessage = z.object({
-  role: z.string().max(20),
-  content: z.unknown().optional(),
-  toolCalls: z
-    .array(z.object({ id: z.string().max(200), function: z.object({ name: z.string().max(100), arguments: z.string().max(200_000) }) }))
-    .max(20)
-    .optional(),
-});
-
 /**
- * AG-UI's `RunAgentInput` as the drawer's `ChatClient` sends it: the question as its one message; or a
- * press of a confirmation card (#269), resuming the run it paused (`resume`, `parentRunId`) with the
- * card's token (`forwardedProps.confirm`). Its `tools`, `state` and `context` are never read.
+ * AG-UI's `RunAgentInput` as the drawer's `ChatClient` sends it: the question as its one message, with,
+ * for a press of a confirmation card (#269), the card's token (`forwardedProps.confirm`) and nothing
+ * else of the call: what it runs is the card's record. A body that carries a call or a resume (an
+ * edited input, an approval of its own) is refused before any card is touched. Its `tools`, `state` and
+ * `context` are never read.
  */
-const chatRequest = z
-  .object({
-    threadId: z.string().min(1).max(100),
-    runId: z.string().min(1).max(100),
-    parentRunId: z.string().max(100).optional(),
-    messages: z.array(wireMessage).min(1).max(20),
-    resume: z
-      .array(z.object({ interruptId: z.string().max(200), status: z.string().max(20), payload: z.unknown().optional() }))
-      .length(1)
-      .optional(),
-    forwardedProps: context,
-  })
-  .refine((r) => r.resume !== undefined || r.messages.length === 1, 'the question is the one message')
-  .refine((r) => {
-    const q = r.messages[0];
-    return q?.role === 'user' && typeof q.content === 'string' && q.content.trim().length > 0 && q.content.length <= CHAT_MESSAGE_CHARS;
-  }, 'the question comes first, 1 to 4000 characters')
-  .refine((r) => (r.resume === undefined) === (r.forwardedProps.confirm === undefined), "a press carries its card's token, and only a press");
+const chatRequest = z.object({
+  threadId: z.string().min(1).max(100),
+  runId: z.string().min(1).max(100),
+  messages: z.tuple([z.object({ role: z.literal('user'), content: z.string().trim().min(1).max(CHAT_MESSAGE_CHARS), toolCalls: z.undefined() })]),
+  resume: z.undefined(),
+  forwardedProps: context,
+});
 
 const SYSTEM = [
   "You are SignForge's assistant in the CMS's drawer. You answer questions about the person's digital signage organization: its screens, what is published to them, its spots, playlists and schedule, and you draft changes to them. You read with the read tools. You draft with the drafting tools: a call to one is a proposal, which the person sees with what it changes and how many screens it reaches, and saves as a draft, or not; nothing is written until they do. Read a thing before you draft a change to it, and pass update_spot the spot's whole data with your changes in it. To publish, take over, end a takeover, delete, revoke, command a live screen, reach an address or set a web page spot's address, call its tool: the turn stops at a card the person sees and presses, or not, and it runs only then. Ask for one such thing at a time, with all it needs (a publish names its drafts).",
@@ -295,7 +276,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     if (request instanceof Response) return request;
     const { threadId, runId, forwardedProps } = request;
     const { history, page } = forwardedProps;
-    const question = String(request.messages[0]?.content).trim();
+    const question = request.messages[0].content;
     const { org } = c.var;
 
     const provider = await org.aiProvider.get();
@@ -335,49 +316,32 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     const allowed: Promise<boolean> = rateLimit ? rateLimit('chat_turn') : Promise.resolve(false);
     if (!(await allowed)) return refuse('rate_limited', 'Too many questions in a minute: wait a minute and ask again.');
     const now = deps.now ?? Date.now;
-    const start = now();
+    // When the turn began: a press goes on from the time its turn had spent when it paused.
+    let start = now();
     const timeZone = (await org.settings.get())?.timezone ?? 'UTC';
     const turns = c.env.ORGS.get(c.env.ORGS.idFromName(org.orgId));
     const member = c.var.session.user.id;
     /**
      * A press of a confirmation card (#269): its record, taken once whatever follows, for this member,
-     * before it ran out, resuming the call it paused with the input exactly as it showed. It resumes the
-     * turn it paused, and takes no turn of its own; a question takes one.
+     * before it ran out. It resumes the call it paused, rebuilt from the record (TanStack AI's resume of
+     * its `needsApproval` pause), and the turn it paused, with what that turn had spent: it takes no
+     * turn of its own and gets no new budget; a question takes one.
      */
     let pressed: Confirmation | undefined;
-    if (request.resume) {
-      const [answered] = request.resume;
-      const record = await turns.takeConfirmation(forwardedProps.confirm ?? '');
-      const call = request.messages.flatMap((m) => m.toolCalls ?? []).find((t) => t.id === record?.toolCallId);
-      const payload = answered?.payload;
-      // Approved, and no other input: the default approval would take edited arguments.
-      const approved =
-        typeof payload === 'object' &&
-        payload !== null &&
-        'approved' in payload &&
-        payload.approved === true &&
-        Object.keys(payload).every(
-          (k) =>
-            k === 'approved' ||
-            (k === 'editedArgs' && 'editedArgs' in payload && canonical(payload.editedArgs) === canonical(parsedJson(record?.calledJson ?? ''))),
-        );
+    if (forwardedProps.confirm !== undefined) {
+      const record = await turns.takeConfirmation(forwardedProps.confirm);
       const problem = !record
         ? 'This card was pressed already, or has run out. Ask again for a new one.'
         : record.member !== member
           ? "This card is someone else's. Ask again for one of your own."
           : record.expiresAt <= start
             ? 'This card has run out. Ask again for a new one.'
-            : answered?.interruptId !== `approval_${record.toolCallId}` ||
-                answered.status !== 'resolved' ||
-                !approved ||
-                request.parentRunId !== record.runId ||
-                // The call as the browser holds it, if it sends one: the input is the record's whatever it sends.
-                (call !== undefined &&
-                  (call.function.name !== record.name || canonical(parsedJson(call.function.arguments)) !== canonical(parsedJson(record.calledJson))))
-              ? 'This is not what the card showed, so nothing was done. Ask again for a new one.'
-              : undefined;
-      if (problem) return refuse('stale_card', problem);
+            : undefined;
+      if (problem || !record) return refuse('stale_card', problem ?? '');
       pressed = record;
+      start -= record.spent.elapsedMs;
+      budget.statements = record.spent.statements;
+      budget.fetches = record.spent.fetches;
     } else if (!(await turns.takeTurn(dayIn(timeZone, start), provider.dailyTurnCeiling)))
       return refuse('out_of_turns', `The organization has used its ${provider.dailyTurnCeiling} agent turns for today. They come back at midnight.`);
 
@@ -425,7 +389,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     const drafts: ProposedCall[] = [];
     /** Tool cards made since the stream last yielded: sent before its next event. */
     const shown: StreamChunk[] = [];
-    let calls = 0;
+    let calls = pressed?.spent.calls ?? 0;
     const show = (card: ToolCard) => {
       trace.push(card);
       shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.call, value: card, timestamp: Date.now() });
@@ -522,10 +486,19 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
               };
             // The person's own action, as the CMS would do it: on the org's scoped repositories, not the turn's
             // counted reading, so a publish to every screen of a large org is never cut short halfway.
-            const own: Caller = { ...caller, org: scoped(c.env.DB, org.orgId), confirmed: record.summary };
+            const own: Caller = {
+              ...caller,
+              org: scoped(c.env.DB, org.orgId),
+              confirmed: { summary: record.summary, runId: record.runId, callId: record.toolCallId },
+            };
             const out = await confirmable.run(own, Object.fromEntries(Object.entries(parsedJson(record.inputJson) ?? {})));
+            // What it did, from its own result: the drawer says done or not from this, never from the model's answer after it.
+            const done: ConfirmDone = out.ok
+              ? { tool: name, ok: true, message: TOOL_CARDS[name]?.did ?? 'Done' }
+              : { tool: name, ok: false, message: `Not done: ${out.message}. This card is spent: ask again for a new one.` };
+            shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
             return out.ok
-              ? { card: card(name, TOOL_CARDS[name]?.did ?? '', true), content: asData(out.output) }
+              ? { card: card(name, done.message, true), content: asData(out.output) }
               : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${out.message}`, refused: true };
           }),
       })),
@@ -635,7 +608,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
        * under a one-use token for this member (none when they may not press it: `why` says who may),
        * then the run's end, whose pause the client resumes when the person presses.
        */
-      async function* paused(end: StreamChunk, asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
+      async function* paused(asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
         const [one] = asked;
         const name = String(one?.metadata?.toolName ?? '');
         const called = one?.metadata?.input;
@@ -667,6 +640,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             toolCallId: one.toolCallId,
             summary,
             expiresAt,
+            spent: { calls, statements: budget.statements, fetches: budget.fetches, elapsedMs: now() - start },
           };
           await turns.offerConfirmation(token, record, now());
         }
@@ -676,7 +650,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           value: { ...made.card, tool: name, token, why, expiresAt } satisfies ConfirmCard,
           timestamp: Date.now(),
         };
-        yield end;
+        // The run's end, without its pause: the browser gets the card and its token, never the model's input; the press resumes it here.
+        yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
       }
       try {
         for await (const chunk of run.value) {
@@ -688,7 +663,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           }
           if (chunk.type === 'RUN_FINISHED' && chunk.outcome?.type === 'interrupt') {
             yield* shown.splice(0);
-            yield* paused(chunk, chunk.outcome.interrupts);
+            yield* paused(chunk.outcome.interrupts);
             return;
           }
           if (chunk.type === 'RUN_FINISHED') {

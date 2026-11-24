@@ -52,7 +52,7 @@ async function setup(orgId: string) {
   /** Publish these entries' drafts. */
   const publish = (...entries: { id: string; version: number }[]) =>
     ok(call('publish', { drafts: entries.map((e) => ({ kind: 'schedule_entry', id: e.id, version: e.version })) }));
-  return { org, call, playingAt, publish, lobby: lobby.id, hall: hall.id, front: front.id, main, breakfast, lunch, flash };
+  return { org, call, playingAt, publish, lobby: lobby.id, hall: hall.id, front: front.id, main, breakfast, lunch, flash, still: still.id };
 }
 
 type Entry = { id: string; version: number; takeover: boolean };
@@ -339,6 +339,35 @@ describe('schedule entries', () => {
     });
     expect(await playingAt(at('2026-11-17T12:30'))).toEqual({ lobby: main, hall: main });
     expect(await call('end_takeover', { scheduleEntryId: takeover.id })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('publish_takeover makes a takeover and publishes it in one batch, whole or not at all: one it cannot publish leaves no draft (#351)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, playingAt, flash, still } = await setup('sch-publish-takeover');
+    const out = await ok(call('publish_takeover', { playlistId: flash, target: 'org', endsAt: '2026-11-17T14:00:00Z' }));
+    expect(out).toMatchObject({ publish: { screens: 2 }, entry: { takeover: true, live: expect.anything() } });
+    expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: flash, hall: flash });
+
+    // A playlist never published, not given to publish with it: refused, and no takeover is left as a draft.
+    const fresh = await org.playlists.insert({ name: 'Storm', transitionJson: JSON.stringify({ type: 'cut' }) });
+    await org.playlists.setItems(fresh.id, [still]);
+    const entries = (await org.scheduleEntries.list()).length;
+    const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+    expect(await call('publish_takeover', { playlistId: fresh.id, target: 'org', endsAt: '2026-11-17T14:00:00Z' })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('the takeover cannot be published'),
+    });
+    expect(await org.scheduleEntries.list()).toHaveLength(entries);
+    expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+    // Given with it, at its version: both go live in the one call. Starting later, it wins over the first.
+    const row = (await org.playlists.get(fresh.id))!;
+    const later = { startsAt: '2026-11-17T12:05:00Z', endsAt: '2026-11-17T14:00:00Z' };
+    expect(
+      await ok(call('publish_takeover', { playlistId: fresh.id, target: 'org', ...later, with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }] })),
+    ).toMatchObject({ promoted: expect.arrayContaining([{ kind: 'playlist', id: fresh.id }]) });
+    expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: fresh.id, hall: fresh.id });
   });
 
   it('a published entry deleted waits for a publish that applies it: one of everything, or one that pins it; never one that pins something else', async () => {

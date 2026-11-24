@@ -125,6 +125,7 @@ describe('the registry', () => {
       'list_templates',
       'publish',
       'publish_manifest_to_screen',
+      'publish_takeover',
       'read_table',
       'register_template_version',
       'remove_ai_provider',

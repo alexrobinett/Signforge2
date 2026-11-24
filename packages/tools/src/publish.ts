@@ -14,7 +14,7 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import { published, type OrgScope } from '@signforge/db';
+import { published, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
 import { z } from 'zod';
 import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
@@ -23,6 +23,7 @@ import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
 import { publishOrg, type DraftPin } from './publishing';
+import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
 import { screenState } from './screen-state';
@@ -100,7 +101,8 @@ async function switchScreens(
  * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
  * approved request (`exact`: nothing removed that it does not pin; `brand`, the brand state it was
  * asked under, which the manifests must be compiled with, held to the commit). `ifDefault`: the
- * default the manifests must be compiled with, held to the commit too.
+ * default the manifests must be compiled with, held to the commit too. `added`: entries staged before
+ * this in the call's batch (`publish_takeover`).
  */
 export async function runPublish(
   ctx: ToolContext<unknown>,
@@ -108,9 +110,10 @@ export async function runPublish(
   end: readonly string[] = [],
   approval?: { brand: string },
   ifDefault?: string,
+  added: readonly ScheduleEntryRow[] = [],
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined);
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined, added);
   // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
   // would pass a second read, and its batch then guards the very rows the manifests were made from.
   if (approval && result.brand !== approval.brand)
@@ -207,6 +210,42 @@ const endTakeover = defineTool({
     if (!row || row.endsAt === null) throw notFound('takeover', ctx.input.scheduleEntryId);
     return runPublish(ctx, [], [row.id]);
   },
+});
+
+const publishTakeover = defineTool({
+  name: 'publish_takeover',
+  description:
+    'Take over screens now: make a takeover and publish it, with the drafts it needs pinned at their versions (its playlist and spots, if never published), in one step, so it is sent whole or not at all: one that cannot be published leaves no draft behind. Nothing else is published with it. Takes what start_takeover takes, and with, the drafts to publish beside it. Returns what publish returns, and the takeover as entry.',
+  scope: 'content:publish',
+  minRole: 'editor',
+  mutates: true,
+  publishes: true,
+  input: z
+    .object({
+      ...takeoverFields,
+      with: z
+        .array(draftRef.extend({ version: z.number().int().positive() }))
+        .max(500)
+        .optional()
+        .describe('Drafts published with it, each at the version chosen: its playlist and spots, if never published'),
+    })
+    .refine(aimed, AIMED),
+  output: outputs.publish_takeover,
+  example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
+  target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
+  handler: async (ctx) => {
+    const { org, input, write } = ctx;
+    // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
+    const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())));
+    const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], undefined, undefined, [made]);
+    // Held (its playlist not published, a check it fails): nothing is written, not even the draft.
+    const held = out.held.find((h) => h.kind === 'schedule_entry' && h.id === made.id);
+    if (held || !out.promoted.some((p) => p.kind === 'schedule_entry' && p.id === made.id))
+      throw new ToolError('conflict', `the takeover cannot be published: ${held?.problems.join('; ') ?? 'it was not promoted'}`, { held: out.held });
+    // As published in the same batch.
+    return { ...out, entry: entryView(org.scheduleEntries.stage.publish(made).row) };
+  },
+  refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
 });
 
 const rollBackPublish = defineTool({
@@ -326,4 +365,4 @@ const getPublish = defineTool({
   },
 });
 
-export const publishTools = [publishManifestToScreen, publish, endTakeover, rollBackPublish, listPublishes, getPublish];
+export const publishTools = [publishManifestToScreen, publish, endTakeover, publishTakeover, rollBackPublish, listPublishes, getPublish];

@@ -31,16 +31,16 @@ const TAKEOVER_MAX_MS = 24 * 3_600_000;
 /** A takeover's priority: above every schedule entry's (at most 99). */
 const TAKEOVER_PRIORITY = 100;
 
-const aim = {
+export const aim = {
   target: scheduleTarget,
   groupId: id('group').optional().describe('For a group entry: the group'),
   screenId: id('screen').optional().describe('For a screen entry: the screen'),
 };
-const aimed = (v: { target?: string; groupId?: string; screenId?: string }) =>
+export const aimed = (v: { target?: string; groupId?: string; screenId?: string }) =>
   v.target === undefined
     ? v.groupId === undefined && v.screenId === undefined
     : (v.target === 'group') === (v.groupId !== undefined) && (v.target === 'screen') === (v.screenId !== undefined);
-const AIMED = 'give groupId for a group entry and screenId for a screen entry, nothing for org';
+export const AIMED = 'give groupId for a group entry and screenId for a screen entry, nothing for org';
 
 const priority = z.number().int().min(0).max(99).describe('Higher wins where entries overlap; 0 to 99, default 0. Takeovers are above all of them');
 const date = (what: string) => z.string().describe(`${what}, YYYY-MM-DD in each screen's time zone`);
@@ -151,8 +151,35 @@ async function requireAim(org: OrgScope, e: { playlistId: string; target: 'org' 
   return { target: e.target, groupId: e.target === 'group' ? (e.groupId ?? null) : null, screenId: e.target === 'screen' ? (e.screenId ?? null) : null };
 }
 
+/** A takeover's fields as its tools take them: the playlist, whom it plays on, and when (`start_takeover`, `publish_takeover`). */
+export const takeoverFields = {
+  playlistId: id('playlist'),
+  ...aim,
+  startsAt: instant('When it starts; default now').optional(),
+  endsAt: instant('When it ends, at most 24 hours after it starts'),
+};
+
+/** A new takeover as stored, checked: the playlist and whom it plays on exist, its bounds hold, and a screen would take it. */
+export async function takeoverOf(org: OrgScope, input: z.output<z.ZodObject<typeof takeoverFields>>, now: number): Promise<Stored> {
+  const aimedAt = await requireAim(org, input);
+  const bounds = takeoverBounds(input.startsAt ?? new Date(now).toISOString(), input.endsAt, now);
+  const values: Stored = {
+    playlistId: input.playlistId,
+    ...aimedAt,
+    priority: TAKEOVER_PRIORITY,
+    startDate: null,
+    endDate: null,
+    daysJson: null,
+    fromTime: null,
+    toTime: null,
+    ...bounds,
+  };
+  check('new', values);
+  return values;
+}
+
 /** The same refusals after a failed commit: a playlist, group or screen deleted meanwhile fails the batch's foreign keys. */
-async function missingAim(org: OrgScope, e: { playlistId?: string; groupId?: string; screenId?: string }) {
+export async function missingAim(org: OrgScope, e: { playlistId?: string; groupId?: string; screenId?: string }) {
   if (e.playlistId && !(await org.playlists.get(e.playlistId))) return notFound('playlist', e.playlistId);
   if (e.groupId && !(await org.screenGroups.get(e.groupId))) return notFound('group', e.groupId);
   if (e.screenId && !(await org.screens.get(e.screenId))) return notFound('screen', e.screenId);
@@ -231,35 +258,12 @@ const startTakeover = defineTool({
   mutates: true,
   idempotent: true,
   input: z
-    .object({
-      playlistId: id('playlist'),
-      ...aim,
-      startsAt: instant('When it starts; default now').optional(),
-      endsAt: instant('When it ends, at most 24 hours after it starts'),
-      idempotencyKey,
-    })
+    .object({ ...takeoverFields, idempotencyKey })
     .refine(aimed, AIMED),
   output: outputs.start_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
   target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
-  handler: async ({ org, input, write }) => {
-    const aimedAt = await requireAim(org, input);
-    const now = Date.now();
-    const bounds = takeoverBounds(input.startsAt ?? new Date(now).toISOString(), input.endsAt, now);
-    const values: Stored = {
-      playlistId: input.playlistId,
-      ...aimedAt,
-      priority: TAKEOVER_PRIORITY,
-      startDate: null,
-      endDate: null,
-      daysJson: null,
-      fromTime: null,
-      toTime: null,
-      ...bounds,
-    };
-    check('new', values);
-    return { entry: entryView(write(await org.scheduleEntries.stage.insert(values))) };
-  },
+  handler: async ({ org, input, write }) => ({ entry: entryView(write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())))) }),
   refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
 });
 

@@ -45,7 +45,7 @@ export {
 } from './tool';
 export { type ClientRedirect, destinationOf, plainName, shownClient, shownClientName } from './agent-clients';
 export { grantClient } from './agent-grants';
-export { dispatch, describeTools, effectiveScopes, grantOf, overLimit, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
+export { dispatch, describeTools, effectiveScopes, grantOf, overLimit, permits, redact, sha256Hex, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
@@ -86,6 +86,7 @@ export {
   publishOrg,
   spotDraft,
   type DraftKind,
+  type DraftPin,
   type DraftReport,
   type OrgGraph,
   type PreviewInput,

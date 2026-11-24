@@ -82,8 +82,11 @@ export interface Caller<D extends DataScope = OrgScope> {
    * role and the org's `editorsPublish` to the commit, so a member demoted meanwhile publishes nothing.
    */
   member?: string;
-  /** The confirmation card the person pressed for this call (#269, the CMS agent's drawer): its summary, on the audit row. */
-  confirmed?: string;
+  /**
+   * The confirmation card the person pressed for this call (#269, the CMS agent's drawer): its summary,
+   * and the agent run and call it resumed, on the audit row, which a confirmed read gets too.
+   */
+  confirmed?: { summary: string; runId: string; callId: string };
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
@@ -226,7 +229,7 @@ export async function dispatch<D extends DataScope>(
   };
   // The writes and their audit row, in one atomic batch. Nothing staged, nothing written.
   const commit = async (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) => {
-    if (!writes.length && !tool.alwaysAudited) return;
+    if (!writes.length && !tool.alwaysAudited && !caller.confirmed) return;
     const audit = caller.org.auditLog.stage({
       actorKind: caller.actor.kind,
       actorId: caller.actor.id,

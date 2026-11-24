@@ -43,6 +43,8 @@ export interface Confirmation {
   toolCallId: string;
   /** What the card said, for the audit row. */
   summary: string;
+  /** What the turn had spent when it paused: a press goes on from there, never with a new budget. */
+  spent: { calls: number; statements: number; fetches: number; elapsedMs: number };
   expiresAt: number;
 }
 

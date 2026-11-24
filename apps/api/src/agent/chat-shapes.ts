@@ -84,7 +84,23 @@ export interface AnswerCard {
  * (`ConfirmCard`, #269), the run paused for it. With `RUN_STARTED`, `RUN_FINISHED` and `RUN_ERROR`,
  * nothing else of the run reaches the browser.
  */
-export const CHAT_EVENTS = { call: 'signforge.call', text: 'signforge.text', answer: 'signforge.answer', confirm: 'signforge.confirm' } as const;
+export const CHAT_EVENTS = {
+  call: 'signforge.call',
+  text: 'signforge.text',
+  answer: 'signforge.answer',
+  confirm: 'signforge.confirm',
+  done: 'signforge.done',
+} as const;
+
+/**
+ * What a press of a confirmation card did (`signforge.done`), from the action's own result, never the
+ * model's word: done, or refused and why (the card is spent either way).
+ */
+export interface ConfirmDone {
+  tool: string;
+  ok: boolean;
+  message: string;
+}
 
 /**
  * A tool the drawer runs only when the person presses its card (#269): publishing, a takeover, a

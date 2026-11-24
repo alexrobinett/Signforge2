@@ -13,7 +13,7 @@
  * summary (`Caller.confirmed`).
  */
 import type { OrgScope } from '@signforge/db';
-import { type Caller, dispatch, type DispatchResult, type Grant, permits, registry } from '@signforge/tools';
+import { type Caller, dispatch, type DispatchResult, type DraftPin, type Grant, OVERRIDE_LIMIT_MS, permits, publishOrg, registry, sha256Hex, ToolError } from '@signforge/tools';
 import { z } from 'zod';
 import type { ConfirmCard } from './chat-shapes';
 
@@ -67,27 +67,36 @@ async function screenNamed(org: OrgScope, id: unknown) {
   return screen;
 }
 
-/** Where an entry plays, in words, and on how many screens. */
-async function aimOf(org: OrgScope, v: Row): Promise<string> {
+const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
+
+/** Where an entry plays, in words, and the screens it reaches now, by id, sorted: what a takeover's card binds. */
+async function reachOf(org: OrgScope, v: Row): Promise<{ words: string; screens: string[] }> {
   if (v.target === 'group') {
     const group = await org.screenGroups.get(str(v.groupId));
     if (!group) throw new CardProblem(`no group ${str(v.groupId)}`);
-    const n = (await org.screenGroups.members(group.id)).length;
-    return `on the ${group.name} group (${n === 1 ? '1 screen' : `${n} screens`})`;
+    const screens = (await org.screenGroups.members(group.id)).sort();
+    return { words: `on the ${group.name} group (${screensWord(screens.length)})`, screens };
   }
-  if (v.target === 'screen') return `on ${(await screenNamed(org, v.screenId)).name}`;
-  const n = (await org.screens.list()).length;
-  return `on every screen (${n === 1 ? '1 screen' : `${n} screens`})`;
+  if (v.target === 'screen') {
+    const screen = await screenNamed(org, v.screenId);
+    return { words: `on ${screen.name}`, screens: [screen.id] };
+  }
+  const screens = (await org.screens.list()).map((s) => s.id).sort();
+  return { words: `on every screen (${screensWord(screens.length)})`, screens };
 }
 
+/** A press refused before it runs anything: the org is not as the card showed it. */
+const changedSince = (what: string): DispatchResult => ({ ok: false, error: 'conflict', message: `${what} since the card was made: ask again for a new one` });
+
 /** Each draft pinned, at the version read now, by its name: what the card shows is what a press publishes. */
-async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: Row[]; names: string[] }> {
+async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[]; names: string[] }> {
   if (!Array.isArray(drafts) || !drafts.length) throw new CardProblem('name the drafts to publish (drafts), each { kind, id }: a publish from here is pinned');
-  const pins: Row[] = [];
+  const pins: DraftPin[] = [];
   const names: string[] = [];
   for (const d of drafts) {
-    const kind = str(d?.kind);
+    const kind = d?.kind;
     const id = str(d?.id);
+    if (kind !== 'spot' && kind !== 'playlist' && kind !== 'schedule_entry') throw new CardProblem(`no draft kind ${str(kind)}: spot, playlist or schedule_entry`);
     const row =
       kind === 'spot'
         ? await org.spots.get(id)
@@ -96,12 +105,15 @@ async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: Row[]; na
           : kind === 'schedule_entry'
             ? await org.scheduleEntries.get(id)
             : undefined;
-    if (!row) throw new CardProblem(`no ${kind || 'draft'} ${id}`);
+    if (!row) throw new CardProblem(`no ${kind} ${id}`);
     pins.push({ kind, id, version: row.rowVersion });
     names.push(kind === 'schedule_entry' ? 'A schedule entry' : `${kind === 'spot' ? 'Spot' : 'Playlist'} ${'name' in row ? row.name : id}`);
   }
   return { pins, names };
 }
+
+/** A calendar's or a sheet's source: the resource read at the provider, in full, through its connection (#351 review). */
+const resourceLines = (called: Row) => (called.resource === undefined ? [] : [`Reads this at the provider, through its connection: ${str(called.resource)}`]);
 
 /** An address card's lines: the address in full, and what fetches it. */
 const addressOf = (url: unknown, fetches: string) => {
@@ -114,16 +126,37 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     tools: ['publish'],
     schema: ofRegistry('publish'),
     description: describedAs('publish'),
-    async make(org, called) {
+    async make(org, called, at) {
       const { pins, names } = await pinsOf(org, called.drafts);
       const settings = await org.settings.get();
-      // Pinned as the default (#393): refused if it is no longer the default by then.
-      const ifDefault = pins.find((p) => p.kind === 'playlist' && p.id === settings?.defaultPlaylistId)?.id;
+      // The model's ifDefault as asked, else the default if pinned (#393): refused if it is no longer the default by then.
+      const ifDefault = str(called.ifDefault) || pins.find((p) => p.kind === 'playlist' && p.id === settings?.defaultPlaylistId)?.id;
+      // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds back.
+      let dry: Awaited<ReturnType<typeof publishOrg>>;
+      try {
+        dry = await publishOrg(org, { hash: sha256Hex, now: new Date(at.now) }, pins);
+      } catch (err) {
+        if (err instanceof ToolError) throw new CardProblem(err.message);
+        throw err;
+      }
+      const reach = dry.screens.filter((x) => x.manifest && x.manifest.id !== x.current).length;
+      // Sample text it was asked to publish anyway (#360, #392): shown, as it goes live with it.
+      const sample = called.allowSample;
       return {
-        input: { drafts: pins, ...(ifDefault ? { ifDefault } : {}) },
+        // Every constraint the model gave, as it gave them, with the pins at the versions shown.
+        input: { ...called, drafts: pins, ...(ifDefault ? { ifDefault } : {}) },
         card: {
           title: 'Publish to screens',
-          lines: [...names.map((n) => `${n}, as drafted now`), 'Every screen that plays them switches as it hears of it.'],
+          lines: [
+            ...names.map((n) => `${n}, as drafted now`),
+            reach ? `Changes what ${screensWord(reach)} play; each switches as it hears of it.` : 'Changes what no screen plays now.',
+            ...(dry.drafts.held.length ? [`${dry.drafts.held.length === 1 ? 'One draft fails' : `${dry.drafts.held.length} drafts fail`} its checks and keeps its published version.`] : []),
+            ...(Array.isArray(sample) && sample.length
+              ? [`Publishes sample text still in ${sample.length === 1 ? 'one spot' : `${sample.length} spots`}, as asked.`]
+              : sample === true
+                ? ['Publishes the sample text it still shows, as asked.']
+                : []),
+          ],
           address: null,
           when: 'Now',
           undo: 'Undo from the publish toast, or roll back on the Publishes page.',
@@ -134,7 +167,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     run: run('publish'),
   },
   start_takeover: {
-    tools: ['start_takeover', 'publish'],
+    tools: ['publish_takeover'],
     schema: ofRegistry('start_takeover'),
     description: () => `${registry.get('start_takeover')?.description ?? ''} From the drawer it is published at once when the person presses its card.`,
     async make(org, called, at) {
@@ -153,12 +186,15 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
             ...unpublished.map((s) => ({ kind: 'spot', id: s?.id, version: s?.rowVersion })),
           ]
         : [];
+      const { idempotencyKey: _key, ...start } = called;
+      const reach = await reachOf(org, called);
       return {
-        input: { start: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() }, also },
+        // What it plays, on which screens: a press refuses if either changed since (the group's screens, the playlist published again).
+        input: { start, with: also, reach: reach.screens, live: playlist.publishedJson },
         card: {
           title: 'Take over screens',
           lines: [
-            `Plays ${playlist.name} ${await aimOf(org, called)}, over anything scheduled.`,
+            `Plays ${playlist.name} ${reach.words}, over anything scheduled.`,
             `From ${starts <= at.now ? 'now' : timeOf(starts, at)} until ${timeOf(ends, at)}.`,
             ...(fresh ? [`Publishes ${playlist.name} too: it was never published.`] : []),
           ],
@@ -170,14 +206,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       };
     },
     async run(caller, input) {
-      const made = await dispatch(registry, 'start_takeover', input.start, caller);
-      if (!made.ok) return made;
-      const output = made.output;
-      const entry = output && typeof output === 'object' && 'entry' in output ? output.entry : undefined;
-      const id = entry && typeof entry === 'object' && 'id' in entry ? str(entry.id) : '';
-      const version = entry && typeof entry === 'object' && 'version' in entry ? entry.version : undefined;
-      const also = Array.isArray(input.also) ? input.also : [];
-      return dispatch(registry, 'publish', { drafts: [{ kind: 'schedule_entry', id, version }, ...also] }, caller);
+      const start = typeof input.start === 'object' && input.start !== null ? Object.fromEntries(Object.entries(input.start)) : {};
+      // The screens it reaches, and what its playlist plays, as the card showed them: else nothing is done.
+      if (canonical((await reachOf(caller.org, start)).screens) !== canonical(input.reach)) return changedSince('The screens it would play on changed');
+      if (((await caller.org.playlists.get(str(start.playlistId)))?.publishedJson ?? null) !== input.live) return changedSince('Its playlist was published again');
+      // Made and published in one batch, or not at all (`publish_takeover`).
+      return dispatch(registry, 'publish_takeover', { ...start, with: input.with }, caller);
     },
   },
   end_takeover: {
@@ -192,7 +226,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         input: { scheduleEntryId: entry.id },
         card: {
           title: 'End the takeover',
-          lines: [`Stops ${playlist?.name ?? 'the takeover'} ${await aimOf(org, entry)}: they go back to what is scheduled.`],
+          lines: [`Stops ${playlist?.name ?? 'the takeover'} ${(await reachOf(org, entry)).words}: they go back to what is scheduled.`],
           address: null,
           when: 'Now',
           undo: 'No undo: start another takeover.',
@@ -235,7 +269,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         input: { scheduleEntryId: entry.id, ifVersion: entry.rowVersion },
         card: {
           title: 'Remove a schedule entry',
-          lines: [`Removes ${playlist?.name ?? 'its playlist'} ${await aimOf(org, entry)}.`],
+          lines: [`Removes ${playlist?.name ?? 'its playlist'} ${(await reachOf(org, entry)).words}.`],
           address: null,
           when: entry.publishedJson === null ? 'Now: it was never published' : 'At the next publish: screens keep it until then',
           undo: 'No undo: schedule it again.',
@@ -279,11 +313,11 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           lines: [
             state === null
               ? `${screen.name} follows its display hours again.`
-              : `${screen.name}'s display turns ${state} now, whatever its display hours say, until it is set to follow them again.`,
+              : `${screen.name}'s display turns ${state} now, whatever its display hours say, until its next scheduled display change, or ${OVERRIDE_LIMIT_MS / 3_600_000} hours at most, then follows its hours again.`,
           ],
           address: null,
           when: 'Now, on the live screen',
-          undo: state === null ? 'Turn it on or off again here.' : 'Set it to follow its display hours again.',
+          undo: state === null ? 'Turn it on or off again here.' : 'Set it to follow its display hours again, or wait: it ends by itself.',
           press: state === null ? 'Follow hours' : `Turn ${state}`,
         },
       };
@@ -359,7 +393,10 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
         card: {
           title: 'Add a data source',
-          lines: [`Adds ${str(called.name) || 'a data source'}, read from the address below.`],
+          lines: [
+            `Adds ${str(called.name) || 'a data source'}, read from ${called.resource === undefined ? 'the address below' : 'its connection'}.`,
+            ...resourceLines(called),
+          ],
           address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, `The poller, every ${minutes === 1 ? 'minute' : `${minutes} minutes`}`),
           when: 'Now: the poller starts reading it',
           undo: 'Delete the data source on the Integrations page.',
@@ -386,6 +423,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
                 .filter((k) => k !== 'dataSourceId' && k !== 'ifVersion')
                 .join(', ') || 'nothing'
             }.`,
+            ...resourceLines(called),
           ],
           address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, 'The poller, at its next read'),
           when: 'Now: screens get what it reads next',
