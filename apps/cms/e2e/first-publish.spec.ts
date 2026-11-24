@@ -37,12 +37,14 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   const screen = await (await browser.newContext()).newPage();
   await screen.goto('/test-screen/?kind=browser&content=/v1/device');
   await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
-  const { screen: paired } = await tool(page, 'claim_screen', {
-    code: (await playing(screen))!.pairing,
-    name: 'Door',
-    timezone: 'UTC',
-    orientation: 'landscape',
+  // Claimed from this spec's own address: `tool` posts from the one every spec shares, and claims
+  // are limited per address (10 a minute), which the specs running beside this one use up.
+  const claimed = await page.request.post('/api/tools/claim_screen', {
+    headers: { 'cf-connecting-ip': ADDRESS },
+    data: { code: (await playing(screen))!.pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' },
   });
+  expect(claimed.status(), await claimed.text()).toBe(200);
+  const { screen: paired } = (await claimed.json()) as { screen: { id: string } };
 
   await page.goto(`/screens/${paired.id}`);
   await hydrated(page);
