@@ -136,6 +136,8 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // The seeded entry, made a takeover.
   end_takeover: (o) => o.scope.scheduleEntries.update(o.scheduleEntry, { priority: 100, startsAt: Date.now(), endsAt: Date.now() + 3_600_000 }),
   delete_playlist: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
+  // The seeded playlist plays the spot its example names: it plays the other one alone.
+  delete_spot: (o) => o.scope.playlists.setItems(o.playlist, [o.imageSpot]),
   delete_asset: async (o) => {
     await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
     await o.scope.spots.delete(o.imageSpot);

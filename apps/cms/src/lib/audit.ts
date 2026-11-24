@@ -106,6 +106,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
+  delete_spot: { group: 'Spots', words: 'Deleted' },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },

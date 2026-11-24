@@ -868,6 +868,7 @@ export const outputs = {
   list_spots: z.object({ spots: z.array(spotOutput), next: nextOutput }),
   get_spot: spotResult,
   create_spot: spotResult,
+  delete_spot: z.object({ deleted: z.string().describe("The deleted spot's id") }),
   update_spot: spotResult,
   get_spot_preview: z.object({
     preview: z

@@ -6,21 +6,31 @@
  * A spot the agent just filled (#263) opens with its marks and a banner (src/components/spots/fill-marks.tsx).
  * Fill from a flyer updates a template spot (#264): its review takes the form's place, with the stage
  * first on a phone, until it is kept or let go (src/components/spots/fill-review.tsx).
+ * Delete (#242) asks first; a spot a playlist plays is refused, and the dialog links those playlists.
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
 import { startData } from '@signforge/compiler/draft';
 import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, notFound } from '@tanstack/react-router';
+import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { cn } from '~/lib/utils';
 import { Input } from '~/components/ui/input';
@@ -99,6 +109,9 @@ function SpotEditor() {
   const openFill = useAppStore((s) => s.openSpotFill);
   const undoUpdate = useAppStore((s) => s.undoUpdate);
   const reviewAlsoOn = useAppStore((s) => s.reviewAlsoOn);
+  const deleting = useAppStore((s) => s.spotEditor.deleting);
+  const askDelete = useAppStore((s) => s.askDeleteSpot);
+  const deleteSpot = useAppStore((s) => s.deleteSpot);
 
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
@@ -125,7 +138,12 @@ function SpotEditor() {
             Fill from a flyer
           </Button>
         )}
-        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />}
+        {canManage && (
+          <>
+            <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />
+            <DeleteButton onAsk={() => askDelete(true)} />
+          </>
+        )}
         {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
@@ -148,7 +166,7 @@ function SpotEditor() {
           marks={filled.marks}
           from={filled.photo ? 'photo' : 'link'}
           onUndo={() => undoFill(orgId, spotId, { name: version.manifest.name, data: startData(version.manifest.fields) })}
-          onAnother={() => void fillWithAnother(spotId)}
+          onAnother={() => void fillWithAnother(orgId, spotId)}
           onDone={() => finishFill(spotId)}
         />
       )}
@@ -300,6 +318,42 @@ function SpotEditor() {
           />
         </div>
       </div>
+      <AlertDialog open={deleting.open} onOpenChange={askDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {spot.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its draft and its published version are deleted; its images and data sources stay. A spot a playlist plays, in its draft or on screens, cannot be
+              deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div role="alert" className="flex flex-col gap-1 text-sm font-medium text-destructive empty:hidden">
+            {deleting.error && <p>{deleting.error}</p>}
+            {deleting.playlists.length > 0 && (
+              <ul className="list-disc pl-5">
+                {deleting.playlists.map((p) => (
+                  <li key={p.id}>
+                    <Link
+                      to="/playlists/$playlistId"
+                      params={{ playlistId: p.id }}
+                      onClick={() => askDelete(false)}
+                      className="underline underline-offset-4"
+                    >
+                      {p.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="destructive" disabled={deleting.pending} onClick={() => void deleteSpot(orgId, spot.id)}>
+              {deleting.pending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

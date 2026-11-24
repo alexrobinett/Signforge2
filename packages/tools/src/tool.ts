@@ -411,7 +411,7 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    */
   publishes?: boolean;
   /**
-   * True for a tool only a person may run (the agent grant tools): dispatch refuses an agent, a
+   * True for a tool only a person may run (the agent grant tools, `delete_spot`): dispatch refuses an agent, a
    * grant's or the in-CMS one (`isAgent`), with `forbidden` before anything is read, and `/mcp` does
    * not list it.
    */
