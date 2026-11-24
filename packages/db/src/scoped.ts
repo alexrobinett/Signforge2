@@ -309,6 +309,19 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
   };
   return {
     ...rows,
+    /**
+     * How many of the org's drafts have changes screens do not have, in one SQL count (#361): never
+     * published, or edited since (a publish keeps `updated_at` as it was). An edit put back as it was
+     * still counts, which `draftChanged` would not, so it is for a count shown, never for what to publish.
+     */
+    countUnpublished: async (): Promise<number> => {
+      const found = await db
+        .select({ n: sql<number>`count(*)`.mapWith(Number) })
+        .from(t)
+        .where(and(eq(t.orgId, orgId), or(isNull(t.publishedAt), gt(t.updatedAt, t.publishedAt))))
+        .get();
+      return found?.n ?? 0;
+    },
     stage: {
       ...rows.stage,
       insert: async (values: NewRow<T>): Promise<Staged<Row>> => {
