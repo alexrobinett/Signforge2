@@ -4,7 +4,7 @@
 // records every write run outside the dispatcher's commit: a statement on its own, or a batch of
 // its own. The dispatcher commits only after the handler returns, so a batch run while the handler
 // runs is the tool's own, whatever it ends with.
-import { scoped, startPairing } from '@signforge/db';
+import { contentJson, scoped, startPairing } from '@signforge/db';
 import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -127,8 +127,23 @@ const savedKey = async (o: SeededOrg) =>
     (await o.scope.aiProvider.stage.put({ provider: 'anthropic', keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1 })).writes,
   );
 
+/** An agent's proposal on the seeded spot or playlist (#116), at version 3, as their examples name it. */
+async function proposed(o: SeededOrg, kind: 'spot' | 'playlist') {
+  const id = kind === 'spot' ? o.templateSpot : o.playlist;
+  await env.DB.prepare(`UPDATE ${kind === 'spot' ? 'spots' : 'playlists'} SET row_version = 3 WHERE org_id = ? AND id = ?`)
+    .bind(o.orgId, id)
+    .run();
+  const row = kind === 'spot' ? await o.scope.spots.get(id) : await o.scope.playlists.get(id);
+  const items = kind === 'playlist' ? await o.scope.playlists.items(id) : undefined;
+  await o.scope.commit(o.scope.draftSnapshots.stage.keep(kind, row!, 'person', { contentJson: contentJson(row!, items), sampleFieldsJson: null }).writes);
+}
+
 /** Clear what would make a tool's example refuse before it writes. */
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
+  revert_spot_draft: (o) => proposed(o, 'spot'),
+  keep_spot_draft: (o) => proposed(o, 'spot'),
+  revert_playlist_draft: (o) => proposed(o, 'playlist'),
+  keep_playlist_draft: (o) => proposed(o, 'playlist'),
   // Its example state, pending for the caller.
   finish_connection: (o) => pendingFor(o.orgId, 'user-g'),
   // Its example code, open to claim.

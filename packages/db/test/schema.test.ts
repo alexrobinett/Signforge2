@@ -58,6 +58,7 @@ describe('schema', () => {
       'connections',
       'data_snapshots',
       'data_sources',
+      'draft_snapshots',
       'draft_tombstones',
       'feed_image_deletes',
       'feed_images',

@@ -138,6 +138,7 @@ export async function runPublish(
     throw new ToolError('conflict', 'the screens this publish would switch have changed since they were shown: ask again', { screens: switches });
   // The pins' guards, the brand state's, the default's and the screens' go with the batch whether or not anything else is written.
   write({ row: undefined, writes: result.pinGuards });
+  write({ row: undefined, writes: result.keptCleared });
   if (brand !== undefined) write(org.brandKits.stage.unchanged(result.brand));
   if (ifDefault !== undefined) write(org.settings.stage.defaultIs(ifDefault));
   // The screens as compiled: one added or deleted before the batch fails it, and the publish runs again from a fresh read.

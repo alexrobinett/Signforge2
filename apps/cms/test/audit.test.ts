@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditInput, auditTime, csvLine, csvRow, detailText, eventText, isWhen, viaText, whatText, whoText, type AuditEntry } from '../src/lib/audit';
+import { agentWho, auditInput, auditTime, csvLine, csvRow, detailText, eventText, isWhen, viaText, whatText, whoText, type AuditEntry } from '../src/lib/audit';
 
 const entry = (e: Partial<AuditEntry>): AuditEntry => ({
   at: Date.UTC(2026, 10, 17, 14, 20),
@@ -39,6 +39,13 @@ describe('the audit log in words', () => {
     const endpoint = entry({ action: 'cancel_invitation', target, detail: { email: 'sam@example.com' } });
     const tool = entry({ action: 'cancel_invitation', target, detail: { input: { invitationId: 'inv_1' }, detail: { email: 'sam@example.com' } } });
     for (const e of [endpoint, tool]) expect([whatText(e), detailText(e)]).toEqual(['Invitation cancelled', 'email: sam@example.com']);
+  });
+
+  it('names an agent by its plain name, else as an agent, and as gone only once disconnected: never "An agent, agent" (#410)', () => {
+    expect(agentWho({ name: 'Deli bot', gone: false })).toBe('Deli bot, agent');
+    expect(agentWho({ name: null, gone: false })).toBe('An agent');
+    expect(agentWho({ name: null, gone: true })).toBe('An agent no longer connected');
+    expect(agentWho(undefined)).toBe('An agent');
   });
 
   it('words a membership change from the fields it kept, and an agent refused for its limits', () => {

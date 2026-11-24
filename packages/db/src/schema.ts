@@ -699,6 +699,36 @@ export const playlistItems = sqliteTable(
   ],
 );
 
+/**
+ * The draft kept beside a spot's or playlist's draft while an agent's draft is on it (#116), so a
+ * person's edit is never lost to an agent's. `holds: 'person'`: the draft an agent first wrote over
+ * (a person's, or the published version as it stood in the draft), which Reject puts back. `holds:
+ * 'agent'`: the agent's draft a Reject set aside, which its Undo puts back. One per draft; it goes
+ * with a publish, a person's edit and the draft itself (the foreign keys cascade, so a draft deleted
+ * and made again with its id starts with none).
+ */
+export const draftSnapshots = sqliteTable(
+  'draft_snapshots',
+  {
+    orgId: orgId(),
+    spotId: text('spot_id'),
+    playlistId: text('playlist_id'),
+    holds: text('holds', { enum: ['person', 'agent'] }).notNull(),
+    /** The kept draft's content as `published_json` holds content (`contentJson`, a playlist's with its items). */
+    contentJson: text('content_json').notNull(),
+    /** A spot's `sample_fields_json` as it was with that draft (#360, #392): it goes back with it. */
+    sampleFieldsJson: text('sample_fields_json'),
+    createdAt: created(),
+  },
+  (t) => [
+    uniqueIndex('draft_snapshots_spot_uq').on(t.orgId, t.spotId),
+    uniqueIndex('draft_snapshots_playlist_uq').on(t.orgId, t.playlistId),
+    foreignKey({ columns: [t.orgId, t.spotId], foreignColumns: [spots.orgId, spots.id] }).onDelete('cascade'),
+    foreignKey({ columns: [t.orgId, t.playlistId], foreignColumns: [playlists.orgId, playlists.id] }).onDelete('cascade'),
+    check('draft_snapshots_one_draft', sql`(${t.spotId} IS NULL) <> (${t.playlistId} IS NULL)`),
+  ],
+);
+
 // ------------------------------------------------------------------ schedule
 
 export const scheduleEntries = sqliteTable(

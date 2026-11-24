@@ -17,6 +17,7 @@ import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { ProposalPanel } from '~/components/proposal';
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
@@ -158,6 +159,16 @@ function SpotEditor() {
         )}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
+      {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
+      <ProposalPanel
+        orgId={orgId}
+        kind="spot"
+        id={spotId}
+        version={spot.version}
+        fieldLabels={Object.fromEntries(Object.entries(version?.manifest.fields ?? {}).map(([k, f]) => [k, f.label]))}
+        unsaved={status !== 'saved'}
+        canDecide={canManage}
+      />
       {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
       {filled?.kind === 'update' && (
         <UpdateBanner

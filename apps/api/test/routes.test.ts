@@ -234,7 +234,8 @@ describe('requests', () => {
     writes.length = 0;
     const kept = await member.post('/api/agent/inline/keep', { spotId: made.spot.id, ifVersion: made.spot.version, data: { title: 'Kept' } });
     expect(kept.status, await kept.clone().text()).toBe(200);
-    expect(ours()).toEqual(['spots', 'audit_log']);
+    // The agent's update is its proposal (#116): the draft it replaced is kept beside it, in the same batch.
+    expect(ours()).toEqual(['draft_snapshots', 'spots', 'audit_log']);
   });
 
   it("to the drawer's turn write nothing of ours, its tools' reads included", async () => {
@@ -276,7 +277,8 @@ describe('requests', () => {
       calls: [{ tool: 'update_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
     });
     expect(saved.status, await saved.clone().text()).toBe(200);
-    expect(ours()).toEqual(['spots', 'audit_log']);
+    // A draft saved from the drawer is the agent's proposal (#116): the draft it replaced is kept beside it.
+    expect(ours()).toEqual(['draft_snapshots', 'spots', 'audit_log']);
   });
 });
 
