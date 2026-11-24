@@ -93,6 +93,28 @@ describe('the scoped repository', () => {
   });
 });
 
+describe('connected grants', () => {
+  it("lists the org's grants not revoked, each with its client's redirect URIs, one member's or one grant, and no other org's", async () => {
+    const mine = await grant('grants-a', a.userId, await client());
+    // Another user's grant here: the repository keeps grants by org and user, whatever the membership.
+    const theirs = await grant('grants-a', b.userId, await client());
+    const revoked = await grant('grants-a', a.userId, await client());
+    const elsewhere = await grant('grants-b', b.userId, await client());
+    const org = scoped(env.DB, 'grants-a');
+    await org.commit(org.agentGrants.stage.revoke(revoked, a.userId, NOW).writes);
+    const ids = async (filter?: { userId?: string; grantId?: string }) => (await org.agentGrants.connected(filter)).map((r) => r.grant.id);
+    const all = await ids();
+    expect(all).toEqual(expect.arrayContaining([mine.id, theirs.id]));
+    expect(all).not.toContain(revoked.id);
+    expect(all).not.toContain(elsewhere.id);
+    expect(await ids({ userId: b.userId })).toEqual([theirs.id]);
+    expect(await org.agentGrants.connected({ grantId: mine.id })).toEqual([
+      { grant: expect.objectContaining({ id: mine.id }), redirectUrisJson: '["http://127.0.0.1/callback"]' },
+    ]);
+    expect(await scoped(env.DB, 'grants-b').agentGrants.connected({ grantId: mine.id })).toEqual([]);
+  });
+});
+
 describe('revoking a grant', () => {
   it("marks it, and deletes the provider's tokens and consent for it, and no other grant's", async () => {
     const org = scoped(env.DB, 'grants-a');

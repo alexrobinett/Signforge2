@@ -163,6 +163,26 @@ describe('who may call', () => {
     expect(res.headers.get('www-authenticate')).toContain('error="invalid_token"');
   });
 
+  it('gives a grant revoked in the CMS 401 on its very next call, and a scope change applies on the next call', async () => {
+    const { t, owner, org, editor } = await team();
+    const { access_token } = await agentToken(t, editor, org.id, ['content:read', 'content:draft', 'screens:manage']);
+    const { grantId } = (await check(access_token))!;
+    expect(await toolNames(access_token)).toContain('rename_screen');
+    // The member turns screens:manage off: the next call has it no more.
+    const { grant } = await editor.ok<{ grant: { version: number } }>('/api/tools/get_agent_grant', { grantId });
+    await editor.ok('/api/tools/update_agent_grant_scopes', { grantId, scopes: ['content:read', 'content:draft'], ifVersion: grant.version });
+    expect(await toolNames(access_token)).not.toContain('rename_screen');
+    expect(await call(access_token, 'rename_screen', { screenId: 'scr_any', name: 'x' })).toMatchObject({
+      isError: true,
+      structuredContent: { error: 'forbidden' },
+    });
+    // An owner disconnects it: the very next call is refused.
+    await owner.ok('/api/tools/revoke_agent_grant', { grantId });
+    const res = await post(access_token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toContain('error="invalid_token"');
+  });
+
   it("takes a downgraded member's publish away on the grant's next call", async () => {
     const { t, owner, org, editor, editorMemberId } = await team();
     const { access_token } = await agentToken(t, editor, org.id, ['content:read', 'content:draft', 'content:publish']);

@@ -15,8 +15,9 @@ const isObjectSchema = (s: unknown): s is Tool['inputSchema'] => isRecord(s) && 
 
 /**
  * The tools a grant may call, as `tools/list` lists them: those `describeTools` gives for it (its
- * scopes capped by the role now), less any that needs a service this caller lacks (the member tools'
- * Better Auth session: an agent has none), each with its input's JSON Schema and hints from the
+ * scopes capped by the role now), less those only a person may run (`people`: the grant tools) and any
+ * that needs a service this caller lacks (the member tools' Better Auth session: an agent has none),
+ * each with its input's JSON Schema and hints from the
  * registry. No output schema: a client may check results against one, and the registry's are not
  * written to be checked by other code.
  */
@@ -24,7 +25,7 @@ export function listedTools(grant: Grant, services: ToolServices): Tool[] {
   return describeTools(registry, grant).flatMap((described): Tool[] => {
     const tool = registry.get(described.name);
     const runnable = (tool?.needs ?? []).every((need) => services[need] !== undefined);
-    if (!tool || !runnable || !isObjectSchema(described.inputSchema)) return [];
+    if (!tool || tool.people || !runnable || !isObjectSchema(described.inputSchema)) return [];
     return [
       {
         name: described.name,

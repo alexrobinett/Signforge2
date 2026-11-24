@@ -7,13 +7,12 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
-import { type AiProviderName, CMS_AGENT_CLIENT_ID, type ToolErrorCode } from './outputs';
+import { type AiProviderName, CMS_AGENT_CLIENT_ID, SCOPES, type ToolErrorCode } from './outputs';
 
 export { CMS_AGENT_CLIENT_ID };
 import type { UploadSigner } from './upload';
 
-/** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
-export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] as const;
+export { SCOPES };
 export type Scope = (typeof SCOPES)[number];
 
 /** The org roles, lowest first. A tool's `minRole` admits that role and every one after it. */
@@ -392,6 +391,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * fresh read (./dispatch.ts, step 6). Its handler must be safe to run again.
    */
   publishes?: boolean;
+  /**
+   * True for a tool only a person may run (the agent grant tools): dispatch refuses an agent, a
+   * grant's or the in-CMS one (`isAgent`), with `forbidden` before anything is read, and `/mcp` does
+   * not list it.
+   */
+  people?: boolean;
   /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
   needs?: readonly N[];
   input: S;

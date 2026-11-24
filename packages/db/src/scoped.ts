@@ -2099,6 +2099,26 @@ export function scoped(d1: D1Database, orgId: string) {
           .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt)))
           .orderBy(asc(ag.id))
           .all(),
+      /**
+       * The grants not revoked, newest first, each with its client's registered redirect URIs (the
+       * provider's `oauthClient`, reached only through a grant here): what Settings › API & agents
+       * lists (M4-07). `userId` keeps one member's; `grantId` one grant.
+       */
+      connected: (filter: { userId?: string; grantId?: string } = {}) =>
+        db
+          .select({ grant: ag, redirectUrisJson: s.oauthClient.redirectUris })
+          .from(ag)
+          .innerJoin(s.oauthClient, eq(s.oauthClient.clientId, ag.clientId))
+          .where(
+            and(
+              eq(ag.orgId, orgId),
+              isNull(ag.revokedAt),
+              filter.userId === undefined ? undefined : eq(ag.userId, filter.userId),
+              filter.grantId === undefined ? undefined : eq(ag.id, filter.grantId),
+            ),
+          )
+          .orderBy(desc(ag.createdAt), asc(ag.id))
+          .all(),
       /** Used now: its 90 days unused start again. Bookkeeping, not audited; a revoked grant stays revoked. */
       touch: (grantId: string, now: number) =>
         db
