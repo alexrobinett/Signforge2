@@ -416,7 +416,8 @@ describe('a news source with photos', () => {
     expect(stored).toMatchObject({ etag: '"p0"', lastError: null, failures: 0, nextCheckAt: NOW + 6 * MIN + RECHECK_MS });
     expect(stored.fileSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(stored.thumbSha256).toBe(stored.fileSha256);
-    expect(photoBlobs.has(feedBlobKey(o.orgId, stored.fileSha256!))).toBe(true);
+    // Stored under the literal feed-owned prefix `o/<org>/f/<sha256>`.
+    expect(photoBlobs.has(`o/${o.orgId}/f/${stored.fileSha256!}`)).toBe(true);
     // Read afresh next time, so a 304 cannot leave the snapshot without them.
     expect(await o.scope.dataSources.get(id)).toMatchObject({ etag: null });
 
@@ -1588,12 +1589,13 @@ describe('the queue handler', () => {
   it('wires Cloudflare R2 and Queue adapters directly to the bindings', async () => {
     const bytes = jpeg(100, 100, 'r2-adapter');
     const sha = await sha256Hex(bytes);
-    const key = feedBlobKey(o.orgId, sha);
+    const literalKey = `o/${o.orgId}/f/${sha}`;
+    expect(feedBlobKey(o.orgId, sha)).toBe(literalKey);
     const r2 = r2PhotoBlobs(env.BLOBS);
-    await r2.put(key, bytes, { sha256: sha, contentType: 'image/jpeg' });
-    expect(await env.BLOBS.head(key)).not.toBeNull();
-    await r2.delete([key]);
-    expect(await env.BLOBS.head(key)).toBeNull();
+    await r2.put(literalKey, bytes, { sha256: sha, contentType: 'image/jpeg' });
+    expect(await env.BLOBS.head(literalKey)).not.toBeNull();
+    await r2.delete([literalKey]);
+    expect(await env.BLOBS.head(literalKey)).toBeNull();
 
     const batches: { body: FeedImageJob }[][] = [];
     const cfQueue = cfPhotoQueue({ sendBatch: async (batch) => void batches.push([...batch]) });

@@ -93,8 +93,6 @@ interface Run {
   photoQueue: PhotoQueue;
   /** Per connection, the grant this run uses (and per connection again, `!` after its id, the one it refreshed after a refusal): shared by its sources. */
   grants: Map<string, Promise<Held>>;
-  /** Serialises per-org photo budget checks + holds within one poll run so concurrent sources cannot overshoot NEW_PER_ORG_PER_DAY. */
-  photoQueues: Map<string, Promise<void>>;
   /** Cached per-org published bound fields (`sourceId -> BoundField[]`), loaded in `pollInit` once per org per run. */
   boundByOrg: Map<string, Map<string, BoundField[]>>;
 }
@@ -116,7 +114,7 @@ export async function pollDataSources(
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps; photoQueue?: PhotoQueue } = {},
 ): Promise<void> {
   const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
-  const pass: Run = { env, now, guards, connectors, photoQueue, grants: new Map(), photoQueues: new Map(), boundByOrg: new Map() };
+  const pass: Run = { env, now, guards, connectors, photoQueue, grants: new Map(), boundByOrg: new Map() };
   // Load each org's claimed sources, snapshot versions, and published bound spots in one D1 batch per org.
   const idsByOrg = new Map<string, string[]>();
   for (const { orgId, id } of claimed) {
@@ -159,14 +157,6 @@ export async function pollDataSources(
   for (const r of results) if (r.status === 'rejected') console.error('[poller] a poll failed', r.reason);
 }
 
-function enqueuePhotos(run: Run, org: OrgScope, sourceId: string, photos: PhotoPlan): Promise<void> {
-  if (!photos.again.length && !photos.fresh.length) return Promise.resolve();
-  const prev = run.photoQueues.get(org.orgId);
-  const next = (prev ?? Promise.resolve()).then(() => enqueueFeedPhotos(run.photoQueue, org, sourceId, photos, run.now));
-  run.photoQueues.set(org.orgId, next);
-  return next;
-}
-
 async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVersion: string | null, locator: string | undefined): Promise<void> {
   const { now } = run;
   const nextPollAt = now + row.refreshS * 1000;
@@ -177,8 +167,12 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     const ok = { nextPollAt, failures: 0, lastError: null };
     const res = await read(run, org, row, locator, photo);
     if (res.status === 'not-modified') {
-      const saved = await org.dataSources.savePoll(row.id, { source: ok, checkedAt: now, ...(photo ? { photos: { read: photo.read } } : {}) });
-      if (saved && res.photos) await enqueuePhotos(run, org, row.id, res.photos);
+      const { held } = await org.dataSources.savePoll(row.id, {
+        source: ok,
+        checkedAt: now,
+        ...(photo ? { photos: { read: photo.read, hold: res.photos } } : {}),
+      });
+      await enqueueFeedPhotos(run.photoQueue, org.orgId, row.id, held);
       return;
     }
     const { data, photos } = res;
@@ -191,12 +185,12 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
       const { refused } = snapshotFit(bound, data);
       if (refused) throw new PollFailure(refused);
     }
-    const saved = await org.dataSources.savePoll(row.id, {
+    const { held } = await org.dataSources.savePoll(row.id, {
       source,
       ...(snapshotChanged ? { snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } } : { checkedAt: now }),
-      ...(photo ? { photos: { read: photo.read, stories: res.stories ?? null } } : {}),
+      ...(photo ? { photos: { read: photo.read, stories: res.stories ?? null, hold: photos } } : {}),
     });
-    if (saved && photos) await enqueuePhotos(run, org, row.id, photos);
+    await enqueueFeedPhotos(run.photoQueue, org.orgId, row.id, held);
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
     const failures = row.failures + 1;

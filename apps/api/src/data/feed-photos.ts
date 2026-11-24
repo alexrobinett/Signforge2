@@ -182,16 +182,15 @@ export async function attachFeedPhotos(
 }
 
 /**
- * Hold and queue `again` (due rechecks) plus `fresh` up to the source's and org's daily budgets.
- * A failure is logged, not thrown: the snapshot is saved, and the photos wait for a later poll.
+ * Send URLs already held by `savePoll` to `queue`. A failure is logged, not thrown: the snapshot
+ * and holds stand, and the photos wait for a later poll.
  */
-export async function enqueueFeedPhotos(queue: PhotoQueue, org: OrgScope, sourceId: string, toQueue: PhotoPlan, now: number): Promise<void> {
+export async function enqueueFeedPhotos(queue: PhotoQueue, orgId: string, sourceId: string, urls: readonly string[]): Promise<void> {
+  if (!urls.length) return;
   try {
-    const urls = await org.feedPhotos.queue(sourceId, toQueue, now);
-    if (!urls.length) return;
-    await queue.enqueue(urls.map((url) => ({ orgId: org.orgId, sourceId, url })));
+    await queue.enqueue(urls.map((url) => ({ orgId, sourceId, url })));
   } catch (e) {
-    console.error(`[feed images] could not queue photos of ${org.orgId}/${sourceId}`, e);
+    console.error(`[feed images] could not queue photos of ${orgId}/${sourceId}`, e);
   }
 }
 

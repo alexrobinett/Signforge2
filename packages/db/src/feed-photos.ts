@@ -5,9 +5,9 @@
  *
  * Callers say what happened, and this decides what follows:
  *
- * - **A poll found stories, or got a 304** (`photoRead`, `plan`, `queue`, and `photos` on
- *   `dataSources.savePoll`): which copies the snapshot names, which URLs to queue within the
- *   holds and daily budgets, and whether the save stands. The read token (the source's
+ * - **A poll found stories, or got a 304** (`photoRead`, `plan`, and `photos` on
+ *   `dataSources.savePoll`): which copies the snapshot names, whether the save stands, and (when it
+ *   stands) which URLs are held within the holds and daily budgets. The read token (the source's
  *   `rowVersion` and `photoGeneration` as the poll read them) is taken here and checked here.
  * - **A source's photos setting or URL changed** (`sourceEdited`, applied by
  *   `dataSources.stage.update`): its next poll reads the feed afresh.
@@ -131,12 +131,14 @@ function lastSeenOf(raw: string): string[] {
 }
 
 /**
- * What a news source's poll saves about photos: the token it read with and, after a full read,
- * the photo URL of each of the first stories in snapshot order (null: none shown). Left out after a 304.
+ * What a news source's poll saves about photos: the token it read with, after a full read the photo
+ * URL of each of the first stories in snapshot order (null: none shown; left out after a 304), and
+ * optionally the URLs to hold within the daily budgets if the save stands.
  */
 export interface PollPhotos {
   read: PhotoRead;
   stories?: (string | null)[] | null;
+  hold?: { again: readonly string[]; fresh: readonly string[] };
 }
 
 /** Whether a snapshot's story at `index` names other copies than these. */
@@ -147,14 +149,16 @@ const storyCopyDiffers = (index: SQL, file: SQLiteColumn | string | null, thumb:
 
 /**
  * The photo half of `dataSources.savePoll`: the patch for the source row, the condition that the
- * row is still the one the poll read (its writes are skipped otherwise), and a last statement that
- * leaves a reread due when the save does not stand or a copy changed during the poll.
+ * row is still the one the poll read (its writes and hold are skipped otherwise), an optional hold
+ * statement that reserves due/budgeted URLs in `feed_images` only when the save stands, and a last
+ * statement that leaves a reread due when the save does not stand or a copy changed during the poll.
  */
-export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, stories }: PollPhotos) {
+export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, stories, hold }: PollPhotos) {
   const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
   const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
   // The version moves on even when two edits restore the original Photos setting.
   const sameVersion = eq(ds.rowVersion, read.rowVersion);
+  const current = sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${sameVersion})`;
   // A first-seen URL's copy can be stored before a delivery knows this source names it.
   const changedCopy = stories
     ? sql`EXISTS (
@@ -165,10 +169,38 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
         AND ${storyCopyDiffers(sql`story.key`, fi.fileSha256, fi.thumbSha256)}
       )`
     : undefined;
+  const alreadyKnown = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = jobs.value)`;
+  const holdWrite =
+    hold && (hold.again.length || hold.fresh.length)
+      ? db
+          .insert(fi)
+          .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
+            WITH counts AS (
+              SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n
+              FROM ${fi}
+              WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
+            )
+            SELECT jobs.value AS url FROM json_each(${JSON.stringify([...hold.again, ...hold.fresh])}) AS jobs WHERE ${alreadyKnown}
+            UNION ALL
+            SELECT value FROM (
+              SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
+              WHERE NOT ${alreadyKnown}
+              ORDER BY jobs.key
+              LIMIT (SELECT MAX(0, MIN(${NEW_PER_SOURCE_PER_DAY} - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) FROM counts)
+            )
+          ) WHERE ${current}`)
+          .onConflictDoUpdate({
+            target: [fi.orgId, fi.url],
+            set: { nextCheckAt: sql`excluded.next_check_at`, updatedAt: sql`excluded.updated_at` },
+            setWhere: lte(fi.nextCheckAt, read.now),
+          })
+          .returning({ url: fi.url })
+      : undefined;
   return {
     patch: stories === undefined ? {} : { photoUrlsJson: stories ? JSON.stringify({ stories }) : null },
     sameVersion,
-    current: sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${sameVersion})`,
+    current,
+    hold: holdWrite,
     reread: db
       .update(ds)
       .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${read.now})` })
@@ -337,38 +369,6 @@ export function feedPhotos(db: Db, orgId: string) {
         again: urls.filter((url) => (held.get(url)?.nextCheckAt ?? Number.POSITIVE_INFINITY) <= now),
         fresh: urls.filter((url) => !held.has(url)),
       };
-    },
-
-    /**
-     * A poll's snapshot was saved: hold `again` and as many of `fresh` as the source's and the
-     * org's daily budgets leave, until HOLD_MS from `now`, so a poll meanwhile does not queue
-     * them twice. One statement. Returns the URLs held, which the caller queues.
-     */
-    queue: async (sourceId: string, { again, fresh }: { again: readonly string[]; fresh: readonly string[] }, now: number): Promise<string[]> => {
-      if (!again.length && !fresh.length) return [];
-      const alreadyKnown = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = jobs.value)`;
-      const held = await db.all<{ url: string }>(sql`
-        INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
-        SELECT ${orgId}, url, ${sourceId}, ${now + HOLD_MS}, ${now}, ${now} FROM (
-          WITH counts AS (
-            SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${sourceId}), 0) AS src_n
-            FROM ${fi}
-            WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${now - DAY_MS}
-          )
-          SELECT jobs.value AS url FROM json_each(${JSON.stringify([...again, ...fresh])}) AS jobs WHERE ${alreadyKnown}
-          UNION ALL
-          SELECT value FROM (
-            SELECT jobs.value FROM json_each(${JSON.stringify(fresh)}) AS jobs
-            WHERE NOT ${alreadyKnown}
-            ORDER BY jobs.key
-            LIMIT (SELECT MAX(0, MIN(${NEW_PER_SOURCE_PER_DAY} - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) FROM counts)
-          )
-        )
-        WHERE true
-        ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
-        WHERE ${fi.nextCheckAt} <= ${now}
-        RETURNING url`);
-      return held.map((r) => r.url);
     },
 
     /** Copies the org already stored for these exact fetched bytes, under any URL. */

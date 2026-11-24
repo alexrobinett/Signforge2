@@ -504,15 +504,29 @@ describe('feed photos', () => {
   const sha = (c: string) => c.repeat(64);
   const copy = (c: string) => ({ file: sha(c), thumb: sha(c) });
   const validators = { etag: null, lastModified: null };
+  const hold = async (org: Seeded['a'], sourceId: string, urls: { again: readonly string[]; fresh: readonly string[] }, now: number) => {
+    const row = (await org.scope.dataSources.get(sourceId))!;
+    const { held } = await org.scope.dataSources.savePoll(sourceId, {
+      source: { nextPollAt: now + 300_000, failures: 0, lastError: null },
+      photos: { read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] }, hold: urls },
+    });
+    return held;
+  };
+  const ensureSource = async (org: Seeded['a'], id: string) => {
+    if (!(await org.scope.dataSources.get(id))) {
+      await org.scope.dataSources.insert({ id, name: id, format: 'rss', urlEncrypted: 'enc', refreshS: 300 });
+    }
+  };
 
   it("keep each org's copy of a URL both name apart", async () => {
     const url = 'https://news.example/photo.jpg';
     const a = s.a.scope.feedPhotos;
     const b = s.b.scope.feedPhotos;
+    await ensureSource(s.b, 'news');
     await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), etag: '"a"', nextCheckAt: 20 });
     expect(await b.get([url])).toEqual([]);
     // Org B's own fetch of it, and its failures, touch only its own row.
-    expect(await b.queue('news', { again: [], fresh: [url] }, 1)).toEqual([url]);
+    expect(await hold(s.b, 'news', { again: [], fresh: [url] }, 1)).toEqual([url]);
     const [held] = await b.get([url]);
     await b.delivered(url, { result: 'failed', now: 2, checked: held!, error: 'timeout', passing: true });
     expect(await a.get([url])).toEqual([expect.objectContaining({ orgId: 'org-a', fileSha256: sha('a'), etag: '"a"', nextCheckAt: 20, lastError: null })]);
@@ -522,8 +536,9 @@ describe('feed photos', () => {
   it('holds a URL it already has without losing its copy', async () => {
     const url = 'https://news.example/kept.jpg';
     const a = s.a.scope.feedPhotos;
+    await ensureSource(s.a, 'other');
     await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), nextCheckAt: 20 });
-    expect(await a.queue('other', { again: [url], fresh: ['https://news.example/new.jpg'] }, 20)).toEqual([url, 'https://news.example/new.jpg']);
+    expect(await hold(s.a, 'other', { again: [url], fresh: ['https://news.example/new.jpg'] }, 20)).toEqual([url, 'https://news.example/new.jpg']);
     expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256])).toEqual(
       expect.arrayContaining([
         [url, sha('a')],
@@ -535,20 +550,23 @@ describe('feed photos', () => {
   it('holds a fresh URL only once, including when two polls both planned it as fresh', async () => {
     const photos = s.a.scope.feedPhotos;
     const url = 'https://news.example/hold-once.jpg';
-    expect(await photos.queue('news', { again: [], fresh: [url] }, 20)).toEqual([url]);
-    expect(await photos.queue('other', { again: [], fresh: [url] }, 21)).toEqual([]);
+    await ensureSource(s.a, 'news');
+    await ensureSource(s.a, 'other');
+    expect(await hold(s.a, 'news', { again: [], fresh: [url] }, 20)).toEqual([url]);
+    expect(await hold(s.a, 'other', { again: [], fresh: [url] }, 21)).toEqual([]);
     expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20 })]);
   });
 
   it("counts the day's new photos against the source and the org that named them, in its own org only", async () => {
     const t = 1_000_000_000;
     const urls = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://budget.example/${tag}-${i}.jpg`);
-    const a = s.a.scope.feedPhotos;
-    expect(await a.queue('one', { again: [], fresh: urls('one', NEW_PER_SOURCE_PER_DAY + 2) }, t)).toEqual(urls('one', NEW_PER_SOURCE_PER_DAY));
-    expect(await a.queue('two', { again: [], fresh: urls('two', NEW_PER_SOURCE_PER_DAY) }, t)).toHaveLength(NEW_PER_ORG_PER_DAY - NEW_PER_SOURCE_PER_DAY);
-    expect(await a.queue('three', { again: [], fresh: urls('three', 1) }, t)).toEqual([]);
+    for (const id of ['one', 'two', 'three']) await ensureSource(s.a, id);
+    await ensureSource(s.b, 'one');
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one', NEW_PER_SOURCE_PER_DAY + 2) }, t)).toEqual(urls('one', NEW_PER_SOURCE_PER_DAY));
+    expect(await hold(s.a, 'two', { again: [], fresh: urls('two', NEW_PER_SOURCE_PER_DAY) }, t)).toHaveLength(NEW_PER_ORG_PER_DAY - NEW_PER_SOURCE_PER_DAY);
+    expect(await hold(s.a, 'three', { again: [], fresh: urls('three', 1) }, t)).toEqual([]);
     // Org B's day is its own.
-    expect(await s.b.scope.feedPhotos.queue('one', { again: [], fresh: urls('one', 1) }, t)).toEqual(urls('one', 1));
+    expect(await hold(s.b, 'one', { again: [], fresh: urls('one', 1) }, t)).toEqual(urls('one', 1));
   });
 
   it('finds the copies of the same bytes within the same org only', async () => {

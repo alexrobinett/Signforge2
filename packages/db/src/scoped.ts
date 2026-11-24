@@ -1700,15 +1700,15 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
-       * A news source's poll also passes `photos` (./feed-photos.ts): its writes then stand only if
-       * the source is still the row the poll read, and a reread is left due if not. Returns whether
-       * the poll's writes stood. Throws `NotInOrgError` if the source does not belong to this org
-       * without an extra read.
+       * A news source's poll also passes `photos` (./feed-photos.ts): its writes and optional photo
+       * holds then stand only if the source is still the row the poll read, and a reread is left due
+       * if not. Returns whether the poll's writes stood and the photo URLs held for queueing. Throws
+       * `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
         poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number; photos?: PollPhotos },
-      ) => {
+      ): Promise<{ stood: boolean; held: string[] }> => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
@@ -1717,14 +1717,14 @@ export function scoped(d1: D1Database, orgId: string) {
           .select({
             ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
           })
-          .from(s.organization)
-          .where(eq(s.organization.id, orgId));
+          .from(sql`(SELECT 1)`);
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
         const sourceWrite = db
           .update(ds)
           .set(updateSet(ds, strip({ ...poll.source, ...photos?.patch })))
           .where(and(mine, photos?.sameVersion));
-        const queries: unknown[] = [check, sourceWrite];
+        type BatchQuery = Parameters<Db['batch']>[0][number];
+        const queries: BatchQuery[] = [check, sourceWrite];
         if (poll.snapshot) {
           const { version, fetchedAt, checkedAt, dataJson } = poll.snapshot;
           const fields = { version, fetchedAt, checkedAt, dataJson };
@@ -1737,16 +1737,15 @@ export function scoped(d1: D1Database, orgId: string) {
         } else if (poll.checkedAt !== undefined) {
           queries.push(db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, photos?.current)));
         }
-        const rereadAt = photos ? queries.push(photos.reread) - 1 : undefined;
+        const holdAt = photos?.hold ? queries.push(photos.hold) - 1 : undefined;
+        if (photos) queries.push(photos.reread);
         try {
-          const changes = await commit(db, staged(undefined, ...queries).writes);
-          const stood = (changes[queries.indexOf(sourceWrite)] ?? 0) > 0;
-          // A source the poll's read no longer matches skips the poll's writes, and is left due a reread.
-          const rereadDue = rereadAt !== undefined && (changes[rereadAt] ?? 0) > 0;
-          if (!stood && !rereadDue) throw new NotInOrgError('data source', dataSourceId);
-          return stood;
+          const [first, ...rest] = queries;
+          const results = await db.batch([first!, ...rest]);
+          const stood = ((results[1] as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+          const held = holdAt !== undefined ? (results[holdAt] as { url: string }[]).map((r) => r.url) : [];
+          return { stood, held };
         } catch (err) {
-          if (err instanceof NotInOrgError) throw err;
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
           if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });
           throw err;

@@ -51,13 +51,18 @@ const snapshot = async (id: string) => JSON.parse((await o.scope.dataSources.sna
 /** A poll of `id` starts: it takes its read token from the row it claimed. */
 const pollReads = async (id: string, at: number, shown = true) => photoRead(await source(id), shown, at);
 
-/** A poll saves a full read: its stories (with the copies it found) and the photo URL of each. */
-function pollSaves(id: string, read: PhotoRead, stories: { url: string | null; image?: { file: string; thumb: string } }[]) {
+/** A poll saves a full read: its stories (with the copies it found), the photo URL of each, and optional URLs to hold. */
+function pollSaves(
+  id: string,
+  read: PhotoRead,
+  stories: { url: string | null; image?: { file: string; thumb: string } }[],
+  hold?: { again: readonly string[]; fresh: readonly string[] },
+) {
   const dataJson = JSON.stringify({ items: stories.map(({ image }, i) => ({ title: `Story ${i}`, ...(image ? { image } : {}) })) });
   return o.scope.dataSources.savePoll(id, {
     source: { nextPollAt: read.now + 5 * MIN, failures: 0, lastError: null, etag: '"feed"', lastModified: null },
     snapshot: { version: `v-${++n}`, fetchedAt: read.now, checkedAt: read.now, dataJson },
-    photos: { read, stories: stories.map((s) => s.url) },
+    photos: { read, stories: stories.map((s) => s.url), hold },
   });
 }
 
@@ -88,12 +93,29 @@ describe('a poll and a delivery at once', () => {
     const read = await pollReads(id, NOW);
     expect((await o.scope.feedPhotos.plan([url], NOW)).copies.size).toBe(0);
     await stored(url, id, 'a', NOW);
-    expect(await pollSaves(id, read, [{ url }])).toBe(true);
+    expect((await pollSaves(id, read, [{ url }])).stood).toBe(true);
 
     expect((await snapshot(id)).items[0].image).toBeUndefined();
     expect(await source(id)).toMatchObject({ etag: null, lastModified: null, nextPollAt: NOW });
     const next = await pollReads(id, NOW + MIN);
     expect((await o.scope.feedPhotos.plan([url], next.now)).copies.get(url)).toEqual(copy('a'));
+  });
+
+  it('pulls nextPollAt back on a 304 poll when a delivery stored its photo while the poll was in flight', async () => {
+    const url = 'https://in-flight-304.test/photo.jpg';
+    const id = await news({ stories: [url] });
+    await o.scope.dataSources.putSnapshot(id, { version: 'before', fetchedAt: NOW - MIN, checkedAt: NOW - MIN, dataJson: JSON.stringify({ items: [{}] }) });
+    await o.scope.feedPhotos.put({ url, sourceId: id, nextCheckAt: NOW + HOLD_MS });
+    const read = await pollReads(id, NOW);
+    // Delivery bumps photoGeneration while the 304 poll (which has no `stories` / `changedCopy` and same `rowVersion`) is in flight.
+    await stored(url, id, 'q', NOW);
+    const saved = await o.scope.dataSources.savePoll(id, {
+      source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
+      checkedAt: NOW,
+      photos: { read },
+    });
+    expect(saved).toEqual({ stood: true, held: [] });
+    expect(await source(id)).toMatchObject({ etag: null, lastModified: null, nextPollAt: NOW, photoGeneration: read.generation + 1 });
   });
 
   it('leaves a reread due when a photo first seen by this poll was stored for another source meanwhile', async () => {
@@ -104,7 +126,7 @@ describe('a poll and a delivery at once', () => {
     const read = await pollReads(reader, NOW);
     // The reader names no photo yet, so the delivery cannot know it uses this one.
     await stored(url, owner, 'b', NOW);
-    expect(await pollSaves(reader, read, [{ url }])).toBe(true);
+    expect((await pollSaves(reader, read, [{ url }])).stood).toBe(true);
 
     expect(await source(reader)).toMatchObject({ etag: null, photoGeneration: read.generation, nextPollAt: NOW });
   });
@@ -115,10 +137,12 @@ describe('a poll and a delivery at once', () => {
     for (const url of urls)
       await o.scope.feedPhotos.put({ url, sourceId: id, sourceSha256: sha('c'), fileSha256: sha('c'), thumbSha256: sha('c'), nextCheckAt: NOW });
     expect(
-      await pollSaves(id, await pollReads(id, NOW), [
-        { url: urls[0]!, image: copy('c') },
-        { url: urls[1]!, image: copy('c') },
-      ]),
+      (
+        await pollSaves(id, await pollReads(id, NOW), [
+          { url: urls[0]!, image: copy('c') },
+          { url: urls[1]!, image: copy('c') },
+        ])
+      ).stood,
     ).toBe(true);
     // An older poller left the feed's validators on a snapshot that lost the second story's copy.
     await o.scope.dataSources.putSnapshot(id, {
@@ -133,6 +157,24 @@ describe('a poll and a delivery at once', () => {
     await o.scope.feedPhotos.delivered(urls[1]!, { result: 'unchanged', now: NOW, sourceId: id, checked: checked! });
     expect(await source(id)).toMatchObject({ etag: null });
     expect(await o.scope.feedPhotos.get([urls[1]!])).toEqual([expect.objectContaining({ nextCheckAt: NOW + RECHECK_MS })]);
+  });
+
+  it('ignores a stale unchanged or failed delivery once another poll moved nextCheckAt on', async () => {
+    const url = 'https://stale-next-check.test/photo.jpg';
+    const id = await news({ stories: [url] });
+    await o.scope.feedPhotos.put({ url, sourceId: id, sourceSha256: sha('x'), fileSha256: sha('x'), thumbSha256: sha('x'), nextCheckAt: NOW });
+    const [checked] = await o.scope.feedPhotos.get([url]);
+    // A poll holds the row, moving only `nextCheckAt` while `sourceSha256`, `etag` and `lastModified` stay identical.
+    const held = await o.scope.dataSources.savePoll(id, {
+      source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
+      checkedAt: NOW,
+      photos: { read: await pollReads(id, NOW), hold: { again: [url], fresh: [] } },
+    });
+    expect(held).toEqual({ stood: true, held: [url] });
+
+    await o.scope.feedPhotos.delivered(url, { result: 'failed', now: NOW + 1, checked: checked!, error: 'timeout', passing: true });
+    await o.scope.feedPhotos.delivered(url, { result: 'unchanged', now: NOW + 1, sourceId: id, checked: checked! });
+    expect(await o.scope.feedPhotos.get([url])).toEqual([expect.objectContaining({ nextCheckAt: NOW + HOLD_MS, failures: 0, lastError: null })]);
   });
 
   it('queues every copy displaced by overlapping deliveries, and a repeated delivery queues nothing more', async () => {
@@ -152,17 +194,19 @@ describe('a poll and a delivery at once', () => {
 });
 
 describe('the photos switch during a poll', () => {
-  it("drops a poll's save when Photos is switched off while it is in flight, and leaves an unconditional reread due", async () => {
+  it("drops a poll's save and holds nothing when Photos is switched off while it is in flight, leaving an unconditional reread due", async () => {
     const url = 'https://switch.test/photo.jpg';
+    const fresh = 'https://switch.test/new.jpg';
     const id = await news({ stories: [url] });
     await o.scope.feedPhotos.put({ url, sourceId: id, fileSha256: sha('d'), thumbSha256: sha('d'), nextCheckAt: NOW + RECHECK_MS });
-    expect(await pollSaves(id, await pollReads(id, NOW), [{ url, image: copy('d') }])).toBe(true);
+    expect((await pollSaves(id, await pollReads(id, NOW), [{ url, image: copy('d') }])).stood).toBe(true);
     const before = await o.scope.dataSources.snapshot(id);
 
     const read = await pollReads(id, NOW + 5 * MIN);
     await o.scope.dataSources.update(id, { photos: false });
-    expect(await pollSaves(id, read, [{ url, image: copy('d') }])).toBe(false);
+    expect(await pollSaves(id, read, [{ url, image: copy('d') }], { again: [], fresh: [fresh] })).toEqual({ stood: false, held: [] });
 
+    expect(await o.scope.feedPhotos.get([fresh])).toEqual([]);
     expect(await o.scope.dataSources.snapshot(id)).toEqual(before);
     const after = await source(id);
     expect(after).toMatchObject({ photos: false, etag: null, lastModified: null, photoUrlsJson: null });
@@ -175,7 +219,7 @@ describe('the photos switch during a poll', () => {
     await o.scope.dataSources.update(id, { photos: true });
     await o.scope.dataSources.update(id, { photos: false });
     // The setting is as the poll read it, but the source is not.
-    expect(await pollSaves(id, read, [{ url: null }])).toBe(false);
+    expect((await pollSaves(id, read, [{ url: null }])).stood).toBe(false);
 
     const after = await source(id);
     expect(after).toMatchObject({ photos: false, etag: null, lastModified: null, photoUrlsJson: null });
@@ -204,7 +248,12 @@ describe('the sweep and a delivery at once', () => {
     const scanned = (await expiredFeedImages(env.DB, NOW, 100)).filter((r) => r.orgId === o.orgId).map((r) => r.url);
     expect(scanned).toEqual(expect.arrayContaining([replaced, shown]));
 
-    expect(await o.scope.feedPhotos.queue(id, { again: [replaced], fresh: [] }, NOW)).toEqual([replaced]);
+    expect(
+      await o.scope.dataSources.savePoll(id, {
+        source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
+        photos: { read: await pollReads(id, NOW), hold: { again: [replaced], fresh: [] } },
+      }),
+    ).toEqual({ stood: true, held: [replaced] });
     await stored(replaced, id, 'g', NOW);
     await o.scope.dataSources.putSnapshot(id, {
       version: 'shown',
@@ -220,7 +269,7 @@ describe('the sweep and a delivery at once', () => {
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toContain(sha('e'));
   });
 
-  it('keeps a blob queued again or newly shown after the sweep found it due', async () => {
+  it('keeps a blob queued again or newly shown after the sweep found it due, restarting the grace window for a shown copy', async () => {
     const id = await news();
     const requeued = 'https://claim-race.test/requeued.jpg';
     const at = NOW + FEED_IMAGE_DELETE_GRACE_MS;
@@ -250,8 +299,62 @@ describe('the sweep and a delivery at once', () => {
 
     for (const c of ['h', 'i']) {
       expect(blobs.has(sha(c))).toBe(true);
-      expect(await o.scope.feedPhotos.deletes()).toContainEqual(expect.objectContaining({ sha256: sha(c), deletingUntil: 0 }));
+      expect(await o.scope.feedPhotos.deletes()).toContainEqual(expect.objectContaining({ sha256: sha(c), queuedAt: at, deletingUntil: 0 }));
     }
+    // Even after the snapshot drops sha('i'), its grace window restarted from `at`.
+    await o.scope.dataSources.putSnapshot(id, { version: 'claim-race-cleared', fetchedAt: at + 1, checkedAt: at + 1, dataJson: JSON.stringify({ items: [] }) });
+    expect(await deleteBlobs([sha('i')], at + FEED_IMAGE_DELETE_GRACE_MS - 1)).toBe(0);
+    expect(blobs.has(sha('i'))).toBe(true);
+    expect(await deleteBlobs([sha('i')], at + FEED_IMAGE_DELETE_GRACE_MS)).toBe(1);
+    expect(blobs.has(sha('i'))).toBe(false);
+  });
+
+  it('claims pending deletes before writing blobs so a sweep running during write cannot delete the new blob', async () => {
+    const id = await news();
+    const gone = 'https://claim-order.test/gone.jpg';
+    const again = 'https://claim-order.test/again.jpg';
+    await o.scope.feedPhotos.put({ url: gone, sourceId: id, fileSha256: sha('w'), thumbSha256: sha('w'), nextCheckAt: NOW - FEED_IMAGE_TTL_MS - 1 });
+    await o.scope.feedPhotos.put({ url: again, sourceId: id, nextCheckAt: NOW });
+    await o.scope.feedPhotos.expire([gone], NOW);
+    const at = NOW + FEED_IMAGE_DELETE_GRACE_MS;
+
+    await o.scope.feedPhotos.delivered(again, {
+      result: 'stored',
+      now: at,
+      sourceId: id,
+      sourceSha256: sha('w'),
+      copy: copy('w'),
+      validators,
+      write: async () => {
+        blobs.add(sha('w'));
+        expect(await deleteBlobs([sha('w')], at)).toBe(0);
+      },
+    });
+    expect(blobs.has(sha('w'))).toBe(true);
+    expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).not.toContain(sha('w'));
+  });
+
+  it('clears a hash queued for delete while a delivery was writing the same copy', async () => {
+    const id = await news();
+    const expiring = 'https://clear-active.test/expiring.jpg';
+    const writer = 'https://clear-active.test/writer.jpg';
+    await o.scope.feedPhotos.put({ url: expiring, sourceId: id, fileSha256: sha('y'), thumbSha256: sha('y'), nextCheckAt: NOW - FEED_IMAGE_TTL_MS - 1 });
+    await o.scope.feedPhotos.put({ url: writer, sourceId: id, nextCheckAt: NOW });
+
+    await o.scope.feedPhotos.delivered(writer, {
+      result: 'stored',
+      now: NOW,
+      sourceId: id,
+      sourceSha256: sha('y'),
+      copy: copy('y'),
+      validators,
+      write: async () => {
+        blobs.add(sha('y'));
+        // Expiring after `claimForWrite` queues `sha('y')`; `save`'s `clearActive` removes it again.
+        expect(await o.scope.feedPhotos.expire([expiring], NOW)).toBe(1);
+      },
+    });
+    expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).not.toContain(sha('y'));
   });
 
   it('refuses a delivery storing or reusing a copy whose delete lease the sweep holds, and succeeds once the delete is done', async () => {
