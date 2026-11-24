@@ -85,6 +85,11 @@ export const ALERTS: { kind: AlertKind; when: string; note: string }[] = [
     when: 'An agent is refused',
     note: 'Refused for a scope it lacks 3 times in a clock hour; at most once an hour per agent, 5 per organization',
   },
+  {
+    kind: 'publish_requested',
+    when: 'An agent or member asks to publish',
+    note: 'Emailed only to those who may approve it: owners, and editors while editors publish',
+  },
 ];
 
 /** What each role may do: the table on the Members page, matching ROLE_SCOPES, the org's choice of who publishes, and the tools' minimum roles. */

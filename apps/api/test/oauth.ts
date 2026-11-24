@@ -1,10 +1,11 @@
 // The OAuth provider as an MCP client and a person meet it, through the API's routes: register,
 // authorize with S256 PKCE, consent with an org and scopes, exchange the code. Shared by the agent
-// grant tests (agent-grants.test.ts) and /mcp's (mcp.test.ts).
+// grant tests (agent-grants.test.ts) and /mcp's (mcp.test.ts, publish-requests.test.ts).
 import { agentGrantForToken } from '@signforge/db';
-import { createExecutionContext } from 'cloudflare:test';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { expect } from 'vitest';
+import { mcp } from '../src/mcp';
 import { Client, email, nextIp, ORIGIN, testApp } from './client';
 
 export type App = ReturnType<typeof testApp>;
@@ -130,3 +131,31 @@ export async function agentToken(t: App, c: Client, organizationId: string, scop
   if (!code) throw new Error('the consent gave no code');
   return { clientId, ...(await exchange(t, clientId, code, verifier)) };
 }
+
+let rpcId = 0;
+/** One JSON-RPC request to /mcp with an agent's access token, as an MCP client sends it, after the work it left running has settled. */
+export async function mcpRpc(token: string, method: string, params: unknown, bindings: Env = env) {
+  const ctx = createExecutionContext();
+  const res = await mcp.request(
+    `${ORIGIN}/mcp`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-protocol-version': '2025-06-18',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
+    },
+    bindings,
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
+  expect(res.status, await res.clone().text()).toBe(200);
+  return res.json<{ result?: { isError?: boolean; structuredContent?: any } }>();
+}
+
+/** One `tools/call`'s result: a refusal is one with `isError` and its code. */
+export const mcpTool = async (token: string, name: string, args: unknown = {}, bindings?: Env) =>
+  (await mcpRpc(token, 'tools/call', { name, arguments: args }, bindings)).result!;

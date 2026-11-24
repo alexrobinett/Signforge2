@@ -56,6 +56,7 @@ export interface QueuedAlert {
 }
 /** The most labels a screen has, and the most label keys an org's screens use between them. */
 export const LABEL_LIMITS = { perScreen: 32, keys: 100 } as const;
+type PublishRequestRow = typeof s.publishRequests.$inferSelect;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
@@ -438,6 +439,8 @@ export function scoped(d1: D1Database, orgId: string) {
   const playlists = drafts(db, orgId, s.playlists, 'pls');
   const scheduleEntries = drafts(db, orgId, s.scheduleEntries, 'sch');
   const publishes = entity(db, orgId, s.publishes, 'pub');
+  const pr = s.publishRequests;
+  const publishRequests = entity(db, orgId, pr, 'prq');
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const connectionRows = entity(db, orgId, s.connections, 'con');
   const authorizations = entity(db, orgId, s.connectionAuthorizations, 'oas');
@@ -1452,6 +1455,40 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
+    /** Requests to publish chosen drafts (M4-09), made and decided through the publish request tools. */
+    publishRequests: {
+      get: publishRequests.get,
+      /**
+       * Newest first, `after` the key `[createdAt, id]` of the last row of the page before; with
+       * `pendingAt`, only those still waiting then: not decided, and not past `expires_at`.
+       */
+      list: ({ after, take, pendingAt }: { after?: readonly (string | number)[]; take: number; pendingAt?: number }) => {
+        const [at, id] = after ?? [];
+        const where: SQL[] = [eq(pr.orgId, orgId)];
+        if (pendingAt !== undefined) where.push(eq(pr.status, 'pending'), gt(pr.expiresAt, pendingAt));
+        if (typeof at === 'number' && typeof id === 'string') where.push(or(lt(pr.createdAt, at), and(eq(pr.createdAt, at), lt(pr.id, id)))!);
+        return db
+          .select()
+          .from(pr)
+          .where(and(...where))
+          .orderBy(desc(pr.createdAt), desc(pr.id))
+          .limit(take)
+          .all();
+      },
+      stage: {
+        insert: publishRequests.stage.insert,
+        /**
+         * Decided: approved (with the publish it made, if any) or declined, by `by` at `now`. Guarded by
+         * the version read, so of two decisions from one read, one commits and the other is a conflict.
+         */
+        decide: (current: PublishRequestRow, decision: { status: 'approved' | 'declined'; by: string; now: number; publishId?: string | null }) =>
+          publishRequests.stage.update(
+            current,
+            { status: decision.status, decidedBy: decision.by, decidedAt: decision.now, publishId: decision.publishId ?? null },
+            current.rowVersion,
+          ),
+      },
+    },
     publishes: {
       ...publishes,
       stage: {

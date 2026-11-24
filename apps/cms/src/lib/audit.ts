@@ -80,6 +80,7 @@ export const TARGET_KINDS: { value: string; label: string }[] = [
   { value: 'alert_delivery', label: 'Alert delivery' },
   { value: 'org', label: 'Settings' },
   { value: 'publish', label: 'Publish' },
+  { value: 'publish_request', label: 'Publish request' },
 ];
 export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value === kind)?.label ?? kind.replaceAll('_', ' ');
 
@@ -118,6 +119,9 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   end_takeover: { group: 'Schedule', words: 'Takeover ended' },
   publish: { group: 'Publishes', words: 'Published' },
   roll_back_publish: { group: 'Publishes', words: 'Rolled back' },
+  request_publish: { group: 'Publishes', words: 'Asked to publish' },
+  approve_publish_request: { group: 'Publishes', words: 'Request approved and published' },
+  decline_publish_request: { group: 'Publishes', words: 'Request declined' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
   renew_asset_upload: { group: 'Assets', words: 'Upload renewed' },
   finalize_asset: { group: 'Assets', words: 'Image checked' },

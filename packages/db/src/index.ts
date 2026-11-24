@@ -56,6 +56,7 @@ export type TemplateVersion = typeof s.templateVersions.$inferSelect;
 export type SpotRow = typeof s.spots.$inferSelect;
 export type PlaylistRow = typeof s.playlists.$inferSelect;
 export type AgentGrantRow = typeof s.agentGrants.$inferSelect;
+export type PublishRequestRow = typeof s.publishRequests.$inferSelect;
 export type ScheduleEntryRow = typeof s.scheduleEntries.$inferSelect;
 export type Publish = typeof s.publishes.$inferSelect;
 export type DataSourceRow = typeof s.dataSources.$inferSelect;

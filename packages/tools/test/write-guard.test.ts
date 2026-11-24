@@ -94,6 +94,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   publish: (o) => o.publish,
   // An agent grant (M4-07's tools): `grantId`.
   grant: (o) => o.agentGrant,
+  publishRequest: (o) => o.publishRequest,
   // Better Auth's rows, as seedTeam names them (PREPARE seeds them).
   member: (o) => `${o.orgId}-member`,
   invitation: (o) => `${o.orgId}-invitation`,
@@ -174,6 +175,8 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
 /** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
 const INPUT: Record<string, (o: SeededOrg, example: unknown) => unknown> = {
   start_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
+  // A draft pinned at the version it is: the seeded spot's first.
+  request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend opening hours' }),
 };
 /** Tools whose example is refused on purpose, changing the asset as it does so. */
 const REJECTS = new Set(['finalize_asset', 'finalize_video_upload']);

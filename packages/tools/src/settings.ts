@@ -9,6 +9,8 @@ const DEFAULT_ALERTS: Record<AlertKind, AlertRule> = {
   screen_offline: { who: 'editors', email: true, slack: false, webhook: false },
   publish_finished: { who: 'editors', email: true, slack: false, webhook: false },
   agent_refused: { who: 'owners', email: true, slack: false, webhook: false },
+  // Its email goes only to those of them who may approve: owners, and editors while editors publish.
+  publish_requested: { who: 'editors', email: true, slack: false, webhook: false },
 };
 
 /**
@@ -19,6 +21,7 @@ const mergeRules = (base: Record<AlertKind, AlertRule>, change: Partial<Record<A
   screen_offline: { ...base.screen_offline, ...change.screen_offline },
   publish_finished: { ...base.publish_finished, ...change.publish_finished },
   agent_refused: { ...base.agent_refused, ...change.agent_refused },
+  publish_requested: { ...base.publish_requested, ...change.publish_requested },
 });
 
 const DEFAULT_UPDATE_WINDOW = { from: '02:00', to: '04:00' };
@@ -88,7 +91,12 @@ const updateOrgSettings = defineTool({
       editorsPublish: editorsPublish.optional(),
       auditRetentionDays: auditRetentionDays.optional(),
       alerts: z
-        .object({ screen_offline: rule.partial().optional(), publish_finished: rule.partial().optional(), agent_refused: rule.partial().optional() })
+        .object({
+          screen_offline: rule.partial().optional(),
+          publish_finished: rule.partial().optional(),
+          agent_refused: rule.partial().optional(),
+          publish_requested: rule.partial().optional(),
+        })
         .optional()
         .describe('Per kind, the fields of its rule to change; the rest stay'),
       ifVersion,

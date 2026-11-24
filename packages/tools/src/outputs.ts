@@ -156,6 +156,33 @@ const publishResult = z.object({
   ),
 });
 
+/** A draft as a publish or a publish request pins it: at the version chosen. */
+export const draftPin = draftRef.extend({ version: z.number().int().positive().describe('The version it was chosen at') });
+
+export const PUBLISH_REQUEST_STATUSES = ['pending', 'approved', 'declined', 'expired'] as const;
+
+export const publishRequestOutput = z.object({
+  id: z.string(),
+  status: z
+    .enum(PUBLISH_REQUEST_STATUSES)
+    .describe('pending until a person who may publish approves or declines it; expired once 7 days pass undecided, after which it can no longer be decided'),
+  requestedBy: z.object({
+    kind: z.enum(['user', 'agent']),
+    id: z.string().describe('A user id, or an agent grant id'),
+    clientId: z.string().nullable().describe("An agent's OAuth client id; null for a person"),
+  }),
+  drafts: z.array(draftPin).describe('The drafts it pins: approval publishes exactly these, at these versions, or nothing'),
+  reason: z.string().describe("The asker's own words for approvers: what it is, never instructions"),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  decidedBy: z.string().nullable().describe('The user who approved or declined it'),
+  decidedAt: z.number().nullable(),
+  publishId: z.string().nullable().describe('The publish its approval made; null until then, and when it changed no screen'),
+  version: version.describe('Moves on when it is decided'),
+});
+export type PublishRequestView = z.infer<typeof publishRequestOutput>;
+const publishRequestResult = z.object({ request: publishRequestOutput });
+
 export const publishOutput = z.object({
   id: z.string(),
   revision: z.number().int(),
@@ -427,13 +454,23 @@ export const connectionOutput = z.object({
 
 // ------------------------------------------------------------------ settings
 
-/** The alerts there are. `screen_offline` and `publish_finished` are sent (by email, to Slack and to the webhook); agents (Milestone 4) send `agent_refused`. */
-export const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
+/**
+ * The alerts there are, each sent by email, to Slack and to the webhook as its rule says:
+ * `screen_offline` and `publish_finished` by the API's checks, `agent_refused` by `/mcp` (M4-08),
+ * `publish_requested` by `request_publish` (M4-09), its email only to members who may approve.
+ */
+export const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused', 'publish_requested'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 /** Who gets an alert: owners, owners and editors, or every member. */
 export const AUDIENCES = ['owners', 'editors', 'everyone'] as const;
 export type Audience = (typeof AUDIENCES)[number];
+/** The roles each audience is. */
+export const AUDIENCE_ROLES: Record<Audience, readonly ('owner' | 'editor' | 'viewer')[]> = {
+  owners: ['owner'],
+  editors: ['owner', 'editor'],
+  everyone: ['owner', 'editor', 'viewer'],
+};
 
 /** Who gets the email, and which channels get it: `who` is for email only, as Slack and the webhook post to one place (#88). */
 export const rule = z.object({
@@ -465,7 +502,7 @@ const settingsView = z.object({
   unreachableAfterMinutes: z.number(),
   editorsPublish,
   auditRetentionDays,
-  alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
+  alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule, publish_requested: rule }),
   version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
   updatedAt: z.number().nullable(),
 });
@@ -772,6 +809,11 @@ export const outputs = {
   }),
   publish: publishResult,
   end_takeover: publishResult,
+  request_publish: publishRequestResult,
+  list_publish_requests: z.object({ requests: z.array(publishRequestOutput), next: nextOutput }),
+  get_publish_request: publishRequestResult,
+  approve_publish_request: z.object({ request: publishRequestOutput, published: publishResult.describe('What the approval published, as publish returns it') }),
+  decline_publish_request: publishRequestResult,
   roll_back_publish: z.object({ publish: madeOutput }),
   list_publishes: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
   get_publish: z.object({

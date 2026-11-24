@@ -181,6 +181,11 @@ function summary(event: AlertEvent): string {
     }
     case 'agent.refused':
       return `${agentName(event.data.grant.client)} in ${event.org.name} was refused ${event.data.refusals} times this hour`;
+    case 'publish.requested': {
+      const { request, by } = event.data;
+      const who = by.kind === 'agent' ? agentName(by) : (by.name ?? 'A member');
+      return `${who} asks to publish ${request.drafts === 1 ? '1 draft' : `${request.drafts} drafts`} in ${event.org.name}`;
+    }
     case 'test':
       return event.data.message;
   }
@@ -235,6 +240,13 @@ function slackMessage(event: AlertEvent) {
       const latest = mrkdwn(`*Latest*\n${esc(tool)}${needs ? `, which needs ${esc(needs)}` : ''}`);
       const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, latest] }];
       if (grant.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${grant.url}|Open the agent in SignForge>`)] });
+      return { text: esc(summary(event)), blocks };
+    }
+    case 'publish.requested': {
+      const { request } = event.data;
+      const until = mrkdwn(`*Decide by*\n${slackTime(request.expiresAt)}`);
+      const blocks: object[] = [{ type: 'section', text: mrkdwn(`:raised_hand: ${esc(summary(event))}`), fields: [org, until] }];
+      if (request.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${request.url}|Approve or decline it in SignForge>`)] });
       return { text: esc(summary(event)), blocks };
     }
   }

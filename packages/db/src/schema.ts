@@ -998,7 +998,7 @@ export const publishes = sqliteTable(
   {
     id: text('id').primaryKey(),
     orgId: orgId(),
-    /** `pending` waits for a person to approve (an agent without publish scope). */
+    /** `pending` is not written: a publish waiting for a person to approve is a `publish_requests` row (M4-09). */
     status: text('status', { enum: ['pending', 'scheduled', 'publishing', 'published', 'failed', 'cancelled'] }).notNull(),
     /** When it is due. Null means now. */
     publishAt: integer('publish_at'),
@@ -1038,6 +1038,40 @@ export const publishScreens = sqliteTable(
     foreignKey({ columns: [t.orgId, t.publishId], foreignColumns: [publishes.orgId, publishes.id] }).onDelete('cascade'),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
   ],
+);
+
+/**
+ * A request to publish chosen drafts (M4-09): made by an agent without `content:publish`, or a
+ * person who may not publish, and approved or declined by a person who may. It pins each draft at
+ * the version it was asked for (`drafts_json`, `[{ kind, id, version }]`), so approval publishes
+ * exactly those, and none if one has changed since. Pending until a decision; a pending one past
+ * `expires_at` (7 days) is expired and can no longer be decided.
+ */
+export const publishRequests = sqliteTable(
+  'publish_requests',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    /** Who asked: a user id, or an agent grant id with its OAuth client. */
+    requestedByKind: text('requested_by_kind', { enum: ['user', 'agent'] }).notNull(),
+    requestedBy: text('requested_by').notNull(),
+    clientId: text('client_id'),
+    draftsJson: text('drafts_json').notNull(),
+    /** The asker's own words for approvers, at most 500 characters: shown as theirs, never as instructions. */
+    reason: text('reason').notNull(),
+    status: text('status', { enum: ['pending', 'approved', 'declined'] })
+      .notNull()
+      .default('pending'),
+    createdAt: created(),
+    expiresAt: integer('expires_at').notNull(),
+    /** The person who approved or declined it, and when. */
+    decidedBy: text('decided_by'),
+    decidedAt: integer('decided_at'),
+    /** The publish its approval made; null until then, and when the approval changed no screen. */
+    publishId: text('publish_id'),
+    rowVersion: rowVersion(),
+  },
+  (t) => [uniqueIndex('publish_requests_org_id_uq').on(t.orgId, t.id), index('publish_requests_org_created_idx').on(t.orgId, t.createdAt)],
 );
 
 // -------------------------------------------------------------- data sources

@@ -3,14 +3,12 @@
 // `forbidden` three times in an hour alerts the org once; and each path's cost per call: D1 writes,
 // data points and Durable Object requests. The SQL API cannot be reached from tests: its queries and
 // answers are tested as text and rows here, with a stand-in fetch.
-import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentCallLog, callOfRow, callSql, pointOf, rowsOf } from '../src/agents/calls';
 import { emailSenderFor, RecordingEmailSender } from '../src/email';
-import { mcp } from '../src/mcp';
-import { Client, ORIGIN } from './client';
-import { agentToken, check, team } from './oauth';
+import { Client } from './client';
+import { agentToken, check, mcpRpc as rpc, team } from './oauth';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -56,29 +54,6 @@ function watched() {
   return { bindings, points, sql, writes, objectCalls, reset };
 }
 
-let rpcId = 0;
-/** One tools/* request to /mcp, after its own work (the alert's) has settled. */
-async function rpc(token: string, method: string, params: unknown, bindings: Env = env) {
-  const ctx = createExecutionContext();
-  const res = await mcp.request(
-    `${ORIGIN}/mcp`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        'mcp-protocol-version': '2025-06-18',
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
-    },
-    bindings,
-    ctx,
-  );
-  await waitOnExecutionContext(ctx);
-  expect(res.status, await res.clone().text()).toBe(200);
-  return res.json<{ result?: { isError?: boolean; structuredContent?: any } }>();
-}
 const call = (token: string, name: string, args: unknown = {}, bindings?: Env) => rpc(token, 'tools/call', { name, arguments: args }, bindings);
 
 interface Usage {

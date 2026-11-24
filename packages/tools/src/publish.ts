@@ -98,7 +98,7 @@ async function switchScreens(
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
  * compile every screen, store and switch the changed ones. `publish` and `end_takeover`.
  */
-async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[] | undefined, end: readonly string[] = []): Promise<ToolOutput<'publish'>> {
+export async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[] | undefined, end: readonly string[] = []): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
   const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end);
   const screens = result.screens.map((s) => ({
