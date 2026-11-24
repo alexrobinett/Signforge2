@@ -138,16 +138,22 @@ describe('the look kit (#190)', () => {
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames
   // dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until one measures under.
+  // Held still, it keeps no layer of its own either.
   it('drifts the photo in landscape, and holds it still in portrait', async () => {
-    const drifting: Record<string, number[]> = {};
+    const drifting: Record<string, string[]> = {};
     for (const orientation of ['landscape', 'portrait'] as const) {
       const k = await kitFrame(orientation);
       for (const look of looks) {
         const f = await k.play({ look });
-        (drifting[orientation] ??= []).push(await f.evaluate(() => document.querySelector('.lk-drift')!.getAnimations().length));
+        (drifting[orientation] ??= []).push(
+          await f.evaluate(() => {
+            const drift = document.querySelector('.lk-drift')!;
+            return `${drift.getAnimations().length} ${getComputedStyle(drift).willChange}`;
+          }),
+        );
       }
     }
-    expect(drifting).toEqual({ landscape: [1, 1, 1, 1], portrait: [0, 0, 0, 0] });
+    expect(drifting).toEqual({ landscape: Array(4).fill('1 transform'), portrait: Array(4).fill('0 auto') });
   });
 
   it('with reduced motion, shows the final frame with nothing animating and the crawl cut to one line', async () => {
