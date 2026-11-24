@@ -64,7 +64,9 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   expect(c.x).toBe(a.x);
   await axe(page);
   await shots(page, '29-new-spot-thumbnails-phone');
+  // Wait for the close to finish: reopened mid-close, the steps below can land on the closing dialog.
   await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
   // Keyboard only: Enter on a template with no name goes to the name; then back, an arrow moves the choice, Enter creates.
