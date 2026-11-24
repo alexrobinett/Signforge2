@@ -31,7 +31,9 @@ import {
 import { agentGrantForToken, scoped } from '@signforge/db';
 import { type Caller, dispatch, grantOf, overLimit, ROLES, registry, SCOPES } from '@signforge/tools';
 import { type Context, Hono } from 'hono';
-import { agentLimiter } from '../agents/grant-object';
+import { recordCall, type CallRecord, UNKNOWN_TOOL } from '../agents/calls';
+import { agentLimiter, refusalAlertDue } from '../agents/grant-object';
+import { alertAgentRefused } from '../alerts';
 import { createAuth } from '../auth';
 import { OAUTH_SCOPES } from '../auth/agent-grants';
 import { refuseSession } from '../auth/guards';
@@ -94,19 +96,75 @@ async function answering<T>(method: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** One request's MCP server: the caller's tools, each call through the dispatcher. */
-function serverFor(caller: Caller, version: string): Server {
+/** A call as the request's own telemetry takes it: the grant, org and client are the route's. */
+type Called = Omit<CallRecord, 'orgId' | 'grantId' | 'clientId'>;
+
+/**
+ * Times `run` and records how it ended (M4-08), whatever happens: `ended` says it from the answer,
+ * and a throw is an `error`. Never the input, output or message.
+ */
+async function recorded<T>(
+  record: (call: Called) => void,
+  what: Omit<Called, 'result' | 'ms' | 'target'>,
+  run: () => Promise<T>,
+  ended: (answer: T) => Pick<Called, 'result' | 'target'>,
+): Promise<T> {
+  const started = Date.now();
+  let end: Pick<Called, 'result' | 'target'> = { result: 'error', target: null };
+  try {
+    const answer = await run();
+    end = ended(answer);
+    return answer;
+  } finally {
+    record({ ...what, ...end, ms: Date.now() - started });
+  }
+}
+
+/** A `forbidden` refusal, counted (`refusalAlertDue`); when due, the org is alerted (`agent_refused`). */
+async function refusedAgain(env: Env, refused: { orgId: string; grantId: string; tool: string; needs: string | null }, now: number) {
+  const due = await refusalAlertDue(env, refused.orgId, refused.grantId, now);
+  if (due) await alertAgentRefused(env, emailSenderFor(env), { ...refused, ...due }, now);
+}
+
+/** One request's MCP server: the caller's tools, each call through the dispatcher and recorded (`record`). */
+function serverFor(caller: Caller, version: string, record: (call: Called) => void): Server {
   const server = new Server({ name: 'signforge', version }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
   server.setRequestHandler('tools/list', () =>
-    answering('tools/list', async () => {
-      const refused = await overLimit('tools/list', false, caller);
-      if (refused && !refused.ok) throw new ProtocolError(RATE_LIMITED, refused.message, { error: refused.error, ...(refused.details ?? {}) });
-      return { tools: listedTools(await grantOf(caller), caller.services) };
-    }),
+    answering('tools/list', () =>
+      recorded(
+        record,
+        { tool: 'tools/list', change: false, needs: null },
+        async () => {
+          const refused = await overLimit('tools/list', false, caller);
+          return refused && !refused.ok ? refused : { ok: true as const, tools: listedTools(await grantOf(caller), caller.services) };
+        },
+        (answer) => ({ result: answer.ok ? 'ok' : answer.error, target: null }),
+      ).then((answer) => {
+        if (!answer.ok) throw new ProtocolError(RATE_LIMITED, answer.message, { error: answer.error, ...(answer.details ?? {}) });
+        return { tools: answer.tools };
+      }),
+    ),
   );
-  server.setRequestHandler('tools/call', (request) =>
-    answering('tools/call', async () => callResult(await dispatch(registry, request.params.name, request.params.arguments ?? {}, caller))),
-  );
+  server.setRequestHandler('tools/call', (request) => {
+    const { name, arguments: args = {} } = request.params;
+    const tool = registry.get(name);
+    return answering('tools/call', async () =>
+      callResult(
+        await recorded(
+          record,
+          // A name that is no tool is the agent's own text: recorded as unknown, never as sent.
+          { tool: tool ? name : UNKNOWN_TOOL, change: tool?.mutates ?? false, needs: tool?.scope ?? null },
+          () => dispatch(registry, name, args, caller),
+          (answer) => {
+            if (!answer.ok) return { result: answer.error, target: null };
+            // A change's target, as its audit row names it: what the agent's page links to.
+            const input = tool?.mutates ? tool.input.safeParse(args) : undefined;
+            return { result: 'ok', target: (input?.success && tool?.target?.(input.data, answer.output)) || null };
+          },
+        ),
+      ),
+    );
+  });
   return server;
 }
 
@@ -171,7 +229,20 @@ mcp.post('/mcp', refuseSession, async (c) => {
       400,
     );
   }
-  const server = () => serverFor(caller, c.env.BUILD_VERSION);
+  const record = (call: Called) => {
+    const at = Date.now();
+    recordCall(c.env, { ...call, orgId: grant.orgId, grantId: grant.grantId, clientId: grant.clientId }, at);
+    if (call.result === 'ok') return;
+    // One line a refused call, with whose it was (never what it was given).
+    console.warn(JSON.stringify({ event: 'agent_call_refused', grant: grant.grantId, client: grant.clientId, tool: call.tool, result: call.result }));
+    if (call.result !== 'forbidden') return;
+    c.executionCtx.waitUntil(
+      refusedAgain(c.env, { orgId: grant.orgId, grantId: grant.grantId, tool: call.tool, needs: call.needs }, at).catch((err: unknown) =>
+        console.error(JSON.stringify({ event: 'agent_refused_alert_failed', grant: grant.grantId, client: grant.clientId }), err),
+      ),
+    );
+  };
+  const server = () => serverFor(caller, c.env.BUILD_VERSION, record);
   // The SDK's handler answers this era over SSE; its own transport answers in JSON when asked.
   if (await isLegacyRequest(c.req.raw, undefined, { maxRequestBodySize: BODY_MAX })) {
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

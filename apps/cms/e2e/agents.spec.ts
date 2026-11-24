@@ -1,6 +1,6 @@
-// Settings › API & agents (M4-07, #112): a stub MCP client connects through /connect and is listed;
-// turning screens:manage off on its page refuses its next rename_screen with forbidden; Disconnect
-// gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
+// Settings › API & agents (M4-07, #112): a stub MCP client connects through /connect and is listed
+// with its last 7 days of calls (M4-08, #113); turning screens:manage off on its page refuses its next
+// rename_screen with forbidden, which its page shows as its last refusal; Disconnect gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
 // reads as SignForge is named by its host on the list, the audit log and its CSV, never by its name.
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
@@ -30,6 +30,9 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   // With screens:manage, renaming a screen that is not there is not found, not refused.
   const rename = () => stub.mcp(accessToken, 'tools/call', { name: 'rename_screen', arguments: { screenId: 'scr_nowhere', name: 'Lobby' } });
   expect((await rename()).result.structuredContent.error).toBe('not_found');
+  // With content:draft it makes a playlist: a change, in the audit log and in its calls.
+  const made = await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Kestrel specials' } });
+  expect(made.result.isError).toBeUndefined();
 
   // It is listed, by its quoted name, with its scopes and who granted it.
   await page.goto('/settings/api');
@@ -38,6 +41,7 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await expect(row).toContainText('“Kestrel agent”');
   await expect(row).toContainText('screens:manage');
   await expect(row).toContainText('This hour');
+  await expect(row).toContainText('2 calls · 1 change');
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 1300 });
   await shots(page, '31-api-agents');
@@ -55,15 +59,36 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await expect(page.getByText('Applies from its next call')).toBeVisible();
   await expect(page.getByRole('checkbox', { name: /Manage screens/ })).not.toBeChecked();
   expect((await rename()).result).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
-  // What it changed: nothing (its rename was refused, which writes nothing; the person's change is the person's).
-  await expect(page.getByText('No changes yet.')).toBeVisible();
+  // Its last 7 days: three calls, one change, one refused (forbidden; the rename not found is a call, not a refusal), named with the scope it needed.
+  await page.reload();
+  await hydrated(page);
+  // Each number by its label alone: "Changes" is also in "Draft changes".
+  const count = (label: string) =>
+    page
+      .locator('dl > div')
+      .filter({ has: page.getByText(label, { exact: true }) })
+      .locator('dd');
+  await expect(count('Tool calls')).toHaveText('3');
+  await expect(count('Changes')).toHaveText('1');
+  await expect(count('Draft changes')).toHaveText('1');
+  await expect(count('Refused')).toHaveText('1');
+  await expect(page.getByText('calling rename_screen: Refused · Needs screens:manage.')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'rename_screen' }).last()).toContainText('Not found');
   await axe(page);
-  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.setViewportSize({ width: 1280, height: 1700 });
   await shots(page, '31-agent-detail');
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
   await shots(page, '31-agent-detail-phone');
   await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Its change links to its row in the audit log: the agent's, on that playlist.
+  await page.getByRole('link', { name: 'See the change by create_playlist' }).click();
+  await expect(page).toHaveURL(/\/audit\?.*target=playlist/);
+  await hydrated(page);
+  await expect(page.getByRole('row', { name: /Created/ })).toBeVisible();
+  await page.goBack();
+  await hydrated(page);
 
   // Disconnect: back to the list, which has none, and the agent's next call gets 401.
   await page.getByRole('button', { name: 'Disconnect…' }).click();

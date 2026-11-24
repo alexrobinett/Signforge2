@@ -6,12 +6,13 @@ import { testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { checkScreenAlerts, finishRollouts } from '../src/alerts';
+import { alertAgentRefused, checkScreenAlerts, finishRollouts } from '../src/alerts';
 import type { FetchGuards } from '../src/data/fetch';
 import { deliverAlert, deliverAlerts } from '../src/deliveries';
 import { emailSenderFor, RecordingEmailSender } from '../src/email';
 import worker from '../src/index';
 import { Client, email, testApp } from './client';
+import { agentToken, check } from './oauth';
 
 /**
  * `real` as the Worker sees it, counting each query and batch (each is one query against the
@@ -301,6 +302,44 @@ describe('alerts to Slack and webhooks', () => {
     const later = (await owner.ok<{ publishes: { id: string; playing: number; replaced: number; reached: number | null }[] }>('/api/tools/list_publishes', {}))
       .publishes;
     expect(later.find((h) => h.id === v1.id)).toMatchObject({ playing: 0, replaced: 2, reached: 2 });
+  });
+
+  it("sends an agent's repeated refusals to Slack and the webhook once an hour, naming its client as a page does (M4-08)", async () => {
+    const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    await owner.ok('/api/tools/update_org_settings', { alerts: { agent_refused: { slack: true, webhook: true } } });
+    const { clientId, access_token } = await agentToken(owner.t, owner, org.id, ['content:read']);
+    const { grantId } = (await check(access_token))!;
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    const cms = { ...env, CMS_ORIGIN: 'https://cms.test' };
+    const start = Date.now();
+    const hour = start - (start % HOUR);
+    const refused = { orgId: org.id, grantId, tool: 'rename_screen', needs: 'screens:manage', refusals: 3, hour };
+    // Twice in one hour, as two calls racing past the object might: one event.
+    await alertAgentRefused(cms, outbox, refused, start);
+    await alertAgentRefused(cms, outbox, refused, start + MIN);
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1]);
+    expect(await to(webhookUrl)[0]!.json()).toEqual({
+      type: 'agent.refused',
+      id: `evt_agent_refused_${grantId}_${hour}`,
+      occurredAt: new Date(start).toISOString(),
+      org: { id: org.id, name: org.name },
+      data: {
+        grant: { id: grantId, url: `https://cms.test/settings/api/${grantId}`, client: { id: clientId, name: 'Test agent' } },
+        refusals: 3,
+        tool: 'rename_screen',
+        needs: 'screens:manage',
+      },
+    });
+    const slack = await to(slackUrl)[0]!.json<{ text: string; blocks: unknown[] }>();
+    expect(slack.text).toBe(`The agent “Test agent” in ${org.name} was refused 3 times this hour`);
+    expect(JSON.stringify(slack.blocks)).toContain(`<https://cms.test/settings/api/${grantId}|Open the agent in SignForge>`);
+
+    // A grant disconnected since: nobody is told.
+    await owner.ok('/api/tools/revoke_agent_grant', { grantId });
+    await alertAgentRefused(cms, outbox, { ...refused, hour: hour + HOUR }, start + HOUR);
+    await deliverAlerts(env, outbox, { now: start + HOUR, guards });
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1]);
   });
 
   it("escapes a screen's name in Slack's notification text as in its blocks", async () => {

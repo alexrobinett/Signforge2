@@ -5,7 +5,7 @@ import { AGENT_GRANT_IDLE_MS, scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type AgentLimiter, type Caller, type Role, type Scope } from '../src';
+import { dispatch, registry, type AgentCallLog, type AgentLimiter, type Caller, type Role, type Scope } from '../src';
 import { CMS_AGENT_CLIENT_ID } from '../src/outputs';
 import { fakeServices } from './services';
 
@@ -220,6 +220,61 @@ describe('the audit log', () => {
     expect(nameOf('agt_old_old-plain')).toBe('Claude Code (signforge)');
     expect(nameOf('agt_old_sf-cli')).toBe('SignForge CLI');
     expect(JSON.stringify(r.output)).not.toContain('SI6NFOR6E');
+  });
+});
+
+describe('usage (M4-08)', () => {
+  /** A call log that answers from fixed calls and notes which grants it was asked about. */
+  function log() {
+    const asked: string[][] = [];
+    const call = { at: 1, tool: 'rename_screen', result: 'forbidden', change: true, needs: 'screens:manage', target: null };
+    const agentCalls: AgentCallLog = {
+      usage: async (ids) => {
+        asked.push([...ids]);
+        return ids.slice(0, 1).map((grantId) => ({ grantId, calls: 12, changes: 3, drafts: 2, refusals: 1 }));
+      },
+      recent: async () => [call],
+      lastRefusal: async () => call,
+    };
+    return { asked, agentCalls };
+  }
+  const withLog = (caller: Caller, agentCalls: AgentCallLog): Caller => ({ ...caller, services: { ...fakeServices, agentCalls } });
+
+  it('asks the log about the grants the caller may see: an owner every one, anyone else their own; none it has no calls of reads as zeros', async () => {
+    const mine = await grant('gt-editor', ['content:read']);
+    const owners = await grant('gt-owner', ['content:read']);
+    const { asked, agentCalls } = log();
+    const r = await call(withLog(person('editor'), agentCalls), 'get_agent_grant_usage', {});
+    expect(asked.at(-1)).toEqual(expect.arrayContaining([mine]));
+    expect(asked.at(-1)).not.toContain(owners);
+    expect(r).toMatchObject({ ok: true, output: { recent: [], lastRefusal: null } });
+
+    await call(withLog(person('owner'), agentCalls), 'get_agent_grant_usage', {});
+    expect(asked.at(-1)).toEqual(expect.arrayContaining([mine, owners]));
+    const each = (r.ok ? (r.output as { grants: { grantId: string; calls: number }[] }).grants : []).filter((g) => g.grantId !== asked.at(-2)![0]);
+    for (const g of each) expect(g).toMatchObject({ calls: 0 });
+  });
+
+  it("gives one grant's numbers, latest calls and latest refusal; another member's grant is not found", async () => {
+    const mine = await grant('gt-editor', ['content:read']);
+    const owners = await grant('gt-owner', ['content:read']);
+    const { agentCalls } = log();
+    expect(await call(withLog(person('editor'), agentCalls), 'get_agent_grant_usage', { grantId: mine })).toMatchObject({
+      ok: true,
+      output: {
+        grants: [{ grantId: mine, calls: 12, changes: 3, drafts: 2, refusals: 1 }],
+        recent: [{ tool: 'rename_screen', result: 'forbidden' }],
+        lastRefusal: { tool: 'rename_screen', needs: 'screens:manage' },
+      },
+    });
+    expect(await call(withLog(person('editor'), agentCalls), 'get_agent_grant_usage', { grantId: owners })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('is refused to a caller with no call log', async () => {
+    expect(await call({ ...person('owner'), services: { ...fakeServices, agentCalls: undefined } }, 'get_agent_grant_usage', {})).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
   });
 });
 

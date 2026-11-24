@@ -84,6 +84,7 @@ describe('the registry', () => {
       'find_places',
       'finish_connection',
       'get_agent_grant',
+      'get_agent_grant_usage',
       'get_ai_provider',
       'get_alert_channels',
       'get_asset',
@@ -236,6 +237,7 @@ describe('roles and scopes', () => {
     expect(names('viewer').sort()).toEqual([
       'find_places',
       'get_agent_grant',
+      'get_agent_grant_usage',
       'get_ai_provider',
       'get_alert_channels',
       'get_asset',

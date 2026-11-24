@@ -32,4 +32,6 @@ export const fakeServices: Pick<Required<ToolServices>, ServiceName> = {
     remove: async () => {},
   },
   rateLimit: async () => true,
+  // No call recorded: a test that reads calls passes its own log.
+  agentCalls: { usage: async () => [], recent: async () => [], lastRefusal: async () => null },
 };

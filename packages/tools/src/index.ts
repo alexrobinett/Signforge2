@@ -15,6 +15,7 @@ export {
   type Actor,
   type AgentAllowance,
   type AgentLimit,
+  type AgentCallLog,
   type AgentLimiter,
   type AgentLimitWindow,
   type AiKey,
@@ -43,6 +44,7 @@ export {
   type ToolServices,
 } from './tool';
 export { type ClientRedirect, destinationOf, plainName, shownClient, shownClientName } from './agent-clients';
+export { grantClient } from './agent-grants';
 export { dispatch, describeTools, effectiveScopes, grantOf, overLimit, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
@@ -58,6 +60,8 @@ export { kitColors, type StoredColors } from './brand';
 export type { StoredCheckReport } from './templates';
 export { AI_PROVIDERS } from './outputs';
 export type {
+  AgentCall,
+  AgentUsage,
   AiProviderName,
   AssetView,
   Audience,
