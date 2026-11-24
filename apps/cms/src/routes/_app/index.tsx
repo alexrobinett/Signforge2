@@ -18,11 +18,9 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { playingNow, setupSteps, templateThumbnail, unpublished, type Playing, type SetupStep, type Unpublished } from '~/lib/overview';
 import { describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import type { ScreenView } from '~/lib/screen-types';
-import { playlistsQuery } from '~/queries/playlists';
+import { overviewQuery } from '~/queries/overview';
 import { publishQuery } from '~/queries/publishes';
-import { scheduleQuery } from '~/queries/schedule';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
-import { spotsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
 const app = getRouteApi('/_app');
@@ -33,9 +31,7 @@ export const Route = createFileRoute('/_app/')({
     if (!orgId) return;
     await Promise.all([
       queryClient.query({ ...screensQuery(orgId), staleTime: 0 }),
-      queryClient.query(spotsQuery(orgId)),
-      queryClient.query(playlistsQuery(orgId)),
-      queryClient.query(scheduleQuery(orgId)),
+      queryClient.query(overviewQuery(orgId)),
       queryClient.query(publishQuery(orgId, null)),
     ]);
   },
@@ -48,9 +44,7 @@ function Overview() {
   const orgId = useOrgId();
   const { data } = useSuspenseQuery(screensQuery(orgId));
   const { data: live } = useQuery(screenStatusQuery(orgId));
-  const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
-  const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
-  const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
+  const { spots, playlists, entries } = useSuspenseQuery(overviewQuery(orgId)).data;
   const now = useNow(Math.max(data.at, live?.at ?? 0));
   const screens = withStatus(data.screens, data.at, live).filter((s) => !isRetired(s));
 
