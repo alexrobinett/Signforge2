@@ -192,11 +192,15 @@ function LastWeek({
   const numbers = [
     ['Tool calls', usage.calls],
     ['Changes', usage.changes],
-    ['Drafts made', usage.drafts],
+    ['Draft changes', usage.drafts],
     ['Refused', usage.refusals],
   ] as const;
   return (
-    <SettingsSection id={`${id}-week`} title="Last 7 days" description="Every call it made: what it called and how that ended, never what it sent or got back.">
+    <SettingsSection
+      id={`${id}-week`}
+      title="Last 7 days"
+      description="Every call it made: what it called and how that ended, never what it sent or got back. Refused is what it was not allowed: a scope it lacks, or too many calls."
+    >
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {numbers.map(([label, n]) => (
           <div key={label} className="rounded-md border p-3">

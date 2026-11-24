@@ -68,14 +68,17 @@ const callOf = (c: Omit<CallRecord, 'orgId' | 'grantId' | 'clientId' | 'ms'> & {
   target: c.target,
 });
 
+/** What counts as a refusal: the agent asked for what it may not do, or too often. Not found, bad input and faults are calls, not refusals. */
+const REFUSED = ['forbidden', 'rate_limited'];
+
 /** The counts of `calls`, by grant. */
 function tally(calls: { grantId: string; result: string; change: boolean; needs: string | null; n: number }[]): AgentUsage[] {
   const by = new Map<string, AgentUsage>();
   for (const c of calls) {
     const u = by.get(c.grantId) ?? { grantId: c.grantId, calls: 0, changes: 0, drafts: 0, refusals: 0 };
     u.calls += c.n;
-    if (c.result !== 'ok') u.refusals += c.n;
-    else if (c.change) {
+    if (REFUSED.includes(c.result)) u.refusals += c.n;
+    else if (c.result === 'ok' && c.change) {
       u.changes += c.n;
       if (c.needs === 'content:draft') u.drafts += c.n;
     }
@@ -101,7 +104,7 @@ function devLog(orgId: string): AgentCallLog {
         .slice(0, limit)
         .map(callOf),
     lastRefusal: async (grantId, since) => {
-      const last = of(since).findLast((c) => c.grantId === grantId && c.result !== 'ok');
+      const last = of(since).findLast((c) => c.grantId === grantId && REFUSED.includes(c.result));
       return last ? callOf(last) : null;
     },
   };
@@ -122,7 +125,7 @@ export const callSql = {
   recent: (dataset: string, orgId: string, grantId: string, seconds: number, limit: number, refusedOnly: boolean) =>
     `SELECT timestamp, blob4 AS tool, blob5 AS result, double2 AS change, blob6 AS needs, blob7 AS targetKind, blob8 AS targetId FROM ${dataset} ` +
     `WHERE blob1 = ${literal(orgId)} AND index1 = ${literal(grantId)} AND timestamp > NOW() - INTERVAL '${seconds}' SECOND` +
-    `${refusedOnly ? " AND blob5 != 'ok'" : ''} ORDER BY timestamp DESC LIMIT ${Math.trunc(limit)} FORMAT JSON`,
+    `${refusedOnly ? ` AND blob5 IN (${REFUSED.map(literal).join(', ')})` : ''} ORDER BY timestamp DESC LIMIT ${Math.trunc(limit)} FORMAT JSON`,
 };
 
 interface Row {
@@ -151,23 +154,31 @@ export function callOfRow(r: Row): AgentCall {
   };
 }
 
+/** How long a page waits for the SQL API before saying the numbers are not available. */
+const SQL_TIMEOUT_MS = 5_000;
+
 /** The deployed log: Analytics Engine's SQL API, one org's. */
 function sqlLog(
   env: { ANALYTICS_ACCOUNT_ID: string; ANALYTICS_TOKEN: string; AGENT_CALLS_DATASET: string },
   orgId: string,
   fetcher: typeof fetch,
 ): AgentCallLog {
+  // Any failure, an answer that is no answer included, is the log being unavailable: the pages say so and show the rest.
   const query = async (sql: string): Promise<Row[]> => {
-    const res = await fetcher(`https://api.cloudflare.com/client/v4/accounts/${env.ANALYTICS_ACCOUNT_ID}/analytics_engine/sql`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.ANALYTICS_TOKEN}` },
-      body: sql,
-    });
-    if (!res.ok) {
-      console.error('[agent calls] the SQL API answered', res.status, await res.text().catch(() => ''));
-      throw new ToolError('unavailable', 'the call log could not be read just now; try again in a minute');
+    try {
+      const res = await fetcher(`https://api.cloudflare.com/client/v4/accounts/${env.ANALYTICS_ACCOUNT_ID}/analytics_engine/sql`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.ANALYTICS_TOKEN}` },
+        body: sql,
+        signal: AbortSignal.timeout(SQL_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`the SQL API answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return rowsOf(await res.json());
+    } catch (err) {
+      console.error('[agent calls] the call log could not be read', err);
+      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
+      throw new ToolError('unavailable', 'the call log could not be read just now; try again in a minute', undefined, false, { cause: err });
     }
-    return rowsOf(await res.json());
   };
   const seconds = (since: number) => Math.max(1, Math.round((Date.now() - since) / 1000));
   const dataset = env.AGENT_CALLS_DATASET;

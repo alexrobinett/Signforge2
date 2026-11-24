@@ -54,21 +54,21 @@ const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-
 /** The list's "Last 7 days": "12 calls · 3 changes". */
 export const weekWords = (u: Pick<AgentUsage, 'calls' | 'changes'>) => `${count(u.calls, 'call', 'calls')} · ${count(u.changes, 'change', 'changes')}`;
 
-/** How a call ended, in words: a refusal by its code, and what a refused call needed. */
+/** How a call ended, in words: a refusal (forbidden or rate_limited) as the ticket words it, with what a forbidden call needed. */
 export function outcome(call: AgentCall): string {
   if (call.result === 'ok') return call.change ? 'Changed' : 'Read';
-  if (call.result === 'forbidden') return call.needs ? `Refused: needs ${call.needs}` : 'Refused';
-  // A code newer than this page's words: still a refusal.
-  return RESULT_WORDS[call.result] ?? 'Refused';
+  if (call.result === 'forbidden') return call.needs ? `Refused · Needs ${call.needs}` : 'Refused';
+  // A code newer than this page's words: it did not go through.
+  return RESULT_WORDS[call.result] ?? 'Failed';
 }
 
 /** Every other ending's words; the call log's text is looked up here, so any string may come. */
 const RESULT_WORDS: Record<string, string> = {
+  rate_limited: 'Refused · Over its limit',
   not_found: 'Not found',
-  invalid_input: 'Refused: input not valid',
-  conflict: 'Refused: changed since it read it',
-  rate_limited: 'Refused: over its limit',
+  invalid_input: 'Input not valid',
+  conflict: 'Changed since it read it',
   unknown_tool: 'No such tool',
-  unavailable: 'Not available just then',
+  unavailable: 'Failed',
   error: 'Failed',
 } satisfies Record<Exclude<ToolErrorCode, 'forbidden'> | 'error', string>;

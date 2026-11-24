@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentCallLog, callOfRow, callSql, pointOf, rowsOf } from '../src/agents/calls';
 import { emailSenderFor, RecordingEmailSender } from '../src/email';
 import { mcp } from '../src/mcp';
-import { type Client, ORIGIN } from './client';
+import { Client, ORIGIN } from './client';
 import { agentToken, check, team } from './oauth';
 
 afterEach(() => {
@@ -166,6 +166,8 @@ describe('get_agent_grant_usage', () => {
     const made = await call(ownerAgent.access_token, 'create_playlist', { name: 'Specials' });
     const playlistId: string = made.result?.structuredContent.playlist.id;
     await call(ownerAgent.access_token, 'rename_screen', { screenId: 'scr_any', name: 'x' });
+    // Not found is a call, not a refusal: only forbidden and rate_limited are.
+    await call(ownerAgent.access_token, 'get_playlist', { playlistId: 'pls_nowhere' });
     await call(editorAgent.access_token, 'list_playlists', {});
 
     // Another org's agent, whose calls are never this org's.
@@ -177,12 +179,13 @@ describe('get_agent_grant_usage', () => {
     const all = await a.owner.ok<Usage>('/api/tools/get_agent_grant_usage', {});
     expect(all.grants.toSorted((x, y) => x.grantId.localeCompare(y.grantId))).toEqual(
       [
-        { grantId: ownerGrant, calls: 3, changes: 1, drafts: 1, refusals: 1 },
+        { grantId: ownerGrant, calls: 4, changes: 1, drafts: 1, refusals: 1 },
         { grantId: editorGrant, calls: 1, changes: 0, drafts: 0, refusals: 0 },
       ].toSorted((x, y) => x.grantId.localeCompare(y.grantId)),
     );
     const one = await a.owner.ok<Usage>('/api/tools/get_agent_grant_usage', { grantId: ownerGrant });
     expect(one.recent).toEqual([
+      { at: expect.any(Number), tool: 'get_playlist', result: 'not_found', change: false, needs: 'content:read', target: null },
       { at: expect.any(Number), tool: 'rename_screen', result: 'forbidden', change: true, needs: 'screens:manage', target: null },
       { at: expect.any(Number), tool: 'create_playlist', result: 'ok', change: true, needs: 'content:draft', target: { kind: 'playlist', id: playlistId } },
       { at: expect.any(Number), tool: 'tools/list', result: 'ok', change: false, needs: null, target: null },
@@ -241,6 +244,48 @@ describe('the agent.refused alert', () => {
   });
 });
 
+describe("the refusals' cost and the org's cap", () => {
+  it('asks the grant object about at most three forbidden refusals a grant per isolate per clock hour, however many come', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    // A minute before the hour turns, so the next hour is reached within the token's life.
+    const start = now - (now % HOUR) + HOUR - 60_000;
+    vi.setSystemTime(start);
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const w = watched();
+    const refuse = () => call(access_token, 'rename_screen', { screenId: 'scr_any', name: 'x' }, w.bindings);
+    const asked = (method: string) => w.objectCalls.filter((m) => m === method).length;
+    for (let i = 0; i < 10; i++) await refuse();
+    expect(asked('refused')).toBe(3);
+    expect(asked('orgAlertDue')).toBe(1);
+    // The next clock hour counts again, as far as its alert.
+    vi.setSystemTime(start + 2 * 60_000);
+    for (let i = 0; i < 10; i++) await refuse();
+    expect(asked('refused')).toBe(6);
+    expect(asked('orgAlertDue')).toBe(2);
+  });
+
+  it('sends an org at most five agent.refused alerts a clock hour, however many of its agents are refused', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    vi.setSystemTime(now - (now % HOUR) + HOUR + 60_000);
+    const { t, owner, org } = await team();
+    const ownerAddress = await addressOf(owner);
+    const outbox = emailSenderFor(env);
+    if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev sends to its outbox');
+    const capped = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (let agent = 0; agent < 6; agent++) {
+      const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+      for (let i = 0; i < 3; i++) await call(access_token, 'rename_screen', { screenId: 'scr_any', name: 'x' });
+    }
+    const lines = capped.mock.calls.map((args) => String(args[0]));
+    capped.mockRestore();
+    expect(outbox.messages.filter((m) => m.to === ownerAddress && m.subject.includes('was refused'))).toHaveLength(5);
+    expect(lines.filter((l) => l.includes('agent_refused_alert_capped'))).toHaveLength(1);
+  });
+});
+
 describe('the cost of each path, per call', () => {
   it('a read, a change, tools/list and a refusal: no D1 write for telemetry, one data point each, and the grant object only on forbidden', async () => {
     const { t, owner, org } = await team();
@@ -291,11 +336,15 @@ describe('the SQL API log', () => {
       { grant: 'agr_1', result: 'ok', change: 1, needs: 'content:draft', n: '2' },
       { grant: 'agr_1', result: 'ok', change: 1, needs: 'content:publish', n: '1' },
       { grant: 'agr_1', result: 'forbidden', change: 1, needs: 'screens:manage', n: '3' },
+      { grant: 'agr_1', result: 'rate_limited', change: 0, needs: 'content:read', n: '2' },
+      // Calls, not refusals: the agent's own mistakes, and faults.
+      { grant: 'agr_1', result: 'not_found', change: 0, needs: 'content:read', n: '4' },
+      { grant: 'agr_1', result: 'error', change: 1, needs: 'content:draft', n: '1' },
     ]);
     const log = agentCallLog(settings, ORG, api.fetcher)!;
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.UTC(2026, 10, 23, 12));
-    expect(await log.usage(['agr_1', 'agr_2'], Date.UTC(2026, 10, 16, 12))).toEqual([{ grantId: 'agr_1', calls: 13, changes: 3, drafts: 2, refusals: 3 }]);
+    expect(await log.usage(['agr_1', 'agr_2'], Date.UTC(2026, 10, 16, 12))).toEqual([{ grantId: 'agr_1', calls: 20, changes: 3, drafts: 2, refusals: 5 }]);
     expect(api.asked).toEqual([
       {
         url: 'https://api.cloudflare.com/client/v4/accounts/acct/analytics_engine/sql',
@@ -322,7 +371,7 @@ describe('the SQL API log', () => {
     expect(await log.recent('agr_1', 0, 20)).toEqual([call]);
     expect(await log.lastRefusal('agr_1', 0)).toEqual(call);
     expect(api.asked[0]!.sql).toMatch(/ORDER BY timestamp DESC LIMIT 20 FORMAT JSON$/);
-    expect(api.asked[1]!.sql).toContain("AND blob5 != 'ok' ORDER BY timestamp DESC LIMIT 1");
+    expect(api.asked[1]!.sql).toContain("AND blob5 IN ('forbidden', 'rate_limited') ORDER BY timestamp DESC LIMIT 1");
     expect(callOfRow({ timestamp: '2026-11-23 10:15:00', tool: 'tools/list', result: 'ok', change: 0, needs: '', targetKind: '', targetId: '' })).toEqual({
       at: Date.UTC(2026, 10, 23, 10, 15),
       tool: 'tools/list',
@@ -333,11 +382,46 @@ describe('the SQL API log', () => {
     });
   });
 
-  it('refuses, as unavailable, when the SQL API answers with an error; and an answer without data', async () => {
+  it('is unavailable, never a fault, whatever goes wrong reading it: an error status, the network, a timeout, a body not JSON or without data', async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const failing: Record<string, typeof fetch> = {
+      'an error status': async () => new Response('nope', { status: 500 }),
+      'the network': async () => {
+        throw new TypeError('Network connection lost.');
+      },
+      // As AbortSignal.timeout ends a fetch: the stand-in does not wait out the real seconds.
+      'a timeout': async (_input, init) => {
+        signals.push(init?.signal);
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      'a body not JSON': async () => new Response('<html>Bad gateway</html>', { status: 200 }),
+      'a body without data': async () => Response.json({ errors: [{ message: 'bad' }] }),
+    };
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await expect(agentCallLog(settings, ORG, sqlApi([], 500).fetcher)!.recent('agr_1', 0, 20)).rejects.toMatchObject({ code: 'unavailable' });
+    for (const [what, fetcher] of Object.entries(failing)) {
+      const log = agentCallLog(settings, ORG, fetcher)!;
+      for (const read of [() => log.usage(['agr_1'], 0), () => log.recent('agr_1', 0, 20), () => log.lastRefusal('agr_1', 0)]) {
+        await expect(read(), what).rejects.toMatchObject({ name: 'ToolError', code: 'unavailable' });
+      }
+    }
     logged.mockRestore();
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
     expect(() => rowsOf({ errors: ['bad'] })).toThrow('without data');
+  });
+
+  it('answers the usage tool 503 while the SQL API is down, and the grants still list', async () => {
+    const { t, owner, org } = await team();
+    await agentToken(t, owner, org.id, ['content:read']);
+    const deployed = new Client(t, owner.ip, { ...env, ANALYTICS_ACCOUNT_ID: 'acct', ANALYTICS_TOKEN: 'token-value' });
+    for (const [k, v] of owner.jar) deployed.jar.set(k, v);
+    const down = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Network connection lost.'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const usage = await deployed.post('/api/tools/get_agent_grant_usage', {});
+    down.mockRestore();
+    logged.mockRestore();
+    expect(usage.status).toBe(503);
+    expect(await usage.json()).toMatchObject({ error: 'unavailable' });
+    expect((await deployed.ok<{ grants: unknown[] }>('/api/tools/list_agent_grants', {})).grants).toHaveLength(1);
   });
 
   it('puts only ids in its SQL', () => {

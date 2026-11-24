@@ -32,7 +32,7 @@ import { agentGrantForToken, scoped } from '@signforge/db';
 import { type Caller, dispatch, grantOf, overLimit, ROLES, registry, SCOPES } from '@signforge/tools';
 import { type Context, Hono } from 'hono';
 import { recordCall, type CallRecord, UNKNOWN_TOOL } from '../agents/calls';
-import { agentLimiter } from '../agents/grant-object';
+import { agentLimiter, refusalAlertDue } from '../agents/grant-object';
 import { alertAgentRefused } from '../alerts';
 import { createAuth } from '../auth';
 import { OAUTH_SCOPES } from '../auth/agent-grants';
@@ -120,13 +120,10 @@ async function recorded<T>(
   }
 }
 
-/**
- * A `forbidden` refusal, counted in the grant's object (one request, refusals only); its
- * `REFUSALS_TO_ALERT`th in an hour alerts the org once (`agent_refused`).
- */
+/** A `forbidden` refusal, counted (`refusalAlertDue`); when due, the org is alerted (`agent_refused`). */
 async function refusedAgain(env: Env, refused: { orgId: string; grantId: string; tool: string; needs: string | null }, now: number) {
-  const counted = await env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(refused.grantId)).refused();
-  if (counted.alert) await alertAgentRefused(env, emailSenderFor(env), { ...refused, refusals: counted.refusals, hour: counted.hour }, now);
+  const due = await refusalAlertDue(env, refused.orgId, refused.grantId, now);
+  if (due) await alertAgentRefused(env, emailSenderFor(env), { ...refused, ...due }, now);
 }
 
 /** One request's MCP server: the caller's tools, each call through the dispatcher and recorded (`record`). */

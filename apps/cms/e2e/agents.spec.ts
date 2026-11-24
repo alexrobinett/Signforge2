@@ -59,13 +59,21 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await expect(page.getByText('Applies from its next call')).toBeVisible();
   await expect(page.getByRole('checkbox', { name: /Manage screens/ })).not.toBeChecked();
   expect((await rename()).result).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
-  // Its last 7 days: three calls, one change, two refused (the rename not found, then forbidden), the last named with the scope it needed.
+  // Its last 7 days: three calls, one change, one refused (forbidden; the rename not found is a call, not a refusal), named with the scope it needed.
   await page.reload();
   await hydrated(page);
-  await expect(page.locator('dl > div', { hasText: 'Tool calls' })).toContainText('3');
-  await expect(page.locator('dl > div', { hasText: 'Changes' })).toContainText('1');
-  await expect(page.locator('dl > div', { hasText: 'Refused' })).toContainText('2');
-  await expect(page.getByText(/calling rename_screen: Refused: needs screens:manage\./)).toBeVisible();
+  // Each number by its label alone: "Changes" is also in "Draft changes".
+  const count = (label: string) =>
+    page
+      .locator('dl > div')
+      .filter({ has: page.getByText(label, { exact: true }) })
+      .locator('dd');
+  await expect(count('Tool calls')).toHaveText('3');
+  await expect(count('Changes')).toHaveText('1');
+  await expect(count('Draft changes')).toHaveText('1');
+  await expect(count('Refused')).toHaveText('1');
+  await expect(page.getByText('calling rename_screen: Refused · Needs screens:manage.')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'rename_screen' }).last()).toContainText('Not found');
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 1700 });
   await shots(page, '31-agent-detail');

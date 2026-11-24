@@ -4,6 +4,7 @@
  * agent's last 7 days of calls (M4-08), and one agent's recent calls and changes. Reads through the
  * tool registry and Better Auth's member list; changes go from the browser (src/state/settings.ts).
  */
+import { isRedirect } from '@tanstack/react-router';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequest } from '@tanstack/react-start/server';
 import { type AgentTool, parseAgentTools } from '~/lib/agents';
@@ -30,16 +31,20 @@ async function tools(): Promise<AgentTool[]> {
 }
 
 /**
- * The agents' calls, or null where they cannot be read: a deployed API without its Analytics
- * Engine token (refused `forbidden`), or the SQL API failing just now (`unavailable`). The pages
- * then say the numbers are not available, and the rest still shows.
+ * The agents' calls, or null whenever they cannot be read: a deployed API without its Analytics
+ * Engine token (refused `forbidden`), the SQL API down, slow or answering nonsense (`unavailable`),
+ * or the request to the API failing. The pages then say the numbers are not available, and the
+ * grants, their scopes and Disconnect still show: the call log never fails a page.
  */
 async function usage(grantId?: string) {
   try {
     return await tool('get_agent_grant_usage', grantId ? { grantId } : {});
   } catch (err) {
-    if (err instanceof Refusal && (err.code === 'forbidden' || err.code === 'unavailable')) return null;
-    throw err;
+    // A session that has ended goes to sign-in, as every read does.
+    if (isRedirect(err)) throw err;
+    // A refusal is the API's own answer, already logged there; anything else is this request's.
+    if (!(err instanceof Refusal)) console.error('agent usage could not be read', err);
+    return null;
   }
 }
 

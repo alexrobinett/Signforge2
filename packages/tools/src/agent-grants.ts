@@ -160,7 +160,7 @@ const RECENT_CALLS = 20;
 const getAgentGrantUsage = defineTool({
   name: 'get_agent_grant_usage',
   description:
-    "How connected agents have been used over the last 7 days: each one's calls, changes, drafts made and refusals, from the call log (never a call's input or output). With grantId, that agent's alone, with its latest calls, reads and refusals included, and its latest refusal. Without, every agent the caller may see: for an owner every member's, for anyone else their own. People only. Returns { since, grants, recent, lastRefusal }.",
+    "How connected agents have been used over the last 7 days: each one's calls, changes, draft changes and refusals (refused forbidden or rate_limited), from the call log (never a call's input or output). With grantId, that agent's alone, with its latest calls, reads and refusals included, and its latest refusal. Without, every agent the caller may see: for an owner every member's, for anyone else their own. People only. Returns { since, grants, recent, lastRefusal }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,

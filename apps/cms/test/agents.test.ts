@@ -33,15 +33,16 @@ describe('weekWords', () => {
 
 describe('outcome', () => {
   const call = (c: Partial<AgentCall>): AgentCall => ({ at: NOW, tool: 'rename_screen', result: 'ok', change: false, needs: null, target: null, ...c });
-  it('says a read, a change, and a refusal by its code, with the scope a forbidden call needed', () => {
+  it('says a read, a change, a refusal as the ticket words it, and the rest as what it was', () => {
     expect(outcome(call({}))).toBe('Read');
     expect(outcome(call({ change: true }))).toBe('Changed');
-    expect(outcome(call({ result: 'forbidden', needs: 'screens:manage' }))).toBe('Refused: needs screens:manage');
+    expect(outcome(call({ result: 'forbidden', needs: 'screens:manage' }))).toBe('Refused · Needs screens:manage');
     expect(outcome(call({ result: 'forbidden' }))).toBe('Refused');
+    expect(outcome(call({ result: 'rate_limited' }))).toBe('Refused · Over its limit');
     expect(outcome(call({ result: 'not_found' }))).toBe('Not found');
-    expect(outcome(call({ result: 'rate_limited' }))).toBe('Refused: over its limit');
+    expect(outcome(call({ result: 'unavailable' }))).toBe('Failed');
     expect(outcome(call({ result: 'error' }))).toBe('Failed');
     // A code this page has no words for yet.
-    expect(outcome(call({ result: 'payload_too_large' }))).toBe('Refused');
+    expect(outcome(call({ result: 'payload_too_large' }))).toBe('Failed');
   });
 });
