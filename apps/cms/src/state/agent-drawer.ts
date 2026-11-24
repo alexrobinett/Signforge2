@@ -16,7 +16,7 @@ type DrawerMessage =
   /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI & agents. */
   | { role: 'error'; text: string; inSettings: boolean };
 
-export type AgentOpener = 'sidebar' | 'top-bar';
+type AgentOpener = 'sidebar' | 'top-bar';
 
 interface AgentDrawerState {
   open: boolean;
