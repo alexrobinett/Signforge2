@@ -219,7 +219,7 @@ describe('the stage (review of #97)', () => {
     store.getState().attachStage({ frame, orgId: ORG, spotId: image.id, orientation: 'landscape' });
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
     await held;
-    expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
+    expect(store.getState().spotEditor.refusals).toEqual(['Asset ast_new is still being checked']);
     expect(posted).toEqual([]);
   });
 });

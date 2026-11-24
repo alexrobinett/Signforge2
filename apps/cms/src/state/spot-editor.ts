@@ -33,6 +33,7 @@ import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { playerMessage } from '~/lib/preview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
+import { problemWords } from '~/lib/field-words';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
@@ -83,8 +84,8 @@ interface SpotEditorState {
   /** True while the draft cannot be drawn: the stage keeps the last frame it drew. */
   holding: boolean;
   /**
-   * While holding, why the draft cannot be a spot at all when no field of the form is marked for
-   * it: an image still being checked, a template version not approved. Empty when a field explains it.
+   * While holding, why the draft cannot be played, in words: a field's problem by its label (an
+   * empty one too, before its field is marked), an image still being checked, a template version not approved.
    */
   refusals: string[];
   /** Whether the player has said it plays the draft. */
@@ -96,6 +97,11 @@ interface SpotEditorState {
   /** The room the stage has on the page, for scaling the screen to fit; null until measured. */
   stageBox: { w: number; h: number } | null;
   newSpot: NewSpotDraft;
+  /**
+   * By spot, the fields a person has touched (changed, left or opened the picker of), and whether
+   * Publish was pressed: an empty field's problem shows only then (#359), not on a spot just made.
+   */
+  checks: Record<string, { touched: string[]; all: boolean }>;
   /** Delete's confirmation: open, deleting, or refused, with the playlists that play the spot when that is why. */
   deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[] };
 }
@@ -123,6 +129,10 @@ export interface SpotEditorSlice {
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft and opens its editor. */
   createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
+  /** A field of the spot touched: its empty-field problem may show now. */
+  touchField: (spotId: string, field: string) => void;
+  /** Publish pressed: every field's problem shows. */
+  checkAllFields: (spotId: string) => void;
   askDeleteSpot: (open: boolean) => void;
   /**
    * Deletes the spot, at the version the editor holds (as loaded, or as its own save left it), and goes
@@ -167,6 +177,7 @@ const initial: SpotEditorState = {
   stageError: null,
   stageBox: null,
   newSpot: newSpotDraft(),
+  checks: {},
   deleting: closedDelete(),
 };
 
@@ -257,8 +268,9 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       const now = new Date().toISOString();
       return table ? [{ id, version: 0, fetchedAt: now, checkedAt: now, data: table }] : [];
     };
-    // The stage shows one spot: its reasons need no "spot <id>:" before them.
-    const refusals = result.refused ? result.problems.map((p) => p.replace(`spot ${spot.id}: `, '')) : [];
+    // The stage shows one spot: its reasons need no "spot <id>:" before them, and its fields' are said by their labels (#359).
+    const fields = versionsById(templates).get(spot.templateVersionId ?? '')?.manifest.fields ?? {};
+    const refusals = result.manifest ? [] : result.problems.map((p) => problemWords(p.replace(`spot ${spot.id}: `, ''), fields));
     return { ...result, refusals, data: (await Promise.all(sources.map(latest))).flat() };
   }
 
@@ -412,6 +424,14 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         editor((e) => ({ ...e, newSpot: { ...e.newSpot, pending: false, error: toolMessage(err) } }));
       }
     },
+
+    touchField(spotId, field) {
+      const was = get().spotEditor.checks[spotId] ?? { touched: [], all: false };
+      if (was.all || was.touched.includes(field)) return;
+      editor((e) => ({ ...e, checks: { ...e.checks, [spotId]: { ...was, touched: [...was.touched, field] } } }));
+    },
+
+    checkAllFields: (spotId) => editor((e) => ({ ...e, checks: { ...e.checks, [spotId]: { touched: e.checks[spotId]?.touched ?? [], all: true } } })),
 
     askDeleteSpot: (open) => editor((e) => ({ ...e, deleting: { ...closedDelete(), open } })),
 

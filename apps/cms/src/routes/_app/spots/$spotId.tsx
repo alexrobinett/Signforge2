@@ -99,6 +99,7 @@ function SpotEditor() {
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);
+  const checkAll = useAppStore((s) => s.checkAllFields);
   const filled = useAppStore((s) => s.agent.filled[spotId]);
   const clearMark = useAppStore((s) => s.clearFillMark);
   const finishFill = useAppStore((s) => s.finishFill);
@@ -144,7 +145,16 @@ function SpotEditor() {
             <DeleteButton onAsk={() => askDelete(true)} />
           </>
         )}
-        {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
+        {canPublish && (
+          <PublishButton
+            pending={publishing}
+            disabled={stale}
+            onPublish={() => {
+              checkAll(spotId);
+              void publish(orgId, spotId);
+            }}
+          />
+        )}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
       {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
@@ -213,6 +223,7 @@ function SpotEditor() {
               (version ? (
                 <EditorSection title="Content">
                   <FieldForm
+                    spotId={spotId}
                     fields={version.manifest.fields}
                     shown={typedFields(version.manifest, draft.bindings)}
                     draft={draft}

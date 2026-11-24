@@ -2,9 +2,11 @@
  * `FieldForm` (docs/proposals/cms-ui.md): a template's fields as a form, in the order the template
  * lists them: text, number, boolean, colour (a brand colour or a custom one), select, url (an https
  * address), date and datetime (the browser's pickers, held to `min` and `max`), image (the asset
- * picker) and list (repeating rows, up to `maxItems`). The contract's message for a field
- * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default. A spot
- * the agent just filled (#263) shows its marks (./fill-marks.tsx) until each field is edited.
+ * picker) and list (repeating rows, up to `maxItems`). A field's problem (`validateSpotField`) sits
+ * under it in words (src/lib/field-words.ts); an empty field's only once it is touched or Publish
+ * was pressed (#359), so a spot just made is not a page of errors. A choice shows its option's label.
+ * Values a spot leaves out show the template's default. A spot the agent just filled (#263) shows
+ * its marks (./fill-marks.tsx) until each field is edited.
  */
 import type { FieldMark } from '@signforge/api/agent-inline';
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
@@ -16,6 +18,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
+import { isEmptyProblem, optionLabel, problemWords } from '~/lib/field-words';
 import { fieldProblems, type SpotDraft } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -46,7 +49,7 @@ function Problems({ id, problems }: { id: string; problems: string[] | undefined
   if (!problems?.length) return null;
   return (
     <p id={id} className="text-sm font-medium text-destructive">
-      {problems.join(' ')}
+      {problems.map((p) => `${p}.`).join(' ')}
     </p>
   );
 }
@@ -59,6 +62,7 @@ function ScalarInput({
   invalid,
   describedBy,
   onChange,
+  onBlur,
 }: {
   id: string;
   def: ScalarFieldDef;
@@ -66,8 +70,10 @@ function ScalarInput({
   invalid: boolean;
   describedBy?: string;
   onChange: (v: unknown) => void;
+  /** Left: the field is touched. */
+  onBlur?: () => void;
 }) {
-  const aria = { 'aria-invalid': invalid || undefined, 'aria-describedby': describedBy };
+  const aria = { 'aria-invalid': invalid || undefined, 'aria-describedby': describedBy, onBlur };
   switch (def.type) {
     case 'text':
       return <Input id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} {...aria} />;
@@ -125,7 +131,7 @@ function ScalarInput({
         <NativeSelect id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} className="w-full" {...aria}>
           {def.options.map((o) => (
             <option key={o} value={o}>
-              {o}
+              {optionLabel(o)}
             </option>
           ))}
         </NativeSelect>
@@ -173,6 +179,7 @@ function ImageField({
   mark,
   flyer,
   onChange,
+  onTouch,
 }: {
   name: string;
   def: Extract<FieldDef, { type: 'image' }>;
@@ -182,6 +189,7 @@ function ImageField({
   mark: FieldMark | undefined;
   flyer: Flyer | undefined;
   onChange: Edit;
+  onTouch: () => void;
 }) {
   const picking = useAppStore((s) => s.spotEditor.picking === name);
   const pick = useAppStore((s) => s.pickImageFor);
@@ -200,7 +208,15 @@ function ImageField({
           {asset && <img src={sessionBlobPath(asset.sha256)} alt="" className="size-full object-cover" />}
         </div>
         <span className="min-w-0 flex-1 truncate text-sm">{asset ? asset.name : 'No image chosen'}</span>
-        <Button type="button" variant="outline" onClick={() => pick(name)} aria-describedby={problems ? errorId : undefined}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            onTouch();
+            pick(name);
+          }}
+          aria-describedby={problems ? errorId : undefined}
+        >
           {asset ? 'Replace' : 'Choose image'}
           <span className="sr-only"> for {def.label}</span>
         </Button>
@@ -307,6 +323,7 @@ function ListField({
 
 /** Draws the `shown` fields, each checked against all of the template's `fields`, as a publish checks it (#304). */
 export function FieldForm({
+  spotId,
   fields,
   shown,
   draft,
@@ -316,6 +333,8 @@ export function FieldForm({
   onChange,
   onEdited,
 }: {
+  /** The spot the form edits: which of its fields were touched, and whether Publish was pressed. */
+  spotId: string;
   fields: Record<string, FieldDef>;
   shown: Record<string, FieldDef>;
   draft: SpotDraft;
@@ -327,7 +346,16 @@ export function FieldForm({
   /** Told which field changed, to take its mark away. */
   onEdited?: (name: string) => void;
 }) {
-  const problems = fieldProblems(fields, draft, Object.keys(shown));
+  const checks = useAppStore((s) => s.spotEditor.checks[spotId]);
+  const touch = useAppStore((s) => s.touchField);
+  // In words; an empty field's problem only once touched or Publish was pressed.
+  const problems = new Map(
+    [...fieldProblems(fields, draft, Object.keys(shown))].flatMap(([name, list]) => {
+      const seen = checks?.all || checks?.touched.includes(name);
+      const words = list.filter((p) => seen || !isEmptyProblem(p)).map((p) => problemWords(p, fields));
+      return words.length ? [[name, words] as const] : [];
+    }),
+  );
   return (
     <div className="flex flex-col gap-5">
       {Object.entries(shown).map(([name, def]) => {
@@ -336,10 +364,22 @@ export function FieldForm({
         const edit: Edit = (change) => {
           onChange(change);
           onEdited?.(name);
+          touch(spotId, name);
         };
         if (def.type === 'image')
           return (
-            <ImageField key={name} name={name} def={def} assetId={draft.assets[name]} assets={assets} problems={p} mark={mark} flyer={flyer} onChange={edit} />
+            <ImageField
+              key={name}
+              name={name}
+              def={def}
+              assetId={draft.assets[name]}
+              assets={assets}
+              problems={p}
+              mark={mark}
+              flyer={flyer}
+              onChange={edit}
+              onTouch={() => touch(spotId, name)}
+            />
           );
         const value = draft.data[name] ?? def.default;
         if (def.type === 'list') {
@@ -366,7 +406,7 @@ export function FieldForm({
                 )}
               </span>
             </span>
-            <ScalarInput id={id} def={def} value={value} invalid={p !== undefined} describedBy={describedBy} onChange={set} />
+            <ScalarInput id={id} def={def} value={value} invalid={p !== undefined} describedBy={describedBy} onChange={set} onBlur={() => touch(spotId, name)} />
             {mark && <MarkNote id={markId} mark={mark} />}
             <Problems id={errorId} problems={p} />
           </div>

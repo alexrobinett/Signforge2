@@ -116,11 +116,12 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await axe(page);
   await shots(page, '30-spot-editor');
 
-  // Invalid: the contract's message by the field, the stage keeps the last frame, nothing is saved.
+  // Invalid: the problem by the field in words (#359), the stage keeps the last frame and says why, nothing is saved.
   await greeting.fill('x'.repeat(41));
-  await expect(page.getByText('field "greeting" is longer than 40')).toBeVisible();
+  const tooLong = 'Greeting (empty for good morning/afternoon/evening) is longer than 40 characters.';
+  await expect(page.locator('#field-greeting-error')).toHaveText(tooLong);
   await expect(greeting).toHaveAttribute('aria-invalid', 'true');
-  await expect(stage.getByText('Holding the last valid frame until the marked field is fixed.')).toBeVisible();
+  await expect(stage.getByText(`Holding the last valid frame. ${tooLong}`)).toBeVisible();
   await expect(page.getByText('Not saved: fix the marked field')).toBeVisible();
   expect(await stageShows(page, 'Welcome to Northside')).toBe(true);
   await axe(page);
@@ -317,7 +318,12 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   await page.setViewportSize({ width: 1280, height: 720 });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const announcement = templates.find((t: { key: string }) => t.key.endsWith('announcement') || t.key === 'announcement');
-  const { spot } = await tool(page, 'create_spot', { name: 'No photo', kind: 'template', templateVersionId: announcement.versions.at(-1).id, data: { showPhoto: false } });
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'No photo',
+    kind: 'template',
+    templateVersionId: announcement.versions.at(-1).id,
+    data: { showPhoto: false },
+  });
   const skipped: string[] = [];
   const listen = (m: { text(): string }) => m.text().includes('[sf] skipped') && skipped.push(m.text());
   page.on('console', listen);
@@ -330,6 +336,21 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   page.off('console', listen);
   expect(skipped).toEqual([]);
+
+  // #359: the photo turned on says nothing under its field until Publish, then says it in words; the choice by its label.
+  await expect(page.getByLabel('Look').locator('option:checked')).toHaveText('Pop');
+  await page.getByLabel('Show the photo').check();
+  // The stage draws once back in view: it keeps the frame it drew, and says why in the same words.
+  await stage.scrollIntoViewIfNeeded();
+  await expect(stage.getByText('Holding the last valid frame. No image for Photo: choose one, or untick Show the photo.')).toBeVisible();
+  const photoError = page.locator('#field-photo-error');
+  await expect(photoError).toHaveCount(0);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(photoError).toHaveText('No image for Photo: choose one, or untick Show the photo.');
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 });
 
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;

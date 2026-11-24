@@ -28,7 +28,8 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
-import { seconds, spotWhat, versionsById } from '~/lib/spots';
+import { problemWords } from '~/lib/field-words';
+import { seconds, type SpotView, spotWhat, versionsById } from '~/lib/spots';
 import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
 import { isRetired } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
@@ -38,6 +39,12 @@ import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { shown } from '~/state/versioned-draft';
+
+/** Why a spot is left out of the preview, in words: its fields' problems by their labels (#359), each a sentence. */
+const leftOutWords = (why: string[], spot: SpotView | undefined, versions: ReturnType<typeof versionsById>) => {
+  const fields = versions.get(spot?.templateVersionId ?? '')?.manifest.fields ?? {};
+  return why.map((p) => `${problemWords(spot ? p.replace(`spot ${spot.id}: `, '') : p, fields)}.`).join(' ');
+};
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -237,7 +244,7 @@ function PlaylistEditor() {
                           {why && (
                             <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                              <span>Not in the preview yet: {why.join('; ')}</span>
+                              <span>Not in the preview yet. {leftOutWords(why, spot, versions)}</span>
                             </span>
                           )}
                         </span>
