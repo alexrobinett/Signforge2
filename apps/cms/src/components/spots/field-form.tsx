@@ -20,6 +20,7 @@ import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
 import { isEmptyProblem, optionLabel, problemCell, problemWords } from '~/lib/field-words';
 import { fieldProblems, type SpotDraft } from '~/lib/spots';
+import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
 /** A change to the draft, as the editor's `editSpot` takes it. */
@@ -45,10 +46,13 @@ const BRAND_WORD: Record<string, string> = {
 
 const fieldClass = 'flex flex-col gap-1.5';
 
-/** A field's problems, in a live region that is always there, so one that appears (on leaving the field, #359) is announced. */
+/**
+ * A field's problems, in a live region that is always in the accessibility tree, so one that appears
+ * (on leaving the field, #359) is announced: empty, it is only visually hidden, never removed.
+ */
 function Problems({ id, problems }: { id: string; problems: string[] | undefined }) {
   return (
-    <p id={id} aria-live="polite" className="text-sm font-medium text-destructive empty:hidden">
+    <p id={id} aria-live="polite" className={cn('text-sm font-medium text-destructive', !problems?.length && 'sr-only')}>
       {problems?.map((p) => `${p}.`).join(' ')}
     </p>
   );

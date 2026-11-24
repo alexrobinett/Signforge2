@@ -224,6 +224,9 @@ describe('a new spot in the editor (#359)', () => {
     const html = formHtml({ fields: facts, shown: facts, draft: draft({ headline: 'Hi', facts: [{ label: 'Too long', value: 'ok' }] }), assets: [] });
     // Empty, but there before anything is wrong, so a screen reader hears what appears in it.
     expect(html).toMatch(/<p id="field-headline-error" aria-live="polite"[^>]*><\/p>/);
+    // Only visually hidden while empty: still in the accessibility tree, where its change is heard (re-check of #387).
+    expect(html).toMatch(/<p id="field-headline-error" aria-live="polite" class="[^"]*\bsr-only\b[^"]*"><\/p>/);
+    expect(html).not.toContain('empty:hidden');
     const cell = /<input[^>]*id="field-facts-0-label"[^>]*>/.exec(html)?.[0] ?? '';
     expect(cell).toContain('aria-invalid="true"');
     expect(cell).toContain('aria-describedby="field-facts-error"');

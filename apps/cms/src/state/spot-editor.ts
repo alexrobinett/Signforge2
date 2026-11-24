@@ -200,6 +200,12 @@ export const spotShown = (e: SpotEditorState, orgId: string, spot: SpotView): Sp
   return d?.orgId === orgId ? shown(d, spot.version) : null;
 };
 
+/** Whether any of the stage's frame is in the viewport now, by its box: the player draws only there (#342). */
+function frameInView(frame: Window): boolean {
+  const box = frame.frameElement?.getBoundingClientRect();
+  return box !== undefined && box.bottom > 0 && box.right > 0 && box.top < window.innerHeight && box.left < window.innerWidth;
+}
+
 export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
@@ -293,8 +299,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       return;
     }
     // Compiled whatever is in view, so what the draft leaves out (a playlist's row warnings) stays current; posted only to a frame in view,
-    // asked again at this moment: a resize while it compiled may have moved it out.
-    if (!stage.inView) {
+    // measured at this moment: the observer's last answer is stale after a resize while it compiled.
+    if (!stage.inView || !frameInView(t.frame)) {
       stage.owed = true;
       return;
     }

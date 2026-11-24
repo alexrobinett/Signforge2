@@ -242,7 +242,13 @@ describe('a stage out of view (#342)', () => {
       },
     }));
     const posted: unknown[] = [];
-    const frame: Window = { postMessage: (m: never) => posted.push(m) } as never;
+    // The frame's box in a 390×280 window: `top` moves it, as a scroll or a resize does.
+    let top = 0;
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f), innerWidth: 390, innerHeight: 280 });
+    const frame: Window = {
+      postMessage: (m: never) => posted.push(m),
+      frameElement: { getBoundingClientRect: () => ({ top, bottom: top + 100, left: 0, right: 390 }) },
+    } as never;
     const say = (data: Record<string, unknown>) => hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, ...data } });
     store.getState().attachStage({ frame, orgId: ORG, playlistId: 'pls_a', orientation: 'landscape' });
     store.getState().seeStage(false);
@@ -268,13 +274,27 @@ describe('a stage out of view (#342)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(posted).toHaveLength(2);
 
+    // Resized while it compiled, the frame now below the window, before the observer says so: its box is measured, not trusted (re-check of #387).
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    top = 300;
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+    compiled = Promise.resolve();
+    top = 0;
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(3);
+
     // Scrolled away while it plays: the player cannot draw there, which is not the draft's fault.
     store.getState().seeStage(false);
     say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
     expect(store.getState().spotEditor.stageError).toBeNull();
     store.getState().seeStage(true);
     await vi.advanceTimersByTimeAsync(0);
-    expect(posted).toHaveLength(3);
+    expect(posted).toHaveLength(4);
     // In view, a failure is the stage's to say.
     say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
     expect(store.getState().spotEditor.stageError).toBe('pls_a: not ready within 2000 ms');
