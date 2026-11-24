@@ -2,7 +2,7 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { liveSources, PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import { liveSources, PREVIEW_PROTOCOL, type ScreenManifest, type TemplateManifest } from '@signforge/contract';
 import news from '@signforge/template-news/template.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ComponentProps, createElement } from 'react';
@@ -221,6 +221,42 @@ describe('the stage (review of #97)', () => {
     await held;
     expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('a stage out of view (#342)', () => {
+  it("draws only in view: a draw asked for out of view, or the player's failure there, is drawn when the stage is seen", async () => {
+    const queryClient = new QueryClient();
+    let hear: (e: unknown) => void = () => {};
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
+    const manifest = { screen: 'preview' } as unknown as ScreenManifest;
+    const store = createStore<SpotEditorSlice & { playlistStageDraft: () => Promise<{ manifest: ScreenManifest; problems: string[] }> }>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      playlistStageDraft: async () => ({ manifest, problems: [] }),
+    }));
+    const posted: unknown[] = [];
+    const frame: Window = { postMessage: (m: never) => posted.push(m) } as never;
+    const say = (data: Record<string, unknown>) => hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, ...data } });
+    store.getState().attachStage({ frame, orgId: ORG, playlistId: 'pls_a', orientation: 'landscape' });
+    store.getState().seeStage(false);
+    say({ type: 'listening' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toEqual([]);
+
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+
+    // Scrolled away while it plays: the player cannot draw there, which is not the draft's fault.
+    store.getState().seeStage(false);
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBeNull();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+    // In view, a failure is the stage's to say.
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBe('pls_a: not ready within 2000 ms');
   });
 });
 

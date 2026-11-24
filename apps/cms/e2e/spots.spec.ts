@@ -313,6 +313,25 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await axe(page);
 });
 
+test('an Announcement with its photo off draws once the stage is in view, and the player is not asked to draw it out of view (#342)', async () => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const announcement = templates.find((t: { key: string }) => t.key.endsWith('announcement') || t.key === 'announcement');
+  const { spot } = await tool(page, 'create_spot', { name: 'No photo', kind: 'template', templateVersionId: announcement.versions.at(-1).id, data: { showPhoto: false } });
+  const skipped: string[] = [];
+  const listen = (m: { text(): string }) => m.text().includes('[sf] skipped') && skipped.push(m.text());
+  page.on('console', listen);
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  // The form is long: at 720 px the stage starts below the fold, where a browser runs no animation frames.
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  expect(await stage.evaluate((el) => el.getBoundingClientRect().top > innerHeight)).toBe(true);
+  await stage.scrollIntoViewIfNeeded();
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  page.off('console', listen);
+  expect(skipped).toEqual([]);
+});
+
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
 
 /** The spot's editor, with Delete pressed: its confirmation. */

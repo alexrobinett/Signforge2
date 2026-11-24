@@ -143,6 +143,15 @@ describe('announcement (#197)', () => {
     }
   });
 
+  // #342: the stage reported "not ready" for this spot; the template was never the cause (the stage was out of view).
+  it('is ready with its photo off and none chosen, in every look, and shows no photo', async () => {
+    const k = await screenFrame(t(), 'landscape', {});
+    for (const look of looks) {
+      const f = await k.play({ look, showPhoto: false });
+      expect(await f.evaluate(() => [document.documentElement.getAttribute('data-photo'), document.querySelector('.photo')]), look).toEqual(['off', null]);
+    }
+  });
+
   it('leaves out what has nothing to show: no QR address, no logo in the kit, no facts, an empty line', async () => {
     const k = await screenFrame(t(), 'landscape', photo);
     for (const look of looks) {

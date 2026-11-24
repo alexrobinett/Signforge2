@@ -87,6 +87,7 @@ export function PlayerStage({
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
+  const see = useAppStore((s) => s.seeStage);
   const box = useAppStore((s) => s.spotEditor.stageBox);
   const holding = useAppStore((s) => s.spotEditor.holding);
   const refusals = useAppStore((s) => s.spotEditor.refusals);
@@ -115,15 +116,24 @@ export function PlayerStage({
     },
     [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
   );
-  // The room the stage has, for scaling to fit.
+  // The room the stage has, for scaling to fit; and whether it is in view, where alone the player can draw (#342).
   const roomRef = useCallback(
     (el: HTMLDivElement | null) => {
       if (!el) return;
       const seen = new ResizeObserver(([entry]) => entry && measure({ w: entry.contentRect.width, h: entry.contentRect.height }));
       seen.observe(el);
-      return () => seen.disconnect();
+      const shown = new IntersectionObserver((entries) => {
+        const last = entries.at(-1);
+        if (last) see(last.isIntersecting);
+      });
+      shown.observe(el);
+      return () => {
+        seen.disconnect();
+        shown.disconnect();
+        see(true);
+      };
     },
-    [measure],
+    [measure, see],
   );
 
   return (

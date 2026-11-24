@@ -16,6 +16,11 @@
  * its playlist on the same stage (a target with a `playlistId`): it compiles the draft
  * (`playlistStageDraft`, src/state/playlist-editor.ts) and asks for a redraw (`redrawStage`).
  *
+ * The stage draws only while it is in view (`seeStage`, from the stage's IntersectionObserver): a
+ * browser runs no animation frames in a frame scrolled out of view, and a template waits for two
+ * before it is ready (the SDK's `sized`), so the player would time out (#342). A draw asked for out
+ * of view, or one the player failed out of view, is drawn when the stage comes back.
+ *
  * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
  * the draft is compiled without its bindings, so the stage shows the fallback values. While the
@@ -112,6 +117,8 @@ export interface SpotEditorSlice {
   /** Draws what the stage shows again, a moment after the last call: after an edit of the playlist it shows. */
   redrawStage: () => void;
   measureStage: (box: { w: number; h: number }) => void;
+  /** The stage scrolled into view or out of it. */
+  seeStage: (inView: boolean) => void;
   openNewSpot: (open: boolean) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft and opens its editor. */
@@ -169,6 +176,10 @@ interface StageLink {
   listening: Window | null;
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
+  /** Whether any of the stage is in the viewport, as its IntersectionObserver last said. */
+  inView: boolean;
+  /** A draw to make once the stage is back in view: asked for out of view, or failed there. */
+  owed: boolean;
 }
 
 /** The draft the spot's page shows and edits in `orgId`, or null for the spot as read (`shown`). */
@@ -254,6 +265,10 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   async function redraw() {
     const t = stage.target;
     if (!t || stage.listening !== t.frame) return;
+    if (!stage.inView) {
+      stage.owed = true;
+      return;
+    }
     const seq = ++stage.seq;
     let result: Awaited<ReturnType<typeof spotDraft>>;
     try {
@@ -272,7 +287,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     editor((x) => ({ ...x, holding: false, refusals: [] }));
   }
 
-  const stage: StageLink = { target: null, listening: null, seq: 0 };
+  const stage: StageLink = { target: null, listening: null, seq: 0, inView: true, owed: false };
 
   /** What the stage's player says. Only the attached frame, on this origin, is listened to. */
   const hear = (e: MessageEvent) => {
@@ -282,6 +297,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       stage.listening = stage.target.frame;
       void redraw();
     } else if (msg?.type === 'playing') editor((x) => ({ ...x, playing: true, playingSpot: msg.spot, stageError: null }));
+    // Out of view the player cannot draw: not the draft's fault, so drawn again when the stage is seen.
+    else if (msg?.type === 'error' && !stage.inView) stage.owed = true;
     else if (msg?.type === 'error') editor((x) => ({ ...x, stageError: msg.message }));
   };
 
@@ -364,6 +381,13 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     redrawStage: () => later('stage', STAGE_DELAY_MS, redraw),
 
     measureStage: (stageBox) => editor((e) => ({ ...e, stageBox })),
+
+    seeStage(inView) {
+      stage.inView = inView;
+      if (!inView || !stage.owed) return;
+      stage.owed = false;
+      void redraw();
+    },
 
     openNewSpot: (open) => editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() })),
     editNewSpot: (change) => editor((e) => ({ ...e, newSpot: { ...e.newSpot, ...change, error: null } })),
