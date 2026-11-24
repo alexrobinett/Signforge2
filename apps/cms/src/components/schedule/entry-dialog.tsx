@@ -20,7 +20,7 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, entryProblems, entryWhen, everywhereAlways, firstDefaultOf } from '~/state/schedule';
-import { FirstDefaultChoice, FirstDefaultNote } from './first-default-note';
+import { FirstDefaultChoice, FirstDefaultNote, UnpublishedDefault } from './first-default-note';
 import { TargetPicker } from './target-picker';
 
 export function EntryDialog({
@@ -122,6 +122,9 @@ export function EntryDialog({
                 action="Save and publish"
               />
             ))}
+          {canPublish && (
+            <UnpublishedDefault playlists={playlists} checked={d.publishDefault === true} onChange={(publishDefault) => edit({ publishDefault })} />
+          )}
           <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           {preview && (
             <section aria-label="What this screen will play" className="grid gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
