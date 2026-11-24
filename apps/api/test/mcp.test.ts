@@ -224,7 +224,7 @@ describe('tools', () => {
     expect(audit).toEqual([expect.objectContaining({ actorKind: 'agent', actorId: grantId, clientId, targetId: playlistId })]);
   });
 
-  it('lets an owner\'s agent cancel a pending invitation as its member, never invite, and no longer once its member is not an owner (#321)', async () => {
+  it("lets an owner's agent cancel a pending invitation as its member, never invite, and no longer once its member is not an owner (#321)", async () => {
     const { t, owner, org, editor, editorMemberId } = await team();
     const { access_token, clientId } = await agentToken(t, owner, org.id, ['content:read', 'org:manage']);
     const { grantId } = (await check(access_token))!;

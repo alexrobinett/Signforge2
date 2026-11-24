@@ -25,7 +25,9 @@ let invitations = 0;
 async function pending() {
   const id = `${o.orgId}-inv-${++invitations}`;
   const now = new Date(0).toISOString();
-  await env.DB.prepare("INSERT INTO invitation (id, organizationId, email, role, status, expiresAt, createdAt, inviterId) VALUES (?, ?, ?, 'viewer', 'pending', ?, ?, ?)")
+  await env.DB.prepare(
+    "INSERT INTO invitation (id, organizationId, email, role, status, expiresAt, createdAt, inviterId) VALUES (?, ?, ?, 'viewer', 'pending', ?, ?, ?)",
+  )
     .bind(id, o.orgId, `${id}@signforge.test`, new Date(Date.UTC(2100, 0)).toISOString(), now, inviter)
     .run();
   return id;
@@ -83,7 +85,10 @@ describe('an owner', () => {
       output: { invitation: { email: 'sam@example.com', role: 'owner', status: 'pending' } },
     });
     const id = await pending();
-    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, owner)).toEqual({ ok: true, output: { canceled: id, email: `${id}@signforge.test` } });
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, owner)).toEqual({
+      ok: true,
+      output: { canceled: id, email: `${id}@signforge.test` },
+    });
     expect(await statusOf(id)).toBe('canceled');
     expect(await dispatch(registry, 'update_member_role', { memberId: member(), role: 'owner' }, owner)).toMatchObject({
       ok: true,
@@ -143,11 +148,21 @@ describe("an owner's agent", () => {
     expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, agent)).toMatchObject({ ok: true, output: { canceled: id } });
     expect(await statusOf(id)).toBe('canceled');
     const [row] = await scoped(env.DB, o.orgId).auditLog.list({ limit: 1 });
-    expect(row).toMatchObject({ action: 'cancel_invitation', actorKind: 'agent', actorId: 'agt_members', clientId: 'agent-app', targetKind: 'invitation', targetId: id });
+    expect(row).toMatchObject({
+      action: 'cancel_invitation',
+      actorKind: 'agent',
+      actorId: 'agt_members',
+      clientId: 'agent-app',
+      targetKind: 'invitation',
+      targetId: id,
+    });
     expect(JSON.parse(row!.detailJson!).detail).toEqual({ email: `${id}@signforge.test` });
     // Cancelled already, or another org's: not found, and nothing changes there.
     expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, agent)).toMatchObject({ ok: false, error: 'not_found' });
-    expect(await dispatch(registry, 'cancel_invitation', { invitationId: `${other.orgId}-invitation` }, agent)).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: `${other.orgId}-invitation` }, agent)).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
     expect(await scoped(env.DB, other.orgId).invitations.get(`${other.orgId}-invitation`)).toMatchObject({ status: 'pending' });
     expect(asked).toEqual([]);
   });
@@ -155,7 +170,10 @@ describe("an owner's agent", () => {
   it('cancels nothing once its member is no longer an owner, nor one accepted between its read and its batch', async () => {
     const { members } = recorder();
     const id = await pending();
-    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, as('editor', members, manager))).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, as('editor', members, manager))).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
     const base = as('owner', members, manager);
     const org = base.org as typeof base.org & { commit: (w: readonly Write[]) => Promise<unknown> };
     let raced = false;

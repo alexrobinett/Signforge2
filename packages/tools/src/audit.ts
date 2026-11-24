@@ -71,7 +71,8 @@ const listAuditLog = defineTool({
       if (!owner && INVITATIONS.includes(e.action)) {
         delete detail.email;
         const more = detail.detail;
-        if (typeof more === 'object' && more !== null && !Array.isArray(more)) detail.detail = Object.fromEntries(Object.entries(more).filter(([k]) => k !== 'email'));
+        if (typeof more === 'object' && more !== null && !Array.isArray(more))
+          detail.detail = Object.fromEntries(Object.entries(more).filter(([k]) => k !== 'email'));
       }
       // A connection's client named itself: only as a page may show it, rows written before that rule too.
       if (e.action === 'create_agent_grant' && typeof detail.clientId === 'string' && typeof detail.clientName === 'string') {
