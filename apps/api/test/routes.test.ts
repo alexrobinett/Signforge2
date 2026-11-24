@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/index';
 import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
+import { type Block, anthropicStream } from './model-streams';
 import { agentToken, check } from './oauth';
 
 /**
@@ -199,17 +200,7 @@ describe('requests', () => {
 
   it('to the inline fill write the one spot with its audit row, through the dispatcher', async () => {
     const answer = JSON.stringify({ template: 'base/clock@1.0.0', name: 'Bake sale', data_json: JSON.stringify({ title: 'Bake sale' }), unsure: [] });
-    const model: typeof fetch = async () =>
-      Response.json({
-        id: 'msg_1',
-        type: 'message',
-        role: 'assistant',
-        model: 'claude-haiku-5-5',
-        content: [{ type: 'text', text: answer }],
-        stop_reason: 'end_turn',
-        stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1 },
-      });
+    const model: typeof fetch = async () => anthropicStream('msg_1', 'claude-haiku-5-5', [{ type: 'text', text: answer }], 'end_turn');
     const page: typeof fetch = async () => new Response('<p>Bake sale</p>');
     const filling = testApp({ agent: { reach: { fetch: model, guards: { fetch: page, resolve: async () => ['93.184.215.14'] } } } });
     const member = new Client(filling, owner.ip, { ...env, DB: recordingD1(env.DB, writes) });
@@ -230,21 +221,12 @@ describe('requests', () => {
   });
 
   it("to the drawer's turn write nothing of ours, its tools' reads included", async () => {
-    const steps = [
-      { content: [{ type: 'tool_use', id: 'toolu_1', name: 'list_screens', input: {} }], stop_reason: 'tool_use' },
-      { content: [{ type: 'tool_use', id: 'toolu_2', name: 'answer', input: { text: 'Fine.' } }], stop_reason: 'tool_use' },
+    const steps: Block[][] = [
+      [{ type: 'tool_use', id: 'toolu_1', name: 'list_screens', input: {} }],
+      [{ type: 'tool_use', id: 'toolu_2', name: 'answer', input: { text: 'Fine.' } }],
     ];
     let n = 0;
-    const model: typeof fetch = async () =>
-      Response.json({
-        id: `msg_${n}`,
-        type: 'message',
-        role: 'assistant',
-        model: 'm',
-        ...steps[Math.min(n++, 1)],
-        stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1 },
-      });
+    const model: typeof fetch = async () => anthropicStream(`msg_${n}`, 'm', steps[Math.min(n++, 1)]!, 'tool_use');
     const asking = testApp({ agent: { reach: { fetch: model, guards: { fetch, resolve: async () => ['93.184.215.14'] } } } });
     const member = new Client(asking, owner.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of owner.jar) member.jar.set(k, v);

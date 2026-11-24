@@ -1,6 +1,6 @@
 /**
  * Fetching a URL a user typed: a feed, a story's photo, an alert channel, an org's model endpoint
- * (docs/backend-plan.md, Data sources, Fetch safety). Every hop
+ * (docs/backend-plan.md, Data sources, Fetch safety); and every model call (`guardedStream`, #349). Every hop
  * is checked before it is requested: https on the default port, a hostname rather than an IP
  * address, and a name that does not resolve to a private or reserved address. Redirects are
  * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds, under one
@@ -47,6 +47,8 @@ export interface FetchGuards {
   /** Every A and AAAA address of `host`, given up when `signal` aborts. */
   resolve: (host: string, signal: AbortSignal) => Promise<string[]>;
   timeoutMs?: number;
+  /** A model call's deadline signal for `timeoutMs` (`guardedStream`); `AbortSignal.timeout` unless a test injects its own. */
+  deadline?: (timeoutMs: number) => AbortSignal;
 }
 
 export type FetchResult<Body = string> = { status: 'not-modified' } | { status: 'ok'; body: Body; etag: string | null; lastModified: string | null };
@@ -75,66 +77,28 @@ export function guardedImageFetch(url: string, last: Validators, guards: FetchGu
   });
 }
 
-/**
- * GET JSON from an org's model endpoint with its key (#262), or POST `body` as JSON (#263): the guards on every hop, a redirect
- * followed only within the endpoint's own origin, and no hop with a user name or password in its URL,
- * since the request carries the key. The body is parsed, not trusted: the caller reads what it needs.
- */
-export async function guardedKeyedJson(url: string, apiKey: string, guards: FetchGuards, body?: unknown): Promise<unknown> {
-  const result = await guardedGet(
-    url,
-    {},
-    guards,
-    'application/json',
-    async (res) => JSON.parse(new TextDecoder().decode(await capped(res, LIMITS.maxBytes))),
-    {
-      headers: { authorization: `Bearer ${apiKey}`, 'user-agent': 'SignForge agent', ...(body !== undefined && { 'content-type': 'application/json' }) },
-      sameOrigin: true,
-      ...(body !== undefined && { body: JSON.stringify(body) }),
-    },
-  );
-  if (result.status !== 'ok') throw new FetchError('it answered 304 to a request with no validators', { code: 'http-status', status: 304 });
-  return result.body;
-}
-
-/**
- * A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline.
- * `headers` are added to each hop's. With `sameOrigin`, for a request that carries a key, a redirect to
- * another origin is refused, and so is a URL, the first or a redirect's, with a user name or password.
- */
+/** A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline. */
 async function guardedGet<Body>(
   url: string,
   last: Validators,
   guards: FetchGuards,
   accept: string,
   read: (res: Response) => Promise<Body>,
-  options: { headers?: Record<string, string>; sameOrigin?: boolean; body?: string } = {},
 ): Promise<FetchResult<Body>> {
   const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
-  const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller', ...options.headers });
+  const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller' });
   if (last.etag) headers.set('if-none-match', last.etag);
   if (last.lastModified) headers.set('if-modified-since', last.lastModified);
   try {
-    // A URL that is not one is left for `checkedUrl` to refuse, as for any request.
-    const keyed = (href: string) => {
-      if (!options.sameOrigin || !URL.canParse(href)) return href;
-      const { username, password } = new URL(href);
-      if (username || password) throw new FetchError('a request with a key goes to no URL with a user name or password', { code: 'bad-url' });
-      return href;
-    };
-    let next = await checkedUrl(keyed(url), guards, signal);
+    let next = await checkedUrl(url, guards, signal);
     for (let hop = 0; ; hop++) {
-      // A body (a keyed request to an endpoint's API) is a POST, sent again to a same-origin redirect.
-      const res = await guards.fetch(next, { headers, redirect: 'manual', signal, ...(options.body !== undefined && { method: 'POST', body: options.body }) });
+      const res = await guards.fetch(next, { headers, redirect: 'manual', signal });
       if (res.status >= 300 && res.status < 400 && res.status !== 304) {
         await res.body?.cancel();
         const location = res.headers.get('location');
         if (!location) throw new FetchError(`redirect ${res.status} without a location`, { code: 'http-status', status: res.status });
         if (hop === MAX_REDIRECTS) throw new FetchError(`more than ${MAX_REDIRECTS} redirects`, { code: 'too-many-redirects' });
-        const to = new URL(location, next);
-        if (options.sameOrigin && to.origin !== new URL(next).origin)
-          throw new FetchError(`it redirected to another origin (${to.origin})`, { code: 'redirect-elsewhere', status: res.status });
-        next = await checkedUrl(keyed(to.href), guards, signal);
+        next = await checkedUrl(new URL(location, next).href, guards, signal);
         continue;
       }
       if (res.status === 304) return { status: 'not-modified' };
@@ -150,6 +114,193 @@ async function guardedGet<Body>(
     if (signal.aborted) throw new FetchError(`no answer in ${(guards.timeoutMs ?? FETCH_TIMEOUT_MS) / 1000} seconds`, { code: 'timeout', cause: e });
     throw new FetchError('it could not be reached', { code: 'network', cause: e });
   }
+}
+
+/** The most a model's answer may be, streamed or not, as an endpoint's was before (1 MB): far over a fill's or a drawer step's 4,096 tokens. */
+const MODEL_MAX_BYTES = LIMITS.maxBytes;
+
+/** One server-sent event: its `event` field, if any, and its data lines joined. */
+interface SseEvent {
+  event?: string;
+  data: string;
+}
+
+/** The media type of `res`, lower case, without its parameters. */
+export const mediaType = (res: Response) => res.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+
+/** One model call (#349): where it may go, what it may carry, and how far each hop is checked. */
+export interface ModelCall {
+  /** The only origin it reaches: the provider's API (in dev, its stub), or an org's endpoint. */
+  origin: string;
+  /**
+   * Every header it sends, besides the key and a user agent, with our values: the request's own are
+   * never read, as an SDK adds and overrides them from `process.env`. `content-type` goes only with a body.
+   */
+  headers: Readonly<Record<string, string>>;
+  /** Whether a streamed (SSE) answer's event is the provider's last: one must come before it closes, or it broke off. */
+  finished: (event: SseEvent) => boolean;
+  /** The key, in the header it goes in: set on every hop, whatever the request carried. */
+  key: readonly [name: string, value: string];
+  /**
+   * Each hop checked as a URL a user typed (https on the default port, a name that resolves only to
+   * public addresses): an org's endpoint. Anthropic's fixed API, or dev's stub, holds only to its origin.
+   */
+  typed: boolean;
+  guards: FetchGuards;
+}
+
+/** A model call's fetch, and the guards' refusal or failure in it, if any: what an adapter wraps in an error of its own. */
+export interface GuardedStream {
+  fetch: typeof fetch;
+  failure(): FetchError | undefined;
+}
+
+/**
+ * The fetch for one model call, for TanStack AI's `wrapFetch` (#349, condition 1 of #346): the
+ * request's method, URL and body as the adapter made them, sent only to the call's origin, with the
+ * call's own headers and the key set here, none of the request's; a redirect followed only within
+ * that origin, at most 3, each hop checked again and sent the body again; no URL with a user name or
+ * password, as it carries the key. One deadline covers the whole call, its streamed answer included: a
+ * body still arriving when it passes is cut off as a timeout; one that breaks off, or closes before
+ * the provider's last event (`finished`), is a network failure; and one over `MODEL_MAX_BYTES` is refused. A non-2xx answer is refused with its status, its body unread. Every
+ * refusal is a `FetchError`, kept as `failure` for the caller to say in a word.
+ */
+export function guardedStream(call: ModelCall): GuardedStream {
+  let failure: FetchError | undefined;
+  const failed = (e: FetchError) => {
+    failure ??= e;
+    return e;
+  };
+  const timeoutMs = call.guards.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const deadline = (call.guards.deadline ?? AbortSignal.timeout)(timeoutMs);
+    const signal = AbortSignal.any([deadline, request.signal]);
+    const lost = (e: unknown, what: string) =>
+      e instanceof FetchError
+        ? e
+        : deadline.aborted
+          ? new FetchError(`no answer in ${timeoutMs / 1000} seconds`, { code: 'timeout', cause: e })
+          : new FetchError(what, { code: 'network', cause: e });
+    const body = request.body ? await request.text() : undefined;
+    const headers = new Headers({ 'user-agent': 'SignForge agent', ...call.headers });
+    if (body === undefined) headers.delete('content-type');
+    headers.set(call.key[0], call.key[1]);
+    const hop = async (href: string) => {
+      const url = URL.canParse(href) ? new URL(href) : undefined;
+      if (url?.username || url?.password) throw new FetchError('a request with a key goes to no URL with a user name or password', { code: 'bad-url' });
+      if (url?.origin !== call.origin) throw new FetchError(`a model call goes only to ${call.origin}`, { code: 'bad-url' });
+      return call.typed ? checkedUrl(href, call.guards, signal) : href;
+    };
+    try {
+      let next = await hop(request.url);
+      for (let n = 0; ; n++) {
+        const res = await call.guards.fetch(next, { method: request.method, headers, body, redirect: 'manual', signal });
+        if (res.status >= 300 && res.status < 400) {
+          await res.body?.cancel();
+          const location = res.headers.get('location');
+          if (!location) throw new FetchError(`redirect ${res.status} without a location`, { code: 'http-status', status: res.status });
+          if (n === MAX_REDIRECTS) throw new FetchError(`more than ${MAX_REDIRECTS} redirects`, { code: 'too-many-redirects' });
+          const to = new URL(location, next);
+          if (to.origin !== call.origin)
+            throw new FetchError(`it redirected to another origin (${to.origin})`, { code: 'redirect-elsewhere', status: res.status });
+          next = await hop(to.href);
+          continue;
+        }
+        if (!res.ok) {
+          // An address a person typed: Cloudflare's own refusal of it is a blocked address. Otherwise the body is not read.
+          const refusal = call.typed ? await answered(res) : (await res.body?.cancel(), '');
+          if (/^error code: 10(03|16)\b/.test(refusal))
+            throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
+          throw new FetchError(`it answered ${res.status}`, { code: 'http-status', status: res.status });
+        }
+        const sse = mediaType(res) === 'text/event-stream';
+        return new Response(
+          streamed(res, signal, sse ? call.finished : undefined, (e) => failed(lost(e, 'the answer broke off'))),
+          { status: res.status, headers: res.headers },
+        );
+      }
+    } catch (e) {
+      throw failed(lost(e, 'it could not be reached'));
+    }
+  };
+  return { fetch, failure: () => failure };
+}
+
+/**
+ * `res`'s body as it arrives, cut off with `fail`'s error when `signal` aborts, when it breaks off, past
+ * `MODEL_MAX_BYTES`, or, for a stream that must end with an event `finished` says is the last, when it
+ * closes without one. The stream's events are parsed as they come (an event ends at a blank line), so
+ * only a real event counts: text that mentions one inside an event's data does not.
+ */
+function streamed(
+  res: Response,
+  signal: AbortSignal,
+  finished: ((e: SseEvent) => boolean) | undefined,
+  fail: (e: unknown) => FetchError,
+): ReadableStream<Uint8Array> | null {
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  let size = 0;
+  let open = true;
+  const text = new TextDecoder();
+  // What has come of the event not yet ended by a blank line.
+  let pending = '';
+  let ended = finished === undefined;
+  const read = (chunk: string) => {
+    pending += chunk;
+    const events = pending.split(/\r?\n\r?\n/);
+    pending = events.pop() ?? '';
+    for (const block of events) {
+      const event: SseEvent = { data: '' };
+      const data: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        const at = line.indexOf(':');
+        const [field, value] = at < 0 ? [line, ''] : [line.slice(0, at), line.slice(at + 1).replace(/^ /, '')];
+        if (field === 'event') event.event = value;
+        if (field === 'data') data.push(value);
+      }
+      event.data = data.join('\n');
+      if (finished?.(event)) ended = true;
+    }
+  };
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      const stop = () => {
+        if (!open) return;
+        open = false;
+        controller.error(fail(signal.reason));
+        reader.cancel().catch(() => {});
+      };
+      if (signal.aborted) stop();
+      else signal.addEventListener('abort', stop, { once: true });
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (!open) return;
+        if (done) {
+          if (!ended) throw new FetchError('the answer stopped before its last event', { code: 'network' });
+          open = false;
+          controller.close();
+          return;
+        }
+        size += value.byteLength;
+        if (size > MODEL_MAX_BYTES) throw new FetchError(`the answer is over ${MODEL_MAX_BYTES} bytes`, { code: 'too-large' });
+        if (!ended) read(text.decode(value, { stream: true }));
+        controller.enqueue(value);
+      } catch (e) {
+        if (!open) return;
+        open = false;
+        controller.error(fail(e));
+        reader.cancel().catch(() => {});
+      }
+    },
+    cancel: (reason) => {
+      open = false;
+      return reader.cancel(reason);
+    },
+  });
 }
 
 /**

@@ -68,7 +68,9 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
  * then `STUB_CARD`.
  */
 function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } {
-  const first = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+  // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
+  const content = messages[0]?.content;
+  const first = typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: { text?: string }) => b.text ?? '').join('') : '';
   const page = /<page>\n(\{.*\})\n<\/page>/.exec(first)?.[1];
   const spotId: string | undefined = page ? JSON.parse(page).ids?.spotId : undefined;
   const last = messages.at(-1)?.content;
@@ -89,6 +91,36 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
   return { name: 'answer', input: STUB_DRAFTED };
 }
 
+/** One answer as Anthropic's Messages API streams it (the adapter asks streaming, #349): its one block, then `stop`. */
+function streamed(
+  res: import('node:http').ServerResponse,
+  model: string,
+  block: { type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown },
+  stop: string,
+) {
+  const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const usage = { input_tokens: 1, output_tokens: 1 };
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end(
+    [
+      event('message_start', {
+        message: { id: 'msg_stub', type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage },
+      }),
+      event('content_block_start', {
+        index: 0,
+        content_block: block.type === 'text' ? { type: 'text', text: '' } : { type: 'tool_use', id: block.id, name: block.name, input: {} },
+      }),
+      event('content_block_delta', {
+        index: 0,
+        delta: block.type === 'text' ? { type: 'text_delta', text: block.text } : { type: 'input_json_delta', partial_json: JSON.stringify(block.input) },
+      }),
+      event('content_block_stop', { index: 0 }),
+      event('message_delta', { delta: { stop_reason: stop, stop_sequence: null }, usage }),
+      event('message_stop', {}),
+    ].join(''),
+  );
+}
+
 /**
  * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
  * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
@@ -107,41 +139,16 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
       });
       req.on('end', () => {
         const asked = JSON.parse(body);
-        // The drawer's tool loop (#267): first a read, then the answer, as `STUB_CARD`.
-        if (asked.tools) {
+        // The drawer's tool loop (#267): first a read, then the answer, as `STUB_CARD`. A fill offers no tools.
+        if (asked.tools?.length) {
           const call = drawerStep(asked.messages);
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              id: 'msg_stub',
-              type: 'message',
-              role: 'assistant',
-              model: asked.model,
-              content: [{ type: 'tool_use', id: `toolu_${asked.messages.length}`, ...call }],
-              stop_reason: 'tool_use',
-              stop_sequence: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            }),
-          );
-          return;
+          return void streamed(res, asked.model, { type: 'tool_use', id: `toolu_${asked.messages.length}`, ...call }, 'tool_use');
         }
         const keys: string[] = asked.output_config.format.schema.properties.template.enum;
         const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0] ?? '';
         const { name, ...data } = template.startsWith('base/menu-board@') ? STUB_MENU : STUB_FILL;
         const text = JSON.stringify({ template, name, data_json: JSON.stringify(data), unsure: ['price'] });
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            id: 'msg_stub',
-            type: 'message',
-            role: 'assistant',
-            model: asked.model,
-            content: [{ type: 'text', text }],
-            stop_reason: 'end_turn',
-            stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 1 },
-          }),
-        );
+        streamed(res, asked.model, { type: 'text', text }, 'end_turn');
       });
       return;
     }
