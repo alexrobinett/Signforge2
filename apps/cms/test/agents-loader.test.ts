@@ -30,7 +30,8 @@ const GRANT = { id: 'agt_1', scopes: ['content:read'], grantedBy: 'usr_1', versi
 
 /** The tools as the API answers them, with the usage tool failing as `usageFails` does. */
 function apiWith(usageFails: () => never) {
-  vi.mocked(all).mockResolvedValue([GRANT]);
+  // The grants; no publish request waits (#115).
+  vi.mocked(all).mockImplementation((async (name: string) => (name === 'list_publish_requests' ? [] : [GRANT])) as never);
   vi.mocked(tool).mockImplementation((async (name: string) => {
     if (name === 'get_agent_grant_usage') usageFails();
     if (name === 'get_agent_grant') return { grant: GRANT };
@@ -65,6 +66,7 @@ describe('when the call log cannot be read', () => {
       const list = await getAgents();
       expect(list.grants).toEqual([GRANT]);
       expect(list.week).toBeNull();
+      expect(list.waiting).toBe(0);
       const one = await getAgent({ data: 'agt_1' });
       expect(one).toMatchObject({ grant: GRANT, week: null, mine: ['screens:manage'], names: { usr_1: 'Ada' } });
     });

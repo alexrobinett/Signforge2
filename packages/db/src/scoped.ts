@@ -1696,6 +1696,25 @@ export function scoped(d1: D1Database, orgId: string) {
           };
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
+        /**
+         * A declined request put back to pending, undecided, at `now` (#115's Undo). The batch is refused
+         * (`StaleVersionError`) unless, as it runs, it is still the declined version read and not expired at
+         * `now` nor by the database's clock: one reopened or decided since, or past its expiry, commits nothing.
+         * And, as `insert` holds it, its asker has no other request waiting with the same pins, and fewer than
+         * `maxPending` waiting: a request asked again since the decline is the one that waits.
+         */
+        reopen: (current: PublishRequestRow, now: number, maxPending: number): Staged<PublishRequestRow> => {
+          const changed = publishRequests.stage.update(current, { status: 'pending', decidedBy: null, decidedAt: null, publishId: null });
+          const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${current.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
+          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.status} = 'declined' AND ${pr.expiresAt} > ${now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER)) AND NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${current.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
+          const stale = async () => {
+            const row = await publishRequests.get(current.id);
+            return row && row.rowVersion === current.rowVersion && row.status === 'declined' && row.expiresAt > Math.max(now, Date.now())
+              ? undefined
+              : (row?.rowVersion ?? 0);
+          };
+          return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
+        },
       },
     },
     publishes: {

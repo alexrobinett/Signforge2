@@ -41,12 +41,12 @@ export async function inOrg<T>(read: () => Promise<T>, empty: T): Promise<T> {
 /** The list tools: those whose output pages, with `next`. */
 type ListName = { [N in ToolName]: ToolOutput<N> extends { next: string | null } ? N : never }[ToolName];
 
-/** Every page of a list tool, the rows `rows` picks from each. */
-export async function all<N extends ListName, T>(name: N, rows: (page: Outputs[N]) => T[]): Promise<T[]> {
+/** Every page of a list tool, the rows `rows` picks from each; `input`, its filters. */
+export async function all<N extends ListName, T>(name: N, rows: (page: Outputs[N]) => T[], input: Record<string, unknown> = {}): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
   do {
-    const page = await tool(name, { limit: 200, ...(cursor ? { cursor } : {}) });
+    const page = await tool(name, { ...input, limit: 200, ...(cursor ? { cursor } : {}) });
     out.push(...rows(page));
     cursor = page.next ?? undefined;
   } while (cursor);

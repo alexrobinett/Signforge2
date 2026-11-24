@@ -64,6 +64,7 @@ describe('the registry', () => {
       'approve_publish_request',
       'assign_brand_kit',
       'cancel_invitation',
+      'check_publish_request',
       'claim_screen',
       'count_drafts',
       'create_asset_upload',
@@ -139,6 +140,7 @@ describe('the registry', () => {
       'rename_group',
       'rename_screen',
       'renew_asset_upload',
+      'reopen_publish_request',
       'request_publish',
       'restart_screen',
       'retry_alert_delivery',
@@ -249,6 +251,7 @@ describe('roles and scopes', () => {
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes, editorsPublish: true }).map((t) => t.name);
     expect(names('viewer').sort()).toEqual([
+      'check_publish_request',
       'count_drafts',
       'find_places',
       'get_agent_draft',

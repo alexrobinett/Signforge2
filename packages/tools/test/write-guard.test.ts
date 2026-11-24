@@ -168,6 +168,11 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
       {},
       { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-g', clientId: 'test' }, blobs: env.BLOBS, services: fakeServices },
     ),
+  // The seeded request, declined, to put back.
+  reopen_publish_request: async (o) => {
+    const row = (await o.scope.publishRequests.get(o.publishRequest))!;
+    await o.scope.commit(o.scope.publishRequests.stage.decide(row, { status: 'declined', by: 'user-g', now: Date.now() }).writes);
+  },
   // A saved key to test, or to remove.
   test_ai_provider: (o) => savedKey(o),
   remove_ai_provider: (o) => savedKey(o),

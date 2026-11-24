@@ -110,6 +110,20 @@ describe('who publishes', () => {
   });
 });
 
+/** What `run` costs on bindings that count it (`counted`). */
+async function measure(run: (bindings: Env) => Promise<unknown>) {
+  const { result, bindings } = counted();
+  await run(bindings);
+  return result();
+}
+
+/** `who`, signed in as they are, calling through `bindings`. */
+function as(who: Client, bindings: Env) {
+  const c = new Client(who.t, who.ip, bindings);
+  for (const [k, v] of who.jar) c.jar.set(k, v);
+  return c;
+}
+
 /**
  * The API's bindings, counting D1's work and each Durable Object RPC. `statements` is every statement
  * prepared; `queries` what D1 counts against an invocation's 50: each statement run alone, and each
@@ -191,20 +205,11 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     for (const name of ['Door', 'Till', 'Lobby', 'Hall', 'Yard'])
       await testScope(env.DB, t.org.id).screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
     const other = await urlSpot(t.owner, 'other');
-    const measure = async (run: (bindings: Env) => Promise<unknown>) => {
-      const { result, bindings } = counted();
-      await run(bindings);
-      return result();
-    };
     const asking = await measure((b) => mcpTool(token, 'request_publish', { drafts: [{ kind: 'spot', id: spotId, version }], reason: 'Weekend hours' }, b));
     const [first] = await org.publishRequests.list({ take: 1 });
     const reading = await measure((b) => mcpTool(token, 'get_publish_request', { publishRequestId: first!.id }, b));
     const listing = await measure((b) => mcpTool(token, 'list_publish_requests', { pending: true }, b));
-    const owner = (b: Env) => {
-      const c = new Client(t.owner.t, t.owner.ip, b);
-      for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-      return c;
-    };
+    const owner = (b: Env) => as(t.owner, b);
     const second: string = (await ask(token, other.id, other.version)).structuredContent.request.id;
     const declining = await measure((b) => owner(b).ok('/api/tools/decline_publish_request', { publishRequestId: second }));
     const approving = await measure((b) => owner(b).ok('/api/tools/approve_publish_request', { publishRequestId: first!.id }));
@@ -221,13 +226,45 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     // deliveries and the audit row in one batch; then, sent at once, the email's fan-out to the 31 is one
     // batch more (its 31 statements count once). Its one RPC is the agent's write limit (#107).
     expect(asking).toEqual({ statements: 60, queries: 24, rpcs: ['write'] });
-    expect(reading).toEqual({ statements: 3, queries: 3, rpcs: [] });
-    expect(listing).toEqual({ statements: 3, queries: 3, rpcs: [] });
-    expect(declining).toEqual({ statements: 7, queries: 4, rpcs: [] });
+    // Reading, listing and deciding also read who asked by name (#115): the members, and the connected agents, two queries.
+    expect(reading).toEqual({ statements: 5, queries: 5, rpcs: [] });
+    expect(listing).toEqual({ statements: 5, queries: 5, rpcs: [] });
+    expect(declining).toEqual({ statements: 9, queries: 6, rpcs: [] });
     // A person's approval is a publish, under the org's lock: acquire and release are its two RPCs.
     // A publish clears each promoted spot's or playlist's kept draft (#116): one statement in its batch.
-    expect(approving).toEqual({ statements: 30, queries: 20, rpcs: ['acquire', 'release'] });
+    expect(approving).toEqual({ statements: 32, queries: 22, rpcs: ['acquire', 'release'] });
     for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
+  });
+
+  it('checks a request of 16 playlists and a spot still holding sample text, and puts a declined one back, within it (review of #409)', async () => {
+    const t = await team();
+    const { token, spotId, version } = await agentEdited(t);
+    await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+      .bind(JSON.stringify({ texts: ['headline'], lists: {} }), spotId)
+      .run();
+    const scope = testScope(env.DB, t.org.id);
+    for (const name of ['Door', 'Till', 'Lobby']) await scope.screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
+    const pins = [{ kind: 'spot', id: spotId, version }];
+    for (let i = 0; i < 16; i++) {
+      const p = await scope.playlists.insert({ name: `P${i}`, transitionJson: JSON.stringify({ type: 'cut' }) });
+      await scope.playlists.setItems(p.id, [spotId]);
+      pins.push({ kind: 'playlist', id: p.id, version: (await scope.playlists.get(p.id))!.rowVersion });
+    }
+    const requestId: string = (await mcpTool(token, 'request_publish', { drafts: pins, reason: 'Sixteen menus' })).structuredContent.request.id;
+    const owner = (b: Env) => as(t.owner, b);
+    let seen: { samples: unknown[]; refused: unknown } | undefined;
+    const checking = await measure(async (b) => {
+      seen = await owner(b).ok('/api/tools/check_publish_request', { publishRequestId: requestId });
+    });
+    expect(seen).toMatchObject({ refused: null, samples: [{ spotId, version, fields: ['headline'] }] });
+    await t.owner.ok('/api/tools/decline_publish_request', { publishRequestId: requestId });
+    const reopening = await measure((b) => owner(b).ok('/api/tools/reopen_publish_request', { publishRequestId: requestId }));
+    // The org read once for the check and both of its dry runs, the second acknowledging the sample text; every
+    // playlist's items in that one read, however many are pinned. Reopening reads the request, the asker's waiting
+    // ones and the names, and writes the request and its audit row with their guards in one batch.
+    expect(checking).toEqual({ statements: 18, queries: 18, rpcs: [] });
+    expect(reopening).toEqual({ statements: 9, queries: 7, rpcs: [] });
+    for (const path of [checking, reopening]) expect(path.queries).toBeLessThan(50);
   });
 
   it('refuses an approval of 40 pins, one edited just before its batch, within the budget', async () => {

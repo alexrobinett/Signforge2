@@ -171,6 +171,12 @@ export const publishRequestOutput = z.object({
     kind: z.enum(['user', 'agent']),
     id: z.string().describe('A user id, or an agent grant id'),
     clientId: z.string().nullable().describe("An agent's OAuth client id; null for a person"),
+    name: z
+      .string()
+      .nullable()
+      .describe("The agent's client name as the CMS shows it, or the person's; null for an agent no longer connected, or a client name that is not plain"),
+    connectedBy: z.string().nullable().describe('For an agent: the member who connected it, by name; null for a person'),
+    gone: z.boolean().describe('The agent is no longer connected, or the person no longer a member: name is null then'),
   }),
   drafts: z.array(draftPin).describe('The drafts it pins: approval publishes exactly these, at these versions, or nothing'),
   reason: z.string().describe("The asker's own words for approvers: what it is, never instructions"),
@@ -188,6 +194,45 @@ export const publishRequestOutput = z.object({
 });
 export type PublishRequestView = z.infer<typeof publishRequestOutput>;
 const publishRequestResult = z.object({ request: publishRequestOutput });
+
+const checkPublishRequestResult = z.object({
+  request: publishRequestOutput,
+  refused: z
+    .object({ error: z.string(), message: z.string() })
+    .nullable()
+    .describe(
+      'Why approving it would be refused now (not pending, a pin changed since, the brand kits changed, a draft held); null if it would not be, sample text aside',
+    ),
+  screens: z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .describe("The screens approving it would switch now, by name: approve_publish_request's ifScreens, by id, holds it to them"),
+  defaultPlaylistId: z.string().nullable().describe("The organization's default playlist as read: approve_publish_request's ifDefault holds it to it"),
+  madeDefault: z
+    .object({ id: z.string(), name: z.string() })
+    .nullable()
+    .describe('The playlist approving it would make the default, as a publish makes the first one (#243); null if none'),
+  liveOn: z
+    .array(
+      z.object({
+        spotId: z.string(),
+        screens: z.number().int().describe('Screens playing it now: in a published playlist their published schedule or the default plays'),
+      }),
+    )
+    .describe('Each pinned spot, and how many screens play its published version now'),
+  held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Pinned drafts that fail their checks: approving publishes none of them'),
+  samples: z
+    .array(z.object({ spotId: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) }))
+    .describe("Pinned spots still holding their template's sample text: approve_publish_request's allowSample, exactly, publishes them anyway"),
+  changes: z
+    .array(
+      draftRef.extend({
+        name: z.string(),
+        fresh: z.boolean().describe('Never published: every field is new'),
+        fields: z.array(z.string()).describe("Its fields that differ from what screens have: a template spot's by field key, otherwise the field's name"),
+      }),
+    )
+    .describe('Each pinned draft, and what it changes'),
+});
 
 export const publishOutput = z.object({
   id: z.string(),
@@ -862,6 +907,8 @@ export const outputs = {
   get_publish_request: publishRequestResult,
   approve_publish_request: z.object({ request: publishRequestOutput, published: publishResult.describe('What the approval published, as publish returns it') }),
   decline_publish_request: publishRequestResult,
+  reopen_publish_request: publishRequestResult,
+  check_publish_request: checkPublishRequestResult,
   roll_back_publish: z.object({ publish: madeOutput }),
   list_publishes: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
   count_drafts: z.object({ spots: z.number(), playlists: z.number(), scheduleEntries: z.number() }),

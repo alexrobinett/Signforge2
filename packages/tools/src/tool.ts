@@ -254,12 +254,17 @@ export interface ToolServices {
   notify?: ScreenNotifier;
   /** Sends what a handler queued with `ctx.deliverNow` once the writes are committed. Without it, they go at the next delivery run. */
   deliverNow?: AlertDeliverer;
+  /**
+   * The CMS's origin, for links in what a tool sends (a publish request's alert to the approvals queue,
+   * #115). The API's `CMS_ORIGIN`; none where it does not know it (dev, or one origin for both), and a link is then null.
+   */
+  cmsOrigin?: string;
 }
 
 /** The services dispatch uses itself, after the commit. A tool queues for them on its context and never needs one. */
 type AfterCommit = 'notify' | 'deliverNow';
-/** A service a tool can need. */
-export type ServiceName = Exclude<keyof ToolServices, AfterCommit>;
+/** A service a tool can need; the CMS's origin is read where there, never needed. */
+export type ServiceName = Exclude<keyof ToolServices, AfterCommit | 'cmsOrigin'>;
 
 /** Each service in the refusal of a call that lacks it: `find_places needs a rate limit, and this caller has none`. */
 export const SERVICE_WORDS: Record<ServiceName, string> = {
@@ -289,8 +294,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;
-  /** The caller's services, as it passed them: the tool sees those it `needs`, each there. */
-  services: Pick<Required<ToolServices>, N>;
+  /** The caller's services, as it passed them: the tool sees those it `needs`, each there, and the CMS's origin if the caller knows it. */
+  services: Pick<Required<ToolServices>, N> & Pick<ToolServices, 'cmsOrigin'>;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one

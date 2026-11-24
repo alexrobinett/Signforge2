@@ -112,6 +112,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   list_publish_requests: { title: 'Publish requests', did: 'Read {n} publish requests' },
   get_publish_request: { title: 'A publish request', did: 'Read a publish request' },
   get_agent_draft: { title: "An agent's draft", did: "Read what an agent's draft changes" },
+  check_publish_request: { title: 'A publish request', did: 'Checked what approving a publish request would do' },
   list_templates: { title: 'Templates', did: 'Listed {n} templates' },
   get_template: { title: 'A template', did: 'Read a template' },
   list_assets: { title: 'Media', did: 'Listed {n} images and videos' },

@@ -22,7 +22,7 @@ import { orgHues } from '~/lib/paths';
 import { SECTIONS, type Section } from '~/lib/sections';
 import { navCountsQuery } from '~/queries/nav-counts';
 import { screenStatusQuery } from '~/queries/screens';
-import { useNow } from '~/lib/live';
+import { useCanApprove, useNow } from '~/lib/live';
 import { needingYou } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
@@ -49,7 +49,9 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
   const path = useRouterState({ select: (s) => s.location.pathname });
   // Overview and Screens poll what the screens are doing already: the sidebar counts from that poll rather than read the fleet again.
   const onFleet = path === '/' || path === '/screens';
-  const read = useQuery({ ...navCountsQuery(orgId ?? '', !onFleet), enabled: live });
+  // Publish requests waiting (#115), counted only for a member who may decide them.
+  const approves = useCanApprove();
+  const read = useQuery({ ...navCountsQuery(orgId ?? '', !onFleet, approves), enabled: live });
   const status = useQuery({ ...screenStatusQuery(orgId ?? ''), enabled: live && onFleet });
   const counts = read.data;
   const needsYou = onFleet ? (status.data ? needingYou(status.data.screens) : null) : (counts?.needsYou ?? null);
@@ -62,6 +64,7 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
         '/spots': { n: counts.spots, word: 'unpublished', urgent: false },
         '/playlists': { n: counts.playlists, word: 'unpublished', urgent: false },
         '/schedule': { n: counts.schedule, word: 'unpublished', urgent: false },
+        ...(approves && { '/approvals': { n: counts.approvals, word: 'waiting', urgent: false } }),
       }
     : {};
   const openCommandMenu = useAppStore((s) => s.openCommandMenu);
@@ -113,7 +116,8 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
           </Button>
         </div>
       )}
-      <nav aria-label="Main" className="flex-1">
+      {/* The list scrolls in a short window, so what is below it (Publish, Fold, the account) stays in reach. */}
+      <nav aria-label="Main" className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
         <ul className="space-y-1">
           {SECTIONS.map(({ to, label, icon: Icon }) => {
             const b = badges[to];

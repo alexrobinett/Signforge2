@@ -22,7 +22,7 @@ import {
   type TableFeed,
   type TemplateManifest,
 } from '@signforge/contract';
-import { contentJson, draftChanged, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
+import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
 import { DECIDING, keptFor, shownVersion, spotContent } from './agent-drafts';
 import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
@@ -248,14 +248,22 @@ const listSpots = defineTool({
 
 const getSpot = defineTool({
   name: 'get_spot',
-  description: "Get one spot's draft. Returns { spot }; pass its version as ifVersion to update_spot.",
+  description:
+    "Get one spot's draft. Returns { spot }; pass its version as ifVersion to update_spot. published: true gets the version screens have instead, shaped as the draft, its version the one published: not_found if it was never published.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ spotId: id('spot') }),
+  input: z.object({ spotId: id('spot'), published: z.boolean().optional().describe("The version screens have, not the draft's") }),
   output: outputs.get_spot,
   example: { spotId: 'spt_example' },
-  handler: async ({ org, input }) => ({ spot: spotView(await requireSpot(org, input.spotId)) }),
+  handler: async ({ org, input }) => {
+    const row = await requireSpot(org, input.spotId);
+    if (!input.published) return { spot: spotView(row) };
+    // What the approvals queue plays beside the draft (#115).
+    const live = published(row);
+    if (!live || row.publishedVersion === null) throw notFound('published spot', input.spotId);
+    return { spot: { ...spotView(live), version: row.publishedVersion } };
+  },
 });
 
 const createSpot = defineTool({

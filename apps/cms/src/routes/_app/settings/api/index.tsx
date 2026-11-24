@@ -17,7 +17,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { type AgentGrant, type AgentTool, type AgentUsage, grantedOn, lastActive, weekWords } from '~/lib/agents';
 import { CONNECT_SCOPES, SCOPE_WORDS } from '~/lib/connect';
-import { useRole } from '~/lib/live';
+import { useCanApprove, useRole } from '~/lib/live';
 import { getAgents } from '~/server/agents.functions';
 
 export const Route = createFileRoute('/_app/settings/api/')({
@@ -32,8 +32,9 @@ const NO_CALLS = { calls: 0, changes: 0 };
 const ROLE_WORDS = { viewer: 'Viewer', editor: 'Editor', owner: 'Owner' } as const;
 
 function ApiSettings() {
-  const { grants, tools, names, week, mcpUrl, at } = Route.useLoaderData();
+  const { grants, tools, names, week, mcpUrl, at, waiting } = Route.useLoaderData();
   const isOwner = useRole() === 'owner';
+  const canApprove = useCanApprove();
   const id = useId();
 
   return (
@@ -43,6 +44,7 @@ function ApiSettings() {
         description="Agents use the same tools as this app, with the scopes you grant. Every change they make is in the audit log."
       />
       <ConnectSteps mcpUrl={mcpUrl} />
+      {canApprove && waiting > 0 && <Waiting count={waiting} />}
       <SettingsSection
         id={`${id}-agents`}
         title="Connected agents"
@@ -61,6 +63,25 @@ function ApiSettings() {
       <ScopeWords />
       <ToolReference tools={tools} />
     </>
+  );
+}
+
+/** The agents' publishes waiting for approval (#115, canvas board SettingsApi), and the way to them. */
+function Waiting({ count }: { count: number }) {
+  const id = useId();
+  return (
+    <section
+      aria-labelledby={id}
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-status-updating/40 bg-status-updating-muted px-4 py-3 text-status-updating-foreground"
+    >
+      <h2 id={id} className="text-base font-semibold">
+        {count === 1 ? '1 publish waiting for approval' : `${count} publishes waiting for approval`}
+      </h2>
+      <span className="flex-[1_1_280px] text-sm">Agents without content:publish asked to put these on screens.</span>
+      <Button asChild>
+        <Link to="/approvals">Review</Link>
+      </Button>
+    </section>
   );
 }
 
