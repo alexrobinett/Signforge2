@@ -21,6 +21,32 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
+test('with no spots, the empty state has New spot and the template gallery under it; a template opens New spot with it picked (#362, #369)', async () => {
+  await page.goto('/spots');
+  await hydrated(page);
+  await expect(page.getByRole('region', { name: 'Make your first spot from a template' })).toBeVisible();
+  // One filled button on the page, New spot; the gallery's templates are outlined tiles.
+  await expect(page.getByRole('main').locator('[data-slot="button"][data-variant="default"]')).toHaveAccessibleName('New spot');
+  const gallery = page.getByRole('region', { name: 'Templates' });
+  const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
+  await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  await axe(page);
+  await shots(page, '28-spots-gallery');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '28-spots-gallery-phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // By keyboard: the card opens New spot with Clock picked, and Escape gives focus back to the card.
+  await clock.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'New spot' });
+  await expect(dialog.getByRole('group', { name: 'Template' }).getByRole('radio', { name: 'Clock', exact: true })).toBeChecked();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(clock).toBeFocused();
+});
+
 test('choose a template by its thumbnail, by keyboard alone, in two columns on a phone (#259)', async () => {
   await page.goto('/spots');
   await hydrated(page);
@@ -69,13 +95,25 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   await expect(dialog).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  // Keyboard only: Enter on a template with no name goes to the name; then back, an arrow moves the choice, Enter creates.
+  // Keyboard only. The name follows the template until one is typed (#360). Cleared, Create says
+  // why it is off, and Enter on a template goes to the name; then back, an arrow moves the choice, Enter creates.
+  const templateName = (i: number) => dialog.getByRole('group', { name: 'Template' }).locator('label').nth(i).textContent();
+  const name = dialog.getByLabel('Name');
+  const create = dialog.getByRole('button', { name: 'Create spot' });
   await opener.focus();
   await page.keyboard.press('Enter');
-  await radios.first().focus();
+  await expect(name).toHaveValue((await templateName(0))?.trim() ?? '');
+  await radios.nth(1).check();
+  await expect(name).toHaveValue((await templateName(1))?.trim() ?? '');
+  await name.fill('');
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAccessibleDescription('Give the spot a name first.');
+  await radios.first().check();
+  await expect(name).toHaveValue('');
   await page.keyboard.press('Enter');
-  await expect(dialog.getByLabel('Name')).toBeFocused();
+  await expect(name).toBeFocused();
   await page.keyboard.type('Picked by keyboard');
+  await expect(create).toBeEnabled();
   await page.keyboard.press('Shift+Tab');
   await expect(radios.first()).toBeFocused();
   await page.keyboard.press('ArrowRight');
@@ -145,6 +183,25 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByLabel('Greeting (empty for good morning/afternoon/evening)')).toHaveValue('Good to see you');
   await page.getByRole('link', { name: 'Spots' }).first().click();
   await expect(page.getByRole('link', { name: /Lobby clock/ })).toContainText('Clock · Draft, never published');
+  await expect(page.getByRole('link', { name: /Lobby clock/ }).locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  // A template the player drew no thumbnail for: its name, clamped, in a frame that stays 16:9 in the row's 64 px slot.
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const fixture = templates.find((t: { name: string }) => t.name === 'Weather and headlines (test)').versions.at(-1).id;
+  const { spot: undrawn } = await tool(page, 'create_spot', { name: 'Undrawn', kind: 'template', templateVersionId: fixture });
+  await page.reload();
+  await hydrated(page);
+  const frame = page
+    .getByRole('link', { name: /Undrawn/ })
+    .locator('span[aria-hidden]')
+    .first();
+  await expect(frame).toContainText('Weather and headlines (test)');
+  expect(
+    await frame.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { ratio: Math.round((r.width / r.height) * 100) / 100, fits: el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1 };
+    }),
+  ).toEqual({ ratio: 1.78, fits: true });
+  await tool(page, 'delete_spot', { spotId: undrawn.id });
 });
 
 test('a change someone else made while the editor was open is not overwritten', async () => {
@@ -279,10 +336,26 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
   await page.getByRole('radio', { name: 'Announcement', exact: true }).check();
+  // Named after its template (#360): this spec's first Announcement.
+  await expect(page.getByLabel('Name')).toHaveValue('Announcement');
+  await axe(page);
+  await shots(page, '35-new-spot-named');
   await page.getByLabel('Name').fill('Pier 9 opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Pier 9 opening', level: 1 })).toBeVisible();
   await hydrated(page);
+  // It starts with the template's sample copy, marked until replaced; focusing a sample selects it, so typing replaces it.
+  const headline = page.getByLabel('Headline');
+  await expect(headline).toHaveValue('Pier 9 opens on Monday');
+  await expect(headline).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
+  // The server records it, so a reload (or another tab) marks it too.
+  await page.reload();
+  await hydrated(page);
+  await expect(headline).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
+  await headline.focus();
+  expect(await headline.evaluate((i) => i instanceof HTMLInputElement && i.selectionStart === 0 && i.selectionEnd === i.value.length)).toBe(true);
+  await axe(page);
+  await shots(page, '35-spot-editor-sample');
   // Every image field needs an image, the photo too: the one the test above uploaded.
   await page.getByRole('button', { name: 'Choose image for Photo' }).click();
   await page
@@ -294,6 +367,7 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
 
   await page.getByLabel('Look').selectOption('night');
   await page.getByLabel('Headline').fill('Pier 9 opens Monday');
+  await expect(page.getByLabel('Headline')).not.toHaveAccessibleDescription(/Sample text/);
   await expect.poll(() => stageShows(page, 'Pier 9 opens Monday'), { timeout: 10_000 }).toBe(true);
   // No address, no code: it appears once one is typed, named by its label.
   const qr = async () => {
@@ -308,12 +382,44 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
     return false;
   };
   expect(await qr()).toBe(false);
-  // Its label starts empty, as all its text does (#253).
+  // No address, no code: it appears once the address is typed.
   await page.getByLabel('QR code label').fill('Scan for the floor plan');
   await page.getByLabel('QR code link').fill('https://example.com/pier-9');
   await expect.poll(qr, { timeout: 10_000 }).toBe(true);
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
+
+  // Its other sample copy is still there: the server refuses the publish, and the page asks, naming it;
+  // Edit first sends nothing (#360). Escape lets it go too, and gives focus back to Publish.
+  const publishes = (await tool(page, 'list_publishes', {})).publishes.length;
+  const publish = page.getByRole('button', { name: 'Publish', exact: true });
+  await publish.click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish sample text?' });
+  await expect(ask).toContainText('Eyebrow, Body, Posted by and QR code label still have sample text. Publish anyway?');
+  await axe(page);
+  await shots(page, '35-publish-sample-text');
+  await ask.getByRole('button', { name: 'Edit first' }).click();
+  await expect(ask).toBeHidden();
+  expect((await tool(page, 'list_publishes', {})).publishes).toHaveLength(publishes);
+  await publish.click();
+  await expect(ask).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeHidden();
+  await expect(publish).toBeFocused();
+  // At phone width the question's buttons stay in view; its words scroll within it.
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Publish still has focus, given back by the question: Enter asks again.
+  await publish.press('Enter');
+  await expect(ask.getByRole('button', { name: 'Publish anyway' })).toBeInViewport();
+  await axe(page);
+  await shots(page, '35-publish-sample-text-phone');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // Publish anyway sends it, as it was asked for.
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await ask.getByRole('button', { name: 'Publish anyway' }).click();
+  await expect(ask).toBeHidden();
+  await expect(page.locator('[data-sonner-toast]').filter({ hasText: /Published|No screen|Not published/ })).toBeVisible();
 });
 
 test('an Announcement with its photo off draws once the stage is in view, and the player is not asked to draw it out of view (#342)', async () => {

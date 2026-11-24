@@ -54,6 +54,12 @@ const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', body
 /** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_video_upload finds the asset first). */
 const NOT_ROWS = new Set(['upload']);
 
+/**
+ * Inputs whose ids are only compared with the org's own rows, never read by: `allowSample` (#360)
+ * acknowledges sample text in the spots a publish promotes, so org A's spot id matches none of them.
+ */
+const MATCHED_ONLY = new Set(['allowSample']);
+
 /** The kind of id a field names, if it names one: `screenId` → `screen`, `groupIds` → `group`. */
 const kindOf = (key: string) => (key.endsWith('Ids') ? key.slice(0, -3) : key.endsWith('Id') ? key.slice(0, -2) : undefined);
 
@@ -73,6 +79,7 @@ function idFields(schema: unknown, path: string[] = []): IdField[] {
     items?: { properties?: unknown };
     additionalProperties?: unknown;
   };
+  if (MATCHED_ONLY.has(path.at(-1) ?? '')) return [];
   if (s.anyOf) return s.anyOf.flatMap((b) => idFields(b, path));
   if (s.items?.properties && idFields(s.items, path).length) throw new Error(`${path.join('.')}: ids inside a list of objects; teach idFields to reach them`);
   // A record's values (a spot's bindings by field name): `*` stands for any key, and REACHED_BY gives the input.

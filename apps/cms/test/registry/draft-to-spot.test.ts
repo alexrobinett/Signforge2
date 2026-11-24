@@ -104,7 +104,7 @@ const drafts: SpotDraft[] = Object.values(golden.spots).map((s) => {
 
 /** The CMS's reads of the same org: `get_spot`, `list_assets`, `list_templates` and `get_spot_preview`, as their outputs. */
 function views(graph: OrgGraph, draft: SpotDraft, orientation: Orientation) {
-  const spot: SpotView = { ...draft, version: 1, published: false, draftChanged: true, publishedAt: null, createdAt: 0, updatedAt: 0 };
+  const spot: SpotView = { ...draft, sampleFields: null, version: 1, published: false, draftChanged: true, publishedAt: null, createdAt: 0, updatedAt: 0 };
   const assets: AssetView[] = [...graph.assets.values()].map(({ asset: a, renditions }) => ({
     ...a,
     renditions: renditions.map((r) => ({

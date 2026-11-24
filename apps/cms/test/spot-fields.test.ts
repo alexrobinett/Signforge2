@@ -1,12 +1,12 @@
 // A template's fields as a new spot starts them and as the editor checks and draws them, for url
 // (#191), date and datetime fields (#192).
-import { type FieldDef, type TemplateManifest, validateSpotData } from '@signforge/contract';
+import { type FieldDef, type SampleFields, type TemplateManifest, validateSpotData } from '@signforge/contract';
 import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
-import { startData } from '@signforge/compiler/draft';
+import { sampleData, sampleFieldsOf, startData } from '@signforge/compiler/draft';
 import { typedFields } from '../src/lib/live-data';
 import { fieldProblems, type SpotDraft } from '../src/lib/spots';
 import { StoreProvider } from '../src/state/provider';
@@ -232,5 +232,47 @@ describe('a new spot in the editor (#359)', () => {
     expect(cell).toContain('aria-describedby="field-facts-error"');
     expect(/<input[^>]*id="field-facts-0-value"[^>]*>/.exec(html)?.[0]).not.toContain('aria-invalid="true"');
     expect(html).toContain('Facts, row 1, Label is longer than 4 characters.');
+  });
+});
+
+describe('a spot’s sample text in the editor (#360)', () => {
+  const fields: Record<string, FieldDef> = {
+    headline: { type: 'text', label: 'Headline', default: 'Pier 9 opens on Monday' },
+    items: {
+      type: 'list',
+      label: 'Items',
+      item: { name: { type: 'text', label: 'Name' }, price: { type: 'text', label: 'Price' } },
+      default: [{ name: 'Espresso', price: '3' }],
+    },
+  };
+  const data = sampleData({ fields });
+  /** The editor's form over the saved spot's `sampleFields`, as the server answers them: on a reload, or in another tab, as here. */
+  const html = (sampleFields: SampleFields | null) => {
+    const draft: SpotDraft = { name: 'Pier', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
+    return formHtml({ fields, shown: fields, draft, assets: [], sampleFields });
+  };
+  const input = (markup: string, id: string) => new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(markup)?.[0] ?? '';
+
+  it('marks what the server says still holds sample text, and ties every cell of a sample row to the note', () => {
+    const marked = html(sampleFieldsOf({ fields }, data));
+    expect(marked).toContain('Sample text. Replace it before you publish.');
+    expect(marked).toContain('Sample rows. Replace them before you publish.');
+    expect(marked).toMatch(/Row 1.*data-slot="badge"[^>]*>Sample</);
+    expect(input(marked, 'field-headline')).toContain('aria-describedby="field-headline-sample"');
+    expect(input(marked, 'field-items-0-name')).toContain('aria-describedby="field-items-sample"');
+    expect(input(marked, 'field-items-0-price')).toContain('aria-describedby="field-items-sample"');
+  });
+
+  it('marks nothing on a spot without any, though its values equal the sample: they may be the person’s choice', () => {
+    const plain = html(null);
+    expect(plain).not.toContain('Sample');
+    expect(input(plain, 'field-headline')).not.toContain('aria-describedby');
+  });
+
+  it('keeps a row marked until every cell in it is edited', () => {
+    expect(html({ texts: [], lists: { items: [['price']] } })).toMatch(/Row 1.*data-slot="badge"[^>]*>Sample</);
+    const done = html({ texts: [], lists: { items: [[]] } });
+    expect(done).not.toContain('Sample rows');
+    expect(input(done, 'field-items-0-name')).not.toContain('aria-describedby');
   });
 });

@@ -51,6 +51,7 @@ const spot = (id: string, version: number): SpotView => ({
   assetId: null,
   fit: null,
   url: 'https://example.com/',
+  sampleFields: null,
   version,
   published: false,
   draftChanged: true,

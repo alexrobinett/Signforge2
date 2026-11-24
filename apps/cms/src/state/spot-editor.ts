@@ -69,7 +69,8 @@ interface NewSpotDraft {
   open: boolean;
   kind: Exclude<SpotKind, 'video'>;
   templateVersionId: string | null;
-  name: string;
+  /** What the person typed; null until they type, while the dialog names the spot after its template (#360). */
+  name: string | null;
   url: string;
   assetId: string | null;
   pending: boolean;
@@ -128,9 +129,14 @@ export interface SpotEditorSlice {
   /** The stage scrolled into view or out of it. */
   seeStage: (inView: boolean) => void;
   openNewSpot: (open: boolean) => void;
+  /** New spot from a template in the empty Spots page's gallery (#362): that version picked, and focus back on its card when the dialog closes. */
+  startSpotFrom: (templateVersionId: string, card: HTMLElement) => void;
+  /** New spot closed (its `onCloseAutoFocus`): back to the gallery card that opened it; else Radix returns focus to its trigger. */
+  newSpotFocusBack: (e: Event) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
-  /** Creates the spot from the dialog's draft and opens its editor. */
-  createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
+  /** Creates the spot from the dialog's draft, called `name`, and opens its editor. */
+  /** `sample`: a template spot started with its template's sample copy, which the server records (#360). */
+  createSpot: (orgId: string, name: string, sample?: boolean) => Promise<void>;
   /** A field of the spot touched: its empty-field problem may show now. */
   touchField: (spotId: string, field: string) => void;
   /** Publish pressed: every field's problem shows. */
@@ -161,7 +167,7 @@ const newSpotDraft = (): NewSpotDraft => ({
   open: false,
   kind: 'template',
   templateVersionId: null,
-  name: '',
+  name: null,
   url: '',
   assetId: null,
   pending: false,
@@ -211,6 +217,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
   let hearing = false;
+  /** The gallery card that opened New spot: outside state, nothing renders it. */
+  let galleryCard: HTMLElement | null = null;
 
   const savedSpot = (orgId: string, spotId: string) => queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
 
@@ -412,21 +420,36 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       void redraw();
     },
 
-    openNewSpot: (open) => editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() })),
+    openNewSpot: (open) => {
+      if (open) galleryCard = null;
+      editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() }));
+    },
+    startSpotFrom(templateVersionId, card) {
+      // The card itself, not document.activeElement: Safari leaves focus on <body> after a click.
+      galleryCard = card;
+      editor((e) => ({ ...e, newSpot: { ...newSpotDraft(), open: true, templateVersionId } }));
+    },
+    newSpotFocusBack(e) {
+      const card = galleryCard;
+      galleryCard = null;
+      if (!card?.isConnected) return;
+      e.preventDefault();
+      card.focus();
+    },
     editNewSpot: (change) => editor((e) => ({ ...e, newSpot: { ...e.newSpot, ...change, error: null } })),
 
-    async createSpot(orgId, start) {
+    async createSpot(orgId, name, sample) {
       const key = get().spotEditor.newSpot.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newSpot: { ...e.newSpot, key, pending: true, error: null } }));
       const d = get().spotEditor.newSpot;
       const kind =
         d.kind === 'template'
-          ? { kind: 'template', templateVersionId: d.templateVersionId, ...start }
+          ? { kind: 'template', templateVersionId: d.templateVersionId, ...(sample && { sample }) }
           : d.kind === 'url'
             ? { kind: 'url', url: d.url.trim() }
             : { kind: 'image', assetId: d.assetId };
       try {
-        const spot = (await callTool('create_spot', { name: d.name.trim(), ...kind, idempotencyKey: key })).spot;
+        const spot = (await callTool('create_spot', { name: name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });

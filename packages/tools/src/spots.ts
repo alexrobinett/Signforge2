@@ -8,7 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { bindingOf, DEFAULT_FIT, draftCheck, unverified } from '@signforge/compiler/draft';
+import { bindingOf, DEFAULT_FIT, draftCheck, sampleAfterEdit, sampleData, sampleFieldsOf, unverified } from '@signforge/compiler/draft';
 import {
   BINDING_PATH,
   missingColumns,
@@ -18,6 +18,7 @@ import {
   templateKey,
   validateTableFeed,
   type Binding,
+  type SampleFields,
   type TableFeed,
   type TemplateManifest,
 } from '@signforge/contract';
@@ -77,6 +78,7 @@ function parsed<T>(text: string | null): T | null {
 
 const spotView = (row: SpotRow): SpotView => ({
   ...spotDraft(row),
+  sampleFields: parsed<SampleFields>(row.sampleFieldsJson),
   version: row.rowVersion,
   published: row.publishedJson != null,
   draftChanged: draftChanged(row),
@@ -269,6 +271,12 @@ const createSpot = defineTool({
     durationMs: durationMs.optional(),
     templateVersionId: id('template version').optional(),
     ...kindInput,
+    sample: z
+      .boolean()
+      .optional()
+      .describe(
+        "Template spots: start the texts and lists with the template's sample copy (its defaults; live fields stay empty), in place of data, and record them as sampleFields until each is edited. publish refuses the spot while any is left, unless a person allows it",
+      ),
     idempotencyKey,
   }),
   output: outputs.create_spot,
@@ -280,8 +288,12 @@ const createSpot = defineTool({
       if (!input.templateVersionId) throw invalid('templateVersionId', ['a template spot needs a templateVersionId']);
       const t = await requireVersion(org, input.templateVersionId);
       const bound = (await bindingsOf(org, input.bindings)) ?? {};
-      const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: input.data ?? {}, assets: input.assets ?? {}, bindings: bound };
+      if (input.sample && input.data) throw invalid('data', ['a spot started with its sample copy takes no data']);
+      const startData = input.sample ? sampleData(t.manifest) : (input.data ?? {});
+      const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: startData, assets: input.assets ?? {}, bindings: bound };
       checkTemplateDraft(t, draft);
+      // A field bound to a source shows the source, not its sample: it is not marked.
+      const sample = input.sample ? sampleFieldsOf(t.manifest, Object.fromEntries(Object.entries(startData).filter(([f]) => !(f in bound)))) : null;
       const row = write(
         await org.spots.stage.insert({
           name: input.name,
@@ -291,6 +303,7 @@ const createSpot = defineTool({
           dataJson: JSON.stringify(draft.data),
           assetMapJson: JSON.stringify(draft.assets),
           bindingsJson: bindingsJson(bound),
+          sampleFieldsJson: sample && JSON.stringify(sample),
         }),
       );
       return { spot: spotView(row) };
@@ -332,8 +345,8 @@ const updateSpot = defineTool({
     const row = await requireSpot(org, input.spotId);
     refuseOtherKinds(row.kind, input);
     const bound = await bindingsOf(org, input.bindings);
-    if (row.kind === 'template' && row.templateVersionId) {
-      const t = await requireVersion(org, row.templateVersionId);
+    const t = row.kind === 'template' && row.templateVersionId ? await requireVersion(org, row.templateVersionId) : null;
+    if (t) {
       checkTemplateDraft(t, {
         durationMs: input.durationMs ?? row.durationMs,
         data: input.data ?? parsed(row.dataJson) ?? {},
@@ -342,6 +355,16 @@ const updateSpot = defineTool({
       });
     }
     if ((row.kind === 'image' || row.kind === 'video') && input.assetId) await checkMedia(org, row.kind, input.assetId);
+    // A sample field this edit changes, or binds, is the person's now (#360).
+    const sample = parsed<SampleFields>(row.sampleFieldsJson);
+    const left =
+      sample &&
+      sampleAfterEdit(
+        sample,
+        t?.manifest.fields ?? {},
+        { data: parsed(row.dataJson) ?? {} },
+        { data: input.data ?? parsed(row.dataJson) ?? {}, bindings: bound ?? parsed(row.bindingsJson) ?? {} },
+      );
     const patch = {
       name: input.name,
       durationMs: input.durationMs,
@@ -351,6 +374,7 @@ const updateSpot = defineTool({
       assetId: input.assetId,
       fit: input.fit,
       url: input.url,
+      ...(sample && { sampleFieldsJson: left && JSON.stringify(left) }),
     };
     return { spot: spotView(write(await org.spots.stage.update(row, patch, input.ifVersion))) };
   },

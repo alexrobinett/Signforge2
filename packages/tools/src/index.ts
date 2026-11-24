@@ -87,6 +87,7 @@ export {
   spotDraft,
   type DraftKind,
   type DraftPin,
+  type SampleAck,
   type DraftReport,
   type OrgGraph,
   type PreviewInput,

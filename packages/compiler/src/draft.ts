@@ -7,18 +7,20 @@
  * What it reads is the seam (`DraftReads`): the tools read the org's rows, the CMS its asset and
  * template views.
  */
-import type {
-  Binding,
-  DataSource,
-  FieldDef,
-  Orientation,
-  ScalarFieldDef,
-  Playlist,
-  ScreenManifest,
-  Sha256,
-  Spot,
-  TableMapping,
-  TemplateManifest,
+import {
+  liveSources,
+  type SampleFields,
+  type Binding,
+  type DataSource,
+  type FieldDef,
+  type Orientation,
+  type ScalarFieldDef,
+  type Playlist,
+  type ScreenManifest,
+  type Sha256,
+  type Spot,
+  type TableMapping,
+  type TemplateManifest,
 } from '@signforge/contract';
 import { compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from './index';
 
@@ -99,10 +101,11 @@ export function startValue(d: ScalarFieldDef): unknown {
 }
 
 /**
- * A new spot's data, as the New spot dialog and the agent's fill (#263) start it: a value for each field the template gives no default, so the draft starts valid
- * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
- * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
- * someone else's words. Other defaults are settings, and stand.
+ * A new spot's data as the agent's fill (#263) starts it, and under `sampleData` New spot's: a value
+ * for each field the template gives no default, so the draft starts valid but for a date to pick.
+ * Text and lists start empty whatever their default: a template's defaults are sample copy for its
+ * preview ("Pier 9 opens on Monday"), which only New spot starts with, marked (#360). Other defaults
+ * are settings, and stand.
  */
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(
@@ -116,6 +119,114 @@ export const startData = (fields: Record<string, FieldDef>) =>
             : [[name, startValue(def)]],
     ),
   );
+
+/**
+ * A text or list field's sample (#360): the template's own default, the copy its thumbnail shows;
+ * a text with none stands in with its label, as the thumbnail does (an empty default stands: a
+ * clock's greeting left empty greets by the time of day). A list with no default stays
+ * empty: stand-in rows would be someone's content to delete, and three of them put Announcement's
+ * stage past the player's 2 s ready time on a laptop. Undefined for every other field, which starts
+ * as `startData` starts it. The editor marks a value equal to its sample until it is replaced.
+ */
+export function sampleValue(def: FieldDef): unknown {
+  if (def.type === 'text') return (def.default ?? def.label).slice(0, def.maxLength);
+  if (def.type === 'list') return def.default ?? [];
+  return undefined;
+}
+
+/**
+ * A new spot's data as `create_spot`'s `sample` starts it for New spot (#360): `startData`, with
+ * each text and list holding its sample, so the stage plays at once and the person edits rather
+ * than writes. This reverses #253's empty text for the dialog only; the server records the fields
+ * (`sampleFieldsOf`), the editor marks them, and a publish refuses them unless a person allows it. A live field keeps `startData`'s value: it is the fallback screens show
+ * when its source is down, which the form does not draw while bound, so a sample there would reach
+ * screens unseen (#253's headlines). The agent's fill keeps `startData`: it writes the copy itself.
+ */
+export function sampleData(m: Pick<TemplateManifest, 'fields' | 'live'>): Record<string, unknown> {
+  const live = new Set(m.live ? Object.values(liveSources(m.live)).flatMap((source) => Object.keys(source.fields)) : []);
+  return {
+    ...startData(m.fields),
+    ...Object.fromEntries(
+      Object.entries(m.fields).flatMap(([name, def]) => ((def.type === 'text' || def.type === 'list') && !live.has(name) ? [[name, sampleValue(def)]] : [])),
+    ),
+  };
+}
+
+/**
+ * The fields `sampleData` filled with sample copy (#360), as the contract's `SampleFields`: each text
+ * holding words, and each list's rows, every cell. A live field starts empty, so none is. Null for none.
+ */
+export function sampleFieldsOf(m: Pick<TemplateManifest, 'fields'>, data: Record<string, unknown>): SampleFields | null {
+  const sample: SampleFields = { texts: [], lists: {} };
+  for (const [name, def] of Object.entries(m.fields)) {
+    const v = data[name];
+    if (def.type === 'text' && typeof v === 'string' && v !== '') sample.texts.push(name);
+    if (def.type === 'list' && Array.isArray(v) && v.length) sample.lists[name] = v.map(() => Object.keys(def.item));
+  }
+  return compactSample(sample);
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const rowsOf = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const cell = (row: unknown, key: string): unknown => (row && typeof row === 'object' ? Object.entries(row).find(([k]) => k === key)?.[1] : undefined);
+
+/** Null for nothing left: a list's rows with no cell left, a list with no row left, no field left. */
+function compactSample(s: SampleFields): SampleFields | null {
+  const lists = Object.fromEntries(Object.entries(s.lists).filter(([, rows]) => rows.some((r) => r.length > 0)));
+  return s.texts.length || Object.keys(lists).length ? { texts: s.texts, lists } : null;
+}
+
+/** A field's value as screens get it: its own, else its default, as the compiler fills it. */
+const withDefault = (value: unknown, def: FieldDef | undefined) => value ?? (def && 'default' in def ? def.default : undefined);
+
+/**
+ * What is left of a draft's sample fields after a saved edit from `before` to `after` (#360). Each
+ * field, and each list cell, is compared as screens get it, its template default standing in for a
+ * value left out: a text bound now, or showing other words, is out. A list bound now is out;
+ * otherwise rows now are paired with the sample rows before, the pairs that still hold the most
+ * marked cells first, then a row whose marked cells all hold, then one that stayed where it was,
+ * wherever the rows moved: a row added beside a sample row, sharing a cell with it, never takes
+ * its marks. A row keeps the marks on the cells it still holds; one with none, new or rewritten,
+ * has none. Null for nothing left.
+ */
+export function sampleAfterEdit(
+  sample: SampleFields,
+  fields: Record<string, FieldDef>,
+  before: { data: Record<string, unknown> },
+  after: { data: Record<string, unknown>; bindings: Record<string, unknown> },
+): SampleFields | null {
+  const shown = (data: Record<string, unknown>, f: string) => withDefault(data[f], fields[f]);
+  const texts = sample.texts.filter((f) => !(f in after.bindings) && same(shown(before.data, f), shown(after.data, f)));
+  const lists: Record<string, string[][]> = {};
+  for (const [f, rows] of Object.entries(sample.lists)) {
+    if (f in after.bindings) continue;
+    const def = fields[f];
+    const item = def?.type === 'list' ? def.item : {};
+    const at = (row: unknown, k: string) => withDefault(cell(row, k), item[k]);
+    const was = rowsOf(shown(before.data, f));
+    const now = rowsOf(shown(after.data, f));
+    const pairs = now
+      .flatMap((row, i) =>
+        rows.map((keys, j) => {
+          const held = keys.filter((k) => same(at(was[j], k), at(row, k)));
+          return { i, j, held, whole: held.length === keys.length, still: i === j };
+        }),
+      )
+      .filter((p) => p.held.length > 0)
+      .sort((a, b) => b.held.length - a.held.length || Number(b.whole) - Number(a.whole) || Number(b.still) - Number(a.still));
+    const marks: string[][] = now.map(() => []);
+    const placed = new Set<number>();
+    const taken = new Set<number>();
+    for (const p of pairs) {
+      if (placed.has(p.i) || taken.has(p.j)) continue;
+      marks[p.i] = p.held;
+      placed.add(p.i);
+      taken.add(p.j);
+    }
+    lists[f] = marks;
+  }
+  return compactSample({ texts, lists });
+}
 
 /** A spot's draft (or published version), as `get_spot` gives it. */
 export interface SpotDraft {

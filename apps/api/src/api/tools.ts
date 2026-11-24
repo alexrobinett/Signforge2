@@ -22,6 +22,8 @@ export const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = 
   unknown_tool: 404,
   not_found: 404,
   conflict: 409,
+  // Spots still holding their template's sample text (#360): a person may publish anyway.
+  sample_text: 409,
   rate_limited: 429,
   unavailable: 503,
 };

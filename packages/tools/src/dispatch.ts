@@ -265,6 +265,7 @@ export async function dispatch<D extends DataScope>(
         actor: caller.actor,
         role: caller.role,
         scopes: effectiveScopes(grant),
+        confirmed: caller.confirmed !== undefined,
         input: parsed.data,
         blobs: caller.blobs,
         services,

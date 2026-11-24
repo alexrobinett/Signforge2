@@ -284,6 +284,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
   role: Role;
   /** The scopes the caller holds, as its org has them: for a change that needs more on some rows than the tool's own scope (deleting what screens play). */
   scopes: readonly Scope[];
+  /** Set when a person pressed a confirmation card showing exactly this call (#269, `Caller.confirmed`): theirs, though the agent's drawer sends it. */
+  confirmed: boolean;
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;

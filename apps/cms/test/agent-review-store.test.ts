@@ -62,6 +62,7 @@ afterEach(() => vi.unstubAllGlobals());
 type Draft = { data: Record<string, unknown>; bindings: Record<string, unknown> };
 
 type Store = AgentSlice & {
+  clearSamples: (spotId: string, fields: readonly string[]) => void;
   spotEditor: { drafts: Record<string, { orgId: string; status: string }> };
   saveSpotDraft: (id: string) => Promise<void>;
   redrawStage: () => void;
@@ -89,6 +90,7 @@ function agentStore(saves: Record<string, string> = {}, draft: Draft = { data: {
     reloadSpot: async () => {},
     editSpot: (_o, _id, change) => void edits.push(change(draft).data),
     openNewSpot: () => {},
+    clearSamples: () => {},
   }));
   store.getState().editFill({ link: 'https://cafe.example/menu' });
   return { store, saved, edits, queryClient };

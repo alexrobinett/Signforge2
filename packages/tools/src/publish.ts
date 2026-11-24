@@ -22,14 +22,14 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { publishOrg, type DraftPin } from './publishing';
+import { publishOrg, type DraftPin, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
 import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
-import { defineTool, notFound, ToolError, type ToolContext } from './tool';
+import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
 import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -110,10 +110,11 @@ export async function runPublish(
   end: readonly string[] = [],
   approval?: { brand: string },
   ifDefault?: string,
+  allowSample: readonly SampleAck[] = [],
   added: readonly ScheduleEntryRow[] = [],
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined, added);
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined, allowSample, added);
   // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
   // would pass a second read, and its batch then guards the very rows the manifests were made from.
   if (approval && result.brand !== approval.brand)
@@ -160,10 +161,32 @@ export async function runPublish(
   return { publish: made, ...report, removedDataSources };
 }
 
+/**
+ * `allowSample` (#360), which only a person may pass: an agent passing it is refused, never quietly
+ * ignored. A person's press of the agent drawer's confirmation card that listed exactly these
+ * acknowledgements (`confirmed`, #351) is theirs, though the drawer sends it.
+ */
+export function peopleAllowSample(ctx: { actor: Actor; confirmed: boolean; input: { allowSample?: SampleAck[] } }): SampleAck[] {
+  const acks = ctx.input.allowSample ?? [];
+  if (acks.length && isAgent(ctx.actor) && !ctx.confirmed) throw new ToolError('forbidden', 'only a person may publish sample text anyway (allowSample)');
+  return acks;
+}
+
+/** `allowSample`'s input: the spots a `sample_text` refusal named, as it named them. */
+export const sampleAcks = z
+  .array(
+    z.object({
+      spotId: id('spot'),
+      version: z.number().int().positive().describe('The version the refusal named'),
+      fields: z.array(z.string().max(100)).max(200).describe('The fields the refusal named'),
+    }),
+  )
+  .max(500);
+
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. With drafts, a pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. With drafts, a pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. A spot it would promote that still holds the sample text of its template (its sampleFields) refuses the whole publish with sample_text, before any screen is compiled, details { spots: [{ id, name, version, fields }] }: replace the text, or a person publishes again with allowSample naming those spots, versions and fields. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -181,6 +204,11 @@ const publish = defineTool({
       .describe(
         'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
       ),
+    allowSample: sampleAcks
+      .optional()
+      .describe(
+        'People only: the spots a sample_text refusal named, { spotId, version, fields } as it named them, once a person has seen them and chose to publish them anyway. It covers that version of each and those fields only: any other refuses again. Refused to an agent',
+      ),
   }),
   output: outputs.publish,
   example: {},
@@ -189,7 +217,7 @@ const publish = defineTool({
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: async (ctx) => {
     const { input } = ctx;
-    return runPublish(ctx, input.drafts, [], undefined, input.ifDefault);
+    return runPublish(ctx, input.drafts, [], undefined, input.ifDefault, peopleAllowSample(ctx));
   },
 });
 
@@ -237,7 +265,7 @@ const publishTakeover = defineTool({
     const { org, input, write } = ctx;
     // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
     const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())));
-    const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], undefined, undefined, [made]);
+    const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], undefined, undefined, [], [made]);
     // Held (its playlist not published, a check it fails): nothing is written, not even the draft.
     const held = out.held.find((h) => h.kind === 'schedule_entry' && h.id === made.id);
     if (held || !out.promoted.some((p) => p.kind === 'schedule_entry' && p.id === made.id))

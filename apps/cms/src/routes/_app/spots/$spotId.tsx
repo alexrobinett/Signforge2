@@ -118,7 +118,6 @@ function SpotEditor() {
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
   const version = versionsById(templates).get(templateVersionId ?? '');
-  const template = templates.find((t) => t.versions.some((v) => v.id === templateVersionId));
   const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot.id, c);
   const set = (patch: Partial<SpotDraft>) => change((d) => ({ ...d, ...patch }));
   const range = version?.manifest.duration;
@@ -231,6 +230,7 @@ function SpotEditor() {
                     draft={draft}
                     assets={assets}
                     marks={filled?.marks}
+                    sampleFields={spot.sampleFields}
                     flyer={
                       filled?.photo
                         ? { onUse: (field) => void takePhoto(orgId, spotId, field), uploading: filled.uploading, error: filled.uploadError }
@@ -328,7 +328,7 @@ function SpotEditor() {
             search={search}
             onSearch={setSearch}
             bound={Object.keys(draft.bindings).length > 0}
-            thumbnail={template && templateThumbnail(template)}
+            thumbnail={version && templateThumbnail(version.key)}
           />
         </div>
       </div>

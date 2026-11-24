@@ -13,7 +13,7 @@
  * summary (`Caller.confirmed`).
  */
 import type { OrgScope } from '@signforge/db';
-import { type Caller, dispatch, type DispatchResult, type DraftPin, type Grant, OVERRIDE_LIMIT_MS, permits, publishOrg, registry, sha256Hex, ToolError } from '@signforge/tools';
+import { type Caller, dispatch, type DispatchResult, type DraftPin, type Grant, OVERRIDE_LIMIT_MS, permits, publishOrg, registry, type SampleAck, sha256Hex, ToolError } from '@signforge/tools';
 import { z } from 'zod';
 import type { ConfirmCard } from './chat-shapes';
 
@@ -112,6 +112,9 @@ async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[
   return { pins, names };
 }
 
+/** What a publish refused for sample text names (#360): each spot, at its version, and its fields still holding the sample. */
+const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) })) });
+
 /** A calendar's or a sheet's source: the resource read at the provider, in full, through its connection (#351 review). */
 const resourceLines = (called: Row) => (called.resource === undefined ? [] : [`Reads this at the provider, through its connection: ${str(called.resource)}`]);
 
@@ -131,31 +134,39 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const settings = await org.settings.get();
       // The model's ifDefault as asked, else the default if pinned (#393): refused if it is no longer the default by then.
       const ifDefault = str(called.ifDefault) || pins.find((p) => p.kind === 'playlist' && p.id === settings?.defaultPlaylistId)?.id;
-      // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds back.
+      // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds
+      // back. A spot still holding its template's sample text (#360, #392) is listed on the card, exactly as the publish
+      // would refuse it, and acknowledged by the press: the model's own allowSample, which an agent may not give, is never taken.
+      const dryRun = (allow: SampleAck[]) => publishOrg(org, { hash: sha256Hex, now: new Date(at.now) }, pins, [], false, allow);
+      let samples: z.output<typeof sampleRefusal>['spots'] = [];
       let dry: Awaited<ReturnType<typeof publishOrg>>;
       try {
-        dry = await publishOrg(org, { hash: sha256Hex, now: new Date(at.now) }, pins);
+        dry = await dryRun([]).catch(async (err: unknown) => {
+          if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
+          samples = sampleRefusal.parse(err.details).spots;
+          return dryRun(samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })));
+        });
       } catch (err) {
         if (err instanceof ToolError) throw new CardProblem(err.message);
         throw err;
       }
       const reach = dry.screens.filter((x) => x.manifest && x.manifest.id !== x.current).length;
-      // Sample text it was asked to publish anyway (#360, #392): shown, as it goes live with it.
-      const sample = called.allowSample;
+      const { allowSample: _theirs, ...asked } = called;
       return {
-        // Every constraint the model gave, as it gave them, with the pins at the versions shown.
-        input: { ...called, drafts: pins, ...(ifDefault ? { ifDefault } : {}) },
+        // Every constraint the model gave, as it gave them, with the pins at the versions shown and the samples the card lists.
+        input: {
+          ...asked,
+          drafts: pins,
+          ...(ifDefault ? { ifDefault } : {}),
+          ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })) } : {}),
+        },
         card: {
           title: 'Publish to screens',
           lines: [
             ...names.map((n) => `${n}, as drafted now`),
             reach ? `Changes what ${screensWord(reach)} play; each switches as it hears of it.` : 'Changes what no screen plays now.',
             ...(dry.drafts.held.length ? [`${dry.drafts.held.length === 1 ? 'One draft fails' : `${dry.drafts.held.length} drafts fail`} its checks and keeps its published version.`] : []),
-            ...(Array.isArray(sample) && sample.length
-              ? [`Publishes sample text still in ${sample.length === 1 ? 'one spot' : `${sample.length} spots`}, as asked.`]
-              : sample === true
-                ? ['Publishes the sample text it still shows, as asked.']
-                : []),
+            ...samples.map((x) => `${x.name} still shows its template's sample text (${x.fields.join(', ')}): pressing publishes it anyway.`),
           ],
           address: null,
           when: 'Now',

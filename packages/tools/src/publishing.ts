@@ -15,6 +15,7 @@
  * the default) and its choices; the compiler picks one (`chooseBrandKit`) and freezes it into the
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
+import type { SampleFields } from '@signforge/contract';
 import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
 import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
@@ -512,6 +513,16 @@ export interface DraftPin {
 const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
 
 /**
+ * A person's word that a spot may go live with sample text (#360): the spot, the version they were
+ * shown, and the fields named to them. It covers that version and those fields only.
+ */
+export interface SampleAck {
+  spotId: string;
+  version: number;
+  fields: string[];
+}
+
+/**
  * Promote drafts, then compile every screen from the published graph. A screen that cannot be
  * compiled is reported and the others still publish. Stages writes; the caller commits them with
  * its switch of each screen's desired manifest, in one batch. The writes put the publish in order
@@ -534,6 +545,7 @@ export async function publishOrg(
   pins?: readonly DraftPin[],
   end: readonly string[] = [],
   exact = false,
+  allowSample: readonly SampleAck[] = [],
   added: readonly ScheduleEntryRow[] = [],
 ): Promise<{
   writes: Write[];
@@ -567,6 +579,22 @@ export async function publishOrg(
   }
   const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end), exact);
   const { writes: promotions, removals, drafts } = promoted;
+  // A spot this would put live with its template's sample copy untouched (#360) refuses the publish,
+  // before any screen is compiled, unless a person was shown that version and those fields.
+  const sample = drafts.promoted.flatMap((p) => {
+    const row = p.kind === 'spot' ? read.spots.find((r) => r.id === p.id) : undefined;
+    const kept: SampleFields | null = row?.sampleFieldsJson ? JSON.parse(row.sampleFieldsJson) : null;
+    if (!row || !kept) return [];
+    const fields = [...kept.texts, ...Object.keys(kept.lists)];
+    const acked = allowSample.some((a) => a.spotId === row.id && a.version === row.rowVersion && fields.every((f) => a.fields.includes(f)));
+    return acked ? [] : [{ id: row.id, name: row.name, version: row.rowVersion, fields }];
+  });
+  if (sample.length)
+    throw new ToolError(
+      'sample_text',
+      `still holding the template's sample text: ${sample.map((s) => `spot ${s.name} (${s.id}): ${s.fields.join(', ')}`).join('; ')}. Replace it, or have a person publish it anyway`,
+      { spots: sample },
+    );
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
   // A pin that needs no promotion (live as it is) or is held is still pinned at its version: an edit
   // of it that lands before the batch fails it, as one of a promoted pin does, even when nothing else is written.
