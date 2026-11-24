@@ -54,9 +54,6 @@ export const draftOf = (s: SpotView): SpotDraft => ({
 /** Every version of every template, by id. */
 export const versionsById = (templates: TemplateView[]) => new Map(templates.flatMap((t) => t.versions.map((v) => [v.id, v] as const)));
 
-/** Each template version's template, by the version's id. */
-export const templatesByVersion = (templates: TemplateView[]) => new Map(templates.flatMap((t) => t.versions.map((v) => [v.id, t] as const)));
-
 /** The newest approved version of each template: what a new spot may use. */
 export const usableVersions = (templates: TemplateView[]) =>
   templates.flatMap((t) => {

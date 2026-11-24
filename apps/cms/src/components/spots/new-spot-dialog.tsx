@@ -30,6 +30,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const d = useAppStore((s) => s.spotEditor.newSpot);
   const picking = useAppStore((s) => s.spotEditor.picking === 'new');
   const open = useAppStore((s) => s.openNewSpot);
+  const focusBack = useAppStore((s) => s.newSpotFocusBack);
   const edit = useAppStore((s) => s.editNewSpot);
   const pick = useAppStore((s) => s.pickImageFor);
   const create = useAppStore((s) => s.createSpot);
@@ -74,7 +75,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           New spot
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={focusBack}>
         <DialogHeader>
           <DialogTitle>New spot</DialogTitle>
           <DialogDescription>It starts as a draft. No screen shows it until you publish.</DialogDescription>
@@ -120,7 +121,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                         onChange={() => edit({ templateVersionId: u.version.id })}
                         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
                       />
-                      <TemplateThumb template={u.template} />
+                      <TemplateThumb version={u.version} />
                       <span className="line-clamp-2 px-0.5">{u.template.name}</span>
                     </label>
                   ))}

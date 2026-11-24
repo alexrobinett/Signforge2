@@ -37,11 +37,14 @@ test('with no spots, the empty state has New spot and the template gallery under
   await axe(page);
   await shots(page, '28-spots-gallery-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
-  await clock.click();
+  // By keyboard: the card opens New spot with Clock picked, and Escape gives focus back to the card.
+  await clock.focus();
+  await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'New spot' });
   await expect(dialog.getByRole('group', { name: 'Template' }).getByRole('radio', { name: 'Clock', exact: true })).toBeChecked();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+  await expect(clock).toBeFocused();
 });
 
 test('choose a template by its thumbnail, by keyboard alone, in two columns on a phone (#259)', async () => {

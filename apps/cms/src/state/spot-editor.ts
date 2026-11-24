@@ -128,6 +128,10 @@ export interface SpotEditorSlice {
   /** The stage scrolled into view or out of it. */
   seeStage: (inView: boolean) => void;
   openNewSpot: (open: boolean) => void;
+  /** New spot from a template in the empty Spots page's gallery (#362): that version picked, and focus back on its card when the dialog closes. */
+  startSpotFrom: (templateVersionId: string) => void;
+  /** New spot closed (its `onCloseAutoFocus`): back to the gallery card that opened it; else Radix returns focus to its trigger. */
+  newSpotFocusBack: (e: Event) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft and opens its editor. */
   createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
@@ -211,6 +215,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
   let hearing = false;
+  /** The gallery card that opened New spot: outside state, nothing renders it. */
+  let galleryCard: Element | null = null;
 
   const savedSpot = (orgId: string, spotId: string) => queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
 
@@ -412,7 +418,21 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       void redraw();
     },
 
-    openNewSpot: (open) => editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() })),
+    openNewSpot: (open) => {
+      if (open) galleryCard = null;
+      editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() }));
+    },
+    startSpotFrom(templateVersionId) {
+      galleryCard = document.activeElement;
+      editor((e) => ({ ...e, newSpot: { ...newSpotDraft(), open: true, templateVersionId } }));
+    },
+    newSpotFocusBack(e) {
+      const card = galleryCard;
+      galleryCard = null;
+      if (!(card instanceof HTMLElement) || !card.isConnected) return;
+      e.preventDefault();
+      card.focus();
+    },
     editNewSpot: (change) => editor((e) => ({ ...e, newSpot: { ...e.newSpot, ...change, error: null } })),
 
     async createSpot(orgId, start) {

@@ -11,7 +11,7 @@ import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { SpotThumb, TemplateThumb } from '~/components/spots/template-thumb';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { ASK_AN_EDITOR, sectionFor } from '~/lib/sections';
-import { publishWord, spotWhat, type TemplateView, templatesByVersion, usableVersions, versionsById } from '~/lib/spots';
+import { publishWord, spotWhat, type TemplateView, usableVersions, versionsById } from '~/lib/spots';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -32,10 +32,7 @@ function SpotsPage() {
   const canManage = useCanManage();
   const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
-  const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
   const versions = versionsById(templates);
-  const templateOf = templatesByVersion(templates);
-  const assetsById = new Map(assets.map((a) => [a.id, a]));
 
   return (
     <div className="space-y-6">
@@ -48,7 +45,7 @@ function SpotsPage() {
           {spots.map((s) => (
             <li key={s.id}>
               <Link to="/spots/$spotId" params={{ spotId: s.id }} className={ROW_LINK}>
-                <SpotThumb spot={s} templateOf={templateOf} assets={assetsById} className="w-16 flex-none" />
+                <SpotThumb orgId={orgId} spot={s} className="w-16 flex-none" />
                 <RowText title={s.name}>
                   {spotWhat(s, versions)} · {publishWord(s)}
                 </RowText>
@@ -74,8 +71,7 @@ function SpotsPage() {
 
 /** No spots yet: the templates to start from, each opening New spot with it picked. Outlined tiles: New spot above is the page's filled button. */
 function Gallery({ templates }: { templates: TemplateView[] }) {
-  const open = useAppStore((s) => s.openNewSpot);
-  const edit = useAppStore((s) => s.editNewSpot);
+  const start = useAppStore((s) => s.startSpotFrom);
   return (
     <section aria-labelledby="gallery-title" className="space-y-4">
       <div className="space-y-1">
@@ -85,18 +81,15 @@ function Gallery({ templates }: { templates: TemplateView[] }) {
         <p className="text-sm text-muted-foreground">Each opens New spot with it picked. A spot is a draft until you publish it.</p>
       </div>
       <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        {usableVersions(templates).map(({ template, version }) => (
+        {usableVersions(templates).map(({ version }) => (
           <li key={version.id}>
             <button
               type="button"
-              onClick={() => {
-                open(true);
-                edit({ templateVersionId: version.id });
-              }}
+              onClick={() => start(version.id)}
               className="flex w-full flex-col gap-2 rounded-xl border bg-card p-2 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <TemplateThumb template={template} />
-              <span className="line-clamp-2 px-1 pb-1">{template.name}</span>
+              <TemplateThumb version={version} />
+              <span className="line-clamp-2 px-1 pb-1">{version.manifest.name}</span>
             </button>
           </li>
         ))}

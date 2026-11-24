@@ -109,7 +109,8 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await expect(latest).toContainText('v4');
   await expect(latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ })).toBeVisible({ timeout: 30_000 });
   // Its tile shows the template the player drew and the template's name, not its key or a hash (#362).
-  const thumb = page.getByRole('img', { name: 'Should be showing: Deal' });
+  // It took the publish, so its tile says Playing, not Updating to (#362).
+  const thumb = page.getByRole('img', { name: 'Playing: Deal' });
   await expect(thumb.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
   await expect(page.getByRole('main')).not.toContainText('base/clock@');
   await expect(page.getByRole('listitem').filter({ has: thumb })).toContainText('Clock');
