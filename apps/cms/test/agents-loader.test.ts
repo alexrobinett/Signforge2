@@ -12,7 +12,9 @@ import { all, tool } from '../src/server/tools.server';
 vi.mock('@tanstack/react-start', () => ({
   createServerFn: () => ({
     handler: (run: (ctx: object) => unknown) => () => run({}),
-    validator: (check: (v: unknown) => unknown) => ({ handler: (run: (ctx: { data: unknown }) => unknown) => (ctx: { data: unknown }) => run({ data: check(ctx.data) }) }),
+    validator: (check: (v: unknown) => unknown) => ({
+      handler: (run: (ctx: { data: unknown }) => unknown) => (ctx: { data: unknown }) => run({ data: check(ctx.data) }),
+    }),
   }),
 }));
 vi.mock('@tanstack/react-start/server', () => ({ getRequest: () => new Request('https://cms.test/settings/api') }));
