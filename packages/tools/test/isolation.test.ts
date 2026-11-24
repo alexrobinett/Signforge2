@@ -260,7 +260,11 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
       ['publish', { drafts: pins }],
       ['request_publish', { drafts: pins, reason: 'Weekend hours' }],
     ] as const) {
-      expect(await dispatch(registry, name, input, callerB), name).toMatchObject({ ok: false, error: 'conflict', details: { id: s.a.templateSpot, version: 0 } });
+      expect(await dispatch(registry, name, input, callerB), name).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        details: { id: s.a.templateSpot, version: 0 },
+      });
     }
   });
 

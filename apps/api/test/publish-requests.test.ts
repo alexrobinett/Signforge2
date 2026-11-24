@@ -42,10 +42,10 @@ describe('an agent asks over /mcp, a person approves', () => {
     const requestId: string = asked.structuredContent.request.id;
     expect(asked.structuredContent.request).toMatchObject({ status: 'pending', requestedBy: { kind: 'agent', id: grantId } });
 
-    const { request, published: made } = await t.owner.ok<{ request: { status: string; publishId: string }; published: { promoted: unknown[]; publish: { id: string } } }>(
-      '/api/tools/approve_publish_request',
-      { publishRequestId: requestId },
-    );
+    const { request, published: made } = await t.owner.ok<{
+      request: { status: string; publishId: string };
+      published: { promoted: unknown[]; publish: { id: string } };
+    }>('/api/tools/approve_publish_request', { publishRequestId: requestId });
     expect(made.promoted).toEqual([{ kind: 'spot', id: spotId }]);
     expect(request).toMatchObject({ status: 'approved', publishId: made.publish.id });
     const org = scoped(env.DB, t.org.id);
@@ -88,7 +88,10 @@ describe('who publishes', () => {
     const requestId: string = (await ask(token, spotId, version)).structuredContent.request.id;
     const { access_token } = await agentToken(t.t, t.owner, t.org.id, ['content:read', 'content:draft', 'content:publish']);
     for (const name of ['approve_publish_request', 'decline_publish_request']) {
-      expect(await mcpTool(access_token, name, { publishRequestId: requestId }), name).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
+      expect(await mcpTool(access_token, name, { publishRequestId: requestId }), name).toMatchObject({
+        isError: true,
+        structuredContent: { error: 'forbidden' },
+      });
     }
     expect((await scoped(env.DB, t.org.id).publishRequests.get(requestId))!.status).toBe('pending');
   });

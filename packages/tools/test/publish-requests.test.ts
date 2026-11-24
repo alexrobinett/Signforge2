@@ -99,9 +99,15 @@ describe('an agent asks, a person approves', () => {
     const decided = rows.find((e) => e.action === 'approve_publish_request')!;
     expect(asked).toMatchObject({ actorKind: 'agent', actorId: o.agentGrant, clientId: 'agent-app', targetKind: 'publish_request' });
     expect(decided).toMatchObject({ actorKind: 'user', actorId: `${o.orgId}-owner`, targetKind: 'publish_request' });
-    expect(JSON.parse(decided.detailJson!).detail).toEqual({ requestedBy: { kind: 'agent', id: o.agentGrant, clientId: 'agent-app' }, publishId: made.publish.id });
+    expect(JSON.parse(decided.detailJson!).detail).toEqual({
+      requestedBy: { kind: 'agent', id: o.agentGrant, clientId: 'agent-app' },
+      publishId: made.publish.id,
+    });
     // The agent learns the outcome.
-    expect((await call(agent(), 'get_publish_request', { publishRequestId: request.id })).request).toMatchObject({ status: 'approved', publishId: made.publish.id });
+    expect((await call(agent(), 'get_publish_request', { publishRequestId: request.id })).request).toMatchObject({
+      status: 'approved',
+      publishId: made.publish.id,
+    });
   });
 
   it('refuses the approval as a conflict when a pinned draft changed since, publishes nothing, and leaves it pending', async () => {
@@ -137,7 +143,9 @@ describe('an agent asks, a person approves', () => {
     const org = testScope(env.DB, o.orgId);
     const row = (await org.publishRequests.get(o.publishRequest))!;
     await org.commit(org.publishRequests.stage.decide(row, { status: 'declined', by: 'user-1', now: 1 }).writes);
-    await expect(org.commit(org.publishRequests.stage.decide(row, { status: 'approved', by: 'user-2', now: 2 }).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    await expect(org.commit(org.publishRequests.stage.decide(row, { status: 'approved', by: 'user-2', now: 2 }).writes)).rejects.toBeInstanceOf(
+      StaleVersionError,
+    );
     expect(await org.publishRequests.get(o.publishRequest)).toMatchObject({ status: 'declined', decidedBy: 'user-1' });
   });
 });

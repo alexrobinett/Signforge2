@@ -61,7 +61,10 @@ async function checkPins(org: OrgScope, pins: readonly DraftPin[]) {
   for (const p of pins) {
     const now = rows[p.kind].find((r) => r.id === p.id)?.rowVersion ?? 0;
     if (now !== p.version) {
-      throw new ToolError('conflict', `${p.kind.replace('_', ' ')} ${p.id} is not at version ${p.version}; it is now version ${now}`, { id: p.id, version: now });
+      throw new ToolError('conflict', `${p.kind.replace('_', ' ')} ${p.id} is not at version ${p.version}; it is now version ${now}`, {
+        id: p.id,
+        version: now,
+      });
     }
   }
 }
@@ -237,7 +240,8 @@ const approvePublishRequest = defineTool({
 
 const declinePublishRequest = defineTool({
   name: 'decline_publish_request',
-  description: 'Decline a publish request: nothing is published, and the asker sees it declined. Refused with a conflict if it is no longer pending. People only. Returns { request }.',
+  description:
+    'Decline a publish request: nothing is published, and the asker sees it declined. Refused with a conflict if it is no longer pending. People only. Returns { request }.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
