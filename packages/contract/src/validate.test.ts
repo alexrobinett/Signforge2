@@ -1330,10 +1330,42 @@ describe('network check', () => {
       expect(problems(html), html).toEqual(refused);
   });
 
+  // A comment marker in a string must not open a comment that hides the rule between it and the next one.
+  it('refuses a network address between comment markers that are not a comment', () => {
+    const fetched = '.b{background-image:image-set("//t.example/p.gif" 1x)}';
+    for (const css of [
+      `.a{content:"/*"}${fetched}.c{content:"*/"}`,
+      `.a{content:'/*'}${fetched}.c{content:'*/'}`,
+      `.a{content:"\\"/*"}${fetched}.c{content:"*/"}`,
+      `.a{content:"\\\\"}/*"}${fetched}.c{content:"*/"}`,
+      // An unterminated string ends at the line's end, its /* with it.
+      `.a{content:"/*\n}${fetched}.c{content:"*/"}`,
+      `.a{content:"x\\\n/*"}${fetched}.c{content:"*/"}`,
+      // Escaped outside a string, a quote starts none.
+      `.a{x:\\"a"/*\n}${fetched}.c{content:"*/"}`,
+      // In an unquoted url(), and in one whose name is escaped, /* is part of the address.
+      `.a{background:url(/*)}${fetched}.c{background:url(*/)}`,
+      `.a{background:u\\72l(/*)}${fetched}.c{background:url(*/)}`,
+    ])
+      expect(problems(`<style>${css}</style>`), css).toEqual(refused);
+    // HTML ends a style element at `</style ` too, and an attribute may hold a quote.
+    expect(problems(`<style title='">'>.a{content:" /*"}${fetched}.c{content:"*/"}</style>`)).toEqual(refused);
+  });
+
   it('passes data: URLs, paths, and network addresses in comments, such as a font licence notice', () => {
     expect(problems('<style>.b{background:url(data:image/png;base64,AA==)}</style><img src="a.png"><a href="#x">')).toEqual([]);
-    const notice = '/*! Copyright 2022 The Inter Project Authors (https://github.com/rsms/inter-tight)\n   see "https://openfontlicense.org" */';
+    const notice =
+      '/*! Inter: Copyright 2022 The Inter Project Authors (https://github.com/rsms/inter-tight)\n   "Font Software" is licensed under the SIL Open Font License, Version 1.1: http://scripts.sil.org/OFL */';
     expect(problems(`<style>${notice}.b{content:"a"}.c{background-image:image-set("p.png" 1x)}</style>`)).toEqual([]);
+    expect(problems(`<style>.a{content:"/*"}${notice}.c{content:"*/"}</style>`)).toEqual([]);
+    // A path, read whole: no comment is cut out of a string.
+    expect(problems('<style>.a{background-image:image-set("/*x*///p.png" 1x)}</style>')).toEqual([]);
+  });
+
+  // Where reading CSS by pattern and the browser disagree on what is a comment, a quoted address stays in sight.
+  it('checks a comment that quotes a network address, and refuses decorative text that starts with //', () => {
+    expect(problems('<style>/* see "https://openfontlicense.org" */</style>')).toEqual(refused);
+    expect(problems('<style>.live::before{content:"// live"}</style>')).toEqual(refused);
   });
 });
 
