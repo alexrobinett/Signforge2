@@ -212,7 +212,12 @@ const checkPublishRequestResult = z.object({
     .nullable()
     .describe('The playlist approving it would make the default, as a publish makes the first one (#243); null if none'),
   liveOn: z
-    .array(z.object({ spotId: z.string(), screens: z.number().int().describe('Screens playing it now: in a published playlist their published schedule or the default plays') }))
+    .array(
+      z.object({
+        spotId: z.string(),
+        screens: z.number().int().describe('Screens playing it now: in a published playlist their published schedule or the default plays'),
+      }),
+    )
     .describe('Each pinned spot, and how many screens play its published version now'),
   held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Pinned drafts that fail their checks: approving publishes none of them'),
   samples: z

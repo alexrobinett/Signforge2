@@ -301,7 +301,9 @@ const approvePublishRequest = defineTool({
     ifDefault: id('playlist')
       .nullable()
       .optional()
-      .describe("check_publish_request's defaultPlaylistId: approve only while it is the default (null: while there is none). Refused with a conflict otherwise"),
+      .describe(
+        "check_publish_request's defaultPlaylistId: approve only while it is the default (null: while there is none). Refused with a conflict otherwise",
+      ),
   }),
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },
@@ -406,7 +408,7 @@ const reopenPublishRequest = defineTool({
     if (refused) throw refused;
     const reopened = write(org.publishRequests.stage.reopen(row, now, MAX_PENDING));
     return { request: view(reopened, now, await namesOf(org, [reopened])) };
-  },  // Its batch refused as it ran: asked again, or decided, or the right to decide it lost, meanwhile.
+  }, // Its batch refused as it ran: asked again, or decided, or the right to decide it lost, meanwhile.
   refuseFailedCommit: async ({ org, input, actor }) => {
     const now = Date.now();
     const row = await org.publishRequests.get(input.publishRequestId);
@@ -456,7 +458,12 @@ function screensPlaying(graph: OrgGraph, spotId: string, now: number): number {
   return graph.screens.filter(
     (s) =>
       defaultPlays ||
-      entries.some((e) => e.target === 'org' || (e.target === 'screen' && e.screenId === s.id) || (e.target === 'group' && (graph.groupsOf.get(s.id) ?? []).includes(e.groupId ?? ''))),
+      entries.some(
+        (e) =>
+          e.target === 'org' ||
+          (e.target === 'screen' && e.screenId === s.id) ||
+          (e.target === 'group' && (graph.groupsOf.get(s.id) ?? []).includes(e.groupId ?? '')),
+      ),
   ).length;
 }
 

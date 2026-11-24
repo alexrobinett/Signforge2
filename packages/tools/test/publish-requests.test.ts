@@ -179,7 +179,14 @@ describe('who decides', () => {
     const version = await editSpot(person('editor'), o.imageSpot, 9_000);
     expect(await dispatch(registry, 'publish', {}, person('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
     const { request } = await ask(person('editor'), [{ kind: 'spot', id: o.imageSpot, version }]);
-    expect(request.requestedBy).toEqual({ kind: 'user', id: `${o.orgId}-editor`, clientId: 'cms', name: `editor of ${o.orgId}`, connectedBy: null, gone: false });
+    expect(request.requestedBy).toEqual({
+      kind: 'user',
+      id: `${o.orgId}-editor`,
+      clientId: 'cms',
+      name: `editor of ${o.orgId}`,
+      connectedBy: null,
+      gone: false,
+    });
     await call(person('owner'), 'update_org_settings', { editorsPublish: true });
     expect(await approve('editor')).toMatchObject({ ok: true });
   });
@@ -587,7 +594,7 @@ describe('putting a declined request back (#115)', () => {
     expect((await scope().publishRequests.get(id))!.status).toBe('declined');
   });
 
-  it('refuses once the same drafts were asked for again since, and at the asker\'s cap: one request waits for the drafts, never two', async () => {
+  it("refuses once the same drafts were asked for again since, and at the asker's cap: one request waits for the drafts, never two", async () => {
     const id = await declined(person('owner'));
     const pin = JSON.parse((await scope().publishRequests.get(id))!.draftsJson);
     const { request: again } = await ask(agent(), pin);
@@ -608,7 +615,7 @@ describe('putting a declined request back (#115)', () => {
     expect((await scope().publishRequests.get(id))!.status).toBe('declined');
   });
 
-  it("holds the right to decide to the commit when another person put it back: one demoted meanwhile is refused", async () => {
+  it('holds the right to decide to the commit when another person put it back: one demoted meanwhile is refused', async () => {
     const id = await declined(person('owner'));
     // The editor did not decline it: they may put it back only while they may decide it, checked again in the batch.
     const raced = racing(person('editor'), () => call(person('owner'), 'update_org_settings', { editorsPublish: false }));
