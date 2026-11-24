@@ -330,11 +330,14 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   const skipped: string[] = [];
   const listen = (m: { text(): string }) => m.text().includes('[sf] skipped') && skipped.push(m.text());
   page.on('console', listen);
-  // The drafts the player is sent, counted in its frame. In every frame: the player's frame starts as about:blank,
-  // where this runs, and keeps its window when the player loads; only the player is ever sent a draft.
+  // Each draft the player is sent, as it arrives: whether its frame was in the page's window then. In every frame:
+  // the player's frame starts as about:blank, where this runs, and keeps its window when the player loads; only it is sent drafts.
   await page.addInitScript(() => {
     addEventListener('message', (e) => {
-      if (e.data?.type === 'draft') Reflect.set(window, 'sfDrafts', Number(Reflect.get(window, 'sfDrafts') ?? 0) + 1);
+      if (e.data?.type !== 'draft') return;
+      const box = window.frameElement?.getBoundingClientRect();
+      const inView = box !== undefined && box.bottom > 0 && box.top < window.parent.innerHeight;
+      Reflect.set(window, 'sfDrafts', [...(Reflect.get(window, 'sfDrafts') ?? []), inView]);
     });
   });
   await page.goto(`/spots/${spot.id}`);
@@ -343,14 +346,14 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   const stage = page.getByRole('region', { name: 'Live preview' });
   expect(await stage.evaluate((el) => el.getBoundingClientRect().top > innerHeight)).toBe(true);
   const player = () => page.frames().find((f) => f.url().includes('/player/'));
-  const drafts = async () => Number((await player()?.evaluate(() => Reflect.get(window, 'sfDrafts') ?? 0)) ?? 0);
-  // The player is listening, and nothing has been sent it out of view.
+  const drafts = async () => (await player()?.evaluate(() => Reflect.get(window, 'sfDrafts') ?? [])) ?? [];
   await expect(stage.getByText('Drawing…').first()).toBeAttached();
-  expect(await drafts()).toBe(0);
   await stage.scrollIntoViewIfNeeded();
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
-  // One draft in all, sent once the stage was in view: none was sent while it was out of view.
-  expect(await drafts()).toBe(1);
+  // Every draft the player was sent arrived with its frame in view: none while it was below the fold.
+  const arrived = await drafts();
+  expect(arrived.length).toBeGreaterThan(0);
+  expect(arrived.every(Boolean)).toBe(true);
   page.off('console', listen);
   expect(skipped).toEqual([]);
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -419,6 +422,24 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
   release();
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await page.unroute('**/player/index.html*');
+
+  // The editor, not the window, decides: at 1024 with the agent's drawer open the stage stacks under the form, at full width.
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const stacked = await stage.evaluate((el) => {
+    const form = document.querySelector('form[aria-label="Spot fields"]')!.getBoundingClientRect();
+    const own = el.getBoundingClientRect();
+    return own.top >= form.bottom - 1 && own.width >= form.width - 1;
+  });
+  expect(stacked).toBe(true);
+  await page.getByRole('button', { name: 'Close the agent' }).click();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // At 100% the screen scrolls inside the stage: the stage's status stays in the window.
+  await page.getByRole('group', { name: 'Scale' }).getByRole('button', { name: '100%' }).click();
+  const status = stage.getByRole('status');
+  await expect(status).toBeInViewport();
+  expect(await status.evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight)).toBe(true);
+  await page.getByRole('group', { name: 'Scale' }).getByRole('button', { name: 'Fit' }).click();
 
   // Unfolded here, it stays open on this visit, and the stage stays beside the form; the list keeps the person's own choice.
   await page.getByRole('button', { name: 'Unfold the sidebar' }).click();

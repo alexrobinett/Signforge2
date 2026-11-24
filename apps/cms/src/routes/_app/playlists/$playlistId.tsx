@@ -13,7 +13,7 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -145,7 +145,7 @@ function PlaylistEditor() {
   const kitId = search.kit ?? brandKits.find((k) => k.isDefault)?.id ?? null;
 
   return (
-    <div className="flex min-h-(--editor-height) flex-col overflow-clip rounded-xl border">
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/playlists', label: 'Playlists' }}
         title={draft.name || playlist.name}

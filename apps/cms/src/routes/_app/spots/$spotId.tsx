@@ -20,7 +20,7 @@ import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton,
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
-import { EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import {
   AlertDialog,
@@ -129,7 +129,7 @@ function SpotEditor() {
 
   return (
     // Clipped, not hidden: an overflow-hidden box is a scroll container, so the review's action bar would stick to it, not the page.
-    <div className="flex min-h-(--editor-height) flex-col overflow-clip rounded-xl border">
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/spots', label: 'Spots' }}
         title={draft.name || spot.name}

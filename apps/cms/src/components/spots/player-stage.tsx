@@ -69,13 +69,15 @@ function Toggle<T extends string>({
 }
 
 /**
- * An editor's form and stage (#363). On a phone the stage follows the form. From `lg` they sit side
- * by side, never wrapping: the form a fixed width, the stage the rest, staying in view as the form
- * scrolls and filling the editor's height, so it is sticky only where it is beside the form.
+ * An editor's frame, form and stage (#363). The frame is a container: the form and the stage sit side
+ * by side only while the editor itself is wide enough for both (`@3xl`, 48rem), whatever the window, so an
+ * open agent drawer stacks them as a phone does. Side by side, the form is a fixed width and the stage the
+ * rest, sticky and the editor's height, so it stays in view as the form scrolls.
  */
-export const EDITOR_ROW = 'flex flex-1 flex-col lg:flex-row';
-export const EDITOR_FORM = 'flex min-w-0 flex-col border-b bg-card lg:w-sm lg:shrink-0 lg:border-r lg:border-b-0';
-export const STAGE_COLUMN = 'flex min-w-0 flex-1 flex-col bg-stage lg:sticky lg:top-0 lg:h-(--editor-height) lg:self-start';
+export const EDITOR = '@container flex min-h-(--editor-height) flex-col overflow-clip rounded-xl border';
+export const EDITOR_ROW = 'flex flex-1 flex-col @3xl:flex-row';
+export const EDITOR_FORM = 'flex min-w-0 flex-col border-b bg-card @3xl:w-sm @3xl:shrink-0 @3xl:border-r @3xl:border-b-0';
+export const STAGE_COLUMN = 'flex min-w-0 flex-1 flex-col bg-stage @3xl:sticky @3xl:top-0 @3xl:h-(--editor-height) @3xl:self-start';
 
 export function PlayerStage({
   target,
@@ -149,8 +151,19 @@ export function PlayerStage({
     [measure],
   );
 
+  // Until the first frame: what a spot of this template looks like, dimmed, and that it is drawing, or why it is not (#363).
+  // The status line below says the same to a screen reader.
+  const waiting = !playing && !stageError && (
+    <div aria-hidden className="absolute inset-0 grid place-items-center bg-stage p-6">
+      {thumbnail && <img src={thumbnail} alt="" className="absolute inset-0 size-full object-cover opacity-40" />}
+      <span className="relative max-w-prose rounded-xl bg-stage-control px-4 py-2 text-center text-base font-medium text-stage-foreground">
+        {holding ? (refusals.length ? refusals.map((r) => `${r}.`).join(' ') : 'Not shown yet: fix the marked field.') : 'Drawing…'}
+      </span>
+    </div>
+  );
+
   return (
-    <section aria-label="Live preview" className="flex min-w-0 flex-1 flex-col gap-3.5 bg-stage px-4 pt-4 pb-7 text-stage-foreground sm:px-8">
+    <section aria-label="Live preview" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 bg-stage px-4 pt-4 pb-7 text-stage-foreground sm:px-8">
       <div className="flex flex-wrap items-center gap-3">
         <Toggle
           label="Orientation"
@@ -205,37 +218,32 @@ export function PlayerStage({
         The draft, as a screen would show it. Screens play what is published.
       </p>
       {/* The room is sized by the page, never by the frame in it, so Fit can measure it. The frame sits at its top, in the first viewport. */}
-      <div ref={roomRef} className={cn('relative min-h-105 flex-1 lg:min-h-0', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>
-        <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
-          <div
-            className="relative shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-stage-edge"
-            style={{ width: size.w * shown, height: size.h * shown }}
-          >
-            {/* A new frame per orientation: the player sizes itself to its window when it starts. */}
-            {hydrated && (
-              <iframe
-                key={orientation}
-                ref={frameRef}
-                title={`Preview, ${orientation}, as screens show it`}
-                src={PLAYER_URL}
-                width={size.w}
-                height={size.h}
-                className="origin-top-left border-0"
-                style={{ transform: `scale(${shown})`, visibility: box ? 'visible' : 'hidden' }}
-              />
-            )}
-            {/* Until the first frame: what a spot of this template looks like, dimmed, and that it is drawing, or why it is not (#363).
-                The status line below says the same to a screen reader. */}
-            {!playing && !stageError && (
-              <div aria-hidden className="absolute inset-0 grid place-items-center bg-stage p-6">
-                {thumbnail && <img src={thumbnail} alt="" className="absolute inset-0 size-full object-cover opacity-40" />}
-                <span className="relative max-w-prose rounded-xl bg-stage-control px-4 py-2 text-center text-base font-medium text-stage-foreground">
-                  {holding ? (refusals.length ? refusals.map((r) => `${r}.`).join(' ') : 'Not shown yet: fix the marked field.') : 'Drawing…'}
-                </span>
-              </div>
-            )}
+      {/* At 100% the room scrolls inside the stage, never past it (at most the editor's height), and what it says while it waits stays in its visible part. */}
+      <div className="relative flex min-h-105 flex-1 flex-col @3xl:min-h-0">
+        <div ref={roomRef} className={cn('relative min-h-0 flex-1', scale === 'actual' ? 'max-h-(--editor-height) overflow-auto' : 'overflow-hidden')}>
+          <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
+            <div
+              className="relative shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-stage-edge"
+              style={{ width: size.w * shown, height: size.h * shown }}
+            >
+              {/* A new frame per orientation: the player sizes itself to its window when it starts. */}
+              {hydrated && (
+                <iframe
+                  key={orientation}
+                  ref={frameRef}
+                  title={`Preview, ${orientation}, as screens show it`}
+                  src={PLAYER_URL}
+                  width={size.w}
+                  height={size.h}
+                  className="origin-top-left border-0"
+                  style={{ transform: `scale(${shown})`, visibility: box ? 'visible' : 'hidden' }}
+                />
+              )}
+              {scale !== 'actual' && waiting}
+            </div>
           </div>
         </div>
+        {scale === 'actual' && waiting}
       </div>
       <p className="flex flex-wrap justify-between gap-3 text-sm text-stage-muted-foreground">
         {/* The player's own error first: it is what the screen shows, whatever the draft. Said politely as it changes. */}
