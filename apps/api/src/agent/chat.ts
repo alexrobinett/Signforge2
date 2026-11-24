@@ -145,6 +145,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   start_takeover: { title: 'Takeover', did: 'Took over the screens' },
   end_takeover: { title: 'End takeover', did: 'Ended the takeover' },
   delete_playlist: { title: 'Delete playlist', did: 'Deleted a playlist' },
+  cancel_invitation: { title: 'Cancel an invitation', did: 'Cancelled an invitation' },
   delete_schedule_entry: { title: 'Remove schedule entry', did: 'Removed a schedule entry' },
   revoke_screen_credential: { title: 'Revoke credential', did: "Revoked a screen's credential" },
   set_display_override: { title: 'Display on or off', did: "Set a screen's display" },
@@ -608,8 +609,10 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       }
       /**
        * The run paused at a tool behind a card (#269): the card, read from the org now, its record kept
-       * under a one-use token for this member (none when they may not press it: `why` says who may),
-       * then the run's end, without its pause: the press sends the token, and the API resumes the call here.
+       * under a one-use token for this member, then the run's end, without its pause: the press sends the
+       * token, and the API resumes the call here. A member who may not press it gets its title and who may,
+       * and nothing is read for it: a card can name what their role does not show them, as an invitee's
+       * address (review of #414).
        */
       async function* paused(asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
         const [one] = asked;
@@ -618,6 +621,15 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         const confirmable = CONFIRMABLE[name];
         if (asked.length !== 1 || !one?.toolCallId || !confirmable || typeof called !== 'object' || called === null || Array.isArray(called)) {
           yield ended('unreadable', 'The agent asked for more than one thing to press at once. Ask for one at a time.');
+          return;
+        }
+        const expiresAt = now() + CONFIRM_MS;
+        const why = whyNot(grant, name);
+        if (why) {
+          const title = TOOL_CARDS[name]?.title ?? '';
+          const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt };
+          yield { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: refused satisfies ConfirmCard, timestamp: Date.now() };
+          yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
           return;
         }
         const input = Object.fromEntries(Object.entries(called));
@@ -630,29 +642,26 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           yield ended('unreadable', `The agent asked for something it cannot show on a card: ${err.message}. Ask again.`);
           return;
         }
-        const why = whyNot(grant, name);
-        const expiresAt = now() + CONFIRM_MS;
-        const token = why ? null : crypto.randomUUID();
-        if (token) {
-          // For the audit row: never a line naming what dispatch redacts there (a provider's resource).
-          const summary = `${made.card.title}: ${made.card.lines.filter((l) => !made.withheld?.includes(l)).join(' ')}`;
-          const record: Confirmation = {
-            member,
-            name,
-            calledJson: JSON.stringify(input),
-            inputJson: JSON.stringify(made.input),
-            runId,
-            toolCallId: one.toolCallId,
-            summary,
-            expiresAt,
-            spent: { calls, statements: budget.statements, fetches: budget.fetches, elapsedMs: now() - start },
-          };
-          await turns.offerConfirmation(token, record, now());
-        }
+        const token = crypto.randomUUID();
+        // For the audit row: never a line naming what the audit log redacts (a provider's resource, an invitee's address).
+        const kept = made.card.lines.filter((l) => !made.withheld?.includes(l));
+        const summary = kept.length ? `${made.card.title}: ${kept.join(' ')}` : made.card.title;
+        const record: Confirmation = {
+          member,
+          name,
+          calledJson: JSON.stringify(input),
+          inputJson: JSON.stringify(made.input),
+          runId,
+          toolCallId: one.toolCallId,
+          summary,
+          expiresAt,
+          spent: { calls, statements: budget.statements, fetches: budget.fetches, elapsedMs: now() - start },
+        };
+        await turns.offerConfirmation(token, record, now());
         yield {
           type: 'CUSTOM',
           name: CHAT_EVENTS.confirm,
-          value: { ...made.card, tool: name, token, why, expiresAt } satisfies ConfirmCard,
+          value: { ...made.card, tool: name, token, why: null, expiresAt } satisfies ConfirmCard,
           timestamp: Date.now(),
         };
         // The run's end, without its pause: the browser gets the card and its token, never the model's input; the press resumes it here.

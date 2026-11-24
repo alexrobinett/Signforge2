@@ -1,22 +1,39 @@
 // Member tools (#108): who may call them, what an agent may do, and that a change asks Better
 // Auth (`Members`, faked here) only about a row of the caller's org. The changes themselves, with
-// Better Auth's rules and audit rows, are tested in apps/api/test/member-tools.test.ts.
-import { scoped } from '@signforge/db';
+// Better Auth's rules and audit rows, are tested in apps/api/test/member-tools.test.ts. Cancelling
+// writes through the org's scope with no session, so an agent may cancel; inviting is a person's (#321).
+import { scoped, type Write } from '@signforge/db';
 import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, ROLES, type AgentLimiter, type Caller, type Members, type Role, type Scope } from '../src';
 import { outputs } from '../src/outputs';
+import { racing } from './calls';
 import { fakeServices } from './services';
 
 let o: SeededOrg;
 let other: SeededOrg;
+let inviter: string;
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'members-org');
   other = await seedOrg(env.DB, 'members-other');
-  await seedTeam(env.DB, o.orgId);
+  inviter = (await seedTeam(env.DB, o.orgId)).userId;
   await seedTeam(env.DB, other.orgId);
 });
+
+let invitations = 0;
+/** A pending invitation of the org's, of its own: a cancel really cancels one. */
+async function pending() {
+  const id = `${o.orgId}-inv-${++invitations}`;
+  const now = new Date(0).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO invitation (id, organizationId, email, role, status, expiresAt, createdAt, inviterId) VALUES (?, ?, ?, 'viewer', 'pending', ?, ?, ?)",
+  )
+    .bind(id, o.orgId, `${id}@signforge.test`, new Date(Date.UTC(2100, 0)).toISOString(), now, inviter)
+    .run();
+  return id;
+}
+const statusOf = async (id: string) => (await scoped(env.DB, o.orgId).invitations.get(id))?.status;
 
 /** A `Members` that records what it is asked. */
 function recorder() {
@@ -26,7 +43,6 @@ function recorder() {
       asked.push(['invite', email, role]);
       return fakeServices.members.invite(email, role);
     },
-    cancelInvitation: async (id) => void asked.push(['cancelInvitation', id]),
     updateRole: async (id, role) => void asked.push(['updateRole', id, role]),
     remove: async (id) => void asked.push(['remove', id]),
   };
@@ -69,7 +85,12 @@ describe('an owner', () => {
       ok: true,
       output: { invitation: { email: 'sam@example.com', role: 'owner', status: 'pending' } },
     });
-    expect(await dispatch(registry, 'cancel_invitation', { invitationId: invitation() }, owner)).toEqual({ ok: true, output: { canceled: invitation() } });
+    const id = await pending();
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, owner)).toEqual({
+      ok: true,
+      output: { canceled: id, email: `${id}@signforge.test` },
+    });
+    expect(await statusOf(id)).toBe('canceled');
     expect(await dispatch(registry, 'update_member_role', { memberId: member(), role: 'owner' }, owner)).toMatchObject({
       ok: true,
       output: { member: { id: member(), role: 'owner' } },
@@ -77,7 +98,6 @@ describe('an owner', () => {
     expect(await dispatch(registry, 'remove_member', { memberId: member() }, owner)).toEqual({ ok: true, output: { removed: member() } });
     expect(asked).toEqual([
       ['invite', 'sam@example.com', 'owner'],
-      ['cancelInvitation', invitation()],
       ['updateRole', member(), 'owner'],
       ['remove', member()],
     ]);
@@ -120,30 +140,107 @@ describe('an editor and a viewer', () => {
 describe("an owner's agent", () => {
   const manager = { scopes: ['content:read', 'org:manage'] satisfies Scope[] };
 
-  it('lists, invites a viewer or an editor, and cancels', async () => {
+  it('lists and cancels a pending invitation, as its member, audited as the agent with its client (#321)', async () => {
     const { asked, members } = recorder();
     const agent = as('owner', members, manager);
     expect((await dispatch(registry, 'list_members', {}, agent)).ok).toBe(true);
     expect((await dispatch(registry, 'list_invitations', {}, agent)).ok).toBe(true);
-    for (const role of ['viewer', 'editor'] as const) {
-      expect((await dispatch(registry, 'invite_member', { email: `${role}@example.com`, role }, agent)).ok, role).toBe(true);
-    }
-    expect((await dispatch(registry, 'cancel_invitation', { invitationId: invitation() }, agent)).ok).toBe(true);
-    expect(asked).toEqual([
-      ['invite', 'viewer@example.com', 'viewer'],
-      ['invite', 'editor@example.com', 'editor'],
-      ['cancelInvitation', invitation()],
-    ]);
+    const id = await pending();
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, agent)).toMatchObject({ ok: true, output: { canceled: id } });
+    expect(await statusOf(id)).toBe('canceled');
+    const [row] = await scoped(env.DB, o.orgId).auditLog.list({ limit: 1 });
+    expect(row).toMatchObject({
+      action: 'cancel_invitation',
+      actorKind: 'agent',
+      actorId: 'agt_members',
+      clientId: 'agent-app',
+      targetKind: 'invitation',
+      targetId: id,
+    });
+    expect(JSON.parse(row!.detailJson!).detail).toEqual({ email: `${id}@signforge.test` });
+    // Cancelled already, or another org's: not found, and nothing changes there.
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, agent)).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: `${other.orgId}-invitation` }, agent)).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
+    expect(await scoped(env.DB, other.orgId).invitations.get(`${other.orgId}-invitation`)).toMatchObject({ status: 'pending' });
+    expect(asked).toEqual([]);
   });
 
-  it('never invites an owner, changes a role or removes a member', async () => {
-    const { asked, members } = recorder();
-    const agent = as('owner', members, manager);
-    expect(await dispatch(registry, 'invite_member', { email: 'boss@example.com', role: 'owner' }, agent)).toMatchObject({
+  it('cancels nothing once its member is no longer an owner, nor one accepted between its read and its batch', async () => {
+    const { members } = recorder();
+    const id = await pending();
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, as('editor', members, manager))).toMatchObject({
       ok: false,
       error: 'forbidden',
-      message: 'an agent may invite only a viewer or an editor',
     });
+    const base = as('owner', members, manager);
+    const org = base.org as typeof base.org & { commit: (w: readonly Write[]) => Promise<unknown> };
+    let raced = false;
+    const racing = {
+      ...base,
+      org: new Proxy(org, {
+        get: (t, k) =>
+          k === 'commit'
+            ? async (writes: readonly Write[]) => {
+                if (!raced) {
+                  raced = true;
+                  await env.DB.prepare("UPDATE invitation SET status = 'accepted' WHERE id = ?").bind(id).run();
+                }
+                return org.commit(writes);
+              }
+            : Reflect.get(t, k),
+      }),
+    };
+    expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, racing)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('accepted, rejected or cancelled meanwhile'),
+    });
+    expect(await statusOf(id)).toBe('accepted');
+  });
+
+  it('cancels nothing when its member is made an editor between its read and its batch: forbidden, not a conflict (review of #414)', async () => {
+    const { members } = recorder();
+    const id = await pending();
+    // Another owner first, as the org must keep one.
+    const now = new Date(0).toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        `${o.orgId}-second`,
+        'Second',
+        `${o.orgId}-second@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(
+        `${o.orgId}-member-2`,
+        o.orgId,
+        `${o.orgId}-second`,
+        now,
+      ),
+    ]);
+    const setRole = (role: Role) => env.DB.prepare('UPDATE member SET role = ? WHERE id = ?').bind(role, member()).run();
+    const demoted = racing({ ...as('owner', members, manager), member: inviter }, () => setRole('editor'));
+    try {
+      expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, demoted)).toMatchObject({ ok: false, error: 'forbidden' });
+    } finally {
+      await setRole('owner');
+    }
+    expect(await statusOf(id)).toBe('pending');
+  });
+
+  it('never invites, changes a role or removes a member', async () => {
+    const { asked, members } = recorder();
+    const agent = as('owner', members, manager);
+    // Inviting is a person's (#321): refused whatever the role.
+    for (const role of ['viewer', 'editor', 'owner'] as const)
+      expect(await dispatch(registry, 'invite_member', { email: `${role}@example.com`, role }, agent), role).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'invite_member is for people only: a person does it in the CMS',
+      });
     expect(await dispatch(registry, 'update_member_role', { memberId: member(), role: 'viewer' }, agent)).toMatchObject({ ok: false, error: 'forbidden' });
     expect(await dispatch(registry, 'remove_member', { memberId: member() }, agent)).toMatchObject({ ok: false, error: 'forbidden' });
     expect(asked).toEqual([]);
@@ -152,10 +249,10 @@ describe("an owner's agent", () => {
   it('refuses the in-CMS agent too, which acts as an owner but is an agent (re-check of #280)', async () => {
     const { asked, members } = recorder();
     const cmsAgent: Caller = { ...as('owner', members), actor: { kind: 'user', id: 'user-owner', clientId: 'cms-agent' } };
-    expect(await dispatch(registry, 'invite_member', { email: 'boss@example.com', role: 'owner' }, cmsAgent)).toMatchObject({
+    expect(await dispatch(registry, 'invite_member', { email: 'sam@example.com', role: 'viewer' }, cmsAgent)).toMatchObject({
       ok: false,
       error: 'forbidden',
-      message: 'an agent may invite only a viewer or an editor',
+      message: 'invite_member is for people only: a person does it in the CMS',
     });
     expect(await dispatch(registry, 'update_member_role', { memberId: member(), role: 'viewer' }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });
     expect(await dispatch(registry, 'remove_member', { memberId: member() }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });

@@ -193,8 +193,8 @@ function DraftsCard({ index }: { index: number }) {
 
 /**
  * A confirmation card (#269): what pressing it does, to what and until when, an address in full and
- * what fetches it, whether it can be undone; then the press, or who may press it. Nothing runs until
- * pressed, and it runs once.
+ * what fetches it, whether it can be undone; then the press. One who may not press it sees its title and
+ * who may. Nothing runs until pressed, and it runs once.
  */
 function ConfirmCardView({ index }: { index: number }) {
   const m = useAppStore((s) => s.agentDrawer.messages[index]);
@@ -206,23 +206,28 @@ function ConfirmCardView({ index }: { index: number }) {
   return (
     <section aria-label={card.title} className="flex flex-col gap-2 rounded-lg border border-status-updating bg-card p-3 text-sm">
       <p className="font-medium">{card.title}</p>
-      <ul className="flex flex-col gap-1">
-        {card.lines.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
+      {card.lines.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {card.lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      )}
       {card.address && (
         <div className="flex flex-col gap-1">
           <p className="text-muted-foreground">{card.address.fetches} fetches this address:</p>
           <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs break-all">{card.address.url}</code>
         </div>
       )}
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
-        <dt className="font-medium">When</dt>
-        <dd>{card.when}</dd>
-        <dt className="font-medium">Undo</dt>
-        <dd>{card.undo}</dd>
-      </dl>
+      {/* One who may not press it is told who may, and nothing of what it would do (review of #414). */}
+      {card.token && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
+          <dt className="font-medium">When</dt>
+          <dd>{card.when}</dd>
+          <dt className="font-medium">Undo</dt>
+          <dd>{card.undo}</dd>
+        </dl>
+      )}
       <p role="alert" className="font-medium text-destructive empty:hidden">
         {m.error}
       </p>
