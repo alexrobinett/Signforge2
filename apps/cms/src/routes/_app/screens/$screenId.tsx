@@ -5,6 +5,7 @@
  * Play on this screen and Take over this screen open the schedule's dialogs aimed at it, and
  * Scheduled here lists the entries that reach it (#181).
  */
+import { Badge } from '~/components/ui/badge';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
@@ -122,15 +123,11 @@ function ScreenPage() {
           </span>
         </nav>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
-          <h1 className="text-[28px] leading-tight font-semibold tracking-tight">{screen.name}</h1>
+          <h1 className="text-3xl leading-tight font-semibold tracking-tight">{screen.name}</h1>
           <span className="flex items-center gap-2">
             <ScreenStatus screen={screen} now={now} />
-            {screen.kind === 'browser' && (
-              <span className="rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground" title="The player in a browser tab">
-                Test screen
-              </span>
-            )}
-            {screen.lastSeenAt && <span className="text-[13px] text-muted-foreground">last heard {ago(now - screen.lastSeenAt)} ago</span>}
+            {screen.kind === 'browser' && <Badge title="The player in a browser tab">Test screen</Badge>}
+            {screen.lastSeenAt && <span className="text-meta text-muted-foreground">last heard {ago(now - screen.lastSeenAt)} ago</span>}
           </span>
           {canManage && !revoked && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
@@ -206,14 +203,14 @@ function ScreenPage() {
                 </DropdownMenu>
               </EditorFields>
               {!inTouch && (
-                <p id="restart-off" className="basis-full text-[13px] text-muted-foreground sm:text-right">
+                <p id="restart-off" className="basis-full text-meta text-muted-foreground sm:text-right">
                   Restart is off: the screen cannot be reached now, and a restart only reaches a screen in touch.
                 </p>
               )}
             </div>
           )}
         </div>
-        <p className="text-[15px] text-muted-foreground">
+        <p className="text-md text-muted-foreground">
           {screen.orientation === 'portrait' ? 'Portrait 1080 × 1920' : 'Landscape 1920 × 1080'} ·{' '}
           {inGroups.length ? `group ${inGroups.map((g) => g.name).join(', ')}` : 'No group'} · {screen.timezone.replaceAll('_', ' ')}
           {plays?.playlist && (
@@ -234,15 +231,15 @@ function ScreenPage() {
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-[2_1_34rem] flex-col gap-4">
           <figure className="m-0 flex flex-col gap-3 rounded-xl border bg-card p-3.5">
-            <div className="overflow-hidden rounded-lg bg-[#0b0c0e] p-2">
+            <div className="overflow-hidden rounded-lg bg-stage p-2">
               <ScreenThumb screen={screen} className="rounded" />
             </div>
-            <figcaption className="flex flex-wrap justify-between gap-2 text-[15px]">
+            <figcaption className="flex flex-wrap justify-between gap-2 text-md">
               <span>
                 {screen.showing?.spot ? (
                   <>
                     Should be showing <strong className="font-semibold">{screen.showing.spot.name}</strong>
-                    {screen.showing.spot.template && <span className="font-mono text-[13px] text-muted-foreground"> · {screen.showing.spot.template}</span>}
+                    {screen.showing.spot.template && <span className="font-mono text-meta text-muted-foreground"> · {screen.showing.spot.template}</span>}
                   </>
                 ) : screen.showing?.asleep ? (
                   <>Should be asleep{screen.showing.wakesAt && ` until ${localClock(screen.showing.wakesAt, screen.timezone, now)}`}</>
@@ -257,11 +254,11 @@ function ScreenPage() {
               )}
             </figcaption>
             {screen.showing ? (
-              <p className="text-[13px] text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {d.line}. Worked out from its published manifest, schedule and display hours, as the screen does; not a screenshot.
               </p>
             ) : (
-              screen.state.reason !== 'nothing_published' && <p className="text-[13px] text-muted-foreground">{d.line}.</p>
+              screen.state.reason !== 'nothing_published' && <p className="text-meta text-muted-foreground">{d.line}.</p>
             )}
           </figure>
 
@@ -269,10 +266,10 @@ function ScreenPage() {
 
           <Section title="Recent events">
             {events.length ? (
-              <ol className="text-[15px]">
+              <ol className="text-md">
                 {events.map((e) => (
                   <li key={`${e.at}-${e.action}-${e.actor.id}`} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 border-t py-2 first:border-t-0">
-                    <span className="font-mono text-[13px] text-muted-foreground" title={new Date(e.at).toLocaleString()}>
+                    <span className="font-mono text-meta text-muted-foreground" title={new Date(e.at).toLocaleString()}>
                       {ago(now - e.at)} ago
                     </span>
                     <span>
@@ -303,7 +300,7 @@ function ScreenPage() {
               ) : undefined
             }
           >
-            <p className="text-[15px]">
+            <p className="text-md">
               <strong className="font-semibold">{describeHours(screen.displayHours)}</strong>
             </p>
             <WeekBars hours={screen.displayHours} />
@@ -321,19 +318,19 @@ function ScreenPage() {
                 {override.state === 'on' ? 'Woken' : 'Put to sleep'} from the CMS until {localClock(override.until, screen.timezone, now)}.
               </p>
             )}
-            <p className="text-[13px] text-muted-foreground">The panel powers off outside these hours. A change reaches the screen with the next publish.</p>
+            <p className="text-meta text-muted-foreground">The panel powers off outside these hours. A change reaches the screen with the next publish.</p>
           </Section>
 
           <Section title="Versions">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[15px]">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-md">
               <dt className="text-muted-foreground">Published</dt>
-              <dd className="font-mono text-[13px]">{short(screen.desiredManifestId)}</dd>
+              <dd className="font-mono text-meta">{short(screen.desiredManifestId)}</dd>
               <dt className="text-muted-foreground">Playing</dt>
-              <dd className="font-mono text-[13px]">{short(screen.reportedManifestId ?? screen.heartbeat?.activeManifestId ?? null)}</dd>
+              <dd className="font-mono text-meta">{short(screen.reportedManifestId ?? screen.heartbeat?.activeManifestId ?? null)}</dd>
               <dt className="text-muted-foreground">Kept</dt>
-              <dd className="font-mono text-[13px]">{short(screen.previousManifestId)}</dd>
+              <dd className="font-mono text-meta">{short(screen.previousManifestId)}</dd>
               <dt className="text-muted-foreground">Player</dt>
-              <dd className="font-mono text-[13px]">{screen.heartbeat?.playerVersion ?? screen.playerVersion ?? 'none'}</dd>
+              <dd className="font-mono text-meta">{screen.heartbeat?.playerVersion ?? screen.playerVersion ?? 'none'}</dd>
               <dt className="text-muted-foreground">Clock</dt>
               <dd>
                 {screen.heartbeat
@@ -410,7 +407,7 @@ function ScheduledHere({
       }
     >
       {here.length ? (
-        <ul className="divide-y text-[15px]">
+        <ul className="divide-y text-md">
           {here.map(({ e, how }) => (
             <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2 first:pt-0 last:pb-0">
               <span>
@@ -419,7 +416,7 @@ function ScheduledHere({
                   · {how} · {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}
                 </span>
               </span>
-              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+              <span className="text-meta text-muted-foreground">{stateWord(e)}</span>
             </li>
           ))}
         </ul>

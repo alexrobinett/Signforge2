@@ -69,7 +69,7 @@ function PublishesPage() {
     // Room at the foot for the toast, so it never covers the last row's button.
     <div className="mx-auto max-w-4xl space-y-6 pb-36">
       <PageHeader title={section.label} description={about(publish, me)} />
-      <section aria-labelledby="rollout-title" className="flex flex-col gap-4 rounded-[14px] border bg-card p-5">
+      <section aria-labelledby="rollout-title" className="flex flex-col gap-4 rounded-xl border bg-card p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 id="rollout-title" className="text-lg font-semibold">
             {publish.restoresRevision === null ? `Rollout of ${v}` : publishTitle(publish)}
@@ -93,7 +93,7 @@ function PublishesPage() {
         <h2 id="history-title" className="text-lg font-semibold">
           Publish history
         </h2>
-        <ol className="divide-y overflow-hidden rounded-[14px] border bg-card">
+        <ol className="divide-y overflow-hidden rounded-xl border bg-card">
           {publishes.map((p) => {
             // Of the screens it switched, the share that played it: once finished, the share it reached;
             // a full grey bar for one that later publishes replaced before any screen played it.

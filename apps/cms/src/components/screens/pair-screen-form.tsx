@@ -72,11 +72,11 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
       <EditorFields>
         <div className="space-y-5">
           <div className="space-y-2">
-            <span id={`${id}-code`} className="text-[15px] font-semibold">
+            <span id={`${id}-code`} className="text-md font-semibold">
               Type the code the screen shows
             </span>
             <PairingCodeInput value={code} onChange={enterPairingCode} labelledBy={`${id}-code`} describedBy={`${id}-code-help`} invalid={!!error} />
-            <p id={`${id}-code-help`} className="text-[13px] text-muted-foreground">
+            <p id={`${id}-code-help`} className="text-meta text-muted-foreground">
               6 characters, as the screen shows them. Pasting the whole code works too. A code lasts 15 minutes.
             </p>
           </div>

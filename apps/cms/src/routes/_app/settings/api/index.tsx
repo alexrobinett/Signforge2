@@ -4,6 +4,7 @@
  * allows, and the tool reference. An owner sees every member's agents, anyone else their own
  * (`list_agent_grants`), with each one's calls and changes over the last 7 days (M4-08).
  */
+import { Badge } from '~/components/ui/badge';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { CopyIcon } from 'lucide-react';
 import { useId } from 'react';
@@ -142,8 +143,8 @@ function AgentTable({
               <td className="px-3 py-3">
                 <ul className="flex flex-wrap gap-1" aria-label="Scopes">
                   {g.scopes.map((s) => (
-                    <li key={s} className="rounded-md border px-1.5 py-0.5 font-mono text-xs">
-                      {s}
+                    <li key={s}>
+                      <Badge className="font-mono text-foreground">{s}</Badge>
                     </li>
                   ))}
                 </ul>

@@ -185,7 +185,7 @@ function KitUse({
         ) : (
           <p className="text-sm text-muted-foreground">No screens yet.</p>
         )}
-        <p className="text-[13px] text-muted-foreground">A screen's own kit wins over its group's.</p>
+        <p className="text-meta text-muted-foreground">A screen's own kit wins over its group's.</p>
       </fieldset>
     </Panel>
   );

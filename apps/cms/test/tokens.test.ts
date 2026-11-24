@@ -35,6 +35,9 @@ const TEXT_ON: [string, string][] = [
   ['actor-agent', 'actor-agent-muted'],
   ['foreground', 'actor-agent-muted'],
   ...(['updating', 'offline'] as const).map((s): [string, string] => [`status-${s}-foreground`, `status-${s}-muted`]),
+  // A toast's line and its second action, a link (#372).
+  ['toast-muted-foreground', 'toast'],
+  ['toast-link', 'toast'],
 ];
 const EDGES_ON: [string, string][] = [
   ['input', 'card'],
@@ -77,6 +80,18 @@ for (const [theme, selector] of [
     });
   });
 }
+
+// A screen's dark surround is the same in both themes, so only :root sets it (#372): its words, and
+// the asleep moon's, on it and on its controls; its ring and warning 3:1.
+it('stage tokens hold their words at 4.5:1 and their marks at 3:1', () => {
+  const t = tokens(':root');
+  const ratio = (a: string, b: string) => contrastRatio(t[a] ?? '', t[b] ?? '');
+  for (const fg of ['stage-foreground', 'stage-muted-foreground', 'stage-asleep']) {
+    expect(ratio(fg, 'stage'), `--${fg} on --stage`).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(fg, 'stage-control'), `--${fg} on --stage-control`).toBeGreaterThanOrEqual(4.5);
+  }
+  for (const mark of ['stage-ring', 'stage-warning']) expect(ratio(mark, 'stage'), `--${mark} on --stage`).toBeGreaterThanOrEqual(3);
+});
 
 /** `hsl(h s% l%)` as hex, for the contrast check of org avatars. */
 function hslHex(h: number, s: number, l: number): string {

@@ -104,7 +104,7 @@ function ScreenSettings() {
                 />
               </div>
             </div>
-            <p className="text-[13px] text-muted-foreground">Local time at each screen. A window that ends before it starts runs past midnight.</p>
+            <p className="text-meta text-muted-foreground">Local time at each screen. A window that ends before it starts runs past midnight.</p>
           </SettingsSection>
 
           <SettingsSection
@@ -132,7 +132,7 @@ function ScreenSettings() {
                 minutes without a heartbeat
               </span>
             </div>
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Screens check in every 5 minutes. One email goes out when a screen passes this, and one when it is back.{' '}
               <Link to="/settings/notifications" className="text-primary underline underline-offset-4">
                 Choose who gets these alerts
@@ -435,7 +435,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
               aria-describedby={`${id}-count`}
             />
           </div>
-          <p id={`${id}-count`} className="text-[13px] text-muted-foreground" aria-live="polite">
+          <p id={`${id}-count`} className="text-meta text-muted-foreground" aria-live="polite">
             {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
           </p>
           <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
