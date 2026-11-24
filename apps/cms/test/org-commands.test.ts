@@ -149,3 +149,18 @@ describe('switching org', () => {
     expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('creating an org', () => {
+  it("forgets the agent drawer's conversation before the new org becomes active (re-check of #327)", async () => {
+    const store = appStore();
+    forgetAgentDrawer.mockClear();
+    orgs.createOrganization.mockClear();
+    orgs.createOrganization.mockImplementationOnce(async () => {
+      expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+    });
+    store.getState().editOrgName('dialog', 'Harbor North');
+    await store.getState().createOrg('dialog');
+    expect(orgs.createOrganization).toHaveBeenCalledTimes(1);
+    expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+});
