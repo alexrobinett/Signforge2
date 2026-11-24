@@ -72,7 +72,13 @@ function PublishesPage() {
       <section aria-labelledby="rollout-title" className="flex flex-col gap-4 rounded-xl border bg-card p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 id="rollout-title" className="text-lg font-semibold">
-            {publish.restoresRevision === null ? `Rollout of ${v}` : publishTitle(publish)}
+            {publish.restoresRevision === null ? (
+              <>
+                Rollout of <span className="font-mono">{v}</span>
+              </>
+            ) : (
+              publishTitle(publish)
+            )}
           </h2>
           <p className="text-sm text-muted-foreground">
             <strong className="text-base font-semibold text-foreground tabular-nums">{done}</strong> of {screens.length} playing it
@@ -119,7 +125,7 @@ function PublishesPage() {
                   <span className="flex w-40 justify-end">
                     {p.id !== latest?.id && (
                       <Button variant="outline" className="sm:h-8" disabled={pending} onClick={() => void rollBack(orgId, p)}>
-                        Roll back to {versionName(p)}
+                        Roll back to <span className="font-mono">{versionName(p)}</span>
                       </Button>
                     )}
                   </span>

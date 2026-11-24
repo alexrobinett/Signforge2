@@ -42,7 +42,7 @@ export function RolloutLegend({ publish, screens, now, reasons }: { publish: Pub
         <li key={s.outcome} className="flex gap-3 py-3 first:pt-0 last:pb-0">
           <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-xs" style={{ background: OUTCOME_COLOR[s.outcome] }} />
           <span className="flex min-w-0 flex-col gap-0.5">
-            <strong className="font-semibold">
+            <strong className="font-semibold tabular-nums">
               {s.count} {s.label}
             </strong>
             <span className="text-sm text-muted-foreground">{s.why}</span>

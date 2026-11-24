@@ -124,7 +124,8 @@ function ScreenPage() {
         </nav>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
           <h1 className="min-w-0 text-3xl leading-tight font-semibold tracking-tight wrap-anywhere">{screen.name}</h1>
-          <span className="flex items-center gap-2">
+          {/* Its own row on a phone, so the seconds since it was heard cannot push it onto another line (#375). */}
+          <span className="flex items-center gap-2 tabular-nums max-sm:basis-full">
             <ScreenStatus screen={screen} now={now} />
             {screen.kind === 'browser' && <Badge title="The player in a browser tab">Test screen</Badge>}
             {screen.lastSeenAt && <span className="text-meta text-muted-foreground">last heard {ago(now - screen.lastSeenAt)} ago</span>}
@@ -325,13 +326,19 @@ function ScreenPage() {
           <Section title="Versions">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-md">
               <dt className="text-muted-foreground">Published</dt>
-              <dd className="font-mono text-meta">{short(screen.desiredManifestId)}</dd>
+              <dd className="text-meta">{short(screen.desiredManifestId)}</dd>
               <dt className="text-muted-foreground">Playing</dt>
-              <dd className="font-mono text-meta">{short(screen.reportedManifestId ?? screen.heartbeat?.activeManifestId ?? null)}</dd>
+              <dd className="text-meta">{short(screen.reportedManifestId ?? screen.heartbeat?.activeManifestId ?? null)}</dd>
               <dt className="text-muted-foreground">Kept</dt>
-              <dd className="font-mono text-meta">{short(screen.previousManifestId)}</dd>
+              <dd className="text-meta">{short(screen.previousManifestId)}</dd>
               <dt className="text-muted-foreground">Player</dt>
-              <dd className="font-mono text-meta">{screen.heartbeat?.playerVersion ?? screen.playerVersion ?? 'none'}</dd>
+              <dd className="text-meta">
+                {(screen.heartbeat?.playerVersion ?? screen.playerVersion) ? (
+                  <span className="font-mono">{screen.heartbeat?.playerVersion ?? screen.playerVersion}</span>
+                ) : (
+                  'none'
+                )}
+              </dd>
               <dt className="text-muted-foreground">Clock</dt>
               <dd>
                 {screen.heartbeat
@@ -375,7 +382,15 @@ function ScreenPage() {
   );
 }
 
-const short = (id: string | null) => (id ? <span title={id}>{id.slice(0, 7)}</span> : 'none');
+/** An identifier, in mono and cut to 7 characters; none is a word, not mono (#375). */
+const short = (id: string | null) =>
+  id ? (
+    <span title={id} className="font-mono">
+      {id.slice(0, 7)}
+    </span>
+  ) : (
+    'none'
+  );
 
 /** The entries that reach this screen, each with how it gets there, as drafted, and the Schedule page to change them on. */
 function ScheduledHere({

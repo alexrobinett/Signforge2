@@ -212,7 +212,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
         {whatText(e)}
         {/* In <bdi>: what a tool was given (an agent's reason for its publish request) cannot reorder the row around it. */}
         {detail && (
-          <span className="mt-0.5 block font-mono text-meta break-all text-muted-foreground">
+          <span className="mt-0.5 block text-meta break-all text-muted-foreground">
             <bdi>{detail}</bdi>
           </span>
         )}
