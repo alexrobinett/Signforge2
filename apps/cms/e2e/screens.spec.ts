@@ -239,6 +239,15 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await settings.getByRole('button', { name: 'Reload' }).click();
   await expect(settings).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Front lobby', level: 1 })).toBeVisible();
+
+  // A long one-word name wraps at phone width instead of widening the page (#372).
+  const long = 'Frontlobbybytherevolvingdoorsnexttothecafe';
+  await tool('rename_screen', { screenId: lobby, name: long });
+  await page.reload();
+  await hydrated(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: long, level: 1 })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('a screen that stops syncing turns unreachable on the open Screens page, without a reload', async ({ page, request }) => {

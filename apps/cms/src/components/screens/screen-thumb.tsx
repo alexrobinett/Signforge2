@@ -19,7 +19,8 @@ export function ScreenThumb({
 }) {
   const s = screen.showing;
   const portrait = screen.orientation === 'portrait';
-  const dim = screen.state.kind === 'asleep' ? 'opacity-35' : screen.state.kind === 'unreachable' ? 'opacity-80' : '';
+  // Asleep shows only its moon and word, at full strength (an asleep screen plays nothing to dim); an unreachable one's preview is dimmed.
+  const dim = screen.state.kind === 'unreachable' ? 'opacity-80' : '';
   const label = !s ? 'Nothing published yet' : s.asleep ? 'Asleep for display hours' : s.spot ? `Should be showing: ${s.spot.name}` : 'Nothing to show';
   return (
     <div className={cn('relative flex aspect-video justify-center overflow-hidden bg-stage text-stage-foreground', className)} role="img" aria-label={label}>

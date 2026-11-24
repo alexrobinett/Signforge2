@@ -123,7 +123,7 @@ function ScreenPage() {
           </span>
         </nav>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
-          <h1 className="text-3xl leading-tight font-semibold tracking-tight">{screen.name}</h1>
+          <h1 className="min-w-0 text-3xl leading-tight font-semibold tracking-tight wrap-anywhere">{screen.name}</h1>
           <span className="flex items-center gap-2">
             <ScreenStatus screen={screen} now={now} />
             {screen.kind === 'browser' && <Badge title="The player in a browser tab">Test screen</Badge>}
@@ -272,7 +272,7 @@ function ScreenPage() {
                     <span className="font-mono text-meta text-muted-foreground" title={new Date(e.at).toLocaleString()}>
                       {ago(now - e.at)} ago
                     </span>
-                    <span>
+                    <span className="wrap-anywhere">
                       {eventText(e)}{' '}
                       <span className="text-muted-foreground">{e.actor.id === me ? 'by you' : e.actor.kind === 'agent' ? 'by an agent' : 'by a member'}</span>
                     </span>

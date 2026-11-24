@@ -277,7 +277,7 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
                 disabled={switchingTo !== null}
                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
               >
-                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-2xs" />
                 <span className="min-w-0 flex-1 truncate">{org.name}</span>
               </button>
             </li>

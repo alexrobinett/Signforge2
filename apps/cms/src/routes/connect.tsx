@@ -83,7 +83,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
 
   return (
     <>
-      <main className="flex w-full max-w-[560px] flex-col gap-[22px] rounded-xl border bg-card p-7">
+      <main className="flex w-full max-w-[560px] flex-col gap-5 rounded-xl border bg-card p-7">
         <div className="flex items-center gap-3.5">
           <span aria-hidden className="flex size-9 flex-none items-center justify-center rounded-lg bg-foreground text-background">
             <BotIcon className="size-4" />
