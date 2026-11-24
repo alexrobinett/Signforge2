@@ -1,0 +1,13 @@
+{
+  // #346 throwaway spike: local only (wrangler dev and workerd tests). Never deployed.
+  // The API Worker's compatibility date and flags, so it runs on the same runtime.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sf-spike-tanstack-ai",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "public" },
+  "vars": { "ORG_ID": "spike-org", "MODEL_STUB": "on" },
+  "d1_databases": [{ "binding": "DB", "database_name": "sf-spike-tanstack-ai", "database_id": "local-only", "migrations_dir": "../../packages/db/migrations" }],
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "sf-spike-tanstack-ai" }]
+}

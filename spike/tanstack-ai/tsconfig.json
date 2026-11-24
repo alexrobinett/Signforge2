@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["@cloudflare/vitest-plugin/types"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src", "test", "vitest.config.ts", "worker-configuration.d.ts"],
+  "exclude": ["src/page"]
+}

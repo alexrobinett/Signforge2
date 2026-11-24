@@ -1,7 +1,7 @@
 // The tenancy guard's other half: nothing outside packages/db may reach the table objects.
 // Code elsewhere imports `@signforge/db` (repositories and row types), and nothing else from this
-// package, except that tests in a package's own test/ or e2e/ directory (and the local dev-screen
-// script) may import `@signforge/db/testing`, whose direct writes production code must never reach.
+// package, except that tests in a package's own test/ or e2e/ directory (a spike's too) and the local
+// dev-screen script may import `@signforge/db/testing`, whose direct writes production code must never reach.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const TESTING = '@signforge/db/testing';
 
 /** A workspace package's own `test` or `e2e` directory (pnpm-workspace.yaml), not such a folder deeper in its source. */
-const TEST_DIR = /^(?:apps|packages|templates)\/[^/]+\/(?:test|e2e)\//;
+const TEST_DIR = /^(?:apps|packages|templates|spike)\/[^/]+\/(?:test|e2e)\//;
 
 /** Whether `file` may import `@signforge/db/testing`: a test, a test's harness or an e2e spec, or the local dev-screen script. */
 function mayUseTesting(file: string): boolean {
@@ -71,6 +71,8 @@ describe('import boundary', () => {
       'apps/api/src/test/x.ts',
       'packages/tools/src/e2e/x.ts',
       'test/x.ts',
+      // A spike's Worker is not a test.
+      'spike/tanstack-ai/src/worker.ts',
     ])
       expect(forbiddenImports(join(ROOT, prod), testing), prod).toEqual([TESTING]);
     expect(forbiddenImports(join(ROOT, 'apps/api/src/x.ts'), "const t = await import('@signforge/db/testing');")).toEqual([TESTING]);
@@ -79,6 +81,7 @@ describe('import boundary', () => {
       'packages/tools/test/harness-worker.ts',
       'packages/db/test/node/x.test.ts',
       'apps/cms/e2e/helpers.ts',
+      'spike/tanstack-ai/test/turn.test.ts',
       'apps/api/scripts/dev-screen.ts',
     ])
       expect(forbiddenImports(join(ROOT, allowed), testing), allowed).toEqual([]);
