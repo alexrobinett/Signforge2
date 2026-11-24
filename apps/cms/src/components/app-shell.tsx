@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon, SparklesIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -13,16 +14,40 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { SidebarMenuButton } from '~/components/ui/sidebar';
 import { Toaster } from '~/components/ui/sonner';
 import { TooltipProvider } from '~/components/ui/tooltip';
+import { UnpublishedChanges } from '~/components/unpublished-changes';
 import { UserMenu } from '~/components/user-menu';
 import { orgHues } from '~/lib/paths';
-import { SECTIONS } from '~/lib/sections';
+import { SECTIONS, type Section } from '~/lib/sections';
+import { navCountsQuery } from '~/queries/nav-counts';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 import { isFolded } from '~/state/ui';
 
-/** The sidebar; `folded` (wide screens only) is an icon rail, each item named and with a tooltip. */
+interface Badge {
+  n: number;
+  /** What the number counts, after it: "needs you", "unpublished". */
+  word: string;
+  /** Needs you is the one red. */
+  urgent: boolean;
+}
+
+/**
+ * The sidebar; `folded` (wide screens only) is an icon rail, each item named and with a tooltip.
+ * Screens, Spots, Playlists and Schedule carry counts (#361): screens that need someone, in the one
+ * red, and drafts not published; folded, a dot and the tooltip say so.
+ */
 function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<string, number>; folded?: boolean }) {
+  const orgId = shell.organization?.id;
+  const { data: counts } = useQuery({ ...navCountsQuery(orgId ?? ''), enabled: orgId !== undefined });
+  const badges: Partial<Record<Section['to'], Badge>> = counts
+    ? {
+        '/screens': { n: counts.needsYou, word: counts.needsYou === 1 ? 'needs you' : 'need you', urgent: true },
+        '/spots': { n: counts.spots, word: 'unpublished', urgent: false },
+        '/playlists': { n: counts.playlists, word: 'unpublished', urgent: false },
+        '/schedule': { n: counts.schedule, word: 'unpublished', urgent: false },
+      }
+    : {};
   const openCommandMenu = useAppStore((s) => s.openCommandMenu);
   const openAgent = useAppStore((s) => s.openAgentDrawer);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -74,19 +99,38 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
       )}
       <nav aria-label="Main" className="flex-1">
         <ul className="space-y-1">
-          {SECTIONS.map(({ to, label, icon: Icon }) => (
-            <li key={to}>
-              <SidebarMenuButton folded={folded} tooltip={label}>
-                <Link to={to} activeOptions={{ exact: to === '/' }}>
-                  <Icon aria-hidden />
-                  <span>{label}</span>
-                </Link>
-              </SidebarMenuButton>
-            </li>
-          ))}
+          {SECTIONS.map(({ to, label, icon: Icon }) => {
+            const b = badges[to];
+            const shown = b && b.n > 0 ? b : undefined;
+            return (
+              <li key={to}>
+                <SidebarMenuButton folded={folded} tooltip={shown ? `${label}, ${shown.n} ${shown.word}` : label} className="relative">
+                  <Link to={to} activeOptions={{ exact: to === '/' }}>
+                    <Icon aria-hidden />
+                    <span className="flex-1">{label}</span>
+                    {shown && (
+                      <span
+                        className={cn(
+                          'rounded-full px-2 text-xs font-semibold tabular-nums',
+                          shown.urgent ? 'bg-status-needs-you-muted text-status-needs-you-foreground' : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {shown.n}
+                        <span className="sr-only"> {shown.word}</span>
+                      </span>
+                    )}
+                    {shown && folded && (
+                      <i aria-hidden className={cn('absolute top-1.5 right-1.5 size-2 rounded-full', shown.urgent ? 'bg-status-needs-you' : 'bg-primary')} />
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </li>
+            );
+          })}
         </ul>
       </nav>
       <div className="flex flex-col gap-2">
+        {orgId && counts && <UnpublishedChanges orgId={orgId} counts={counts} folded={folded} />}
         <SidebarMenuButton folded={folded} tooltip="Unfold the sidebar" className="hidden lg:flex">
           <button type="button" onClick={toggleSidebar} aria-expanded={!folded}>
             <FoldIcon aria-hidden />
