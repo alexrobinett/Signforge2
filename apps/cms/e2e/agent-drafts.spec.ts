@@ -25,7 +25,7 @@ test('a member asks the agent for a punchier headline and a QR link, sees what i
 
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
-  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toBeEmpty({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, 'Breakfast served'), { timeout: 10_000 }).toBe(true);
   await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
   const drawer = page.getByRole('dialog', { name: 'Agent' });

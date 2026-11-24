@@ -108,12 +108,14 @@ test('a client whose name reads as SignForge is named by its host on the list, t
   const stub = await stubClient('SI6NFOR6E', ADDRESS.stub);
   await page.goto(stub.authorizeUrl);
   await hydrated(page);
+  // Reading only: its row says so, not content:read, which every agent has (#374).
+  await page.getByRole('checkbox', { name: /Make and edit drafts/ }).uncheck();
   await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
   await stub.dispose();
 
   await page.goto('/settings/api');
   await hydrated(page);
-  await expect(page.getByRole('row', { name: /An unverified app at 127\.0\.0\.1:33418/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /An unverified app at 127\.0\.0\.1:33418/ })).toContainText('Reads only');
   await expect(page.getByRole('link', { name: 'Manage An unverified app at 127.0.0.1:33418' })).toBeVisible();
   expect(await page.content()).not.toContain('SI6NFOR6E');
 

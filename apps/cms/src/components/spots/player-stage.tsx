@@ -255,8 +255,8 @@ export function PlayerStage({
                   : 'Holding the last valid frame until the marked field is fixed.'}
             </span>
           ) : (
-            // Drawn, it says nothing: the caption above already says what the stage is (#374).
-            !playing && <span>Drawing…</span>
+            // Drawn, it says so only to assistive tech: the caption above already says what the stage is (#374).
+            <span className={playing ? 'sr-only' : undefined}>{playing ? 'Preview ready' : 'Drawing…'}</span>
           )}
         </span>
         <span>{playlistId !== undefined ? 'Plays the loop. Updates as you edit.' : 'Updates as you type.'}</span>

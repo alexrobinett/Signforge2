@@ -82,6 +82,16 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
+  // Its tile says nothing published once, in the thumbnail, not again under it (#374).
+  await page.goto('/screens');
+  await hydrated(page);
+  const lobbyTile = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Lobby' }) });
+  await expect(lobbyTile.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
+  await expect(lobbyTile).not.toContainText('Nothing is published to it yet');
+  await shots(page, '13-screens-tile-nothing-published');
+  await page.getByRole('link', { name: 'Lobby' }).click();
+  await expect(page.getByRole('heading', { name: 'Lobby', level: 1 })).toBeVisible();
+  await hydrated(page);
 
   // Sleep now: stored, and carried by the next sync to the screen.
   await page.getByRole('button', { name: 'Sleep now' }).click();
@@ -215,6 +225,12 @@ test('an edit keeps a change someone else made while the form was open, and refu
     (await tool('claim_screen', { code: (await startPairing(request)).code, name, timezone: 'UTC', orientation: 'landscape' })).screen!.id;
   const lobby = await pair('Lobby');
   const hall = await pair('Hall');
+  // A portrait screen's tile says its ratio; a landscape one's says none (#374).
+  await tool('claim_screen', { code: (await startPairing(request)).code, name: 'Kiosk', timezone: 'UTC', orientation: 'portrait' });
+  await page.goto('/screens');
+  await hydrated(page);
+  await expect(page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Kiosk' }) })).toContainText('9:16');
+  await expect(page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Hall' }) })).not.toContainText('16:9');
   const group = (await tool('create_group', { name: 'Windows' })).group!;
 
   await page.goto(`/screens/${lobby}`);

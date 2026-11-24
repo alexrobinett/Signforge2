@@ -189,6 +189,8 @@ test('groups and screens in name order wherever they are listed, though their id
   await hydrated(page);
   await page.getByRole('button', { name: 'Pair a screen' }).click();
   const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  // No heading above its display hours, so their legend shows (#374).
+  await expect(pair.getByText('Display hours', { exact: true })).toBeVisible();
   await expect(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox')).toHaveCount(2);
   expect(await labels(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox'))).toEqual(['Alpha', 'Zeta']);
   await page.keyboard.press('Escape');

@@ -332,7 +332,10 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 </Link>
                 {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
-              <p className="text-meta text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
+              <p className="text-meta text-muted-foreground">
+                {/* Nothing published is said once, by the thumbnail (#374). */}
+                {[s.kind === 'browser' && 'Test screen', where, s.state.reason !== 'nothing_published' && d.line].filter(Boolean).join(' · ')}
+              </p>
             </div>
           </li>
         );

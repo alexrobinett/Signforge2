@@ -28,7 +28,16 @@ export function describeHours(hours: DisplayHours | null): string {
   return hours.weekly.map((w) => `${dayRange(w.days)} ${w.from}–${w.to}`).join(' · ');
 }
 
-export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | null; onChange: (v: DisplayHours | null) => void }) {
+export function DisplayHoursEditor({
+  value,
+  onChange,
+  headed,
+}: {
+  value: DisplayHours | null;
+  onChange: (v: DisplayHours | null) => void;
+  /** Its parent shows a Display hours heading, so the legend is for assistive tech only (#374); else it is shown. */
+  headed: boolean;
+}) {
   const id = useId();
   const problems = hoursProblems(value);
   const setWeekly = (weekly: DisplayHours['weekly']) => onChange({ ...value!, weekly });
@@ -37,8 +46,7 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
 
   return (
     <fieldset className="space-y-4">
-      {/* Named for assistive tech only: its section's heading already says Display hours (#374). */}
-      <legend className="sr-only">Display hours</legend>
+      <legend className={headed ? 'sr-only' : 'text-sm font-medium'}>Display hours</legend>
       <div className="flex flex-wrap gap-2">
         {(
           [
