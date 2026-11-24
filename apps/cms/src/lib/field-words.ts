@@ -41,30 +41,39 @@ export const isEmptyProblem = (problem: string) => / has no asset$| is missing\b
  * One of `validateSpotField`'s problems, in words, capitalised and without a full stop. `fields` are
  * the template's, for labels; a field it does not have is named by its key. Another problem reads as it says.
  */
-export const problemWords = (problem: string, fields: Record<string, FieldDef>): string => capital(said(problem, fields));
-
-function said(problem: string, fields: Record<string, FieldDef>): string {
+export function problemWords(problem: string, fields: Record<string, FieldDef>): string {
   const subject = SUBJECT.exec(problem);
-  if (!subject) return problem;
+  if (!subject) return capital(problem);
   const [, name = '', rest = ''] = subject;
   const label = labelOf(name, fields);
   if (rest === 'has no asset') {
     const toggle = fields[toggleOf(name)]?.label;
     return `No image for ${label}: choose one${toggle ? `, or untick ${toggle}` : ''}`;
   }
-  if (rest === 'is missing (a bound field needs a fallback value)') return `${label} needs a value to show until its data arrives`;
-  if (rest === 'is missing') return `${label} is empty`;
+  if (rest === 'is missing (a bound field needs a fallback value)') return `${capital(label)} needs a value to show until its data arrives`;
+  if (rest === 'is missing') return `${capital(label)} is empty`;
   const date = /^has no (date|date and time) yet$/.exec(rest);
   if (date) return `No ${date[1]} for ${label}: pick one`;
   const row = /^row (\d+) is missing "([^"]+)"$/.exec(rest);
-  if (row) return `${labelOf(`${name}[${row[1]}].${row[2]}`, fields)} is empty`;
+  if (row) return `${capital(labelOf(`${name}[${row[1]}].${row[2]}`, fields))} is empty`;
   const chars = /^is longer than (\d+)$/.exec(rest);
-  if (chars) return `${label} is longer than ${chars[1]} characters`;
+  if (chars) return `${capital(label)} is longer than ${chars[1]} characters`;
   const options = /^must be one of (.*)$/.exec(rest);
   if (options) {
     const def = fields[name];
     const list = def?.type === 'select' ? def.options : (options[1] ?? '').split(', ');
-    return `${label} must be one of ${list.map(optionLabel).join(', ')}`;
+    return `${capital(label)} must be one of ${list.map(optionLabel).join(', ')}`;
   }
-  return `${label} ${rest}`;
+  return `${capital(label)} ${rest}`;
+}
+
+/** The list cell a problem is about, its row counted from 1, as `rowNumber.column`; undefined for a problem of the field as a whole. */
+export function problemCell(problem: string): string | undefined {
+  const subject = SUBJECT.exec(problem);
+  if (!subject) return undefined;
+  const [, name = '', rest = ''] = subject;
+  const cell = CELL.exec(name);
+  if (cell) return `${cell[2]}.${cell[3]}`;
+  const row = /^row (\d+) is missing "([^"]+)"$/.exec(rest);
+  return row ? `${row[1]}.${row[2]}` : undefined;
 }

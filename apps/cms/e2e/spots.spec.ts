@@ -344,7 +344,7 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   await stage.scrollIntoViewIfNeeded();
   await expect(stage.getByText('Holding the last valid frame. No image for Photo: choose one, or untick Show the photo.')).toBeVisible();
   const photoError = page.locator('#field-photo-error');
-  await expect(photoError).toHaveCount(0);
+  await expect(photoError).toBeEmpty();
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(photoError).toHaveText('No image for Photo: choose one, or untick Show the photo.');
   await axe(page);

@@ -215,4 +215,19 @@ describe('a new spot in the editor (#359)', () => {
     ])
       expect(html).toContain(option);
   });
+
+  it('announces a problem as it appears, from a live region each field always has, and ties a list cell with a problem to its message (review of #387)', () => {
+    const facts: Record<string, FieldDef> = {
+      headline: { type: 'text', label: 'Headline', maxLength: 12 },
+      facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label', maxLength: 4 }, value: { type: 'text', label: 'Value' } } },
+    };
+    const html = formHtml({ fields: facts, shown: facts, draft: draft({ headline: 'Hi', facts: [{ label: 'Too long', value: 'ok' }] }), assets: [] });
+    // Empty, but there before anything is wrong, so a screen reader hears what appears in it.
+    expect(html).toMatch(/<p id="field-headline-error" aria-live="polite"[^>]*><\/p>/);
+    const cell = /<input[^>]*id="field-facts-0-label"[^>]*>/.exec(html)?.[0] ?? '';
+    expect(cell).toContain('aria-invalid="true"');
+    expect(cell).toContain('aria-describedby="field-facts-error"');
+    expect(/<input[^>]*id="field-facts-0-value"[^>]*>/.exec(html)?.[0]).not.toContain('aria-invalid="true"');
+    expect(html).toContain('Facts, row 1, Label is longer than 4 characters.');
+  });
 });

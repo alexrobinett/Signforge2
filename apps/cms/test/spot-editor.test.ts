@@ -225,14 +225,21 @@ describe('the stage (review of #97)', () => {
 });
 
 describe('a stage out of view (#342)', () => {
-  it("draws only in view: a draw asked for out of view, or the player's failure there, is drawn when the stage is seen", async () => {
+  it("posts only to a frame in view: a draft compiled out of view (its warnings kept current), or the player's failure there, is posted when the frame is seen", async () => {
     const queryClient = new QueryClient();
     let hear: (e: unknown) => void = () => {};
     vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
     const manifest = { screen: 'preview' } as unknown as ScreenManifest;
+    let compiles = 0;
+    let finish = () => {};
+    let compiled = Promise.resolve();
     const store = createStore<SpotEditorSlice & { playlistStageDraft: () => Promise<{ manifest: ScreenManifest; problems: string[] }> }>()((set, get) => ({
       ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
-      playlistStageDraft: async () => ({ manifest, problems: [] }),
+      playlistStageDraft: async () => {
+        compiles++;
+        await compiled;
+        return { manifest, problems: [] };
+      },
     }));
     const posted: unknown[] = [];
     const frame: Window = { postMessage: (m: never) => posted.push(m) } as never;
@@ -241,11 +248,25 @@ describe('a stage out of view (#342)', () => {
     store.getState().seeStage(false);
     say({ type: 'listening' });
     await vi.advanceTimersByTimeAsync(0);
-    expect(posted).toEqual([]);
+    // Compiled, so the playlist's row warnings are current, but not posted.
+    expect([compiles, posted.length]).toEqual([1, 0]);
 
     store.getState().seeStage(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(posted).toHaveLength(1);
+
+    // Moved out of view while it compiled: kept for when it is back.
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    store.getState().seeStage(false);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+    compiled = Promise.resolve();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
 
     // Scrolled away while it plays: the player cannot draw there, which is not the draft's fault.
     store.getState().seeStage(false);
@@ -253,7 +274,7 @@ describe('a stage out of view (#342)', () => {
     expect(store.getState().spotEditor.stageError).toBeNull();
     store.getState().seeStage(true);
     await vi.advanceTimersByTimeAsync(0);
-    expect(posted).toHaveLength(2);
+    expect(posted).toHaveLength(3);
     // In view, a failure is the stage's to say.
     say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
     expect(store.getState().spotEditor.stageError).toBe('pls_a: not ready within 2000 ms');

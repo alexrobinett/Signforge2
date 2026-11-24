@@ -105,35 +105,36 @@ export function PlayerStage({
   const scale: Scale = search.scale ?? 'fit';
   const shown = scale === 'fit' ? fit : 1;
 
-  // The frame and what it shows, handed to the store whenever either changes.
+  // The frame and what it shows, handed to the store whenever either changes; and whether the frame
+  // itself is in view, where alone the player can draw (#342): the room around it may be in view when it is not.
   const frameRef = useCallback(
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
-      if (!frame) return;
+      if (!el || !frame) return;
       const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId, fallback };
       attach({ frame, orgId, orientation, brandKitId, ...shows });
-      return () => attach(null);
+      const inView = new IntersectionObserver((entries) => {
+        const last = entries.at(-1);
+        if (last) see(last.isIntersecting);
+      });
+      inView.observe(el);
+      return () => {
+        inView.disconnect();
+        see(true);
+        attach(null);
+      };
     },
-    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
+    [attach, see, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
   );
-  // The room the stage has, for scaling to fit; and whether it is in view, where alone the player can draw (#342).
+  // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
     (el: HTMLDivElement | null) => {
       if (!el) return;
       const seen = new ResizeObserver(([entry]) => entry && measure({ w: entry.contentRect.width, h: entry.contentRect.height }));
       seen.observe(el);
-      const shown = new IntersectionObserver((entries) => {
-        const last = entries.at(-1);
-        if (last) see(last.isIntersecting);
-      });
-      shown.observe(el);
-      return () => {
-        seen.disconnect();
-        shown.disconnect();
-        see(true);
-      };
+      return () => seen.disconnect();
     },
-    [measure, see],
+    [measure],
   );
 
   return (

@@ -2,7 +2,7 @@
 // field's label, as the publish toast says them, and select options by a label.
 import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { isEmptyProblem, optionLabel, problemWords } from '../src/lib/field-words';
+import { isEmptyProblem, optionLabel, problemCell, problemWords } from '../src/lib/field-words';
 
 const fields: Record<string, FieldDef> = {
   look: { type: 'select', label: 'Look', options: ['pop', 'poster'], default: 'pop' },
@@ -54,4 +54,13 @@ describe('optionLabel', () => {
     ['New', 'New'],
     ['', 'None'],
   ])('%s', (option, label) => expect(optionLabel(option)).toBe(label));
+});
+
+describe('problemCell', () => {
+  it.each([
+    ['field "facts[3].value" must be a number', '3.value'],
+    ['field "facts" row 2 is missing "label"', '2.label'],
+    ['field "facts" has more than 3 rows', undefined],
+    ['image field "photo" has no asset', undefined],
+  ])('%s', (problem, cell) => expect(problemCell(problem)).toBe(cell));
 });

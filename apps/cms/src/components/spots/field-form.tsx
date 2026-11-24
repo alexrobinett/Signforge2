@@ -18,7 +18,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
-import { isEmptyProblem, optionLabel, problemWords } from '~/lib/field-words';
+import { isEmptyProblem, optionLabel, problemCell, problemWords } from '~/lib/field-words';
 import { fieldProblems, type SpotDraft } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -45,11 +45,11 @@ const BRAND_WORD: Record<string, string> = {
 
 const fieldClass = 'flex flex-col gap-1.5';
 
+/** A field's problems, in a live region that is always there, so one that appears (on leaving the field, #359) is announced. */
 function Problems({ id, problems }: { id: string; problems: string[] | undefined }) {
-  if (!problems?.length) return null;
   return (
-    <p id={id} className="text-sm font-medium text-destructive">
-      {problems.map((p) => `${p}.`).join(' ')}
+    <p id={id} aria-live="polite" className="text-sm font-medium text-destructive empty:hidden">
+      {problems?.map((p) => `${p}.`).join(' ')}
     </p>
   );
 }
@@ -248,6 +248,7 @@ function ListField({
   def,
   rows,
   problems,
+  cells,
   mark,
   onChange,
 }: {
@@ -255,6 +256,8 @@ function ListField({
   def: Extract<FieldDef, { type: 'list' }>;
   rows: Record<string, unknown>[];
   problems: string[] | undefined;
+  /** The cells a problem is about, as `rowNumber.column`: each is marked and points at the list's message. */
+  cells: Set<string>;
   mark: FieldMark | undefined;
   onChange: Edit;
 }) {
@@ -304,7 +307,8 @@ function ListField({
                   id={id}
                   def={d}
                   value={row[k] ?? d.default}
-                  invalid={false}
+                  invalid={cells.has(`${i + 1}.${k}`)}
+                  describedBy={cells.has(`${i + 1}.${k}`) ? `field-${name}-error` : undefined}
                   onChange={(v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))}
                 />
               </div>
@@ -349,13 +353,14 @@ export function FieldForm({
   const checks = useAppStore((s) => s.spotEditor.checks[spotId]);
   const touch = useAppStore((s) => s.touchField);
   // In words; an empty field's problem only once touched or Publish was pressed.
-  const problems = new Map(
+  const raw = new Map(
     [...fieldProblems(fields, draft, Object.keys(shown))].flatMap(([name, list]) => {
       const seen = checks?.all || checks?.touched.includes(name);
-      const words = list.filter((p) => seen || !isEmptyProblem(p)).map((p) => problemWords(p, fields));
-      return words.length ? [[name, words] as const] : [];
+      const kept = list.filter((p) => seen || !isEmptyProblem(p));
+      return kept.length ? [[name, kept] as const] : [];
     }),
   );
+  const problems = new Map([...raw].map(([name, list]) => [name, list.map((p) => problemWords(p, fields))] as const));
   return (
     <div className="flex flex-col gap-5">
       {Object.entries(shown).map(([name, def]) => {
@@ -384,7 +389,8 @@ export function FieldForm({
         const value = draft.data[name] ?? def.default;
         if (def.type === 'list') {
           const rows = Array.isArray(value) ? value.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null) : [];
-          return <ListField key={name} name={name} def={def} rows={rows} problems={p} mark={mark} onChange={edit} />;
+          const cells = new Set((raw.get(name) ?? []).flatMap((r) => problemCell(r) ?? []));
+          return <ListField key={name} name={name} def={def} rows={rows} problems={p} cells={cells} mark={mark} onChange={edit} />;
         }
         const id = `field-${name}`;
         const errorId = `${id}-error`;

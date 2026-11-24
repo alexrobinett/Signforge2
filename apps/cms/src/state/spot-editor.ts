@@ -16,10 +16,11 @@
  * its playlist on the same stage (a target with a `playlistId`): it compiles the draft
  * (`playlistStageDraft`, src/state/playlist-editor.ts) and asks for a redraw (`redrawStage`).
  *
- * The stage draws only while it is in view (`seeStage`, from the stage's IntersectionObserver): a
- * browser runs no animation frames in a frame scrolled out of view, and a template waits for two
- * before it is ready (the SDK's `sized`), so the player would time out (#342). A draw asked for out
- * of view, or one the player failed out of view, is drawn when the stage comes back.
+ * The player is sent a draft only while its frame is in view (`seeStage`, from the frame's
+ * IntersectionObserver): a browser runs no animation frames in a frame scrolled out of view, and a
+ * template waits for two before it is ready (the SDK's `sized`), so the player would time out (#342).
+ * The draft is still compiled out of view, so what it says (a playlist's left-out spots) stays
+ * current; one compiled out of view, or one the player failed out of view, is posted when the frame comes back.
  *
  * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
@@ -277,10 +278,6 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   async function redraw() {
     const t = stage.target;
     if (!t || stage.listening !== t.frame) return;
-    if (!stage.inView) {
-      stage.owed = true;
-      return;
-    }
     const seq = ++stage.seq;
     let result: Awaited<ReturnType<typeof spotDraft>>;
     try {
@@ -293,6 +290,12 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     if (!result || seq !== stage.seq || stage.target?.frame !== t.frame) return;
     if (!result.manifest) {
       editor((x) => ({ ...x, holding: true, refusals: result.refusals ?? [] }));
+      return;
+    }
+    // Compiled whatever is in view, so what the draft leaves out (a playlist's row warnings) stays current; posted only to a frame in view,
+    // asked again at this moment: a resize while it compiled may have moved it out.
+    if (!stage.inView) {
+      stage.owed = true;
       return;
     }
     t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data: result.data ?? [] }, location.origin);
