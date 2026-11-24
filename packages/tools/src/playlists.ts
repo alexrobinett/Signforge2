@@ -131,6 +131,25 @@ const updatePlaylist = defineTool({
   refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
 });
 
+/**
+ * `set_default_playlist`'s `ifDefault`: refused as a conflict naming the default now unless it is
+ * `playlistId` (null: none); else the guard that holds it so as the batch runs, so a default chosen
+ * between this read and the commit fails it.
+ */
+async function stillDefault(org: OrgScope, playlistId: string | null) {
+  const moved = await defaultMoved(org, playlistId);
+  if (moved) throw moved;
+  return org.settings.stage.defaultIs(playlistId);
+}
+
+/** `ifDefault` refused when the default is `now`, not `playlistId` (null: none): a conflict naming the default now. */
+export const defaultConflict = (now: string | null, playlistId: string | null) =>
+  now === playlistId
+    ? undefined
+    : new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', { defaultPlaylistId: now });
+
+const defaultMoved = async (org: OrgScope, playlistId: string | null) => defaultConflict((await org.settings.get())?.defaultPlaylistId ?? null, playlistId);
+
 /** The playlist's takeovers that have ended for good: they play nowhere again, and go with it. */
 const endedWith = async (org: OrgScope, playlistId: string, now: number) =>
   (await org.scheduleEntries.list()).filter((e) => ended(e, now) && (e.playlistId === playlistId || published(e)?.playlistId === playlistId));
@@ -173,21 +192,33 @@ const deletePlaylist = defineTool({
 const setDefaultPlaylist = defineTool({
   name: 'set_default_playlist',
   description:
-    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Returns { playlist }.",
+    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Pass the organization settings' version you read (get_org_settings) as ifVersion so a default someone else chose since is not replaced: refused with a conflict if they changed. Or pass ifDefault, the default you saw (null for none): refused with a conflict, details { defaultPlaylistId }, unless it is still that, checked again as it is saved. Returns { playlist }.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ playlistId: id('playlist') }),
+  input: z.object({
+    playlistId: id('playlist'),
+    ifVersion: ifVersion.optional().describe("The organization settings' version you read (get_org_settings): refused with a conflict if they changed since"),
+    ifDefault: id('playlist')
+      .nullable()
+      .optional()
+      .describe('Set it only if the default is still this playlist; null: only if there is none. Refused with a conflict otherwise'),
+  }),
   output: outputs.set_default_playlist,
   example: { playlistId: 'pls_example' },
   target,
   handler: async ({ org, input, write }) => {
     const row = await requirePlaylist(org, input.playlistId);
-    write(await org.settings.stage.set({ defaultPlaylistId: row.id }));
+    if (input.ifDefault !== undefined) write(await stillDefault(org, input.ifDefault));
+    write(await org.settings.stage.set({ defaultPlaylistId: row.id }, input.ifVersion));
     return { playlist: playlistView(row, await org.playlists.items(row.id), row.id) };
   },
-  // Deleted between the read and the commit, the setting's foreign key fails the batch.
-  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+  // Deleted between the read and the commit, the setting's foreign key fails the batch; a default chosen
+  // meanwhile fails `ifDefault`'s guard, said as the read says it.
+  refuseFailedCommit: async ({ org, input }) => {
+    if (!(await org.playlists.get(input.playlistId))) return notFound('playlist', input.playlistId);
+    return input.ifDefault === undefined ? undefined : defaultMoved(org, input.ifDefault);
+  },
 });
 
 export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist, setDefaultPlaylist];

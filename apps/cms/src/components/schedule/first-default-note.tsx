@@ -1,6 +1,7 @@
 /**
  * Before a publish from the Schedule's dialogs, when the org has no default playlist (#243): without
- * one no screen can be published to. An entry on every screen at all hours makes its playlist the
+ * one no screen can be published to. When it has one never published (#393), the dialog says so and
+ * publishes it too only if the person ticks that: nothing goes live they were not shown. An entry on every screen at all hours makes its playlist the
  * default as it publishes (the `publish` tool's `madeDefault`), and the dialog says so. For a takeover
  * or a narrower entry (owner decision) the dialog asks for one instead, prefilled with its playlist:
  * Save and publish, or Take over, makes it the default first (`set_default_playlist`).
@@ -54,6 +55,23 @@ export function FirstDefaultChoice({
           </option>
         ))}
       </NativeSelect>
+    </div>
+  );
+}
+
+/** When the default playlist was never published: say so, and publish it with this only if ticked (#393). */
+export function UnpublishedDefault({ playlists, checked, onChange }: { playlists: PlaylistView[]; checked: boolean; onChange: (checked: boolean) => void }) {
+  const current = playlists.find((p) => p.isDefault);
+  if (!current || current.published) return null;
+  return (
+    <div className={`grid gap-1.5 ${BOX}`}>
+      <p>
+        <bdi>{current.name}</bdi> is the default playlist but is not published yet: screens get nothing when nothing is scheduled until it is.
+      </p>
+      <label className="flex items-center gap-2 font-medium">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="size-4 accent-primary" />
+        Publish <bdi>{current.name}</bdi> too, with its unpublished spots
+      </label>
     </div>
   );
 }
