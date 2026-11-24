@@ -409,9 +409,19 @@ describe('the final re-check of #391', () => {
     const a = anthropic((b) =>
       b.stream
         ? anthropicStream('m', b.model, [{ type: 'text', text: partial }], 'max_tokens')
-        : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text: partial }], stop_reason: 'max_tokens', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+        : Response.json({
+            id: 'm',
+            type: 'message',
+            role: 'assistant',
+            model: b.model,
+            content: [{ type: 'text', text: partial }],
+            stop_reason: 'max_tokens',
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
     );
-    for (const model of ['claude-haiku-5-5', 'claude-haiku-5-5-20261201']) expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: true, text: partial });
+    for (const model of ['claude-haiku-5-5', 'claude-haiku-5-5-20261201'])
+      expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: true, text: partial });
   });
 
   it('says an empty answer is unreadable, with no second try, on both paths', async () => {
@@ -420,11 +430,19 @@ describe('the final re-check of #391', () => {
       const a = anthropic((b) =>
         b.stream
           ? anthropicStream('m', b.model, [], 'end_turn')
-          : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+          : Response.json({
+              id: 'm',
+              type: 'message',
+              role: 'assistant',
+              model: b.model,
+              content: [],
+              stop_reason: 'end_turn',
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
       );
       expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: false, problem: 'unreadable' });
       expect(a.asked, model).toHaveLength(1);
     }
   });
 });
-

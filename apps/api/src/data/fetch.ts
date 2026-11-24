@@ -233,7 +233,12 @@ export function guardedStream(call: ModelCall): GuardedStream {
  * closes without one. The stream's events are parsed as they come (an event ends at a blank line), so
  * only a real event counts: text that mentions one inside an event's data does not.
  */
-function streamed(res: Response, signal: AbortSignal, finished: ((e: SseEvent) => boolean) | undefined, fail: (e: unknown) => FetchError): ReadableStream<Uint8Array> | null {
+function streamed(
+  res: Response,
+  signal: AbortSignal,
+  finished: ((e: SseEvent) => boolean) | undefined,
+  fail: (e: unknown) => FetchError,
+): ReadableStream<Uint8Array> | null {
   if (!res.body) return null;
   const reader = res.body.getReader();
   let size = 0;
