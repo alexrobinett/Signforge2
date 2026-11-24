@@ -221,7 +221,10 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     });
     // The pin that sorts last by id edited between the approval's reads and its batch: the batch fails, and the diagnosis reads
     // every chunk of guards before the one that holds it, the most it ever reads; the retry finds it. Never a random pin.
-    const edited = spots.map((x) => x.id).sort().at(-1)!;
+    const edited = spots
+      .map((x) => x.id)
+      .sort()
+      .at(-1)!;
     const { result, bindings } = counted(() =>
       env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(edited).run(),
     );

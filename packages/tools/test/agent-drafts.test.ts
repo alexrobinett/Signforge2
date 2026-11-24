@@ -293,7 +293,14 @@ describe('a publish of every draft, raced by an agent (review round 2 of #410)',
     await call(person('owner'), 'publish', {});
     const live = await spot();
     // The agent edits the published, unchanged spot while the publish compiles.
-    expect(await dispatch(registry, 'publish', {}, duringCompile(() => edit(agent(), 12_000, live.rowVersion)))).toMatchObject({ ok: true });
+    expect(
+      await dispatch(
+        registry,
+        'publish',
+        {},
+        duringCompile(() => edit(agent(), 12_000, live.rowVersion)),
+      ),
+    ).toMatchObject({ ok: true });
     // Run again from a fresh read, it published the agent's edit: what the proposal was cleared for is on screens.
     expect(published(await spot())?.durationMs).toBe(12_000);
     expect(await kept()).toBeNull();

@@ -129,7 +129,10 @@ describe("an agent's proposal", () => {
     const first = s.getState().rejectProposal(ORG, 'spot', 'spt_soup', 7);
     await rereading;
     // This Reject's toast: sonner keeps the earlier tests' too.
-    const done = toast.getToasts().filter((t) => 'title' in t && t.title === "Rejected the agent's draft").at(-1);
+    const done = toast
+      .getToasts()
+      .filter((t) => 'title' in t && t.title === "Rejected the agent's draft")
+      .at(-1);
     const undo = done && 'action' in done ? done.action : undefined;
     if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
     // Pressed now, it waits: nothing more is sent until the read again is done.
@@ -143,7 +146,10 @@ describe("an agent's proposal", () => {
     expect(callTool).toHaveBeenLastCalledWith('revert_spot_draft', { spotId: 'spt_soup', ifVersion: 8 }, ORG);
     // A read again that fails: the slice is free again for the next press.
     reloadSpot.mockRejectedValueOnce(new Error('offline'));
-    await s.getState().keepProposal(ORG, 'spot', 'spt_soup', 9).catch(() => {});
+    await s
+      .getState()
+      .keepProposal(ORG, 'spot', 'spt_soup', 9)
+      .catch(() => {});
     expect(s.getState().proposals.pending).toBeNull();
   });
 });
