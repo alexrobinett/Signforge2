@@ -189,19 +189,32 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
   };
   const said = () => toast.getToasts().flatMap((t) => ('title' in t ? [{ title: t.title, description: t.description }] : []));
 
-  it('pins a default never published, from a dialog that shows it: a retry after a publish that failed once it was set publishes it too (#336); never from the agent drawer (round 3 of #393)', async () => {
+  it('pins a default never published only when its box was ticked: a retry after a publish that failed once it was set (#336); never a dialog choice it did not show, nor from the agent drawer (#393)', async () => {
     vi.mocked(getPlaylists).mockResolvedValue({
       playlists: [list('pls_holiday', {}), list('pls_all_day', { isDefault: true, published: false, version: 2, spotIds: ['spt_open'] })],
     } as never);
     vi.mocked(getSpots).mockResolvedValue({ spots: [list('spt_open', { published: false, version: 3 })] } as never);
+    const alone = [['publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] }]];
+    // Ticked: "Publish All day too".
     vi.mocked(callTool).mockClear();
-    await setup([mine]).publishEntry(ORG, 'sch_mine', {});
+    await setup([mine]).publishEntry(ORG, 'sch_mine', { publishDefault: true });
     expect(names()).toEqual(['publish']);
     expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', pinnedDefault);
+    // Confirmed for its own playlist, the box left unticked: the entry alone, whatever choice the dialog carried.
+    for (const withDefault of [{}, { choice: 'pls_holiday' }, { choice: 'pls_holiday', publishDefault: false }]) {
+      vi.mocked(callTool).mockClear();
+      await setup([mine]).publishEntry(ORG, 'sch_mine', withDefault);
+      expect(vi.mocked(callTool).mock.calls, JSON.stringify(withDefault)).toEqual(alone);
+    }
+    // A takeover's dialog the same.
+    vi.mocked(callTool).mockClear();
+    await setup([mine]).publishSchedule(ORG, ['sch_mine'], { choice: 'pls_holiday' });
+    expect(vi.mocked(callTool).mock.calls[0]?.[1]).not.toHaveProperty('ifDefault');
+    expect(JSON.stringify(vi.mocked(callTool).mock.calls)).not.toContain('pls_all_day');
     // As the drawer calls it (agent-drawer.ts publishDrafts), with no default choice: the entry alone.
     vi.mocked(callTool).mockClear();
     await setup([mine]).publishEntry(ORG, 'sch_mine');
-    expect(vi.mocked(callTool).mock.calls).toEqual([['publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] }]]);
+    expect(vi.mocked(callTool).mock.calls).toEqual(alone);
   });
 
   it('says the default was set when the publish after it fails (#336)', async () => {
@@ -270,7 +283,7 @@ describe('the default chosen before a publish, with none yet (#243)', () => {
       playlists: [list('pls_holiday', {}), list('pls_all_day', { isDefault: true, published: false, version: 2 })],
     } as never);
     toast.dismiss();
-    await setup([mine]).publishEntry(ORG, 'sch_mine', {});
+    await setup([mine]).publishEntry(ORG, 'sch_mine', { publishDefault: true });
     expect(said().findLast((t) => t.title === plain.title)).toEqual(plain);
   });
 

@@ -37,7 +37,7 @@ import { contentJson, published } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
-import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, GUARD_ABORT, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type AlertChannel = typeof s.alertChannels.$inferSelect;
@@ -117,9 +117,9 @@ type Ids = 'content' | 'server';
  * version `stale` reads now. Every version check inside a batch is one of these.
  */
 function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
-  // json() of text that is not JSON raises an error, which aborts the batch.
+  // A JSON path that is not one raises an error naming it, which aborts the batch: `commit` knows a guard's abort by it.
   const check = db
-    .select({ ok: sql`json(CASE WHEN ${holds} THEN '1' ELSE 'stale version' END)` })
+    .select({ ok: sql`json_extract('{}', CASE WHEN ${holds} THEN '$' ELSE ${GUARD_ABORT} END)` })
     .from(s.organization)
     .where(eq(s.organization.id, orgId));
   return guard(check, { id, version, holds, stale });

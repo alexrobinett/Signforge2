@@ -287,11 +287,14 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     // While it is: published.
     await chooseDefault(org, o.playlist);
     expect(await ok(owner(org)('publish', pins))).toMatchObject({ promoted: [{ kind: 'spot', id: spot.id }] });
-    // Switched to another as it compiled and back before its batch (A, B, A): the guard alone would pass, so it
-    // holds to the default the compiler read, and refuses, publishing nothing compiled against the other.
+    // Switched to another just as the compiler reads it, and back before its batch (A, B, A): every other read,
+    // a check made before compiling included, sees A, and the guard alone would pass; so it holds to the
+    // default the compiler read, and refuses, publishing nothing compiled against the other.
     await chooseDefault(org, o.playlist);
     const spotNow = (await org.spots.get(spot.id))!;
     const settings = org.settings;
+    /** The settings reads that saw B: the compiler's alone. */
+    const flipped: string[] = [];
     const aba = racing(
       new Proxy(org, {
         get: (t, k) =>
@@ -300,7 +303,11 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
                 get: (st, sk) =>
                   sk === 'get'
                     ? async () => {
-                        await chooseDefault(org, other.id);
+                        // The compiler's read (`loadOrg`, src/publishing.ts), by its caller.
+                        if (new Error().stack?.includes('loadOrg')) {
+                          flipped.push('loadOrg');
+                          await chooseDefault(org, other.id);
+                        }
                         return settings.get();
                       }
                     : Reflect.get(st, sk),
@@ -316,6 +323,7 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
       expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
     };
     await refusedFor(aba, { drafts: [{ kind: 'spot', id: spotNow.id, version: spotNow.rowVersion }], ifDefault: o.playlist });
+    expect(flipped).toEqual(['loadOrg']);
     await chooseDefault(org, o.playlist);
     // A publish that changes no screen (removals only, or nothing) is held to it as well.
     await refusedFor(

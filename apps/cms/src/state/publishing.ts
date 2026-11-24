@@ -37,11 +37,14 @@ interface PublishingState {
 }
 
 /**
- * A publish from a Schedule dialog that shows the default choice (#243, #336): it may set the default
- * the person chose (`choice`, when there is none) and publish a default never published with it.
+ * What a Schedule dialog showed the person of the default, and what they kept (#243, #336, #393).
+ * `choice`: with no default, the one they chose to make it first, which is published with this if it
+ * never was. `publishDefault`: with a default never published, they ticked to publish it too. Nothing
+ * of the default goes with a publish unless the dialog showed it.
  */
 interface DefaultChoice {
   choice?: string;
+  publishDefault?: boolean;
 }
 
 export interface PublishingSlice {
@@ -211,10 +214,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
    * `withDefault`; any other publish pins nothing of the default. With no default playlist yet, the one the
    * person chose made the default first (`set_default_playlist` with `ifDefault: null`: only while the
    * org has none, checked again as it is saved, so a default someone chose meanwhile is never replaced).
-   * Then, whichever is the default, if it was never published, its pins and its unpublished spots', so
-   * the publish publishes it (a retry after a publish that failed once the default was set does too,
-   * #336), with `ifDefault`, which refuses the publish if it is no longer the default by then. `made`
-   * names the default this set, for the toasts. null when it was refused, which is said under `refused`.
+   * If that default was never published, its pins and its unpublished spots', so the publish publishes
+   * it. With a default already, the dialog offered no choice: one never published is pinned only when
+   * the person ticked its own box (`publishDefault`), as a retry after a publish that failed once the
+   * default was set would (#336, #393). Pinned, the publish carries `ifDefault`, which refuses it if it
+   * is no longer the default by then. `made` names the default this set, for the toasts. null when it
+   * was refused, which is said under `refused`.
    */
   async function defaultPins(
     withDefault: DefaultChoice | undefined,
@@ -223,11 +228,14 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   ): Promise<{ pins: Pin[]; made?: string; ifDefault?: string } | null> {
     // Not from a dialog that shows the default: no pin the person did not see (round 3 of #393).
     if (!withDefault) return { pins: [] };
-    const { choice } = withDefault;
+    const { choice, publishDefault } = withDefault;
     let current = drafts.playlists.find((p) => p.isDefault);
     let made: string | undefined;
+    // A default already: the dialog offered no choice, so only its own box publishes it with this (#393).
+    if (current && !publishDefault) return { pins: [] };
     const chosen = choice ? drafts.playlists.find((p) => p.id === choice) : undefined;
-    if (!current && chosen) {
+    if (!current) {
+      if (!chosen) return { pins: [] };
       try {
         await callTool('set_default_playlist', { playlistId: chosen.id, ifDefault: null });
         current = chosen;
@@ -239,7 +247,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         return null;
       }
     }
-    if (!current || current.published) return { pins: [], made };
+    if (current.published) return { pins: [], made };
     const inIt = new Set(current.spotIds);
     return {
       made,

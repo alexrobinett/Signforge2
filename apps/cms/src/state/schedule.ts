@@ -41,6 +41,8 @@ export interface EntryDraft {
    * the dialog. Unset follows the entry's playlist; '' is none.
    */
   firstDefault?: string;
+  /** The default exists but was never published, and the person ticked to publish it with this (#393). */
+  publishDefault?: boolean;
 }
 
 /** A takeover in its dialog: until when, as a `datetime-local` value in the browser's time zone. */
@@ -52,6 +54,8 @@ interface TakeoverDraft {
   until: string;
   /** As an entry's: the default to make first when there is none (#243). Unset follows its playlist; '' is none. */
   firstDefault?: string;
+  /** As an entry's: publish a default never published with it, ticked (#393). */
+  publishDefault?: boolean;
 }
 
 interface ScheduleState {
@@ -253,7 +257,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const d = get().schedule.entries[DIALOG]?.edit;
       const firstDefault = d && !everywhereAlways(d) ? firstDefaultOf(d) : undefined;
       const record = await saveDialogEntry(orgId);
-      if (record) await get().publishEntry(orgId, record, { choice: firstDefault });
+      if (record) await get().publishEntry(orgId, record, { choice: firstDefault, publishDefault: d?.publishDefault === true });
     },
 
     async reloadEntry(orgId) {
@@ -291,11 +295,12 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       if (draft?.orgId !== orgId) return;
       // A takeover never makes the default itself: the person's choice does, when there is none (#243).
       const firstDefault = firstDefaultOf(draft.edit);
+      const publishDefault = draft.edit.publishDefault === true;
       // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
       const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
       if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
-      await get().publishSchedule(orgId, [made.record], { choice: firstDefault });
+      await get().publishSchedule(orgId, [made.record], { choice: firstDefault, publishDefault });
     },
 
     closeScheduleDialog: close,

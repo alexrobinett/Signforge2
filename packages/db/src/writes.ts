@@ -53,8 +53,11 @@ export class StaleVersionError extends Error {
   }
 }
 
-/** A guard's abort: `json()` of its text, which is not JSON (`staleGuard`, ./scoped.ts). */
-const GUARD_ABORT = /malformed JSON/i;
+/**
+ * What a version guard aborts its batch with (`staleGuard`, ./scoped.ts): a JSON path that is not one,
+ * which D1's error names, so a guard's abort is told from any other failure of the batch.
+ */
+export const GUARD_ABORT = 'sf-guard: stale version';
 
 /** A staged change: the statements to run, and the row (if any) as it will be afterwards. */
 export interface Staged<T = void> {
@@ -71,8 +74,8 @@ export const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: que
 /**
  * Run writes in one atomic batch. Nothing to write runs nothing. A batch failed by a version
  * guard throws `StaleVersionError` (`NotInOrgError` if the row is gone, but version 0 for a draft that vanished during promotion), so a caller can tell a
- * refusal from a fault; one whose guards all hold again by the time it is diagnosed, `StaleVersionError`
- * with id `batch`. Any other failure is rethrown as it is. Returns how many rows each write
+ * refusal from a fault; one a guard aborted (its abort names `GUARD_ABORT`) whose guards all hold again by
+ * the time it is diagnosed, `StaleVersionError` with id `batch`. Any other failure is rethrown as it is. Returns how many rows each write
  * changed, as D1 counts them (with its triggers' and cascades'; 0 for a guard), which `testScope`
  * reports from (./testing.ts).
  */
@@ -102,8 +105,8 @@ export async function commit(db: Db, writes: readonly Write[]): Promise<number[]
       }
     }
     // A guard aborted it, but every one holds again as it is read (a change made and taken back since): still a
-    // refusal, never a fault, though which row changed is no longer known.
-    if (guards.length && err instanceof Error && GUARD_ABORT.test(err.message))
+    // refusal, never a fault, though which row changed is no longer known. Any other failure is the database's.
+    if (guards.length && err instanceof Error && err.message.includes(GUARD_ABORT))
       // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
       throw new StaleVersionError('batch', 0, { cause: err, message: 'Something changed while this was saved. Read it again and redo the change' });
     throw err;
