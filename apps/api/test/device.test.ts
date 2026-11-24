@@ -153,12 +153,19 @@ describe('device auth', () => {
     for (const [path, status] of [
       ['/api/screens', 401],
       ['/api/v1/device/manifest.json', 401],
-      ['/mcp', 404],
       ['/manifest.json', 404],
     ] as const) {
       const res = await exports.default.fetch(`https://api.test${path}`, { headers: { authorization: `Bearer ${a.credential}` } });
       expect(res.status, path).toBe(status);
     }
+    // The agents' tree (M4-06) takes only an agent's OAuth token.
+    const mcp = await exports.default.fetch('https://api.test/mcp', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${a.credential}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(mcp.status).toBe(401);
+    expect(mcp.headers.get('www-authenticate')).toContain('error="invalid_token"');
   });
 
   it('answers a CORS preflight without a token', async () => {

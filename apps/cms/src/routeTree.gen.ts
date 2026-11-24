@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known/$'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
@@ -47,9 +49,19 @@ const ConnectRoute = ConnectRouteImport.update({
   path: '/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownSplatRoute = DotwellKnownSplatRouteImport.update({
+  id: '/.well-known/$',
+  path: '/.well-known/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -185,7 +197,9 @@ const AppSettingsBrandKitsKitIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
@@ -213,7 +227,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
@@ -243,7 +259,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/_app/account': typeof AppAccountRoute
   '/_app/assets': typeof AppAssetsRoute
   '/_app/audit': typeof AppAuditRoute
@@ -275,7 +293,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/account'
     | '/assets'
     | '/audit'
@@ -303,7 +323,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/account'
     | '/assets'
     | '/audit'
@@ -332,7 +354,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/_app/account'
     | '/_app/assets'
     | '/_app/audit'
@@ -363,7 +387,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   ConnectRoute: typeof ConnectRoute
+  McpRoute: typeof McpRoute
   SignInRoute: typeof SignInRoute
+  DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
   ApiSplatRoute: typeof ApiSplatRoute
   V1DeviceSplatRoute: typeof V1DeviceSplatRoute
@@ -385,11 +411,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in': {
       id: '/sign-in'
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/$': {
+      id: '/.well-known/$'
+      path: '/.well-known/$'
+      fullPath: '/.well-known/$'
+      preLoaderRoute: typeof DotwellKnownSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -635,7 +675,9 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   ConnectRoute: ConnectRoute,
+  McpRoute: McpRoute,
   SignInRoute: SignInRoute,
+  DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
   ApiSplatRoute: ApiSplatRoute,
   V1DeviceSplatRoute: V1DeviceSplatRoute,

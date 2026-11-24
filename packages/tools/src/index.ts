@@ -42,7 +42,7 @@ export {
   type ToolContext,
   type ToolServices,
 } from './tool';
-export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
+export { dispatch, describeTools, effectiveScopes, grantOf, overLimit, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';

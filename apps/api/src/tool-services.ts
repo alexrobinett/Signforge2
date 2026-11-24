@@ -4,10 +4,9 @@
  * `/admin`'s take only what their tools need. Each is cheap to build: none calls a binding or a
  * provider until a tool uses it.
  *
- * Milestone 4's `/mcp` caller is the third adapter: it builds its services here, with its own
- * `ServiceScope` (the grant's org, and whoever the rate limits should count). Its `members` needs a
- * Better Auth that acts as the grant's member, and an audit hook that records the agent: today only
- * a session's request has one (`auth`).
+ * `/mcp` (M4-06, src/mcp) is the third adapter: it builds its services here, with the grant's org and
+ * member as its `ServiceScope`. It gets no `members`, which needs a Better Auth that acts as the grant's
+ * member and an audit hook that records the agent: only a session's request has one (`auth`).
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
