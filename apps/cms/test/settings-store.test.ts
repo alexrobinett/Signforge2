@@ -478,3 +478,51 @@ describe('AI & agents (#261)', () => {
     expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^The endpoint refused the key/);
   });
 });
+
+describe('focus as Remove gives way to its confirmation, and back (#289)', () => {
+  /** An element as a ref callback gets it: only `focus` is used. */
+  const element = () => ({ focus: vi.fn() });
+  const mount = (store: ReturnType<typeof settingsStore>, key: string) => {
+    const el = element();
+    store.getState().focusWhenReplaced(key)(el as never);
+    return el.focus;
+  };
+
+  it('names what takes focus next: the question as it opens, Remove on Keep it, the form once removed; each once', async () => {
+    const store = settingsStore();
+    // One callback a key, so React calls it as its element mounts, not on every render.
+    expect(store.getState().focusWhenReplaced('remove:webhook')).toBe(store.getState().focusWhenReplaced('remove:webhook'));
+    expect(mount(store, 'remove:webhook')).not.toHaveBeenCalled();
+
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    expect(mount(store, 'remove:webhook')).not.toHaveBeenCalled();
+    expect(mount(store, 'confirm:webhook')).toHaveBeenCalledTimes(1);
+    // Once: rendered again, it does not take focus again.
+    expect(mount(store, 'confirm:webhook')).not.toHaveBeenCalled();
+
+    store.getState().askToRemoveAlertChannel(A, null);
+    expect(mount(store, 'remove:webhook')).toHaveBeenCalledTimes(1);
+
+    // Removed: the card's form to set one.
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    replies.push(Promise.resolve({ status: 200, body: {} }));
+    await store.getState().removeAlertChannel(A, 'webhook');
+    expect(mount(store, 'form:webhook')).toHaveBeenCalledTimes(1);
+  });
+
+  it('names nothing when the confirmation does not change, and nothing once a removal is refused: the confirmation stays', async () => {
+    const store = settingsStore();
+    store.getState().askToRemoveAiKey(A, true);
+    expect(mount(store, 'confirm:key')).toHaveBeenCalledTimes(1);
+    const removal = held<Reply>();
+    replies.push(removal.promise);
+    const removing = store.getState().removeAiKey(A);
+    // Keep it waits for a removal that has been sent: nothing changes, so focus stays where it is.
+    store.getState().askToRemoveAiKey(A, false);
+    expect(mount(store, 'remove:key')).not.toHaveBeenCalled();
+    removal.resolve({ status: 403, body: { error: 'forbidden', message: 'Not removed' } });
+    await removing;
+    expect(mount(store, 'form:key')).not.toHaveBeenCalled();
+    expect(store.getState().settings.removingAiKey).toBe(A);
+  });
+});

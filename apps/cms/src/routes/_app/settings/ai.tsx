@@ -125,6 +125,8 @@ function KeyForm({ provider }: { provider: AiProvider | null }) {
   const id = useId();
   const save = useAppStore((s) => s.saveAiKey);
   const running = useRunning(pageOf(orgId));
+  // Once the key is removed, the form is read afresh: its key field takes the focus Remove key had (#289).
+  const focus = useAppStore((s) => s.focusWhenReplaced('form:key'));
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -189,7 +191,7 @@ function KeyForm({ provider }: { provider: AiProvider | null }) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={id}>{provider ? 'Replace the API key' : 'API key'}</Label>
-          <Input id={id} name="apiKey" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" className="font-mono" />
+          <Input ref={focus} id={id} name="apiKey" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" className="font-mono" />
           <p className="text-xs text-muted-foreground">
             Kept encrypted, and never shown again. Leave it empty to keep the saved key; a new provider or a new address needs the key again.
           </p>
@@ -215,15 +217,26 @@ function RemoveKey() {
   const remove = useAppStore((s) => s.removeAiKey);
   const running = useRunning(pageOf(orgId));
   const busy = running !== undefined;
+  const focus = useAppStore((s) => s.focusWhenReplaced);
   if (!asking)
     return (
-      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(orgId, true)}>
+      <Button
+        ref={focus('remove:key')}
+        type="button"
+        variant="ghost"
+        className="text-destructive"
+        aria-disabled={busy || undefined}
+        onClick={() => ask(orgId, true)}
+      >
         Remove key
       </Button>
     );
   return (
     <div className="w-full space-y-2 rounded-lg border border-destructive/40 p-3 text-sm">
-      <p>Remove the key? It is deleted, and the agent goes back to SignForge’s demo model and its daily limit.</p>
+      {/* Focus comes here as Remove key gives way to it (#289): the question first, then Tab to its answers. */}
+      <p ref={focus('confirm:key')} tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        Remove the key? It is deleted, and the agent goes back to SignForge’s demo model and its daily limit.
+      </p>
       <ActionError at="remove" />
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(orgId)}>

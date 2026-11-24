@@ -147,6 +147,12 @@ export interface SettingsSlice {
   saveAiChoices: (orgId: string, provider: AiProvider['provider'], choices: AiChoices, ifVersion: number) => Promise<void>;
   /** Opens or closes the key's removal confirmation, as `askToRemoveAlertChannel` does. */
   askToRemoveAiKey: (orgId: string, open: boolean) => void;
+  /**
+   * A ref callback for what takes focus when the element that had it is replaced (#289): a Remove by
+   * its confirmation, the confirmation by Remove again on Keep it, or, once removed, by the form that
+   * adds one. It focuses the element once, when it mounts as the one `key` names.
+   */
+  focusWhenReplaced: (key: string) => (el: HTMLElement | null) => void;
   removeAiKey: (orgId: string) => Promise<void>;
   /** Sets an agent's scopes from its next call (`update_agent_grant_scopes`), with the version the page read. */
   setAgentScopes: (orgId: string, grantId: string, scopes: ConnectScope[], ifVersion: number) => Promise<void>;
@@ -295,6 +301,10 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     }
   }
 
+  /** What takes focus next, by its `focusWhenReplaced` key: outside state, as nothing renders it. */
+  let focusNext: string | null = null;
+  const focusRefs = new Map<string, (el: HTMLElement | null) => void>();
+
   const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
   const notifications = (orgId: string) => org('notifications', orgId);
   const ai = (orgId: string) => org('ai', orgId);
@@ -355,20 +365,29 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (saved) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
     },
     dismissSigningSecret: () => patch((s) => ({ ...s, signingSecret: null })),
-    askToRemoveAlertChannel: (orgId, kind) =>
+    askToRemoveAlertChannel: (orgId, kind) => {
+      const was = get().settings.removingChannel;
       patch((s) => {
         const running = runningIn(s, notifications(orgId));
         if (kind ? running !== undefined : running === `remove:${s.removingChannel?.kind}`) return s;
         return { ...s, removingChannel: kind && { orgId, kind }, errors: withoutKey(s.errors, `remove:${kind ?? s.removingChannel?.kind}`) };
-      }),
+      });
+      if (get().settings.removingChannel !== was) focusNext = kind ? `confirm:${kind}` : `remove:${was?.kind}`;
+    },
     async removeAlertChannel(orgId, kind) {
+      // Its card goes back to the form that sets one, which can mount as the removal reads the page again: named first.
+      focusNext = `form:${kind}`;
       const removed = await run(
         notifications(orgId),
         `remove:${kind}`,
         () => callTool('remove_alert_channel', { channel: kind }),
         kind === 'slack' ? 'Slack removed' : 'Webhook removed',
       );
-      if (removed) patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
+      if (!removed) {
+        if (focusNext === `form:${kind}`) focusNext = null;
+        return;
+      }
+      patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
     },
     testAlertChannel: async (orgId, channel) =>
       void (await run(
@@ -427,15 +446,37 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
           }),
         'Saved',
       )),
-    askToRemoveAiKey: (orgId, open) =>
+    askToRemoveAiKey: (orgId, open) => {
+      const was = get().settings.removingAiKey;
       patch((s) => {
         const running = runningIn(s, ai(orgId));
         if (open ? running !== undefined : running === 'remove') return s;
         return { ...s, removingAiKey: open ? orgId : null, errors: withoutKey(s.errors, 'remove') };
-      }),
+      });
+      if (get().settings.removingAiKey !== was) focusNext = open ? 'confirm:key' : 'remove:key';
+    },
     async removeAiKey(orgId) {
+      // The form is read afresh without a key, as the removal reads the page again: its key field takes focus.
+      focusNext = 'form:key';
       const removed = await run(ai(orgId), 'remove', () => callTool('remove_ai_provider', {}), 'Key removed. The agent uses the demo model.');
-      if (removed) patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
+      if (!removed) {
+        if (focusNext === 'form:key') focusNext = null;
+        return;
+      }
+      patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
+    },
+    focusWhenReplaced(key) {
+      // One callback a key, so React calls it as its element mounts, not again on every render.
+      let ref = focusRefs.get(key);
+      if (!ref) {
+        ref = (el) => {
+          if (!el || focusNext !== key) return;
+          focusNext = null;
+          el.focus();
+        };
+        focusRefs.set(key, ref);
+      }
+      return ref;
     },
 
     async setAgentScopes(orgId, grantId, scopes, ifVersion) {

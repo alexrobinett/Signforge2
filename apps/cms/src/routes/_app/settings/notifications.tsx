@@ -217,16 +217,27 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
   const running = useRunning(pageOf(orgId));
   const busy = running !== undefined;
   const removing = running === `remove:${kind}`;
+  const focus = useAppStore((s) => s.focusWhenReplaced);
   const name = CHANNEL_COPY[kind].title;
   if (!asking)
     return (
-      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(orgId, kind)}>
+      <Button
+        ref={focus(`remove:${kind}`)}
+        type="button"
+        variant="ghost"
+        className="text-destructive"
+        aria-disabled={busy || undefined}
+        onClick={() => ask(orgId, kind)}
+      >
         Remove {name}
       </Button>
     );
   return (
     <div className="w-full space-y-2 rounded-lg border border-destructive/40 p-3">
-      <p>Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.</p>
+      {/* Focus comes here as Remove gives way to it (#289): the question first, then Tab to its answers. */}
+      <p ref={focus(`confirm:${kind}`)} tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.
+      </p>
       <ActionError at={`remove:${kind}`} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(orgId, kind)}>
@@ -257,6 +268,8 @@ function UrlForm({
 }) {
   const id = useId();
   const running = useRunning(pageOf(useOrgId()));
+  // Once the channel is removed, its card's form to set one takes the focus Remove had (#289).
+  const focus = useAppStore((s) => s.focusWhenReplaced(`form:${at}`));
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const url = String(new FormData(e.currentTarget).get('url') ?? '');
@@ -271,7 +284,7 @@ function UrlForm({
     <EditorFields>
       <form method="post" onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>
         <Label htmlFor={id}>{name}</Label>
-        <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
+        <Input ref={focus} id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
         <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
         <ActionError at={at} />
         <Button type="submit" aria-disabled={running !== undefined || undefined}>
