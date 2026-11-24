@@ -17,6 +17,7 @@ export function FillSource({
   help,
   label,
   blocked = false,
+  secondary = false,
   note,
   onFill,
 }: {
@@ -25,6 +26,8 @@ export function FillSource({
   label: string;
   /** Set while something else the fill needs is missing (a template to pick). */
   blocked?: boolean;
+  /** Beside the view's own primary action (Create spot), so its button is outlined: one filled button per view (#364). */
+  secondary?: boolean;
   note?: ReactNode;
   onFill: () => void;
 }) {
@@ -67,7 +70,7 @@ export function FillSource({
       </p>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {note}
-        <Button type="button" disabled={!ready} onClick={onFill}>
+        <Button type="button" variant={secondary ? 'outline' : 'default'} disabled={!ready} onClick={onFill}>
           {fill.pending ? 'Reading…' : label}
         </Button>
       </div>
