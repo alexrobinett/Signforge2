@@ -20,6 +20,7 @@ import type { ApiEnv } from '../api';
 import { cmsCaller, STATUS } from '../api/tools';
 import type { ConnectorDeps } from '../connectors';
 import type { ApplyAnswer, ProposedCall } from './chat-shapes';
+import { readBody } from './inline';
 
 type ApplyResult = ApplyAnswer['results'][number];
 
@@ -126,19 +127,11 @@ const applyRequest = z
  */
 export function mountApply(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined) {
   api.post('/agent/apply', async (c) => {
-    if (!/^application\/json\b/i.test(c.req.header('content-type') ?? ''))
-      return c.json({ error: 'invalid_input', message: 'send the request as application/json' }, 415);
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return c.json({ error: 'invalid_input', message: 'the body is not JSON' }, 400);
-    }
-    const parsed = applyRequest.safeParse(body);
-    if (!parsed.success) return c.json({ error: 'invalid_input', message: z.prettifyError(parsed.error) }, 400);
+    const request = await readBody(c, applyRequest);
+    if (request instanceof Response) return request;
     const caller: Caller = { ...cmsCaller(c, connectors), actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID } };
     const results: ApplyResult[] = [];
-    for (const { tool, input } of parsed.data.calls) {
+    for (const { tool, input } of request.calls) {
       if (!Object.hasOwn(DRAFTS, tool)) {
         results.push({ tool, ok: false, error: 'forbidden', message: `${tool} is not one the agent drafts` });
         break;

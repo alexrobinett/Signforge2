@@ -42,7 +42,7 @@ import {
   type ChatRequestBody,
   type TraceItem,
 } from './chat-shapes';
-import { type AgentDeps, dayIn, fenced } from './inline';
+import { type AgentDeps, dayIn, fenced, readBody } from './inline';
 import { draftTools, MAX_DRAFTS, propose } from './drafts';
 import { type ChatTool, type ChatTurn, chatWith, type ModelReach } from './provider';
 
@@ -185,17 +185,9 @@ function asData(output: unknown): string {
 export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, deps: AgentDeps = {}) {
   api.post('/agent/chat', async (c) => {
     const refuse = (error: keyof typeof STATUSES, message: string) => c.json({ error, message }, STATUSES[error]);
-    if (!/^application\/json\b/i.test(c.req.header('content-type') ?? ''))
-      return c.json({ error: 'invalid_input', message: 'send the request as application/json' }, 415);
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return refuse('invalid_input', 'the body is not JSON');
-    }
-    const parsed = chatRequest.safeParse(body);
-    if (!parsed.success) return refuse('invalid_input', z.prettifyError(parsed.error));
-    const { messages, page } = parsed.data;
+    const request = await readBody(c, chatRequest);
+    if (request instanceof Response) return request;
+    const { messages, page } = request;
     const { org } = c.var;
 
     const provider = await org.aiProvider.get();
