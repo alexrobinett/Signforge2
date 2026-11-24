@@ -1,7 +1,7 @@
 /**
  * The tools the agent's drawer runs only when the person presses a confirmation card (#269, #351,
  * docs/proposals/cms-agent.md): publishing, taking over, ending a takeover, deleting, revoking, a live
- * screen command, and every tool that reaches an address. The model may ask for one; TanStack AI's
+ * screen command, cancelling an invitation (#321), and every tool that reaches an address. The model may ask for one; TanStack AI's
  * `needsApproval` pauses the run there, before it runs, and the card says what it would do, read from
  * the org now: to what, how many screens, until when, whether it can be undone, and an address in full.
  *
@@ -39,7 +39,7 @@ export const CONFIRM_MS = 10 * 60_000;
 interface Made {
   card: Omit<ConfirmCard, 'tool' | 'token' | 'why' | 'expiresAt'>;
   input: Row;
-  /** Lines naming what the audit log redacts (a provider's resource): shown to the person, kept out of the audit row's summary. */
+  /** Lines naming what the audit log redacts (a provider's resource, an invitee's address): shown to the person, kept out of the audit row's summary. */
   withheld?: readonly string[];
 }
 
@@ -345,6 +345,31 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       };
     },
     run: run('delete_schedule_entry'),
+  },
+  // An invitation cancelled cannot be undone by the agent: only a person invites again (#321).
+  cancel_invitation: {
+    tools: ['cancel_invitation'],
+    schema: ofRegistry('cancel_invitation'),
+    description: describedAs('cancel_invitation'),
+    async make(org, called) {
+      const invitation = await org.invitations.get(str(called.invitationId));
+      if (invitation?.status !== 'pending') throw new CardProblem(`no pending invitation ${str(called.invitationId)}`);
+      const whose = `The invitation for ${invitation.email}${invitation.role ? ` as ${invitation.role}` : ''} stops working: its link no longer lets them in.`;
+      return {
+        input: { invitationId: invitation.id },
+        // The invitee's address: only owners read it in the audit log, so the summary every member reads leaves it out.
+        withheld: [whose],
+        card: {
+          title: 'Cancel an invitation',
+          lines: [whose],
+          address: null,
+          when: 'Now',
+          undo: 'No undo: an owner invites them again.',
+          press: 'Cancel the invitation',
+        },
+      };
+    },
+    run: run('cancel_invitation'),
   },
   revoke_screen_credential: {
     tools: ['revoke_screen_credential'],

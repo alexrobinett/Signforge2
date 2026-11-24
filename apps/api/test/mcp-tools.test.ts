@@ -28,7 +28,6 @@ const members: Members = {
   invite: async () => {
     throw new Error('not called');
   },
-  cancelInvitation: async () => {},
   updateRole: async () => {},
   remove: async () => {},
 };
@@ -72,8 +71,13 @@ describe('tools/list', () => {
     const withSession = listedTools(owner, { members }).map((t) => t.name);
     for (const name of needing) {
       expect(without, name).not.toContain(name);
-      expect(withSession, name).toContain(name);
+      // A people-only one (invite_member, #321) is listed to no agent, with a session or not.
+      if (registry.get(name)?.people) expect(withSession, name).not.toContain(name);
+      else expect(withSession, name).toContain(name);
     }
+    // Cancelling an invitation needs no session (#321): offered to an owner's agent as it is.
+    expect(without).toContain('cancel_invitation');
+    expect(without).not.toContain('invite_member');
   });
 
   it('hints from the registry: a read is read-only, a delete or revoke destructive, a keyed creation idempotent', () => {
@@ -82,13 +86,14 @@ describe('tools/list', () => {
       const tool = registry.get(t.name);
       expect(t.annotations, t.name).toEqual({
         readOnlyHint: !tool?.mutates,
-        destructiveHint: tool?.mutates === true && /^(delete|revoke)_/.test(t.name),
+        destructiveHint: tool?.mutates === true && /^(delete|revoke|cancel)_/.test(t.name),
         idempotentHint: tool?.idempotent === true,
       });
     }
     const hints = (name: string) => listedTools(owner, AGENT).find((t) => t.name === name)?.annotations;
     expect(hints('list_screens')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    expect(hints('cancel_invitation')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });
 

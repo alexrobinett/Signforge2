@@ -6,7 +6,7 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
 import { type DispatchResult, describeTools, type Grant, registry, type ToolServices } from '@signforge/tools';
 
 /** Tools that take something away for good: a person should look before an agent runs them. */
-const DESTRUCTIVE = /^(delete|revoke)_/;
+const DESTRUCTIVE = /^(delete|revoke|cancel)_/;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 

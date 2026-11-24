@@ -3,9 +3,8 @@
  * request's own Better Auth instance with its headers, so the caller is the session's member and
  * Better Auth's rules and after hooks run as they do for the CMS's own calls. `membershipAudit`
  * writes each change's audit row. Inviting, changing a role and removing name the org the service was
- * made for. Cancelling cannot: Better Auth acts in the invitation's own org, wherever the person may
- * manage invitations, so `cancel_invitation`'s check that the invitation is in the caller's org
- * (packages/tools src/members.ts) is that path's only org guard.
+ * made for. Cancelling is not here: `cancel_invitation` writes through the org's scope with no session,
+ * so an agent can cancel too (#321).
  * Better Auth's refusals become tool refusals: a 400 (already a member, already invited, the last
  * owner) is `conflict`, a 401 or 403 `forbidden`, a 404 `not_found`.
  */
@@ -44,7 +43,6 @@ export function betterAuthMembers(auth: Auth, headers: Headers, organizationId: 
           createdAt: new Date(i.createdAt).toISOString(),
         };
       }),
-    cancelInvitation: (invitationId) => refusing(async () => void (await auth.api.cancelInvitation({ headers, body: { invitationId } }))),
     updateRole: (memberId, role) => refusing(async () => void (await auth.api.updateMemberRole({ headers, body: { memberId, role, organizationId } }))),
     remove: (memberId) => refusing(async () => void (await auth.api.removeMember({ headers, body: { memberIdOrEmail: memberId, organizationId } }))),
   };

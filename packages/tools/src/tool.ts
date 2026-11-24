@@ -142,7 +142,6 @@ export interface Invitation {
 export interface Members {
   /** Invites the address with the role. Returns the invitation, as Better Auth made it. */
   invite(email: string, role: Role): Promise<Invitation>;
-  cancelInvitation(invitationId: string): Promise<void>;
   updateRole(memberId: string, role: Role): Promise<void>;
   remove(memberId: string): Promise<void>;
 }

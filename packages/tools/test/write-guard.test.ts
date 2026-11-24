@@ -190,7 +190,8 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     });
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, 'b'.repeat(64)), 'not the claimed bytes');
   },
-  // The member tools' rows. Their changes are Better Auth's, faked here: they write nothing of their own.
+  // The member tools' rows. Role changes and removals are Better Auth's, faked here: they write nothing of their own.
+  // A cancel writes the invitation through the org's scope (#321).
   cancel_invitation: (o) => seedTeam(env.DB, o.orgId),
   update_member_role: (o) => seedTeam(env.DB, o.orgId),
   remove_member: (o) => seedTeam(env.DB, o.orgId),

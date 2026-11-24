@@ -148,8 +148,9 @@ describe('the audit row of a member change', () => {
     await owner.tool('cancel_invitation', { invitationId: toolInvitation });
     await owner.ok('/api/auth/organization/cancel-invitation', { invitationId: endpointInvitation });
     const by = { actorKind: 'user', actorId: ownerId, clientId: 'cms' };
+    // The tool's row is the dispatcher's, its invitee under `detail` (#321: it cancels with no Better Auth session).
     expect(await audits(org.id, 'cancel_invitation')).toEqual([
-      { ...by, targetKind: 'invitation', targetId: toolInvitation, detail: { email: byTool } },
+      { ...by, targetKind: 'invitation', targetId: toolInvitation, detail: { input: { invitationId: toolInvitation }, detail: { email: byTool } } },
       { ...by, targetKind: 'invitation', targetId: endpointInvitation, detail: { email: byEndpoint } },
     ]);
 
