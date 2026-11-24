@@ -36,7 +36,7 @@ test.afterAll(() => page.context().close());
 test('make a playlist, add spots, and see the real player play the loop', async () => {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Playlists' }).click();
   await hydrated(page);
-  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Put your spots in a playlist' })).toBeVisible();
   await axe(page);
   await shots(page, '40-playlists-empty');
 
@@ -180,7 +180,7 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
   await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/playlists$/);
-  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Put your spots in a playlist' })).toBeVisible();
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {

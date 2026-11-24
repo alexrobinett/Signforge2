@@ -41,14 +41,20 @@ export const SECTIONS: Section[] = [
     label: 'Spots',
     icon: LayersIcon,
     description: 'The pieces of content a screen shows: templates filled with your text, images, video or a web page.',
-    empty: { title: 'No spots yet', body: 'Spots you create from templates, images, video or web pages will be listed here.' },
+    empty: {
+      title: 'Make your first spot from a template',
+      body: 'A spot is what a screen shows: a template with your words and pictures, an image, or a web page. Pick a template to start.',
+    },
   },
   {
     to: '/playlists',
     label: 'Playlists',
     icon: ListVideoIcon,
     description: 'Ordered spots that play in a loop.',
-    empty: { title: 'No playlists yet', body: 'A playlist puts spots in order and sets how one gives way to the next. Make one, then add spots to it.' },
+    empty: {
+      title: 'Put your spots in a playlist',
+      body: 'A playlist plays spots in order, in a loop, and sets how one gives way to the next. Make one, then add spots to it.',
+    },
   },
   {
     to: '/schedule',
@@ -94,5 +100,8 @@ export const SECTIONS: Section[] = [
     empty: { title: '', body: '' },
   },
 ];
+
+/** An empty list's word to a viewer, who cannot make the first one. */
+export const ASK_AN_EDITOR = 'Ask an editor or owner to make one.';
 
 export const sectionFor = (to: Section['to']) => SECTIONS.find((s) => s.to === to)!;

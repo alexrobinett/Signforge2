@@ -5,15 +5,18 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
+import { PlusIcon } from 'lucide-react';
 import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewPlaylistDialog } from '~/components/playlists/new-playlist-dialog';
 import { SpotThumb } from '~/components/spots/template-thumb';
+import { Button } from '~/components/ui/button';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistPublishWord, transitionWord } from '~/lib/playlists';
-import { sectionFor } from '~/lib/sections';
+import { ASK_AN_EDITOR, sectionFor } from '~/lib/sections';
 import { templatesByVersion } from '~/lib/spots';
 import { playlistsQuery } from '~/queries/playlists';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
+import { useAppStore } from '~/state/provider';
 
 const section = sectionFor('/playlists');
 
@@ -42,11 +45,13 @@ function PlaylistsPage() {
   const byId = new Map(spots.map((s) => [s.id, s]));
   const templateOf = templatesByVersion(templates);
   const assetsById = new Map(assets.map((a) => [a.id, a]));
+  const newSpot = useAppStore((s) => s.openNewSpot);
 
   return (
     <div className="space-y-6">
+      {/* With no playlists, the empty state's action is the one on the page (#369): New playlist, or New spot first when there is none to put in one. */}
       <PageHeader title={section.label} description={section.description}>
-        {canManage && <NewPlaylistDialog orgId={orgId} />}
+        {canManage && playlists.length > 0 && <NewPlaylistDialog orgId={orgId} />}
       </PageHeader>
       {playlists.length ? (
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
@@ -70,8 +75,25 @@ function PlaylistsPage() {
           })}
         </ul>
       ) : (
-        <EmptyState icon={section.icon} title={section.empty.title}>
-          {section.empty.body}
+        <EmptyState
+          icon={section.icon}
+          title={spots.length ? section.empty.title : 'Make a spot first, then a playlist'}
+          action={
+            !canManage ? (
+              <p className="text-sm text-muted-foreground">{ASK_AN_EDITOR}</p>
+            ) : spots.length ? (
+              <NewPlaylistDialog orgId={orgId} />
+            ) : (
+              <Button asChild>
+                <Link to="/spots" onClick={() => newSpot(true)}>
+                  <PlusIcon aria-hidden />
+                  New spot
+                </Link>
+              </Button>
+            )
+          }
+        >
+          {spots.length ? section.empty.body : 'A playlist plays spots in order, in a loop. Make a spot from a template, then put it in a playlist here.'}
         </EmptyState>
       )}
     </div>

@@ -1,7 +1,8 @@
 /**
  * Spots: every spot's draft, most recently edited first, with what it is and whether screens have
  * it, and a dialog to make one (a template, an image or a web page). Each opens in the editor. With
- * no spots yet, the page is the template gallery (#362): a template opens the dialog with it picked.
+ * no spots yet, the empty state's New spot (#369) and under it the template gallery (#362): a
+ * template opens the dialog with it picked.
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
@@ -9,7 +10,7 @@ import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { SpotThumb, TemplateThumb } from '~/components/spots/template-thumb';
 import { useCanManage, useOrgId } from '~/lib/live';
-import { sectionFor } from '~/lib/sections';
+import { ASK_AN_EDITOR, sectionFor } from '~/lib/sections';
 import { publishWord, spotWhat, type TemplateView, templatesByVersion, usableVersions, versionsById } from '~/lib/spots';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -38,8 +39,9 @@ function SpotsPage() {
 
   return (
     <div className="space-y-6">
+      {/* With no spots, New spot is the empty state's own action, the one on the page (#369). */}
       <PageHeader title={section.label} description={section.description}>
-        {canManage && <NewSpotDialog orgId={orgId} templates={templates} />}
+        {canManage && spots.length > 0 && <NewSpotDialog orgId={orgId} templates={templates} />}
       </PageHeader>
       {spots.length ? (
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
@@ -54,18 +56,23 @@ function SpotsPage() {
             </li>
           ))}
         </ul>
-      ) : canManage ? (
-        <Gallery templates={templates} />
       ) : (
-        <EmptyState icon={section.icon} title={section.empty.title}>
-          {section.empty.body}
-        </EmptyState>
+        <>
+          <EmptyState
+            icon={section.icon}
+            title={section.empty.title}
+            action={canManage ? <NewSpotDialog orgId={orgId} templates={templates} /> : <p className="text-sm text-muted-foreground">{ASK_AN_EDITOR}</p>}
+          >
+            {section.empty.body}
+          </EmptyState>
+          {canManage && <Gallery templates={templates} />}
+        </>
       )}
     </div>
   );
 }
 
-/** No spots yet: the templates to start from, each opening New spot with it picked. */
+/** No spots yet: the templates to start from, each opening New spot with it picked. Outlined tiles: New spot above is the page's filled button. */
 function Gallery({ templates }: { templates: TemplateView[] }) {
   const open = useAppStore((s) => s.openNewSpot);
   const edit = useAppStore((s) => s.editNewSpot);
@@ -73,9 +80,9 @@ function Gallery({ templates }: { templates: TemplateView[] }) {
     <section aria-labelledby="gallery-title" className="space-y-4">
       <div className="space-y-1">
         <h2 id="gallery-title" className="text-lg font-semibold">
-          {section.empty.title}
+          Templates
         </h2>
-        <p className="text-sm text-muted-foreground">Start from a template. Each one opens as a draft you fill in; no screen shows it until you publish.</p>
+        <p className="text-sm text-muted-foreground">Each opens New spot with it picked. A spot is a draft until you publish it.</p>
       </div>
       <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {usableVersions(templates).map(({ template, version }) => (

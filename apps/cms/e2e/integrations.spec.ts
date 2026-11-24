@@ -36,6 +36,9 @@ async function newOrg(page: Page, name: string, address: string): Promise<string
   return (await session.json()).organization.id;
 }
 
+/** The page's filled buttons: one at most (#364). */
+const filled = (page: Page) => page.getByRole('main').locator('[data-slot="button"][data-variant="default"]');
+
 async function memberPage(browser: Browser, email: string, address: string) {
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1100 } })).newPage();
   await signInAs(page, email, address);
@@ -63,6 +66,8 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
   await expect(now).toContainText('No data sources yet');
   await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button')).toHaveText(['All 26', 'Connected 0', 'Built 5', 'Planned 17', 'Later 4']);
+  // A new org: the first Connect is the page's one filled button.
+  await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
 
   // Connect iCal URL: the dialog opens on the add form.
   await owner.getByRole('button', { name: 'Connect iCal URL' }).click();
@@ -72,7 +77,9 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await dialog.getByRole('button', { name: 'Add calendar' }).click();
   await expect(dialog.getByText('Its first check of this address runs within a minute.')).toBeVisible();
   await expect(dialog).not.toContainText('key=private');
+  // Escape gives focus back to the button that opened it, Connect, now Manage.
   await owner.keyboard.press('Escape');
+  await expect(owner.getByRole('button', { name: 'Manage iCal URL' })).toBeFocused();
   await owner.getByRole('button', { name: 'Connect RSS / Atom' }).click();
   const feeds = owner.getByRole('dialog', { name: 'RSS / Atom feeds' });
   await feeds.getByLabel('Address').fill('https://news.example.com/northside.xml');
@@ -105,14 +112,30 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await hydrated(owner);
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(now.getByText('failed 2×')).toBeVisible();
-  await expect(now).toContainText(
+  // The failing calendar's fix, at the top of the page as its one filled button (#364).
+  const failing = owner.getByRole('alert', { name: 'iCal · Break room' });
+  await expect(failing).toContainText(
     /The Break room calendar answers with an error: its last 2 checks failed\. Its screens show the (?:\w{3} )?\d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
   );
+  await expect(filled(owner)).toHaveText(['Fix the iCal URL for Break room']);
   await expect(now.getByText('RSS · Northside blog')).toBeVisible();
   await expect(owner.getByText('1 calendar · failing')).toBeVisible();
   await expect(owner.getByText('1 feed', { exact: true })).toBeVisible();
   await axe(owner);
   await shots(owner, '60-integrations');
+
+  // Two failing: the first fix is filled, the other outlined.
+  await pollsFailed(orgId, blog, 1);
+  await owner.reload();
+  await hydrated(owner);
+  await expect(owner.getByRole('alert', { name: 'RSS · Northside blog' })).toBeVisible();
+  await expect(owner.getByRole('main').getByRole('button', { name: /^Fix the / })).toHaveCount(2);
+  await expect(filled(owner)).toHaveCount(1);
+  await expect(filled(owner)).toHaveText(/^Fix the /);
+  await pollFound(orgId, blog);
+  await owner.reload();
+  await hydrated(owner);
+  await expect(owner.getByRole('alert', { name: 'RSS · Northside blog' })).toHaveCount(0);
 
   // The filters and the search, kept in the URL.
   await owner.getByRole('button', { name: 'Connected 2' }).click();
@@ -128,13 +151,14 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await owner.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await shots(owner, '61-integrations-phone');
+  await axe(owner);
   await owner.setViewportSize({ width: 1440, height: 1100 });
 });
 
 test('fixing the URL clears the failing state after the next poll, and a bound source cannot be deleted', async () => {
   test.setTimeout(120_000);
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
-  await now.getByRole('button', { name: 'Fix the iCal URL for Break room' }).click();
+  await owner.getByRole('button', { name: 'Fix the iCal URL for Break room' }).click();
   const dialog = owner.getByRole('dialog', { name: 'iCal calendars' });
   await expect(dialog.getByLabel('New address for Break room')).toBeFocused();
   await axe(owner);
@@ -142,14 +166,17 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await dialog.getByLabel('New address for Break room').fill('https://calendar.example.com/break-room-2026.ics');
   await dialog.getByRole('button', { name: 'Save URL' }).click();
   await expect(dialog.getByText('Its first check of this address runs within a minute.')).toBeVisible();
+  // Saved, the alert and its fix button are gone: Escape gives focus to the page's main region.
+  await expect(owner.locator('[data-slot="alert"]')).toHaveCount(0);
   await owner.keyboard.press('Escape');
+  await expect(owner.locator('#main')).toBeFocused();
   await expect(now.getByText('checking')).toBeVisible();
   await expect(now.getByText('failed 2×')).toHaveCount(0);
 
   // The next poll succeeds: the open page shows its time within its 30-second refresh.
   await pollFound(orgId, calendar);
   await expect(now.getByText('checking')).toHaveCount(0, { timeout: 45_000 });
-  await expect(now).not.toContainText('answers with an error');
+  await expect(owner.getByRole('main')).not.toContainText('answers with an error');
   await expect(owner.getByText('1 calendar', { exact: true })).toBeVisible();
 
   // Delete asks first, saying the address must be typed again; a source a spot reads is not deleted, one no spot reads is.
@@ -161,15 +188,39 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await shots(owner, '64-integrations-delete');
   await confirm.getByRole('button', { name: 'Delete source' }).click();
   await expect(confirm.getByRole('alert')).toHaveText('Break room is used by Break room agenda. Choose another source in those spots first.');
-  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await owner.keyboard.press('Escape');
+  await expect(dialog.getByRole('button', { name: 'Delete Break room' })).toBeFocused();
   await owner.keyboard.press('Escape');
   await owner.getByRole('button', { name: 'Manage RSS / Atom' }).click();
   const feeds = owner.getByRole('dialog', { name: 'RSS / Atom feeds' });
+  const confirmBlog = owner.getByRole('alertdialog', { name: 'Delete Northside blog?' });
+  // Escape while the delete is still on its way (held here): its row's button is disabled, so focus goes to the Sources dialog, not behind it.
+  const deleting = await holdFirst(owner, '/api/tools/delete_data_source');
   await feeds.getByRole('button', { name: 'Delete Northside blog' }).click();
-  await owner.getByRole('alertdialog', { name: 'Delete Northside blog?' }).getByRole('button', { name: 'Delete source' }).click();
+  await confirmBlog.getByRole('button', { name: 'Delete source' }).click();
+  const held = await deleting.arrived;
+  await owner.keyboard.press('Escape');
+  await expect(confirmBlog).toBeHidden();
+  await expect(feeds).toBeFocused();
+  await held.abort('connectionrefused');
+  await owner.unroute('**/api/tools/delete_data_source');
+  // Deleted: its row's button is gone, and focus stays in the Sources dialog.
+  await feeds.getByRole('button', { name: 'Delete Northside blog' }).click();
+  await confirmBlog.getByRole('button', { name: 'Delete source' }).click();
   await expect(feeds.getByText('None yet.')).toBeVisible();
+  await expect(feeds).toBeFocused();
+  await owner.keyboard.press('Tab');
+  await expect(feeds.locator(':focus')).toHaveCount(1);
   await owner.keyboard.press('Escape');
   await expect(now.getByText('RSS · Northside blog')).toHaveCount(0);
+
+  // One failure with a connector to connect: the fix is filled, Connect is outlined.
+  await pollsFailed(orgId, calendar, 1);
+  await owner.reload();
+  await hydrated(owner);
+  await expect(filled(owner)).toHaveText(['Fix the iCal URL for Break room']);
+  await expect(owner.getByRole('button', { name: 'Connect RSS / Atom' })).toHaveAttribute('data-variant', 'outline');
+  await pollFound(orgId, calendar);
 
   // A weather source is named and reused by its place and units (the spot editor's): no address is typed for it here,
   // and a failing one is the forecast service's.
@@ -184,8 +235,11 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await pollsFailed(orgId, weather.id, 1);
   await owner.reload();
   await hydrated(owner);
-  await expect(now).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
-  await expect(now.getByRole('button', { name: /for Weather, Portland$/ })).toHaveCount(0);
+  const weatherAlert = owner.getByRole('alert', { name: 'Weather · Weather, Portland' });
+  await expect(weatherAlert).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
+  await expect(weatherAlert.getByRole('button')).toHaveCount(0);
+  // Nothing to fix here, so Connect is the filled button again.
+  await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
   await owner.getByRole('button', { name: 'Manage Weather' }).click();
   const forecasts = owner.getByRole('dialog', { name: 'Weather' });
   await expect(forecasts.getByRole('button', { name: 'Delete Weather, Portland' })).toBeVisible();
@@ -233,6 +287,10 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   await expect(confirm.getByRole('alert')).toHaveText('The provider did not answer. Try again.');
   await expect(owner.getByText('The provider did not answer. Try again.')).toHaveCount(1);
   await owner.unroute('**/api/tools/disconnect');
+  // Escape gives focus back to Disconnect.
+  await owner.keyboard.press('Escape');
+  await expect(accounts.getByRole('button', { name: 'Disconnect facilities@example.com' })).toBeFocused();
+  await accounts.getByRole('button', { name: 'Disconnect facilities@example.com' }).click();
   // Done when the API says so. Not when the card leaves: while the confirm is open the page behind it
   // is aria-hidden, so `accounts` counted 0 at once, before the disconnect landed.
   const disconnected = owner.waitForResponse((r) => r.url().endsWith('/api/tools/disconnect'));
@@ -285,6 +343,7 @@ test("a viewer reads the sources and changes nothing; another org's sources neve
   const now = viewer.getByRole('region', { name: 'Feeding screens now' });
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(viewer.getByRole('button', { name: /^Connect / })).toHaveCount(0);
+  await expect(filled(viewer)).toHaveCount(0);
   await viewer.getByRole('button', { name: 'View iCal URL' }).click();
   const dialog = viewer.getByRole('dialog', { name: 'iCal calendars' });
   await expect(dialog.getByText('Used by Break room agenda.')).toBeVisible();

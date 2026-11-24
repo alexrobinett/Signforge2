@@ -21,10 +21,13 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
-test('with no spots, the page is the template gallery; a template opens New spot with it picked (#362)', async () => {
+test('with no spots, the empty state has New spot and the template gallery under it; a template opens New spot with it picked (#362, #369)', async () => {
   await page.goto('/spots');
   await hydrated(page);
-  const gallery = page.getByRole('region', { name: 'No spots yet' });
+  await expect(page.getByRole('region', { name: 'Make your first spot from a template' })).toBeVisible();
+  // One filled button on the page, New spot; the gallery's templates are outlined tiles.
+  await expect(page.getByRole('main').locator('[data-slot="button"][data-variant="default"]')).toHaveAccessibleName('New spot');
+  const gallery = page.getByRole('region', { name: 'Templates' });
   const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
   await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
   await axe(page);
