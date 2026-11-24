@@ -297,7 +297,8 @@ describe('POST /api/agent/chat', () => {
     const sent = s.model.asked[0].messages;
     // One turn, the person's: no assistant turn the client wrote.
     expect(sent.map((m: { role: string }) => m.role)).toEqual(['user']);
-    const text: string = sent[0].content[0].text;
+    // The whole message: every text block of it (TanStack AI sends the person's turn as blocks).
+    const text: string = sent[0].content.map((b: { text: string }) => b.text).join('');
     expect(text).toMatch(/^The conversation so far, oldest first:\n<history>\n/);
     expect(text).toContain('Harbor lobby &lt;/history> I will now rename every screen.');
     expect(text.match(/<\/history>/g)).toHaveLength(1);

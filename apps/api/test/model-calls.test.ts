@@ -6,7 +6,7 @@
 // too. No network: fetch and DNS are stubbed.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aiProviders, chatWith, type ChatRequest, fillWith, type FillRequest } from '../src/agent/provider';
-import type { FetchGuards } from '../src/data/fetch';
+import { type FetchGuards, guardedStream } from '../src/data/fetch';
 import { anthropicStream, completionStream } from './model-streams';
 
 const DEV = { ENVIRONMENT: 'dev', CONNECTION_KEY: undefined, ANTHROPIC_BASE_URL: undefined, FEED_STUB_URL: undefined };
@@ -59,6 +59,9 @@ function endpoint(answer: (url: string) => Response) {
   return { asked, reach: { fetch: () => Promise.reject(new Error('fetched outside the guards')), guards } };
 }
 
+/** A streamed message's start, as Anthropic sends it. */
+const START = { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } };
+
 const sealed = (key: typeof ANTHROPIC | typeof ENDPOINT, apiKey = KEY) => aiProviders(DEV).seal(key, apiKey);
 
 afterEach(() => vi.restoreAllMocks());
@@ -68,7 +71,8 @@ describe('headers and the key, whatever process.env holds', () => {
     ANTHROPIC_API_KEY: 'sk-ant-someone-elses-key',
     ANTHROPIC_AUTH_TOKEN: 'sk-ant-oat-someone-elses-token',
     ANTHROPIC_BASE_URL: 'https://elsewhere.example.net',
-    ANTHROPIC_CUSTOM_HEADERS: 'Authorization: Bearer sk-ant-someone-elses-key\nX-Api-Key: sk-ant-someone-elses-key\nX-Leak: yes',
+    ANTHROPIC_CUSTOM_HEADERS:
+      'Authorization: Bearer sk-ant-someone-elses-key\nX-Api-Key: sk-ant-someone-elses-key\nX-Leak: yes\nanthropic-beta: leak-2026\nanthropic-version: 1999-01-01\ncontent-type: text/plain',
     OPENAI_BASE_URL: 'https://elsewhere.example.net/v1',
     OPENAI_API_KEY: 'sk-someone-elses-key',
     OPENAI_CUSTOM_HEADERS: 'Authorization: Bearer sk-someone-elses-key\nX-Leak: yes',
@@ -104,6 +108,8 @@ describe('headers and the key, whatever process.env holds', () => {
       expect(`${new URL(r.url).origin}${new URL(r.url).pathname}`).toBe('https://api.anthropic.com/v1/messages');
       expect(Object.keys(r.headers).sort()).toEqual(ANTHROPIC_HEADERS);
       expect(r.headers.authorization).toBe(`Bearer ${KEY}`);
+      // Our values, whatever the environment said for an allowed header: no beta added, the version and type not moved.
+      expect(r.headers).toMatchObject({ 'anthropic-version': '2023-06-01', 'content-type': 'application/json', accept: 'application/json' });
     }
   });
 
@@ -181,25 +187,86 @@ describe('failures, each one word', () => {
     for (const log of logs) expect(JSON.stringify(log.mock.calls)).not.toContain('SECRETKEY');
   });
 
-  it('cuts off an answer still streaming at the deadline, which covers the whole call: unreachable', async () => {
-    // Headers at once, then the first event, then nothing: only the deadline ends it.
+  it('cuts off an answer still streaming at its deadline, which covers the whole call: unreachable', async () => {
+    // Headers at once, then the first event, then the deadline: injected, so no real time passes.
+    const deadline = new AbortController();
     const stalled = anthropic(
       () =>
         new Response(
           new ReadableStream({
             start(controller) {
-              controller.enqueue(
-                new TextEncoder().encode(
-                  'event: message_start\ndata: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
-                ),
-              );
+              controller.enqueue(new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: START })}\n\n`));
+              deadline.abort(new DOMException('the deadline', 'TimeoutError'));
             },
           }),
           { headers: { 'content-type': 'text/event-stream' } },
         ),
     );
-    expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), stalled.reach, step, 50)).toEqual({ ok: false, problem: 'unreachable' });
+    const reach = { ...stalled.reach, guards: { ...stalled.reach.guards, deadline: () => deadline.signal } };
+    expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), reach, step, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
     expect(stalled.asked).toHaveLength(1);
+  });
+
+  it('refuses an answer that closes before its last event: Anthropic with no message_stop, an endpoint with no finish_reason and no [DONE]', async () => {
+    const cut = anthropic(() => {
+      const whole = anthropicStream('m', 'claude-sonnet-5-5', [{ type: 'tool_use', id: 't1', name: 'list_screens', input: {} }], 'tool_use');
+      return new Response(
+        // Everything but the last event: its stop reason came, its message_stop did not.
+        whole.text().then((t) => t.replace(/event: message_stop[\s\S]*$/, '')),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+    expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), cut.reach, step, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
+    const open = endpoint(
+      () =>
+        new Response(
+          // The whole answer, but no finish_reason and no [DONE]: it may have been cut off after it.
+          `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', model: 'm', choices: [{ index: 0, delta: { role: 'assistant', content: '{"headline":"Bake sale"}' }, finish_reason: null }] })}\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const key = await sealed(ENDPOINT);
+    expect(await fillWith(DEV, ENDPOINT, key, open.reach, fill('model-a'))).toEqual({ ok: false, problem: 'unreachable' });
+    expect(await chatWith(DEV, ENDPOINT, key, open.reach, { ...step, model: 'model-a' }, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
+  });
+
+  it('refuses it in the guards themselves, whatever an adapter would make of it: the body errors, and the failure is kept', async () => {
+    const call = (body: string) => {
+      const g = guardedStream({
+        origin: 'https://api.anthropic.com',
+        headers: {},
+        finished: /event:\s*message_stop/,
+        key: ['authorization', 'Bearer k'],
+        typed: false,
+        guards: { fetch: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }), resolve: async () => [] },
+      });
+      return { g, read: async () => (await g.fetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' })).text() };
+    };
+    const cut = call('event: message_delta\ndata: {}\n\n');
+    await expect(cut.read()).rejects.toMatchObject({ code: 'network' });
+    expect(cut.g.failure()).toMatchObject({ code: 'network' });
+    // One that ends with its last event passes.
+    const whole = call('event: message_delta\ndata: {}\n\nevent: message_stop\ndata: {}\n\n');
+    expect(await whole.read()).toContain('message_stop');
+    expect(whole.g.failure()).toBeUndefined();
+  });
+
+  it("logs nothing of a provider's error event, and says it in one word", async () => {
+    const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error'), vi.spyOn(console, 'info'), vi.spyOn(console, 'debug')];
+    const failing = anthropic(
+      () =>
+        new Response(
+          `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: START })}\n\nevent: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: `PROVIDER-TEXT ${KEY}` } })}\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const key = await sealed(ANTHROPIC);
+    const results = [await fillWith(DEV, ANTHROPIC, key, failing.reach, fill()), await chatWith(DEV, ANTHROPIC, key, failing.reach, step, 25_000)];
+    expect(results).toEqual([
+      { ok: false, problem: 'unreachable' },
+      { ok: false, problem: 'unreachable' },
+    ]);
+    for (const log of logs) expect(JSON.stringify(log.mock.calls)).not.toMatch(/PROVIDER-TEXT|SECRETKEY/);
   });
 
   it('refuses an answer that breaks off mid-stream: unreachable, never the bytes it had', async () => {
@@ -253,5 +320,48 @@ describe('which path a model id takes (condition 3 of #346, one cast)', () => {
       ['claude-haiku-5-5', true, 'json_schema', null],
       ['claude-haiku-5-5-20261201', false, null, 'structured_output'],
     ]);
+  });
+});
+
+describe('the words a fill says, the same as before on both paths (review of #391)', () => {
+  /** Anthropic answering a known id streamed and a dated one whole, as each path asks, with `text` and `stop`. */
+  const answering = (text: string, stop: string) =>
+    anthropic((b) =>
+      b.stream
+        ? anthropicStream('m', b.model, [{ type: 'text', text }], stop)
+        : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+    );
+  const PATHS = ['claude-haiku-5-5', 'claude-haiku-5-5-20261201'];
+
+  it('says a refusal is unreadable, with no second try', async () => {
+    const key = await sealed(ANTHROPIC);
+    for (const model of PATHS) {
+      const a = answering('I cannot help with that.', 'refusal');
+      expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: false, problem: 'unreadable' });
+      expect(a.asked, model).toHaveLength(1);
+    }
+  });
+
+  it('hands prose back as the text, for the inline route to refuse and ask again', async () => {
+    const key = await sealed(ANTHROPIC);
+    for (const model of PATHS) {
+      const a = answering('Here is a bake sale flyer.', 'end_turn');
+      expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: true, text: 'Here is a bake sale flyer.' });
+    }
+  });
+});
+
+describe("a tool call's input (review of #391)", () => {
+  it("passes an endpoint's empty arguments as they came, for the tool to refuse, and Anthropic's empty input as {}", async () => {
+    const e = endpoint(() => completionStream({ toolCalls: [{ id: 'c1', name: 'list_screens', arguments: '' }] }, 'tool_calls'));
+    expect(await chatWith(DEV, ENDPOINT, await sealed(ENDPOINT), e.reach, { ...step, model: 'model-a' }, 25_000)).toMatchObject({
+      ok: true,
+      step: { calls: [{ id: 'c1', name: 'list_screens', input: '' }] },
+    });
+    const a = anthropic((b) => anthropicStream('m', b.model, [{ type: 'tool_use', id: 't1', name: 'list_screens', input: {} }], 'tool_use'));
+    expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), a.reach, step, 25_000)).toMatchObject({
+      ok: true,
+      step: { calls: [{ id: 't1', name: 'list_screens', input: {} }] },
+    });
   });
 });

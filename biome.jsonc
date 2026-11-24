@@ -26,6 +26,10 @@
         "noUselessTypeAssertion": "error",
         // No `as` that narrows a type: parse with the contract, or annotate. The overrides below
         // allow it where it is the point (tests, the db layer, the validators) and in a frozen list.
+        // One exception outside them, by an owner decision on #349: apps/api/src/agent/provider.ts casts an
+        // org's Anthropic model id to the adapter's `AnthropicChatModel` (one line, `biome-ignore` with its
+        // reason). The adapter's types accept only the ids its release knows, and an org may choose a dated or
+        // newer id from Anthropic's list, which Anthropic's API checks. Add no other.
         "noUnsafeTypeAssertion": "error"
       },
       "complexity": { "noCommaOperator": "off" },

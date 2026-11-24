@@ -92,9 +92,13 @@ const TEST_TIMEOUT_MS = 10_000;
 /** Where a deployed API sends an org's key: Anthropic's API and nowhere else. */
 const ANTHROPIC_API = 'https://api.anthropic.com';
 
-/** The headers a model call keeps from what its adapter built (`ModelCall.headers`); the key is set by the guards. */
-const ANTHROPIC_HEADERS = ['accept', 'content-type', 'anthropic-version', 'anthropic-beta'];
-const ENDPOINT_HEADERS = ['accept', 'content-type'];
+/**
+ * Every header a model call sends besides the key and a user agent (`ModelCall.headers`), fixed here:
+ * nothing an adapter or its SDK takes from `process.env` (`ANTHROPIC_CUSTOM_HEADERS`) adds one or
+ * changes one. No `anthropic-beta`: no call of ours needs one.
+ */
+const ANTHROPIC_HEADERS = { accept: 'application/json', 'content-type': 'application/json', 'anthropic-version': '2023-06-01' };
+const ENDPOINT_HEADERS = { accept: 'application/json', 'content-type': 'application/json' };
 
 /** A model list, as Anthropic's Models API and an OpenAI-compatible endpoint both answer it. */
 const modelList = z.object({ data: z.array(z.object({ id: z.string() })) });
@@ -111,19 +115,27 @@ interface Opened {
   /** A call's limits, for a call given `timeoutMs`. */
   call: (timeoutMs: number) => ModelCall;
   adapter: WithAdapter;
+  /**
+   * A tool call's input as the provider's protocol has it: Anthropic's starts as `{}`, so one with no
+   * input streamed is `{}` (the adapter's parse); an endpoint's is the text it sent, `''` included,
+   * for the tool to refuse what is not JSON.
+   */
+  toolInput: 'parsed' | 'text';
 }
 
-function anthropic(apiKey: string, base: string, fetcher: typeof fetch): Opened {
+function anthropic(apiKey: string, base: string, reach: ModelReach): Opened {
   return {
     base,
     modelsPath: '/v1/models?limit=100',
+    toolInput: 'parsed',
     // Anthropic's own fixed address (in dev, the e2e's stub): only its origin, as it is not an address a person typed.
     call: (timeoutMs) => ({
       origin: new URL(base).origin,
       headers: ANTHROPIC_HEADERS,
+      finished: /event:\s*message_stop/,
       key: ['authorization', `Bearer ${apiKey}`],
       typed: false,
-      guards: { fetch: fetcher, resolve: () => Promise.reject(new Error('Anthropic is not resolved')), timeoutMs },
+      guards: { fetch: reach.fetch, resolve: () => Promise.reject(new Error('Anthropic is not resolved')), timeoutMs, deadline: reach.guards.deadline },
     }),
     adapter: (model, use) =>
       use(
@@ -146,9 +158,12 @@ function endpoint(apiKey: string, baseUrl: string, guards: FetchGuards): Opened 
   return {
     base: baseUrl,
     modelsPath: '/models',
+    toolInput: 'text',
     call: (timeoutMs) => ({
       origin: URL.canParse(baseUrl) ? new URL(baseUrl).origin : baseUrl,
       headers: ENDPOINT_HEADERS,
+      // Its last chunk says why it stopped, and `[DONE]` follows; an endpoint may send either alone.
+      finished: /data:\s*\[DONE\]|"finish_reason"\s*:\s*"[a-z_]+"/,
       key: ['authorization', `Bearer ${apiKey}`],
       typed: true,
       guards: { ...guards, timeoutMs },
@@ -223,28 +238,31 @@ const messagesOf = (turns: ChatTurn[]): ModelMessage[] =>
     return t.results.map((r) => ({ role: 'tool', toolCallId: r.id, content: r.content, ...(r.error && { error: r.content }) }));
   });
 
-/** A tool call's arguments, as the model streamed them: parsed if JSON, else as written, for the tool to refuse. */
+/** A tool call's arguments as the model sent them: parsed if JSON, else as written (`''` too), for the tool to refuse. */
 function argumentsOf(text: string): unknown {
   try {
-    return text ? JSON.parse(text) : {};
+    return JSON.parse(text);
   } catch (err) {
     if (err instanceof SyntaxError) return text;
     throw err;
   }
 }
 
-/** The tool calls a step's chunks hold, in the order the model made them. */
-function callsOf(chunks: StreamChunk[]): ToolCall[] {
-  const calls = new Map<string, { name: string; args: string }>();
+/** The tool calls a step's chunks hold, in the order the model made them, each input as `toolInput` says. */
+function callsOf(chunks: StreamChunk[], toolInput: Opened['toolInput']): ToolCall[] {
+  const calls = new Map<string, { name: string; args: string; parsed?: unknown }>();
   for (const chunk of chunks) {
     if (chunk.type === 'TOOL_CALL_START') calls.set(chunk.toolCallId, { name: chunk.toolCallName, args: '' });
-    else if (chunk.type === 'TOOL_CALL_ARGS') {
-      const call = calls.get(chunk.toolCallId);
-      if (call) call.args += chunk.delta;
-    }
+    const call = calls.get(('toolCallId' in chunk && chunk.toolCallId) || '');
+    if (!call) continue;
+    if (chunk.type === 'TOOL_CALL_ARGS') call.args += chunk.delta;
+    if (chunk.type === 'TOOL_CALL_END' && chunk.input !== undefined) call.parsed = chunk.input;
   }
-  return [...calls].map(([id, c]) => ({ id, name: c.name, input: argumentsOf(c.args) }));
+  return [...calls].map(([id, c]) => ({ id, name: c.name, input: toolInput === 'parsed' && c.parsed !== undefined ? c.parsed : argumentsOf(c.args) }));
 }
+
+/** An answer that came whole, not streamed (Anthropic's to a forced tool, for a model id its adapter does not know). */
+const wholeAnswer = z.object({ stop_reason: z.string().nullable(), content: z.array(z.object({ type: z.string(), text: z.string().optional() })) });
 
 /** Whether `err` is `chat()`'s refusal of an answer that is not JSON, with the text the model gave. */
 const unparsed = (err: unknown): err is Error & { rawText: string } =>
@@ -258,10 +276,22 @@ const unparsed = (err: unknown): err is Error & { rawText: string } =>
 function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvider; problem: () => Problem | undefined } {
   const guarded = guardedStream(opened.call(timeoutMs));
   let asked = false;
+  /**
+   * The last answer that came whole: whether the model refused, and its text. A fill to a forced tool
+   * (an id the adapter does not know) reads it as master did a message: a refusal is no answer, and
+   * prose is handed back for the inline route to refuse and ask again.
+   */
+  let whole: { refused: boolean; text: string } | undefined;
   // The adapters' own fetch is never called: every request goes through the guards.
-  const fetch: typeof globalThis.fetch = (input, init) => {
+  const fetch: typeof globalThis.fetch = async (input, init) => {
     asked = true;
-    return guarded.fetch(input, init);
+    const res = await guarded.fetch(input, init);
+    if (res.headers.get('content-type')?.includes('application/json')) {
+      const answer = wholeAnswer.safeParse(await res.clone().json().catch(() => undefined));
+      if (answer.success)
+        whole = { refused: answer.data.stop_reason === 'refusal', text: answer.data.content.flatMap((b) => (b.type === 'text' && b.text ? [b.text] : [])).join('') };
+    }
+    return res;
   };
   const wrapFetch = () => fetch;
   return {
@@ -295,12 +325,16 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
               stream: false,
               modelOptions: { max_tokens: FILL_MAX_TOKENS },
               middleware: [seen.middleware],
+              // Its logs would carry what a provider answered: the failure is said in a word, and nothing logged.
+              debug: false,
             });
-            return seen.refused() ? null : JSON.stringify(answer);
+            return seen.refused() || whole?.refused ? null : JSON.stringify(answer);
           } catch (err) {
-            if (seen.refused()) return null;
+            if (seen.refused() || whole?.refused) return null;
             // Not JSON: as the model wrote it, for the inline route to refuse and ask again, as it does any answer it cannot read.
             if (unparsed(err)) return err.rawText;
+            // A forced tool's answer that called no tool: its text, as master's message was read.
+            if (whole && !guarded.failure()) return whole.text;
             throw err;
           }
         }),
@@ -319,8 +353,9 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
             agentLoopStrategy: maxIterations(1),
             modelOptions: { max_tokens: CHAT_MAX_TOKENS },
             middleware: [seen.middleware],
+            debug: false,
           });
-          return { text, calls: callsOf(chunks), refused: seen.refused() };
+          return { text, calls: callsOf(chunks, opened.toolInput), refused: seen.refused() };
         }),
     },
   };
@@ -347,7 +382,7 @@ async function openModel(
     return endpoint(apiKey, key.baseUrl, reach.guards);
   }
   const base = env.ENVIRONMENT === 'dev' && env.ANTHROPIC_BASE_URL ? env.ANTHROPIC_BASE_URL : ANTHROPIC_API;
-  return anthropic(apiKey, base, reach.fetch);
+  return anthropic(apiKey, base, reach);
 }
 
 /** `run` on an opened provider given `timeoutMs`: its result, or its failure in a word. */

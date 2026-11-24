@@ -47,6 +47,8 @@ export interface FetchGuards {
   /** Every A and AAAA address of `host`, given up when `signal` aborts. */
   resolve: (host: string, signal: AbortSignal) => Promise<string[]>;
   timeoutMs?: number;
+  /** A model call's deadline signal for `timeoutMs` (`guardedStream`); `AbortSignal.timeout` unless a test injects its own. */
+  deadline?: (timeoutMs: number) => AbortSignal;
 }
 
 export type FetchResult<Body = string> = { status: 'not-modified' } | { status: 'ok'; body: Body; etag: string | null; lastModified: string | null };
@@ -121,8 +123,13 @@ const MODEL_MAX_BYTES = 2_000_000;
 export interface ModelCall {
   /** The only origin it reaches: the provider's API (in dev, its stub), or an org's endpoint. */
   origin: string;
-  /** The request's headers it keeps, by name. Every other is dropped, whatever added it: an SDK reads `process.env` for more. */
-  headers: readonly string[];
+  /**
+   * Every header it sends, besides the key and a user agent, with our values: the request's own are
+   * never read, as an SDK adds and overrides them from `process.env`. `content-type` goes only with a body.
+   */
+  headers: Readonly<Record<string, string>>;
+  /** What a streamed (SSE) answer must hold before it closes: the provider's last event. Without it, it broke off. */
+  finished: RegExp;
   /** The key, in the header it goes in: set on every hop, whatever the request carried. */
   key: readonly [name: string, value: string];
   /**
@@ -141,12 +148,12 @@ export interface GuardedStream {
 
 /**
  * The fetch for one model call, for TanStack AI's `wrapFetch` (#349, condition 1 of #346): the
- * request as the adapter made it, sent only to the call's origin, with its headers rebuilt from the
- * call's list and the key set here; a redirect followed only within that origin, at most 3, each hop
- * checked again and sent the body again; no URL with a user name or password, as it carries the key.
- * One deadline covers the whole call, its streamed answer included: a body still arriving when it
- * passes is cut off as a timeout, one that breaks off is a network failure, and one over
- * `MODEL_MAX_BYTES` is refused. A non-2xx answer is refused with its status, its body unread. Every
+ * request's method, URL and body as the adapter made them, sent only to the call's origin, with the
+ * call's own headers and the key set here, none of the request's; a redirect followed only within
+ * that origin, at most 3, each hop checked again and sent the body again; no URL with a user name or
+ * password, as it carries the key. One deadline covers the whole call, its streamed answer included: a
+ * body still arriving when it passes is cut off as a timeout; one that breaks off, or closes before
+ * the provider's last event (`finished`), is a network failure; and one over `MODEL_MAX_BYTES` is refused. A non-2xx answer is refused with its status, its body unread. Every
  * refusal is a `FetchError`, kept as `failure` for the caller to say in a word.
  */
 export function guardedStream(call: ModelCall): GuardedStream {
@@ -158,7 +165,7 @@ export function guardedStream(call: ModelCall): GuardedStream {
   const timeoutMs = call.guards.timeoutMs ?? FETCH_TIMEOUT_MS;
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    const deadline = AbortSignal.timeout(timeoutMs);
+    const deadline = (call.guards.deadline ?? AbortSignal.timeout)(timeoutMs);
     const signal = AbortSignal.any([deadline, request.signal]);
     const lost = (e: unknown, what: string) =>
       e instanceof FetchError
@@ -166,13 +173,10 @@ export function guardedStream(call: ModelCall): GuardedStream {
         : deadline.aborted
           ? new FetchError(`no answer in ${timeoutMs / 1000} seconds`, { code: 'timeout', cause: e })
           : new FetchError(what, { code: 'network', cause: e });
-    const headers = new Headers({ 'user-agent': 'SignForge agent' });
-    for (const name of call.headers) {
-      const value = request.headers.get(name);
-      if (value !== null) headers.set(name, value);
-    }
-    headers.set(call.key[0], call.key[1]);
     const body = request.body ? await request.text() : undefined;
+    const headers = new Headers({ 'user-agent': 'SignForge agent', ...call.headers });
+    if (body === undefined) headers.delete('content-type');
+    headers.set(call.key[0], call.key[1]);
     const hop = async (href: string) => {
       const url = URL.canParse(href) ? new URL(href) : undefined;
       if (url?.username || url?.password) throw new FetchError('a request with a key goes to no URL with a user name or password', { code: 'bad-url' });
@@ -201,8 +205,9 @@ export function guardedStream(call: ModelCall): GuardedStream {
             throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
           throw new FetchError(`it answered ${res.status}`, { code: 'http-status', status: res.status });
         }
+        const sse = res.headers.get('content-type')?.includes('text/event-stream') ?? false;
         return new Response(
-          streamed(res, signal, (e) => failed(lost(e, 'the answer broke off'))),
+          streamed(res, signal, sse ? call.finished : undefined, (e) => failed(lost(e, 'the answer broke off'))),
           { status: res.status, headers: res.headers },
         );
       }
@@ -213,12 +218,19 @@ export function guardedStream(call: ModelCall): GuardedStream {
   return { fetch, failure: () => failure };
 }
 
-/** `res`'s body as it arrives, cut off with `fail`'s error when `signal` aborts, when it breaks off, or past `MODEL_MAX_BYTES`. */
-function streamed(res: Response, signal: AbortSignal, fail: (e: unknown) => FetchError): ReadableStream<Uint8Array> | null {
+/**
+ * `res`'s body as it arrives, cut off with `fail`'s error when `signal` aborts, when it breaks off, past
+ * `MODEL_MAX_BYTES`, or, for a stream that must end with `finished`, when it closes without it.
+ */
+function streamed(res: Response, signal: AbortSignal, finished: RegExp | undefined, fail: (e: unknown) => FetchError): ReadableStream<Uint8Array> | null {
   if (!res.body) return null;
   const reader = res.body.getReader();
   let size = 0;
   let open = true;
+  // The last event may arrive split over two chunks: each is read with the tail of the one before.
+  const text = new TextDecoder();
+  let tail = '';
+  let ended = finished === undefined;
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const stop = () => {
@@ -235,12 +247,18 @@ function streamed(res: Response, signal: AbortSignal, fail: (e: unknown) => Fetc
         const { done, value } = await reader.read();
         if (!open) return;
         if (done) {
+          if (!ended) throw new FetchError('the answer stopped before its last event', { code: 'network' });
           open = false;
           controller.close();
           return;
         }
         size += value.byteLength;
         if (size > MODEL_MAX_BYTES) throw new FetchError(`the answer is over ${MODEL_MAX_BYTES} bytes`, { code: 'too-large' });
+        if (!ended && finished) {
+          const read = tail + text.decode(value, { stream: true });
+          ended = finished.test(read);
+          tail = read.slice(-200);
+        }
         controller.enqueue(value);
       } catch (e) {
         if (!open) return;
