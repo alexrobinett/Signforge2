@@ -315,7 +315,9 @@ describe('alerts to Slack and webhooks', () => {
       await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, '2026-11-24', '2026-11-24')")
         .bind(userId, name, `${userId}@signforge.test`)
         .run();
-      await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, '2026-11-24')").bind(`${userId}-m`, org.id, userId, role).run();
+      await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, '2026-11-24')")
+        .bind(`${userId}-m`, org.id, userId, role)
+        .run();
       return { userId, email: `${userId}@signforge.test` };
     };
     const asker = await member('Ada', 'editor');
