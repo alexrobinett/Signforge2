@@ -134,6 +134,11 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           if (needsInput(entry.tool)) set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
           else await run(entry.label, entry.tool, {});
           return;
+        case 'agent':
+          set((s) => ({ commandMenu: closed(s.commandMenu) }));
+          // No button opened it: closing it, focus goes to the page.
+          get().openAgentDrawer(null);
+          return;
         case 'org':
           if (entry.action === 'switch') {
             set((s) => ({ commandMenu: { ...s.commandMenu, choosingOrg: true } }));

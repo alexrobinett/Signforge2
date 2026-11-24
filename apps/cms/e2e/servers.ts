@@ -30,6 +30,12 @@ export const STUB_MENU = {
     { name: 'Flat white', price: '$4.00' },
   ],
 };
+/** The drawer's answer from the Anthropic stub (#267): a diagnosis of two Bayside screens, and a note to copy. */
+export const STUB_CARD = {
+  text: 'Both Bayside screens went quiet in the same minute, 09:14: that points to the store, not the two players.',
+  groups: [{ title: 'Bayside, quiet since 09:14', screens: ['Bayside door', 'Bayside till'], why: 'They miss revision 12, the new breakfast menu.' }],
+  steps: [{ label: 'Copy a note for the store', note: 'Both screens at Bayside went offline at 09:14. Could you check the router by the till?' }],
+};
 /** The one key the run's OpenAI-compatible stub accepts at any host's /v1/models (the feed server, global-setup.ts), and its models (#262). */
 export const ENDPOINT_STUB_KEY = 'sk-e2e-endpoint-stub-key-000000000000-Cd34';
 export const ENDPOINT_STUB_MODELS = ['gemini-stub-flash', 'gemini-stub-pro'];

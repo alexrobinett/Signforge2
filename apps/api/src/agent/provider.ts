@@ -33,7 +33,7 @@ export interface ChatTool {
   schema: Record<string, unknown>;
 }
 
-export interface ToolCall {
+interface ToolCall {
   id: string;
   name: string;
   /** As the model wrote it: parsed by the tool it names, never trusted here. */

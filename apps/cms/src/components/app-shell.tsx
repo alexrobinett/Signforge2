@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
-import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon } from 'lucide-react';
+import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon, SparklesIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { AgentDrawer } from '~/components/agent-drawer';
 import { CommandMenu } from '~/components/command-menu';
 import { CreateOrgDialog } from '~/components/create-org-form';
 import { Logo } from '~/components/logo';
@@ -22,6 +23,7 @@ import { isFolded } from '~/state/ui';
 /** The sidebar; `folded` (wide screens only) is an icon rail, each item named and with a tooltip. */
 function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<string, number>; folded?: boolean }) {
   const openCommandMenu = useAppStore((s) => s.openCommandMenu);
+  const openAgent = useAppStore((s) => s.openAgentDrawer);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const FoldIcon = folded ? PanelLeftOpenIcon : PanelLeftCloseIcon;
   return (
@@ -48,6 +50,13 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
           </kbd>
         </Button>
       )}
+      {/* Not shrunk by a short window, as the column's other items, each wrapped, are not. */}
+      <SidebarMenuButton folded={folded} tooltip="Ask the agent" className="shrink-0">
+        <button type="button" onClick={(e) => openAgent(e.currentTarget)}>
+          <SparklesIcon aria-hidden className="text-actor-agent" />
+          <span>Agent</span>
+        </button>
+      </SidebarMenuButton>
       <nav aria-label="Main" className="flex-1">
         <ul className="space-y-1">
           {SECTIONS.map(({ to, label, icon: Icon }) => (
@@ -86,6 +95,8 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
   const closeDrawer = useAppStore((s) => s.closeDrawer);
   const status = useAppStore((s) => s.orgs.status);
   const folded = useAppStore((s) => isFolded(s.ui));
+  const agentOpen = useAppStore((s) => s.agentDrawer.open);
+  const openAgent = useAppStore((s) => s.openAgentDrawer);
   const hues = orgHues(shell.organizations.map((o) => o.id));
 
   return (
@@ -97,7 +108,8 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
           <Sidebar shell={shell} hues={hues} folded={folded} />
         </aside>
-        <div className="flex min-w-0 flex-col">
+        {/* The agent's drawer sits beside the page on a wide screen, not over it. */}
+        <div className={cn('flex min-w-0 flex-col', agentOpen && 'lg:pr-[400px]')}>
           <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/90 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 lg:hidden">
             <Sheet open={drawerOpen} onOpenChange={(open) => (open ? openDrawer() : closeDrawer())}>
               <SheetTrigger asChild>
@@ -114,7 +126,10 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
             <Link to="/" aria-label="SignForge home" className="rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
               <Logo />
             </Link>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1">
+              <Button variant="ghost" size="icon" aria-label="Ask the agent" onClick={(e) => openAgent(e.currentTarget)}>
+                <SparklesIcon className="size-5 text-actor-agent" aria-hidden />
+              </Button>
               <UserMenu user={shell.user} compact />
             </div>
           </header>
@@ -123,6 +138,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
           </main>
         </div>
         <CommandMenu shell={shell} hues={hues} />
+        <AgentDrawer />
         <CreateOrgDialog />
         <ScheduleDialogs />
         <p role="status" className="sr-only">
