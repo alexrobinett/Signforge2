@@ -36,7 +36,7 @@ export const SCOPE_WORDS: Record<ConnectScope, { title: string; desc: string }> 
   'screens:manage': { title: 'Manage screens', desc: 'Rename screens, change display hours and groups.' },
   'org:manage': {
     title: 'Manage the organisation',
-    desc: 'Cancel invitations and change most organisation settings; never invite, remove people or change where alerts go. Off unless you turn it on.',
+    desc: 'See and cancel invitations and change most organisation settings; never invite, remove people or change alert channels. Off unless you turn it on.',
   },
 };
 

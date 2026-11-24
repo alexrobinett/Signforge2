@@ -120,6 +120,7 @@ const updatePlaylist = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
   input: z
     .object({ playlistId: id('playlist'), name: name('playlist').optional(), transition: transition.optional(), spotIds: spotIds.optional(), ifVersion })
     .refine((v) => v.name !== undefined || v.transition !== undefined || v.spotIds !== undefined, 'nothing to change'),

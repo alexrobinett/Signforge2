@@ -427,6 +427,11 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * not list it.
    */
   people?: boolean;
+  /**
+   * Why the tool treats an agent apart, short of refusing it the whole tool (`people`): refusing it some fields, or
+   * asking it for the right to publish. Declared, so a test holds every such tool to saying why (#122, review of #419).
+   */
+  partialAgents?: string;
   /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
   needs?: readonly N[];
   input: S;

@@ -117,18 +117,18 @@ describe("an agent, even an owner's with every scope", () => {
         });
   });
 
-  it('is refused in a handler only where the rule is partial: a tool that refuses an agent outright is `people` (review of #419)', () => {
-    /** Tools whose handler treats an agent apart, and why that is not a refusal of the whole tool. */
-    const PARTIAL: Record<string, string> = {
-      update_org_settings: 'refuses three fields; the rest are an agent’s to change',
-      create_data_source: 'a provider source needs the right to publish; a feed does not',
-      update_data_source: 'a change that reaches screens needs the right to publish; a name does not',
-      update_spot: 'an agent’s edit is held to the version it read',
-      update_playlist: 'an agent’s edit is held to the version it read',
-    };
-    const checks = (name: string) => /isAgent|refuseAgent/.test(String(registry.get(name)?.handler));
-    for (const tool of registry.values()) if (checks(tool.name)) expect(tool.people || tool.name in PARTIAL, tool.name).toBe(true);
-    // None listed that no longer treats an agent apart.
-    for (const name of Object.keys(PARTIAL)) expect(checks(name), name).toBe(true);
+  it('treats an agent apart only in a tool that says why (`partialAgents`), or refuses it the whole tool (`people`) (reviews of #419)', () => {
+    const tools = [...registry.values()];
+    for (const tool of tools) {
+      expect(tool.people && tool.partialAgents, `${tool.name}: people, or partial, not both`).toBeFalsy();
+      if (tool.partialAgents !== undefined) expect(tool.partialAgents.trim(), tool.name).not.toBe('');
+    }
+    // A backstop, not the rule: a handler that names a check of agents (or a helper that makes one) must declare it.
+    // A check in a helper not named here escapes it, so the declaration, read by people, is what holds.
+    const AGENT_CHECKS = /isAgent|peopleAllowSample|keptFor/;
+    for (const tool of tools)
+      if (AGENT_CHECKS.test(String(tool.handler))) expect(tool.people || tool.partialAgents !== undefined, tool.name).toBe(true);
+    // And every declaration is borne out by its handler, so none is left once the rule goes.
+    for (const tool of tools) if (tool.partialAgents !== undefined) expect(AGENT_CHECKS.test(String(tool.handler)), tool.name).toBe(true);
   });
 });

@@ -170,6 +170,7 @@ const createDataSource = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  partialAgents: "a provider source reads through a person's connection: an agent adds one only with the right to publish",
   idempotent: true,
   needs: ['feedUrls'],
   input: z
@@ -233,6 +234,7 @@ const updateDataSource = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  partialAgents: "screens follow a source's changes with no publish: an agent changes anything but its name only with the right to publish",
   needs: ['feedUrls'],
   input: z.object({
     dataSourceId: id('data source'),
@@ -250,16 +252,11 @@ const updateDataSource = defineTool({
   target,
   handler: async ({ org, actor, input, write, publishRight, services: { feedUrls } }) => {
     const row = await requireSource(org, input.dataSourceId);
-    // The poller takes a source's change to screens with no publish: an agent may make one that reaches them, or replaces
-    // its sealed address, only with the right to publish (#122, review of #419). A name alone reaches no screen.
-    if (isAgent(actor)) {
-      // Anything but its name, a field added later included.
-      const reaching = Object.entries(input).some(([k, v]) => v !== undefined && !['dataSourceId', 'name', 'ifVersion'].includes(k));
-      if (input.feedUrl !== undefined || input.resource !== undefined)
-        publishRight("Changing a source's address or resource needs the right to publish: screens follow it with no publish");
-      else if (reaching && (await publishedBinding(org, row.id)))
-        publishRight('Published spots show this source: changing it needs the right to publish, as screens follow it with no publish');
-    }
+    // The poller takes a source's change to screens with no publish, whatever spot shows it now or later (one published
+    // meanwhile, a rolled-back screen still syncing it): an agent changes anything but its name only with the right to
+    // publish, held to the commit (#122, reviews of #419). A name alone reaches no screen.
+    if (isAgent(actor) && reachesScreens(input))
+      publishRight("Changing a data source needs the right to publish: screens follow its changes with no publish. Its name alone may change");
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
     if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
     if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
@@ -292,9 +289,9 @@ const updateDataSource = defineTool({
  */
 export const madeBySpotEditor = (dataSourceId: string) => /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/.test(dataSourceId);
 
-/** Whether a spot's published version binds a field to `dataSourceId`: what screens show of it. */
-const publishedBinding = async (org: OrgScope, dataSourceId: string) =>
-  (await org.spots.list()).some((s) => sourcesBound(published(s)?.bindingsJson).includes(dataSourceId));
+/** Whether an update changes more than a source's name: anything else, a field added later included, reaches screens. */
+export const reachesScreens = (input: Record<string, unknown>) =>
+  Object.entries(input).some(([k, v]) => v !== undefined && !['dataSourceId', 'name', 'ifVersion'].includes(k));
 
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {

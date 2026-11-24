@@ -351,13 +351,30 @@ describe("an agent's change that reaches screens with no publish (#122, review o
     }
   });
 
-  it('refuses a draft-only agent any change but the name to a source published spots show, and allows one no published spot shows', async () => {
-    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 600 }, agent('owner', drafts))).toMatchObject({
-      ok: false,
-      error: 'forbidden',
+  it('refuses a draft-only agent any change but the name, whether or not a published spot shows the source (review of #419)', async () => {
+    // A spot published, or a screen rolled back, later: screens would follow the change with no publish. So no read of
+    // what shows it now decides.
+    for (const id of ['quiet', 'live']) {
+      for (const input of [{ refreshS: 600 }, { photos: false }, { name: 'Renamed', refreshS: 600 }])
+        expect(await change('update_data_source', { dataSourceId: id, ...input }, agent('owner', drafts)), `${id} ${JSON.stringify(input)}`).toMatchObject({
+          ok: false,
+          error: 'forbidden',
+          message: expect.stringContaining('Its name alone may change'),
+        });
+      expect(await change('update_data_source', { dataSourceId: id, name: `${id} feed` }, agent('owner', drafts))).toMatchObject({ ok: true });
+    }
+    expect(await person.org.dataSources.get('quiet')).toMatchObject({ refreshS: 300 });
+  });
+
+  it('is refused a change whose source a person publishes between its read and its batch', async () => {
+    // What a read of the published spots would have missed: the right is asked for before any is read.
+    const published = racing(agent('owner', drafts), async () => {
+      const spot = (await a.scope.spots.get(a.templateSpot))!;
+      const live = { ...JSON.parse(contentJson(spot)), bindingsJson: JSON.stringify({ title: { source: 'quiet', path: 'title' } }) };
+      await env.DB.prepare('UPDATE spots SET published_json = ? WHERE id = ?').bind(JSON.stringify(live), spot.id).run();
     });
-    expect(await change('update_data_source', { dataSourceId: 'live', name: 'Live feed' }, agent('owner', drafts))).toMatchObject({ ok: true });
-    expect(await change('update_data_source', { dataSourceId: 'quiet', refreshS: 600 }, agent('owner', drafts))).toMatchObject({ ok: true });
+    expect(await change('update_data_source', { dataSourceId: 'quiet', refreshS: 900 }, published)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await person.org.dataSources.get('quiet')).toMatchObject({ refreshS: 300 });
   });
 
   it('lets an agent that may publish change it, held to the commit: one whose editors stop publishing meanwhile is refused', async () => {

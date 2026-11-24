@@ -81,6 +81,7 @@ const updateOrgSettings = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  partialAgents: "editorsPublish, auditRetentionDays and the agent_refused alert are a person's; the rest an agent may change",
   input: z
     .object({
       timezone: timezone.nullable().optional(),

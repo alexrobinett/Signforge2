@@ -619,7 +619,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return;
         }
         const expiresAt = now() + CONFIRM_MS;
-        const why = whyNot(grant, name);
+        const why = whyNot(grant, name, Object.fromEntries(Object.entries(called)));
         if (why) {
           const title = TOOL_CARDS[name]?.title ?? '';
           const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt };

@@ -231,27 +231,26 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
 
   it('changes a feed within the budget (the Free plan: 50 D1 queries an invocation)', async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
-      200,
-    );
+    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
     const publisher = (await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish'])).access_token;
     const drafter = (await agentToken(t, owner, org.id, ['content:read', 'content:draft'])).access_token;
-    const address = await measure(async (b) => {
-      expect(await mcpTool(publisher, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/later.json' }, b)).toMatchObject({
-        structuredContent: { dataSource: { id: 'menu' } },
+    // Each grant's first call writes its last use (hourly): made before any is measured.
+    for (const token of [publisher, drafter]) expect((await listed(token)).status).toBe(200);
+    const measured = (token: string, input: Record<string, unknown>) =>
+      measure(async (b) => {
+        expect(await mcpTool(token, 'update_data_source', { dataSourceId: 'menu', ...input }, b)).toMatchObject({ structuredContent: { dataSource: { id: 'menu' } } });
       });
-    });
-    const refresh = await measure(async (b) => {
-      expect(await mcpTool(drafter, 'update_data_source', { dataSourceId: 'menu', refreshS: 600 }, b)).toMatchObject({
-        structuredContent: { dataSource: { id: 'menu' } },
-      });
-    });
-    // Measured, as the most each may take, the grant's write limit the one RPC of each. A new address holds the right to
-    // publish to its batch (one statement more there); any other change reads the spots that might show the source (a
-    // query more). Far inside 50. A new statement fails this on purpose: look at the budget, then raise it.
-    expect({ address, refresh }).toEqual({
-      address: { statements: 6, queries: 4, rpcs: ['write'] },
-      refresh: { statements: 6, queries: 5, rpcs: ['write'] },
+    const address = await measured(publisher, { feedUrl: 'https://menu.example.com/later.json' });
+    const refresh = await measured(publisher, { refreshS: 600 });
+    const name = await measured(drafter, { name: 'Menu board' });
+    // Measured, as the most each may take, the grant's write limit the one RPC of each: the token with its grant and member,
+    // the source, then one batch. Any change but the name holds the right to publish to that batch, one statement more than
+    // a name alone (review of #419); no read of what shows the source decides any more. Far inside 50. A new statement fails
+    // this on purpose: look at the budget, then raise it.
+    expect({ address, refresh, name }).toEqual({
+      address: { statements: 5, queries: 3, rpcs: ['write'] },
+      refresh: { statements: 5, queries: 3, rpcs: ['write'] },
+      name: { statements: 4, queries: 3, rpcs: ['write'] },
     });
   });
 });
