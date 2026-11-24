@@ -65,6 +65,8 @@ export const Route = createFileRoute('/_app/audit')({
   },
   server: { handlers: backToPage },
   loaderDeps: ({ search }) => search,
+  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
+  pendingMs: Infinity,
   // The first page is read again on every load, as after a change elsewhere, never from the cache.
   // Unsearched: the search is the store's, which a loader can't read; empty in a server render.
   loader: async ({ context: { queryClient }, parentMatchPromise, deps }) => {

@@ -47,6 +47,8 @@ import { spotShown } from '~/state/spot-editor';
 export const Route = createFileRoute('/_app/spots/$spotId')({
   validateSearch: stageSearch,
   loaderDeps: ({ search }) => ({ o: search.o, kit: search.kit }),
+  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
+  pendingMs: Infinity,
   loader: async ({ context: { queryClient }, params, deps, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;

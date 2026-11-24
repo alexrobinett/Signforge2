@@ -31,6 +31,8 @@ export const Route = createFileRoute('/connect')({
     ...(typeof search.sig === 'string' ? { sig: search.sig } : {}),
   }),
   loaderDeps: ({ search }) => ({ q: search.q, signed: search.sig !== undefined }),
+  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
+  pendingMs: Infinity,
   loader: async ({ deps, location }) => {
     if (deps.signed) throw redirect({ to: '/connect', search: { q: await getSignedQuery() }, replace: true });
     if (!deps.q) return { oauthQuery: '', read: { ok: false as const, signedOut: false, message: NO_REQUEST } };

@@ -19,6 +19,8 @@ import { useAppStore } from '~/state/provider';
 export const Route = createFileRoute('/_app/publishes')({
   validateSearch: (s: Record<string, unknown>): { id?: string } => (typeof s.id === 'string' && s.id ? { id: s.id } : {}),
   loaderDeps: ({ search }) => ({ id: search.id }),
+  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
+  pendingMs: Infinity,
   loader: async ({ context: { queryClient }, deps, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;

@@ -262,6 +262,7 @@
   @keyframes pending-appear {
     to {
       opacity: 1;
+      visibility: visible;
     }
   }
   @keyframes pending-slide {
