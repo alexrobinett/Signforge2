@@ -18,6 +18,8 @@ import { agentToken, check } from './oauth';
 const WRITERS: Record<string, string> = {
   'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations, and the OAuth consent for agents (#110)',
   'POST /api/tools/:name': 'the tool registry, through the dispatcher',
+  'POST /api/agent/apply':
+    "the drawer's drafts the person saved (#268): each a drafting tool through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /api/agent/chat':
     "reads only: a turn of the agent's drawer (#267), POST because the body is a conversation; its tool calls are reads through the dispatcher (it writes nothing of ours, checked below)",
   'POST /api/agent/inline/keep':
@@ -86,6 +88,7 @@ describe('the route table', () => {
     expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual([
       'POST /api/auth/*',
       'POST /api/tools/:name',
+      'POST /api/agent/apply',
       'POST /api/agent/chat',
       'POST /api/agent/inline/keep',
       'POST /api/agent/inline',
@@ -250,6 +253,22 @@ describe('requests', () => {
     const res = await member.post('/api/agent/chat', { messages: [{ role: 'user', text: 'How are the screens?' }], page: { path: '/screens', ids: {} } });
     expect(await res.text()).toContain('"type":"answer"');
     expect(ours()).toEqual([]);
+
+    // Its drafts, saved (#268): the change and its audit row, and nothing else.
+    const made = await owner.tool('create_spot', {
+      name: 'Clock',
+      kind: 'template',
+      templateVersionId: baseVersion,
+      data: { title: 'Now' },
+      idempotencyKey: 'guard-draft-1',
+    });
+    const { spot } = (await made.json()) as { spot: { id: string; version: number } };
+    writes.length = 0;
+    const saved = await member.post('/api/agent/apply', {
+      calls: [{ tool: 'update_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
+    });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    expect(ours()).toEqual(['spots', 'audit_log']);
   });
 });
 

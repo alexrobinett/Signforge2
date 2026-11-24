@@ -13,7 +13,7 @@ import { type SubmitEvent, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { Button } from '~/components/ui/button';
 import { Label } from '~/components/ui/label';
-import { useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { screenStatusQuery } from '~/queries/screens';
 import { useAppStore } from '~/state/provider';
 
@@ -51,6 +51,134 @@ function Suggestions({ path, onAsk }: { path: string; onAsk: (q: string) => void
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The change summary card (#268): each change the agent drafted, before → after, a link to check
+ * marked amber in full, and how many screens it reaches; Save as draft once every change is shown
+ * (or why it cannot be, with Try again), then Undo these changes and, for those who may, Publish now….
+ * A rename is not a draft: it shows at once. A viewer's are a request to copy, never saved.
+ */
+function DraftsCard({ index }: { index: number }) {
+  const m = useAppStore((s) => s.agentDrawer.messages[index]);
+  const save = useAppStore((s) => s.saveDrafts);
+  const show = useAppStore((s) => s.showDrafts);
+  const undo = useAppStore((s) => s.undoDrafts);
+  const confirm = useAppStore((s) => s.confirmPublish);
+  const publish = useAppStore((s) => s.publishDrafts);
+  const canManage = useCanManage();
+  const canPublish = useCanPublish();
+  if (m?.role !== 'assistant' || !m.drafts) return null;
+  const d = m.drafts;
+  const summaries = d.shown.state === 'shown' ? d.shown.summaries : [];
+  const savable = summaries.length === m.card.drafts.length;
+  // A screen's new name shows at once; the rest wait for a publish.
+  const renames = m.card.drafts.filter((c) => c.tool === 'rename_screen').length;
+  const drafted = m.card.drafts.length - renames;
+  const request = summaries.map((s) => [s.title, ...s.lines.map((l) => `${l.label}: ${l.before} → ${l.after}`), s.reach].join('\n')).join('\n\n');
+  return (
+    <section aria-label="Changes the agent drafted" className="mt-2 flex flex-col gap-3 rounded-lg border border-actor-agent/40 bg-card p-3 text-sm">
+      {d.shown.state === 'working' ? (
+        <p className="text-muted-foreground">Working out what the {m.card.drafts.length === 1 ? 'change does' : 'changes do'}…</p>
+      ) : d.shown.state === 'failed' ? (
+        <div className="flex flex-col gap-2">
+          <p className="font-medium text-destructive">{d.shown.reason} Nothing is saved until every change is shown.</p>
+          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => void show(index)}>
+            Try again
+          </Button>
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {summaries.map((s, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: two drafts may change one thing; their place tells them apart.
+            <li key={`${i}-${s.title}`} className="flex flex-col gap-1">
+              <p className="font-medium">{s.title}</p>
+              {s.lines.map((l) => (
+                <p key={l.label} data-check={l.check || undefined} className="break-words">
+                  {l.label}: <del className="text-muted-foreground">{l.before}</del> → <ins className="no-underline">{l.after}</ins>
+                  {l.check && (
+                    <span className="ml-1.5 rounded-full bg-status-updating-muted px-2 py-0.5 text-xs font-medium text-status-updating-foreground">Check</span>
+                  )}
+                </p>
+              ))}
+              <p className="text-muted-foreground">{s.reach}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p role="alert" className="font-medium text-destructive empty:hidden">
+        {d.error && (d.status === 'refused' ? `Not saved: ${d.error}. Nothing of it was overwritten.` : d.error)}
+      </p>
+      {!canManage ? (
+        <div className="flex flex-col gap-2">
+          <p>Not saved: you can view only. Send it to an editor as a request.</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={() =>
+              void navigator.clipboard.writeText(request).then(
+                () => toast.success('Copied'),
+                () => toast.error('Could not copy'),
+              )
+            }
+          >
+            <CopyIcon aria-hidden />
+            Copy as a request
+          </Button>
+        </div>
+      ) : d.status === 'proposed' || d.status === 'saving' ? (
+        <Button type="button" size="sm" className="self-start" disabled={d.status === 'saving' || !savable} onClick={() => void save(index)}>
+          {d.status === 'saving' ? 'Saving…' : drafted ? 'Save as draft' : 'Save'}
+        </Button>
+      ) : d.status === 'undone' ? (
+        <p>Undone: the drafts are as they were.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {d.status !== 'refused' && (
+            <p className="font-medium">
+              {d.status === 'published'
+                ? 'Published.'
+                : !drafted
+                  ? 'Saved. The new name shows at once.'
+                  : renames
+                    ? 'Saved. The new screen name shows at once; the rest is a draft no screen shows until it is published.'
+                    : 'Saved as draft. No screen shows it until it is published.'}
+            </p>
+          )}
+          {d.confirming ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Publish these changes to screens now?</span>
+              <Button type="button" size="sm" onClick={() => void publish(index)}>
+                Publish
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => confirm(index, false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {d.status !== 'published' && (
+                <Button type="button" variant="outline" size="sm" disabled={d.status === 'undoing'} onClick={() => void undo(index)}>
+                  {d.status === 'undoing' ? 'Undoing…' : 'Undo these changes'}
+                </Button>
+              )}
+              {d.status === 'saved' &&
+                drafted > 0 &&
+                (canPublish ? (
+                  <Button type="button" size="sm" onClick={() => confirm(index, true)}>
+                    Publish now…
+                  </Button>
+                ) : (
+                  <p>Only owners publish in this organization: ask one to publish it.</p>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -153,7 +281,7 @@ export function AgentDrawer() {
             <div className="min-w-0 flex-1">
               <DialogPrimitive.Title className="font-medium text-actor-agent">Agent</DialogPrimitive.Title>
               <DialogPrimitive.Description id="agent-drawer-about" className="text-sm text-foreground">
-                It reads your organization to answer, and changes nothing.
+                It reads your organization to answer, and drafts changes you see before you save them.
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close asChild>
@@ -171,7 +299,10 @@ export function AgentDrawer() {
                   {m.role === 'user' ? (
                     <p className="ml-8 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">{m.text}</p>
                   ) : m.role === 'assistant' ? (
-                    <AnswerCard card={m.card} />
+                    <>
+                      <AnswerCard card={m.card} />
+                      {m.drafts && <DraftsCard index={i} />}
+                    </>
                   ) : (
                     <p className="text-sm font-medium text-destructive">
                       {m.text}
