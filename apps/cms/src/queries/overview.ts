@@ -1,8 +1,9 @@
 /**
- * Overview's drafts and setup data as TanStack Query options, keyed by org. Read again on every
- * visit: it is a status page, and spots or playlists made elsewhere (an agent, another tab) must show.
+ * Overview's drafts and setup data as TanStack Query options, keyed by org (`overviewKey`). Its
+ * loader reads it fresh on every visit, as it is a status page.
  */
 import { queryOptions } from '@tanstack/react-query';
+import { overviewKey } from '~/lib/overview';
 import { getOverview } from '~/server/overview.functions';
 
-export const overviewQuery = (orgId: string) => queryOptions({ queryKey: ['org', orgId, 'overview'], queryFn: () => getOverview(), staleTime: 0 });
+export const overviewQuery = (orgId: string) => queryOptions({ queryKey: overviewKey(orgId), queryFn: () => getOverview() });

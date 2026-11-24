@@ -5,12 +5,14 @@
 import type { ScreenStatus, ScreenView } from './screen-types';
 
 /**
- * Which screens there are, what each should play and the kind of its state. The list's `showing`
- * (asleep, or the spot) follows from all three, so a change to any makes the list out of date: a
- * screen that wakes is read again once, and its tile never says Online over an Asleep thumbnail.
+ * Which screens there are, what each should play, what each reports playing and the kind of its
+ * state. The list's `showing` (asleep, or the spot) follows from the first three, so a change to any
+ * makes the list out of date: a screen that wakes is read again once, and its tile never says Online
+ * over an Asleep thumbnail. The reported manifest counts too: Overview's Playing now shows a screen
+ * only once it reports what it should play (#357), so the cards move when a screen takes a publish.
  */
-const fleetOf = (screens: readonly Pick<ScreenView, 'id' | 'desiredManifestId' | 'state'>[]) =>
-  screens.map((s) => `${s.id}:${s.desiredManifestId}:${s.state.kind}`).join();
+const fleetOf = (screens: readonly Pick<ScreenView, 'id' | 'desiredManifestId' | 'reportedManifestId' | 'state'>[]) =>
+  screens.map((s) => `${s.id}:${s.desiredManifestId}:${s.reportedManifestId}:${s.state.kind}`).join();
 
 /** Whether the poll has seen what the list does not have, so the list must be read again. Both are ordered by id. */
 export const listOutOfDate = (list: readonly ScreenView[], status: readonly ScreenStatus[]) => fleetOf(list) !== fleetOf(status);

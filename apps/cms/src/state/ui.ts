@@ -67,7 +67,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   },
   hideSetup: (orgId) =>
     set((s) => {
-      const setupHidden = [...s.ui.setupHidden, orgId];
+      // What another tab hid since this one read storage stays hidden: merged, not replaced.
+      const setupHidden = [...new Set([...readSetupHidden(), ...s.ui.setupHidden, orgId])];
       try {
         localStorage.setItem(SETUP_KEY, JSON.stringify(setupHidden));
       } catch {}

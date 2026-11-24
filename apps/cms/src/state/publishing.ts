@@ -19,6 +19,7 @@ import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
 import { type SpotView, versionsById } from '~/lib/spots';
 import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
+import { overviewKey } from '~/lib/overview';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { assetsQuery, brandKitsQuery, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
@@ -355,6 +356,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         const playlist = (await callTool('set_default_playlist', { playlistId })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, playlistId), playlist);
         await queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         toast.success(`${playlist.name} plays on every screen`, { description: 'From the next publish, wherever no schedule says otherwise.' });
       } catch (err) {
         toast.error('Not changed', { description: toolMessage(err) });

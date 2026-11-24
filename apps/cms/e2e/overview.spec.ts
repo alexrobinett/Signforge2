@@ -1,13 +1,17 @@
-// Overview (#357, #334): a new org's setup checklist ticks each step off from its data (a spot from
-// a template, a default playlist with it, a screen) and goes once all are done; then the page shows
-// the org's status: a screen that needs someone, what plays now with its template's thumbnail, the
-// drafts not published, and the latest publish. Hiding the checklist is kept on a reload. Axe at
+// Overview (#357, #334): a new org's setup checklist ticks each step off once screens have it (a spot
+// from a template, a published default playlist with it, a screen that took a publish) and goes once
+// all are done; then the page shows the org's status: a screen that needs someone, what screens
+// report playing with its template's thumbnail, the drafts not published, and the latest publish.
+// Hiding the checklist is kept on a reload; a 100-letter playlist name wraps on a phone; an editor
+// where only owners publish sees the default as an owner's step; a failing poll says so. Axe at
 // desktop and phone width, light and dark.
 import { expect, test, type Page } from '@playwright/test';
+import { CMS_URL } from './servers';
 import { axe, createOrg, d1, hydrated, shots, signInAs, tool } from './helpers';
 
 /** This spec's own client address, so its sign-ins and claims have their own rate limits. */
 const ADDRESS = '192.0.2.211';
+const EDITOR_ADDRESS = '192.0.2.212';
 
 /** What the player in the tab says it plays (`window.__sf`). */
 const player = (tab: Page) =>
@@ -59,13 +63,17 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await expect(setup.getByRole('listitem').first()).toHaveText(/Make a spot from a template \(done\)/);
   await expect(page.getByRole('region', { name: 'Unpublished drafts' }).getByRole('link')).toHaveText([/Opening.*Spot · never published/]);
 
-  // Step 2 ticks once a playlist with the spot is the default, however it was made.
+  // Step 2 ticks once a playlist with the spot is the default and published: a draft default plays nowhere.
   const { playlist } = await tool(page, 'create_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spotId] });
   await tool(page, 'set_default_playlist', { playlistId: playlist.id });
   await page.reload();
+  await expect(setup).toContainText('1 of 3 done');
+  await expect(setup.getByRole('link', { name: 'Open Opening week' })).toBeVisible();
+  await tool(page, 'publish', {});
+  await page.reload();
   await expect(setup).toContainText('2 of 3 done');
 
-  // Step 3: a test screen, paired by its code. Every step is done, so the checklist goes.
+  // Step 3: a test screen, paired by its code, ticks once it has taken a publish; then the checklist goes.
   const screen = await (await browser.newContext()).newPage();
   await screen.goto('/test-screen/?kind=browser&content=/v1/device');
   await expect.poll(async () => (await player(screen)).pairing, { timeout: 20_000 }).not.toBe('');
@@ -76,12 +84,12 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   expect(claimed.status(), await claimed.text()).toBe(200);
   const { screen: door } = (await claimed.json()) as { screen: { id: string } };
   await page.reload();
-  await expect(setup).toBeHidden();
-
-  // Published: the screen plays the spot, shown by its template's thumbnail, and the drafts are gone.
-  await tool(page, 'publish', {});
+  await expect(setup).toContainText('2 of 3 done');
+  // A new screen plays once a publish compiles for it: no draft, every screen compiled again.
+  await tool(page, 'publish', { drafts: [] });
   await expect.poll(async () => (await player(screen)).playlist, { timeout: 30_000 }).not.toBe('');
-  await page.reload();
+  // The poll reads the list again once the screen reports the manifest: no reload.
+  await expect(setup).toBeHidden({ timeout: 30_000 });
   const playing = page.getByRole('region', { name: 'Playing now' });
   await expect(playing.getByRole('link')).toHaveText([/Opening\s*On 1 screen · Opening week/]);
   await expect(playing.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
@@ -98,19 +106,72 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await d1(`UPDATE screens SET last_seen_at = last_seen_at - ${30 * 60_000} WHERE id = '${door.id}'`);
   await page.reload();
   await expect(page.getByRole('region', { name: /Needs you/ }).getByRole('link')).toHaveText([/Door.*Unreachable and behind/]);
+  // It has not taken the publish, so it is not counted as playing it; the finished checklist stays gone.
+  await expect(page.getByRole('region', { name: 'Get your first spot on a screen' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Playing now' })).toContainText('None of the screens is playing its latest publish right now.');
   await expect(page.getByRole('region', { name: 'Latest publish' })).toBeVisible();
   await bothWidths(page, '111-overview-status');
 });
 
-test('hiding the setup checklist keeps it hidden on a reload', async ({ page }) => {
+test('a long playlist name wraps on a phone, hiding the checklist keeps it hidden, and a failing poll says so', async ({ page }) => {
   await signInAs(page, `e2e-overview-hide-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Kestrel Annex', ADDRESS);
   const setup = page.getByRole('region', { name: 'Get your first spot on a screen' });
   await expect(setup).toBeVisible();
+
+  // The default's name is on its step's button: 100 letters, with no space to break at.
+  const long = 'W'.repeat(100);
+  const { playlist } = await tool(page, 'create_playlist', { name: long, transition: { type: 'cut' } });
+  await tool(page, 'set_default_playlist', { playlistId: playlist.id });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await hydrated(page);
+  await expect(setup.getByRole('link', { name: `Open ${long}` })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '112-overview-long-name-phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   await page.getByRole('button', { name: 'Hide the setup checklist' }).click();
   await expect(setup).toBeHidden();
   await page.reload();
   await hydrated(page);
   await expect(setup).toBeHidden();
   await expect(page.getByRole('region', { name: 'Playing now' })).toContainText('No screen is playing anything yet.');
+
+  // The status poll fails: the page says its status is not current, as Screens does.
+  await page.route('**/_serverFn/**', (route) =>
+    new URL(route.request().url()).pathname.startsWith('/_serverFn/getScreenStatus_') ? route.abort('connectionrefused') : route.fallback(),
+  );
+  await page.reload();
+  await expect(page.getByRole('status').filter({ hasText: 'Status is not current.' })).toBeVisible({ timeout: 20_000 });
+  await axe(page);
+  await page.unroute('**/_serverFn/**');
+});
+
+test('an editor where only owners publish sees the default as an owner’s step, with no button', async ({ page, browser }) => {
+  const stamp = Date.now();
+  const owner = await browser.newPage();
+  await signInAs(owner, `e2e-overview-owner-${stamp}@example.com`, ADDRESS);
+  await createOrg(owner, 'Kestrel Mews', ADDRESS);
+  await tool(owner, 'update_org_settings', { editorsPublish: false });
+  const editorEmail = `e2e-overview-editor-${stamp}@example.com`;
+  const invited = await owner.request.post('/api/auth/organization/invite-member', {
+    headers: { origin: CMS_URL },
+    data: { email: editorEmail, role: 'editor' },
+  });
+  expect(invited.status(), await invited.text()).toBe(200);
+  const { id: invitationId } = (await invited.json()) as { id: string };
+  await owner.close();
+
+  await signInAs(page, editorEmail, EDITOR_ADDRESS);
+  const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
+  expect(accepted.status(), await accepted.text()).toBe(200);
+  await page.goto('/');
+  await hydrated(page);
+  const setup = page.getByRole('region', { name: 'Get your first spot on a screen' });
+  const step = setup.getByRole('listitem').nth(1);
+  await expect(step).toHaveText(/An owner sets the default \(for an owner\)/);
+  await expect(step.getByRole('link')).toHaveCount(0);
+  await axe(page);
 });

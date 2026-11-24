@@ -2,7 +2,8 @@
  * Overview (#357): the org's status, most urgent first. Screens that need someone, what the awake
  * screens play, drafts not published yet, and the latest publish. A new org also gets a setup
  * checklist (#334), whose steps tick themselves off from its data, until every step is done or the
- * member hides it. What screens are doing stays current while it is open, as on Screens.
+ * member hides it. What screens are doing stays current while it is open, from the Screens page's
+ * own poll, and says when it is not.
  */
 import { sessionBlobPath } from '@signforge/contract';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
@@ -11,10 +12,11 @@ import { CircleCheckIcon, XIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { LatestPublish } from '~/components/publishes/latest-publish';
+import { NotCurrent } from '~/components/screens/not-current';
 import { StatusGlyph } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { withStatus } from '~/lib/fleet-status';
-import { useCanManage, useNow, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { playingNow, setupSteps, templateThumbnail, unpublished, type Playing, type SetupStep, type Unpublished } from '~/lib/overview';
 import { describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import type { ScreenView } from '~/lib/screen-types';
@@ -31,7 +33,7 @@ export const Route = createFileRoute('/_app/')({
     if (!orgId) return;
     await Promise.all([
       queryClient.query({ ...screensQuery(orgId), staleTime: 0 }),
-      queryClient.query(overviewQuery(orgId)),
+      queryClient.query({ ...overviewQuery(orgId), staleTime: 0 }),
       queryClient.query(publishQuery(orgId, null)),
     ]);
   },
@@ -43,18 +45,21 @@ function Overview() {
   const shell = app.useLoaderData();
   const orgId = useOrgId();
   const { data } = useSuspenseQuery(screensQuery(orgId));
-  const { data: live } = useQuery(screenStatusQuery(orgId));
-  const { spots, playlists, entries } = useSuspenseQuery(overviewQuery(orgId)).data;
-  const now = useNow(Math.max(data.at, live?.at ?? 0));
+  const { data: live, errorUpdatedAt, dataUpdatedAt } = useQuery(screenStatusQuery(orgId));
+  const overview = useSuspenseQuery(overviewQuery(orgId)).data;
+  const heardAt = Math.max(data.at, live?.at ?? 0);
+  const now = useNow(heardAt);
   const screens = withStatus(data.screens, data.at, live).filter((s) => !isRetired(s));
 
   return (
     <div className="space-y-8">
       <PageHeader title={shell.organization?.name ?? 'Overview'} />
-      <Setup orgId={orgId} steps={setupSteps({ spots, playlists, screens })} firstPlaylist={playlists.find((p) => p.spotIds.length > 0)} />
+      {/* Not `isError`: a query with no data yet goes back to pending on each retry (as on Screens). */}
+      <NotCurrent failing={errorUpdatedAt > dataUpdatedAt} heardAt={heardAt} now={now} />
+      <Setup orgId={orgId} steps={setupSteps({ ...overview, screens })} defaultPlaylist={overview.defaultPlaylist} />
       <NeedsYou screens={screens} now={now} />
-      <PlayingNow rows={playingNow(screens)} />
-      <Drafts rows={unpublished({ spots, playlists, entries })} />
+      <PlayingNow rows={playingNow(screens)} anyScreen={screens.length > 0} />
+      <Drafts rows={unpublished(overview)} total={overview.drafts} />
       <LatestPublish orgId={orgId} now={now} />
     </div>
   );
@@ -74,19 +79,20 @@ function Section({ id, title, children }: { id: string; title: ReactNode; childr
 const STEPS: { key: SetupStep; title: string; body: string }[] = [
   { key: 'spot', title: 'Make a spot from a template', body: 'Pick a template and put in your words and pictures.' },
   { key: 'default', title: 'Put it in a playlist and make that the default', body: 'Every screen plays the default playlist when nothing is scheduled.' },
-  { key: 'screen', title: 'Pair a screen, or use the test screen', body: 'Pair a display by the code it shows, or open the test screen in this browser.' },
+  { key: 'screen', title: 'Pair a screen, or use the test screen', body: 'Pair a display by the code it shows, or open the test screen in this browser, then publish so it plays.' },
 ];
 
 /**
  * The setup checklist, for members who can do its steps. It goes once every step is done, or when
- * the member hides it (per browser, `ui.setupHidden`).
+ * the member hides it (per browser, `ui.setupHidden`). Choosing the default needs the right to
+ * publish, so where only owners publish an editor sees that step as an owner's, with no button.
  */
-function Setup({ orgId, steps, firstPlaylist }: { orgId: string; steps: Record<SetupStep, boolean>; firstPlaylist: { id: string; name: string } | undefined }) {
+function Setup({ orgId, steps, defaultPlaylist }: { orgId: string; steps: Record<SetupStep, boolean>; defaultPlaylist: { id: string; name: string } | null }) {
   const canManage = useCanManage();
+  const canPublish = useCanPublish();
   const hidden = useAppStore((s) => s.ui.setupHidden.includes(orgId));
   const hide = useAppStore((s) => s.hideSetup);
   const newSpot = useAppStore((s) => s.openNewSpot);
-  const newPlaylist = useAppStore((s) => s.openNewPlaylist);
   const done = STEPS.filter((s) => steps[s.key]).length;
   if (!canManage || hidden || done === STEPS.length) return null;
 
@@ -96,14 +102,12 @@ function Setup({ orgId, steps, firstPlaylist }: { orgId: string; steps: Record<S
         New spot
       </Link>
     ),
-    default: firstPlaylist ? (
-      <Link to="/playlists/$playlistId" params={{ playlistId: firstPlaylist.id }}>
-        Open {firstPlaylist.name}
+    default: defaultPlaylist ? (
+      <Link to="/playlists/$playlistId" params={{ playlistId: defaultPlaylist.id }}>
+        Open {defaultPlaylist.name}
       </Link>
     ) : (
-      <Link to="/playlists" onClick={() => newPlaylist(true)}>
-        New playlist
-      </Link>
+      <Link to="/playlists">Open playlists</Link>
     ),
     screen: <Link to="/screens">Pair a screen</Link>,
   };
@@ -124,31 +128,43 @@ function Setup({ orgId, steps, firstPlaylist }: { orgId: string; steps: Record<S
         </Button>
       </div>
       <ol className="mt-4 divide-y">
-        {STEPS.map((s, i) => (
-          <li key={s.key} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center">
-            <span className="flex min-w-0 flex-1 items-start gap-3">
-              {steps[s.key] ? (
-                <CircleCheckIcon className="mt-0.5 size-6 shrink-0 text-status-online" aria-hidden />
-              ) : (
-                <span aria-hidden className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border text-sm font-medium">
-                  {i + 1}
+        {STEPS.map((s, i) => {
+          const owners = s.key === 'default' && !canPublish && !steps[s.key];
+          return (
+            <li key={s.key} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center">
+              <span className="flex min-w-0 flex-1 items-start gap-3">
+                {steps[s.key] ? (
+                  <CircleCheckIcon className="mt-0.5 size-6 shrink-0 text-status-online" aria-hidden />
+                ) : (
+                  <span aria-hidden className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border text-sm font-medium">
+                    {i + 1}
+                  </span>
+                )}
+                <span className="min-w-0">
+                  <span className={steps[s.key] || owners ? 'block font-medium text-muted-foreground' : 'block font-medium'}>
+                    {owners ? 'An owner sets the default' : s.title}
+                    <span className="sr-only">{steps[s.key] ? ' (done)' : owners ? ' (for an owner)' : ' (to do)'}</span>
+                  </span>
+                  {!steps[s.key] && (
+                    <span className="block text-sm text-muted-foreground">
+                      {owners ? 'Only owners publish here, and the default comes with a publish.' : s.body}
+                    </span>
+                  )}
                 </span>
-              )}
-              <span className="min-w-0">
-                <span className={steps[s.key] ? 'block font-medium text-muted-foreground' : 'block font-medium'}>
-                  {s.title}
-                  <span className="sr-only">{steps[s.key] ? ' (done)' : ' (to do)'}</span>
-                </span>
-                {!steps[s.key] && <span className="block text-sm text-muted-foreground">{s.body}</span>}
               </span>
-            </span>
-            {!steps[s.key] && (
-              <Button asChild variant="outline" className="ml-9 self-start sm:ml-0 sm:self-auto">
-                {action[s.key]}
-              </Button>
-            )}
-          </li>
-        ))}
+              {!steps[s.key] && !owners && (
+                // A playlist's name may be 100 letters with no space: the button wraps it rather than widen a phone's page.
+                <Button
+                  asChild
+                  variant="outline"
+                  className="ml-9 h-auto min-h-9 max-w-full self-start py-2 text-left whitespace-normal wrap-anywhere sm:ml-0 sm:self-auto"
+                >
+                  {action[s.key]}
+                </Button>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </section>
   );
@@ -182,7 +198,7 @@ function NeedsYou({ screens, now }: { screens: ScreenView[]; now: number }) {
 }
 
 /** What awake screens play now, by their first spot, with its template's thumbnail. */
-function PlayingNow({ rows }: { rows: Playing[] }) {
+function PlayingNow({ rows, anyScreen }: { rows: Playing[]; anyScreen: boolean }) {
   return (
     <Section id="playing-now" title="Playing now">
       {rows.length ? (
@@ -192,7 +208,7 @@ function PlayingNow({ rows }: { rows: Playing[] }) {
               <Link
                 to="/spots/$spotId"
                 params={{ spotId: r.spot.id }}
-                className="group flex h-full flex-col overflow-hidden rounded-xl border bg-card outline-none hover:border-primary/40 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="group flex h-full flex-col overflow-hidden rounded-xl border bg-card outline-none hover:border-primary/40 focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 <SpotThumb spot={r.spot} />
                 <span className="space-y-0.5 px-4 py-3">
@@ -207,7 +223,9 @@ function PlayingNow({ rows }: { rows: Playing[] }) {
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground">No screen is playing anything yet.</p>
+        <p className="text-muted-foreground">
+          {anyScreen ? 'None of the screens is playing its latest publish right now.' : 'No screen is playing anything yet.'}
+        </p>
       )}
     </Section>
   );
@@ -224,17 +242,15 @@ function SpotThumb({ spot }: { spot: Playing['spot'] }) {
 }
 
 const KIND: Record<Unpublished['kind'], string> = { spot: 'Spot', playlist: 'Playlist', entry: 'Schedule' };
-/** How many drafts the list names; the rest are counted. */
-const SHOWN = 5;
 
-/** Drafts whose changes screens do not have yet, newest edit first. */
-function Drafts({ rows }: { rows: Unpublished[] }) {
+/** Drafts whose changes screens do not have yet: the newest edits by name, and how many more. */
+function Drafts({ rows, total }: { rows: Unpublished[]; total: number }) {
   return (
     <Section id="unpublished" title="Unpublished drafts">
       {rows.length ? (
         <>
           <ul className={LIST}>
-            {rows.slice(0, SHOWN).map((r) => (
+            {rows.map((r) => (
               <li key={`${r.kind}:${r.id}`}>
                 <DraftLink row={r}>
                   <RowText title={r.name}>
@@ -244,7 +260,7 @@ function Drafts({ rows }: { rows: Unpublished[] }) {
               </li>
             ))}
           </ul>
-          {rows.length > SHOWN && <p className="text-sm text-muted-foreground">And {rows.length - SHOWN} more.</p>}
+          {total > rows.length && <p className="text-sm text-muted-foreground">And {total - rows.length} more.</p>}
         </>
       ) : (
         <p className="text-muted-foreground">Everything is published.</p>
