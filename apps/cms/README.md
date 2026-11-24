@@ -56,7 +56,7 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 ```
 src/routes/__root.tsx     document, theme script, fonts
 src/routes/sign-in.tsx    email code, and GitHub when the API offers it
-src/routes/_app.tsx       signed-in layout: redirects signed-out visitors; with no active org, picks or creates one
+src/routes/_app.tsx       signed-in layout: redirects signed-out visitors; with no active org, picks or creates one, in a minimal frame: the logo and the account menu, no sidebar or search until there is an org (#379)
 src/routes/_app/index.tsx Overview (#357): Needs you; Playing now (what the screens that have taken their publish play, by first spot, with its template's thumbnail); the newest unpublished drafts and how many more; the latest publish; and a new org's setup checklist (#334), each step ticked once screens have it (a template spot; a published default playlist with spots; a screen that took a publish), gone once all are done or hidden (per browser, `ui.setupHidden`), its default step an owner's where only owners publish. It reads only what it shows (`getOverview`: the list tools' `unpublished`, `kind` and `isDefault` filters and `total`), under its own key (`overviewKey`, invalidated by every spot, playlist and schedule save), and shares the Screens page's poll and its not-current notice
 src/routes/_app/*.tsx     Assets, the image library
 src/routes/_app/schedule.tsx  Schedule (M3-19): takeovers with End now, the schedule entries with Edit and Remove, one screen's week hour by hour as drafted, Schedule a playlist, Take over screens, Publish

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, fromAddress, orgSwitcher, screenshot, signIn } from './helpers';
+import { accountMenu, axe, createOrg, fromAddress, orgSwitcher, screenshot, shots, signIn } from './helpers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.124';
@@ -11,6 +11,12 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
   await signIn(page, email);
   // Signed in once the first page asks for an org: the session cookie is set by then.
   await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
+  // No org yet: no navigation to open, only the account menu (#379).
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
+  await expect(accountMenu(page)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '03-first-org-phone');
   await createOrg(page, 'Pocket Signs', ADDRESS);
 
   // No horizontal scroll at phone width.
