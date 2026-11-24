@@ -6,6 +6,7 @@ CREATE TABLE `publish_requests` (
 	`client_id` text,
 	`drafts_json` text NOT NULL,
 	`reason` text NOT NULL,
+	`brand_state` text NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`created_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
@@ -13,8 +14,11 @@ CREATE TABLE `publish_requests` (
 	`decided_at` integer,
 	`publish_id` text,
 	`row_version` integer DEFAULT 1 NOT NULL,
-	FOREIGN KEY (`org_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`org_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`org_id`,`publish_id`) REFERENCES `publishes`(`org_id`,`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `publish_requests_org_id_uq` ON `publish_requests` (`org_id`,`id`);--> statement-breakpoint
-CREATE INDEX `publish_requests_org_created_idx` ON `publish_requests` (`org_id`,`created_at`);
+CREATE INDEX `publish_requests_org_created_idx` ON `publish_requests` (`org_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `publish_requests_org_status_created_idx` ON `publish_requests` (`org_id`,`status`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `publish_requests_org_asker_idx` ON `publish_requests` (`org_id`,`requested_by`,`status`);

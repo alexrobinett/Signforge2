@@ -2,13 +2,13 @@
 // approves exactly the drafts it pinned, as themselves, or declines; nothing else is published, a
 // changed draft makes the approval a conflict, an agent never decides, and a request expires after
 // 7 days. Asking tells the members who may approve and the channels the org's rule names. Times are
-// the test's (fake Date), never the clock's.
-import { draftChanged, published, StaleVersionError } from '@signforge/db';
+// the test's: Date is faked for the whole file, its setup included, never the clock's.
+import { draftChanged, published, StaleVersionError, type OrgScope, type Write } from '@signforge/db';
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AgentLimiter, type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role, type Scope } from '../src';
-import { PUBLISH_REQUEST_TTL_MS } from '../src/publish-requests';
+import { MAX_PENDING, PUBLISH_REQUEST_TTL_MS } from '../src/publish-requests';
 import { fakeServices } from './services';
 
 const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
@@ -16,11 +16,13 @@ const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: asy
 let orgs = 0;
 let o: SeededOrg;
 let delivered: string[];
+/** When each test starts: every time in the file is counted from it. */
+const START = Date.UTC(2026, 10, 24, 9);
 
 /** A user who is a member of the org with `role`, as Better Auth's organization endpoints leave one. */
 async function addMember(role: Role) {
   const userId = `${o.orgId}-${role}`;
-  const now = new Date().toISOString();
+  const now = new Date(Date.now()).toISOString();
   await env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)')
     .bind(userId, `${role} of ${o.orgId}`, `${userId}@signforge.test`, now, now)
     .run();
@@ -31,6 +33,8 @@ async function addMember(role: Role) {
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(START);
   o = await seedOrg(env.DB, `pubreq-${++orgs}`);
   await seedTeam(env.DB, o.orgId);
   await addMember('editor');
@@ -179,9 +183,7 @@ describe('who decides', () => {
 
 describe('expiry', () => {
   it('expires a request 7 days after it was asked: it is listed so, no longer pending, and cannot be decided', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    const start = Date.UTC(2026, 10, 24, 9);
-    vi.setSystemTime(start);
+    const start = START;
     const version = await editSpot(agent(), o.templateSpot, 12_000);
     const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
     const pendingIds = async () => (await call(person('viewer'), 'list_publish_requests', { pending: true })).requests.map((r: { id: string }) => r.id);
@@ -222,7 +224,8 @@ describe('asking', () => {
   it('tells the members who may approve by email and the channels its rule names, never with the reason, and sends them now', async () => {
     await call(person('owner'), 'set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
     await call(person('owner'), 'update_org_settings', { alerts: { publish_requested: { slack: true } } });
-    const version = await spotVersion(o.templateSpot);
+    // Edited, so not the seeded request's pin, which asking again would return.
+    const version = await editSpot(agent(), o.templateSpot, 11_000);
     const queued = async () => {
       delivered = [];
       const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }], 'SECRET-REASON-TEXT');
@@ -231,9 +234,9 @@ describe('asking', () => {
     };
 
     const { request, rows } = await queued();
+    // One email delivery, to whoever may approve when it is sent (apps/api's deliveries): the same however many members.
     expect(rows.map((d) => [d.channel, d.toUserId]).sort()).toEqual([
-      ['email', `${o.orgId}-editor`],
-      ['email', `${o.orgId}-owner`],
+      ['email', null],
       ['slack', null],
     ]);
     expect(delivered.sort()).toEqual(rows.map((d) => d.id).sort());
@@ -250,11 +253,213 @@ describe('asking', () => {
     });
     expect(rows.every((d) => !d.eventJson.includes('SECRET-REASON-TEXT'))).toBe(true);
 
-    // Editors who may not publish are not asked to approve.
-    await call(person('owner'), 'update_org_settings', { editorsPublish: false });
-    expect((await queued()).rows.map((d) => [d.channel, d.toUserId]).sort()).toEqual([
-      ['email', `${o.orgId}-owner`],
-      ['slack', null],
+    // No email when the rule sends none: the channels alone.
+    await call(person('owner'), 'update_org_settings', { alerts: { publish_requested: { email: false } } });
+    const version2 = await editSpot(agent(), o.templateSpot, 13_000);
+    delivered = [];
+    const { request: second } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version: version2 }]);
+    const rows2 = (await testScope(env.DB, o.orgId).alertDeliveries.list({ take: 50 })).filter((d) => d.eventId.includes(second.id));
+    expect(rows2.map((d) => d.channel)).toEqual(['slack']);
+  });
+});
+
+/** `caller`'s org, with `before` run as its batch is committed: a change that lands between the handler's read and the batch. */
+function racing(caller: Caller, before: () => Promise<unknown>): Caller {
+  const org = caller.org as OrgScope;
+  let raced = false;
+  const commit = async (writes: readonly Write[]) => {
+    if (!raced) {
+      raced = true;
+      await before();
+    }
+    return org.commit(writes);
+  };
+  return { ...caller, org: new Proxy(org, { get: (t, k) => (k === 'commit' ? commit : Reflect.get(t, k)) }) };
+}
+const scope = () => testScope(env.DB, o.orgId);
+const pendingStill = async (id: string) => expect((await scope().publishRequests.get(id))!.status).toBe('pending');
+const approve = (caller: Caller, publishRequestId: string) => dispatch(registry, 'approve_publish_request', { publishRequestId }, caller);
+
+/** A second template spot like the seeded one: a draft of its own. */
+async function otherSpot() {
+  const seeded = (await scope().spots.get(o.templateSpot))!;
+  return scope().spots.insert({
+    id: `${o.orgId}-other`,
+    name: 'Other',
+    kind: 'template',
+    durationMs: 10_000,
+    templateVersionId: seeded.templateVersionId,
+    dataJson: seeded.dataJson,
+    assetMapJson: '{}',
+  });
+}
+
+describe('all or nothing (review of #386)', () => {
+  it('fails the batch when a pinned draft that needs no promotion is edited before it commits, and leaves the request pending', async () => {
+    // A is live at its version; B is a new draft. Both are pinned.
+    await call(person('owner'), 'publish', { drafts: [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }] });
+    const b = await otherSpot();
+    const { request } = await ask(agent(), [
+      { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) },
+      { kind: 'spot', id: b.id, version: b.rowVersion },
     ]);
+    const edited = racing(person('owner'), () => scope().spots.update(o.templateSpot, { durationMs: 20_000 }));
+    expect(await approve(edited, request.id)).toMatchObject({ ok: false, error: 'conflict', details: { id: o.templateSpot } });
+    await pendingStill(request.id);
+    expect(published((await scope().spots.get(b.id))!)).toBeUndefined();
+  });
+
+  it('refuses, publishing nothing, when a pinned draft fails its checks: a playlist whose spot is not published', async () => {
+    const playlist = (await scope().playlists.get(o.playlist))!;
+    const { request } = await ask(agent(), [{ kind: 'playlist', id: o.playlist, version: playlist.rowVersion }]);
+    const r = await approve(person('owner'), request.id);
+    expect(r).toMatchObject({ ok: false, error: 'conflict', details: { held: [{ kind: 'playlist', id: o.playlist }] } });
+    expect(JSON.stringify(r)).toContain('is not published');
+    await pendingStill(request.id);
+    expect(published((await scope().playlists.get(o.playlist))!)).toBeUndefined();
+  });
+
+  it('removes no ended takeover it does not pin', async () => {
+    const takeover = (
+      await call(person('owner'), 'start_takeover', {
+        playlistId: o.playlist,
+        target: 'org',
+        endsAt: new Date(START + 60_000).toISOString(),
+        idempotencyKey: 'takeover-1',
+      })
+    ).entry;
+    await call(person('owner'), 'publish', {});
+    vi.setSystemTime(START + 120_000);
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const r = await call(person('owner'), 'approve_publish_request', { publishRequestId: request.id });
+    expect(r.published.removed).toEqual([]);
+    expect(await scope().scheduleEntries.get(takeover.id)).toBeDefined();
+  });
+});
+
+describe('expiry at its boundary (review of #386)', () => {
+  it('approves a millisecond before, and not at its expiry; the batch refuses a decision staged at or after it', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const first = (await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }])).request;
+    const other = await otherSpot();
+    const second = (await ask(agent(), [{ kind: 'spot', id: other.id, version: other.rowVersion }])).request;
+    vi.setSystemTime(first.expiresAt - 1);
+    expect(await approve(person('owner'), first.id)).toMatchObject({ ok: true });
+    vi.setSystemTime(second.expiresAt);
+    expect(await approve(person('owner'), second.id)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'expired' } });
+    // The guard itself: a decision staged at its expiry, read before it, commits nothing.
+    const row = (await scope().publishRequests.get(second.id))!;
+    await expect(scope().commit(scope().publishRequests.stage.decide(row, { status: 'declined', by: 'u', now: row.expiresAt }).writes)).rejects.toBeInstanceOf(
+      StaleVersionError,
+    );
+    await pendingStill(second.id);
+  });
+});
+
+describe('permission at the commit (review of #386)', () => {
+  const offNow = () =>
+    scope()
+      .commit([])
+      .then(async () => scope().commit((await scope().settings.stage.set({ editorsPublish: false })).writes));
+
+  it("refuses an editor's approval when editors stop publishing while it waits for the lock", async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const waited: Caller = { ...person('editor'), publishLock: async (run) => (await offNow(), run()) };
+    expect(await approve(waited, request.id)).toMatchObject({ ok: false, error: 'forbidden' });
+    await pendingStill(request.id);
+  });
+
+  it("refuses an editor's approval when editors stop publishing between its read and its batch", async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    expect(await approve(racing(person('editor'), offNow), request.id)).toMatchObject({ ok: false, error: 'forbidden' });
+    await pendingStill(request.id);
+    expect(published((await scope().spots.get(o.templateSpot))!)).toBeUndefined();
+  });
+});
+
+describe('brand kits, which have no draft (review of #386)', () => {
+  const asked = async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    return (await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }])).request.id as string;
+  };
+  const refusedForBrand = async (id: string, caller = person('owner')) => {
+    expect(await approve(caller, id)).toMatchObject({ ok: false, error: 'conflict', details: { brand: true } });
+    await pendingStill(id);
+    expect(published((await scope().spots.get(o.templateSpot))!)).toBeUndefined();
+  };
+
+  it('refuses after a kit is edited', async () => {
+    const id = await asked();
+    const kit = (await scope().brandKits.get(o.brandKit))!;
+    await call(agent(), 'update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: kit.rowVersion });
+    await refusedForBrand(id);
+  });
+
+  it('refuses after the default kit changes', async () => {
+    const id = await asked();
+    const night = await scope().brandKits.insert({ name: 'Night', colorsJson: (await scope().brandKits.get(o.brandKit))!.colorsJson, shape: 'soft' });
+    await call(agent(), 'set_default_brand_kit', { brandKitId: night.id });
+    await refusedForBrand(id);
+  });
+
+  it('refuses after a kit is assigned to a group', async () => {
+    const id = await asked();
+    await call(agent(), 'assign_brand_kit', { brandKitId: o.brandKit, groupId: o.group });
+    await refusedForBrand(id);
+  });
+
+  it('refuses when a kit is edited between its read and its batch', async () => {
+    const id = await asked();
+    const edited = racing(person('owner'), async () => scope().brandKits.update(o.brandKit, { shape: 'square' }));
+    await refusedForBrand(id, edited);
+  });
+});
+
+describe('asking again (review of #386)', () => {
+  it('returns the waiting request for the same pins, in any order, and sends no second alert', async () => {
+    await call(person('owner'), 'set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
+    await call(person('owner'), 'update_org_settings', { alerts: { publish_requested: { slack: true } } });
+    const other = await otherSpot();
+    const pins = [
+      { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) },
+      { kind: 'spot', id: other.id, version: other.rowVersion },
+    ];
+    const first = (await ask(agent(), pins)).request;
+    const sent = delivered.length;
+    expect((await ask(agent(), pins.toReversed(), 'Asked again')).request).toEqual(first);
+    expect(delivered).toHaveLength(sent);
+    expect(await scope().publishRequests.list({ take: 50 })).toHaveLength(2); // the seeded one and this one
+  });
+
+  it(`lets an asker have at most ${MAX_PENDING} waiting`, async () => {
+    await editSpot(agent(), o.templateSpot, 12_000);
+    const drafts = [
+      { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) },
+      { kind: 'spot', id: o.imageSpot, version: await spotVersion(o.imageSpot) },
+      { kind: 'playlist', id: o.playlist, version: (await scope().playlists.get(o.playlist))!.rowVersion },
+      { kind: 'schedule_entry', id: o.scheduleEntry, version: (await scope().scheduleEntries.get(o.scheduleEntry))!.rowVersion },
+    ];
+    // The seeded request is the agent's too: one waits already.
+    const subsets = Array.from({ length: 15 }, (_, n) => drafts.filter((_d, i) => ((n + 1) >> i) & 1)).filter((d) => d.length);
+    const waiting = (await scope().publishRequests.pendingBy(o.agentGrant, Date.now())).length;
+    for (const pins of subsets.slice(0, MAX_PENDING - waiting)) await ask(agent(), pins);
+    expect(await dispatch(registry, 'request_publish', { drafts: subsets[MAX_PENDING - waiting], reason: 'One more' }, agent())).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { pending: MAX_PENDING },
+    });
+  });
+
+  it('refuses a reason with a line or paragraph separator, a bidi control or an invisible character', async () => {
+    const pin = { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) };
+    for (const reason of ['one two', 'one two', 'abc‮dcba', 'in⁦side⁩', 'zero​width', 'soft­hyphen']) {
+      expect(await dispatch(registry, 'request_publish', { drafts: [pin], reason }, agent()), JSON.stringify(reason)).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+      });
+    }
   });
 });

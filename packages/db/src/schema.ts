@@ -1043,9 +1043,10 @@ export const publishScreens = sqliteTable(
 /**
  * A request to publish chosen drafts (M4-09): made by an agent without `content:publish`, or a
  * person who may not publish, and approved or declined by a person who may. It pins each draft at
- * the version it was asked for (`drafts_json`, `[{ kind, id, version }]`), so approval publishes
- * exactly those, and none if one has changed since. Pending until a decision; a pending one past
- * `expires_at` (7 days) is expired and can no longer be decided.
+ * the version it was asked for (`drafts_json`, `[{ kind, id, version }]` sorted by kind and id, so
+ * the same pins are the same text), so approval publishes all of them at those versions, or none.
+ * Pending until a decision; a pending one past `expires_at` (7 days) is expired and can no longer be
+ * decided. Decided and expired ones are kept for the org's audit retention (./retention.ts).
  */
 export const publishRequests = sqliteTable(
   'publish_requests',
@@ -1059,6 +1060,8 @@ export const publishRequests = sqliteTable(
     draftsJson: text('drafts_json').notNull(),
     /** The asker's own words for approvers, at most 500 characters: shown as theirs, never as instructions. */
     reason: text('reason').notNull(),
+    /** The org's brand state when asked (`brandKits.state`): kits have no draft, so approval publishes only while it is unchanged. */
+    brandState: text('brand_state').notNull(),
     status: text('status', { enum: ['pending', 'approved', 'declined'] })
       .notNull()
       .default('pending'),
@@ -1067,11 +1070,19 @@ export const publishRequests = sqliteTable(
     /** The person who approved or declined it, and when. */
     decidedBy: text('decided_by'),
     decidedAt: integer('decided_at'),
-    /** The publish its approval made; null until then, and when the approval changed no screen. */
+    /** The publish its approval made; null until then, and when there was nothing to publish (every pin already live at its version). */
     publishId: text('publish_id'),
     rowVersion: rowVersion(),
   },
-  (t) => [uniqueIndex('publish_requests_org_id_uq').on(t.orgId, t.id), index('publish_requests_org_created_idx').on(t.orgId, t.createdAt)],
+  (t) => [
+    uniqueIndex('publish_requests_org_id_uq').on(t.orgId, t.id),
+    // The list, newest first, all of them or the pending ones, each read in index order.
+    index('publish_requests_org_created_idx').on(t.orgId, t.createdAt, t.id),
+    index('publish_requests_org_status_created_idx').on(t.orgId, t.status, t.createdAt, t.id),
+    // One asker's pending requests: the same pins asked again, and the cap.
+    index('publish_requests_org_asker_idx').on(t.orgId, t.requestedBy, t.status),
+    foreignKey({ columns: [t.orgId, t.publishId], foreignColumns: [publishes.orgId, publishes.id] }),
+  ],
 );
 
 // -------------------------------------------------------------- data sources

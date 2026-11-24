@@ -83,8 +83,8 @@ interface AuditPage {
   actorKind?: (typeof s.auditLog.$inferSelect)['actorKind'];
   actorId?: string;
   action?: string;
-  /** With `action`: also rows of this other action whose detail holds `detailHas` (a publish that made the default, for `set_default_playlist`). */
-  alsoAction?: { action: string; detailHas: string };
+  /** With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the default, for `set_default_playlist`). */
+  alsoAction?: { actions: readonly string[]; detailHas: string };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -301,6 +301,11 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
         return staged(row as Row, db.insert(t).values({ ...row, rowVersion: firstVersion(id) } as never));
       },
       publish: publisher(db, orgId, table),
+      /**
+       * Nothing written: the batch is refused, as `publish` is, if the draft was edited since it was
+       * read. For a draft a publish pins at its version but need not promote, as it is live as it is.
+       */
+      unchanged: (row: Row): Staged => ({ row: undefined, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion, row.incarnation)] }),
       /** Delete the row, draft and published version, refused like `publish` if it was edited since it was read. */
       remove: (row: Row): Staged => {
         const deleted = rows.stage.delete(row.id);
@@ -613,6 +618,10 @@ export function scoped(d1: D1Database, orgId: string) {
     for (const id of [v.logoOnDarkAssetId, v.logoOnLightAssetId]) if (id != null && !(await assets.get(id))) throw new NotInOrgError('asset', id);
   };
   const ba = s.brandAssignments;
+  const bk = s.brandKits;
+  /** The org's brand state (`brandKits.state`): every kit and its version, then every assignment, each in a fixed order. */
+  const brandState = sql<string>`COALESCE((SELECT group_concat(${bk.id} || ':' || ${bk.rowVersion}, ',' ORDER BY ${bk.id}) FROM ${bk} WHERE ${bk.orgId} = ${orgId}), '')
+    || '|' || COALESCE((SELECT group_concat(${ba.target} || ':' || COALESCE(${ba.groupId}, '') || ':' || COALESCE(${ba.screenId}, '') || ':' || ${ba.brandKitId}, ',' ORDER BY ${ba.target}, ${ba.groupId}, ${ba.screenId}) FROM ${ba} WHERE ${ba.orgId} = ${orgId}), '')`;
   type BrandTarget = { target: 'org' } | { target: 'group'; groupId: string } | { target: 'screen'; screenId: string };
   const whereTarget = (t: BrandTarget) =>
     t.target === 'org'
@@ -1230,6 +1239,19 @@ export function scoped(d1: D1Database, orgId: string) {
           });
           return upsertVersioned(os, { id: 'settings', key: { orgId }, absent: 1, fresh }, values, ifVersion);
         },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `settings`) unless editors
+         * still publish when it runs. For an editor's publish, whose right to it is this setting, read
+         * before the batch: one turned off meanwhile fails it.
+         */
+        editorsPublish: (): Staged => {
+          const holds = sql`COALESCE((SELECT ${os.editorsPublish} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = 1`;
+          const stale = async () => {
+            const row = await db.select({ version: os.rowVersion, editorsPublish: os.editorsPublish }).from(os).where(eq(os.orgId, orgId)).get();
+            return row && !row.editorsPublish ? row.version : undefined;
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'settings', 0, holds, stale)] };
+        },
       },
     },
 
@@ -1414,8 +1436,21 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     brandKits: {
       ...brandKitRows,
+      /**
+       * What the org's screens would be branded with at the next publish, as one text: each kit's id
+       * and version, and each assignment, the default included. Kits have no draft, so a publish
+       * takes them as they are: a publish request records this, and its approval publishes only while
+       * it is the same (`stage.unchanged`).
+       */
+      state: async (): Promise<string> => (await db.select({ state: brandState }).from(s.organization).where(eq(s.organization.id, orgId)).get())?.state ?? '',
       stage: {
         ...brandKitRows.stage,
+        /** Nothing written: the batch is refused (`StaleVersionError`, id `brand`) unless the org's brand state is still `state`. */
+        unchanged: (state: string): Staged => {
+          const stale = async () =>
+            (await db.select({ state: brandState }).from(s.organization).where(eq(s.organization.id, orgId)).get())?.state === state ? undefined : 0;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'brand', 0, sql`(${brandState}) = ${state}`, stale)] };
+        },
         insert: async (values: NewRow<typeof s.brandKits>) => {
           await checkLogos(values);
           return brandKitRows.stage.insert(values);
@@ -1475,18 +1510,43 @@ export function scoped(d1: D1Database, orgId: string) {
           .limit(take)
           .all();
       },
+      /** `requestedBy`'s requests still waiting at `now`: not decided, and not past `expires_at`. */
+      pendingBy: (requestedBy: string, now: number) =>
+        db
+          .select()
+          .from(pr)
+          .where(and(eq(pr.orgId, orgId), eq(pr.requestedBy, requestedBy), eq(pr.status, 'pending'), gt(pr.expiresAt, now)))
+          .all(),
       stage: {
-        insert: publishRequests.stage.insert,
+        /** A new request, made at `now`: its `created_at`, which its expiry is counted from. */
+        insert: (values: NewRow<typeof pr>, now: number): Staged<PublishRequestRow> => {
+          const row = fullRow(pr, { ...strip(values), id: newId('prq'), orgId, createdAt: now }) as PublishRequestRow;
+          return staged(row, db.insert(pr).values(row));
+        },
         /**
-         * Decided: approved (with the publish it made, if any) or declined, by `by` at `now`. Guarded by
-         * the version read, so of two decisions from one read, one commits and the other is a conflict.
+         * Decided: approved (with the publish it made, if any) or declined, by `by` at `now`. The batch
+         * is refused (`StaleVersionError`) unless the request is still the version read and not expired
+         * at `now`, so of two decisions from one read one commits, and one that took past the expiry
+         * commits nothing.
          */
-        decide: (current: PublishRequestRow, decision: { status: 'approved' | 'declined'; by: string; now: number; publishId?: string | null }) =>
-          publishRequests.stage.update(
-            current,
-            { status: decision.status, decidedBy: decision.by, decidedAt: decision.now, publishId: decision.publishId ?? null },
-            current.rowVersion,
-          ),
+        decide: (
+          current: PublishRequestRow,
+          decision: { status: 'approved' | 'declined'; by: string; now: number; publishId?: string | null },
+        ): Staged<PublishRequestRow> => {
+          const changed = publishRequests.stage.update(current, {
+            status: decision.status,
+            decidedBy: decision.by,
+            decidedAt: decision.now,
+            publishId: decision.publishId ?? null,
+          });
+          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now})`;
+          // Changed since, or past its expiry when decided: either way not the request that was read.
+          const stale = async () => {
+            const row = await publishRequests.get(current.id);
+            return row && row.rowVersion === current.rowVersion && row.expiresAt > decision.now ? undefined : (row?.rowVersion ?? 0);
+          };
+          return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
+        },
       },
     },
     publishes: {
@@ -2022,7 +2082,9 @@ export function scoped(d1: D1Database, orgId: string) {
         if (p.action) {
           const also = p.alsoAction;
           where.push(
-            also ? or(eq(a.action, p.action), and(eq(a.action, also.action), sql`instr(${a.detailJson}, ${also.detailHas}) > 0`))! : eq(a.action, p.action),
+            also
+              ? or(eq(a.action, p.action), and(inArray(a.action, [...also.actions]), sql`instr(${a.detailJson}, ${also.detailHas}) > 0`))!
+              : eq(a.action, p.action),
           );
         }
         if (p.targetKind) where.push(eq(a.targetKind, p.targetKind));

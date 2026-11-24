@@ -1,18 +1,22 @@
 /**
  * Publish requests (M4-09): an agent without `content:publish`, or a person who may not publish,
  * asks; a person who may publish approves or declines. Owner decisions on #114: a request pins its
- * drafts at the versions asked for, and approval publishes exactly those (`publish` with drafts,
- * M3-18), or nothing if one has changed since; an agent with `content:publish` granted at consent by
- * someone who may publish publishes without asking, capped on every call by that member's role and
- * `editorsPublish` (the dispatcher's effective scopes).
+ * drafts at the versions asked for, and approval publishes all of them at those versions (`publish`
+ * with drafts, M3-18), or nothing: not if one has changed since, not if one fails its checks, and
+ * not if the org's brand kits, which have no draft and go live with any publish, have changed since
+ * it was asked. An agent with `content:publish` granted at consent by someone who may publish
+ * publishes without asking, capped on every call by that member's role and `editorsPublish`.
  *
  * Approving and declining are people's (`people`): the dispatcher refuses any agent, with
  * `content:publish` or without. An approval is the approver's publish, audited as them, its row
  * naming the request and the publish it made. A request waits 7 days, then is expired and can no
- * longer be decided.
+ * longer be decided; the batch checks that again, as it does the pins and the brand kits.
  *
  * Asking queues a `publish.requested` alert in the same batch: to the channels the org's
- * `publish_requested` rule names, and by email to the members it names who may approve.
+ * `publish_requested` rule names, and one email delivery, which the delivery run sends to the
+ * members the rule names who may approve then (apps/api src/deliveries.ts), so asking costs the
+ * same however many members there are. The same pins asked again while the first waits get the
+ * first request; an asker has at most `MAX_PENDING` waiting.
  */
 import type { OrgScope, PublishRequestRow } from '@signforge/db';
 import { z } from 'zod';
@@ -28,6 +32,10 @@ import { defineTool, notFound, ToolError, type ToolContext } from './tool';
 
 /** How long a request waits for a decision. */
 export const PUBLISH_REQUEST_TTL_MS = 7 * 24 * 60 * 60_000;
+/** The most requests one asker has waiting at once. */
+export const MAX_PENDING = 10;
+/** Controls, format and bidi characters, line and paragraph breaks, and invisible code points: as a client's name refuses them. */
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
 
 /** Its status at `now`: a pending request past its expiry is expired. */
 const statusOf = (row: PublishRequestRow, now: number) => (row.status === 'pending' && row.expiresAt <= now ? 'expired' : row.status);
@@ -49,14 +57,12 @@ const view = (row: PublishRequestRow, now: number): PublishRequestView => ({
   version: row.rowVersion,
 });
 
-/** Each pinned draft as it is now, refused `conflict` (details `{ id, version }`, 0 if gone) unless it is at the version pinned: as `publish` refuses one. */
+/**
+ * Each pinned draft as it is now, refused `conflict` (details `{ id, version }`, 0 if gone) unless it
+ * is at the version pinned: as `publish` refuses one. Three reads, however many pins.
+ */
 async function checkPins(org: OrgScope, pins: readonly DraftPin[]) {
-  const ids = (kind: DraftPin['kind']) => pins.filter((p) => p.kind === kind).map((p) => p.id);
-  const [spots, playlists, entries] = await Promise.all([
-    org.spots.getMany(ids('spot')),
-    org.playlists.getMany(ids('playlist')),
-    org.scheduleEntries.getMany(ids('schedule_entry')),
-  ]);
+  const [spots, playlists, entries] = await Promise.all([org.spots.list(), org.playlists.list(), org.scheduleEntries.list()]);
   const rows = { spot: spots, playlist: playlists, schedule_entry: entries };
   for (const p of pins) {
     const now = rows[p.kind].find((r) => r.id === p.id)?.rowVersion ?? 0;
@@ -69,21 +75,22 @@ async function checkPins(org: OrgScope, pins: readonly DraftPin[]) {
   }
 }
 
+/** Whether `role` may approve while the org has `editorsPublish`. */
+export const approves = (role: string, editorsPublish: boolean) => role === 'owner' || (role === 'editor' && editorsPublish);
+
 /**
- * Stages `publish.requested` for the org's channels and by email to the members its rule names who
- * may approve (not the asker), and returns the deliveries to send once committed. An email
- * delivery's event id names its member too, as one delivery per event and channel is kept: the
- * event itself has one id everywhere.
+ * Stages `publish.requested` for the org's channels, and one email delivery when its rule sends email
+ * and some member it names may approve (not the asker): the delivery run sends it to each of them
+ * (apps/api src/deliveries.ts). Returns the deliveries to send once committed.
  */
 async function announce(ctx: Pick<ToolContext<unknown>, 'org' | 'write'>, row: PublishRequestRow, now: number): Promise<string[]> {
   const { org, write } = ctx;
   const [settings, members, channels, orgName] = await Promise.all([orgSettings(org), org.members.list(), org.alertChannels.list(), org.name()]);
   const rule = settings.alerts.publish_requested;
-  const mayPublish = (role: string) => role === 'owner' || (role === 'editor' && settings.editorsPublish);
   const roles: readonly string[] = AUDIENCE_ROLES[rule.who];
-  const to = rule.email ? members.filter((m) => roles.includes(m.role) && mayPublish(m.role) && m.userId !== row.requestedBy) : [];
-  const sendTo = channels.map((c) => c.kind).filter((kind) => rule[kind]);
-  if (!to.length && !sendTo.length) return [];
+  const email = rule.email && members.some((m) => roles.includes(m.role) && approves(m.role, settings.editorsPublish) && m.userId !== row.requestedBy);
+  const sendTo = [...channels.map((c) => c.kind).filter((kind) => rule[kind]), ...(email ? (['email'] as const) : [])];
+  if (!sendTo.length) return [];
   let name: string | null;
   if (row.requestedByKind === 'agent') {
     const [connected] = await org.agentGrants.connected({ grantId: row.requestedBy });
@@ -101,25 +108,30 @@ async function announce(ctx: Pick<ToolContext<unknown>, 'org' | 'write'>, row: P
     },
   };
   const json = JSON.stringify(event);
-  const queued = (channel: 'email' | 'slack' | 'webhook', eventId: string, toUserId: string | null) =>
-    write(
-      org.alertDeliveries.stage.insert({
-        channel,
-        eventId,
-        eventType: event.type,
-        eventJson: json,
-        toUserId,
-        nextAttemptAt: now,
-        giveUpAt: now + ALERT_RETRY_MS,
-      }),
-    ).id;
-  return [...sendTo.map((kind) => queued(kind, event.id, null)), ...to.map((m) => queued('email', `${event.id}:${m.userId}`, m.userId))];
+  return sendTo.map(
+    (channel) =>
+      write(
+        org.alertDeliveries.stage.insert({
+          channel,
+          eventId: event.id,
+          eventType: event.type,
+          eventJson: json,
+          // Email to no one member: to those who may approve when it is sent.
+          toUserId: null,
+          nextAttemptAt: now,
+          giveUpAt: now + ALERT_RETRY_MS,
+        }),
+      ).id,
+  );
 }
+
+/** Pins in one order, so the same drafts asked for are the same text (`drafts_json`). */
+const sortedPins = (pins: readonly DraftPin[]): DraftPin[] =>
+  pins.map(({ kind, id, version }) => ({ kind, id, version })).toSorted((a, b) => (a.kind === b.kind ? (a.id < b.id ? -1 : 1) : a.kind < b.kind ? -1 : 1));
 
 const requestPublish = defineTool({
   name: 'request_publish',
-  description:
-    'Ask a person who may publish to publish chosen drafts: what to use without content:publish. It pins each draft at the version you give (the version you read); a person approves or declines it, and approval publishes exactly those, or nothing if one has changed since. Refused with a conflict, details { id, version }, if one is not at that version now. reason is shown to approvers as your words. It waits 7 days, then expires. Follow it with get_publish_request. Pass an idempotencyKey so a retry cannot ask twice. Returns { request }.',
+  description: `Ask a person who may publish to publish chosen drafts: what to use without content:publish. It pins each draft at the version you give (the version you read); a person approves or declines it, and approval publishes all of them, or nothing if one has changed since, fails its checks, or the brand kits have changed since you asked. Refused with a conflict, details { id, version }, if one is not at that version now. The same drafts asked for again while the first request waits return it. At most ${MAX_PENDING} of yours wait at once. reason is shown to approvers as your words. It waits 7 days, then expires. Follow it with get_publish_request. Pass an idempotencyKey so a retry cannot ask twice. Returns { request }.`,
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -136,8 +148,8 @@ const requestPublish = defineTool({
       .trim()
       .min(1)
       .max(500)
-      // One paragraph of plain text: no control characters, so it cannot reshape the page or alert around it.
-      .regex(/^[^\p{Cc}]*$/u, 'one line of text, with no control characters')
+      // One line of plain text: nothing that breaks it, hides text or reorders it on the page or alert around it.
+      .refine((v) => !HIDDEN.test(v), 'one line of text, with no control, format, bidirectional or invisible characters')
       .describe('What it is and why, for the person deciding: one line, 500 characters at most'),
     idempotencyKey,
   }),
@@ -147,15 +159,28 @@ const requestPublish = defineTool({
   handler: async ({ org, actor, input, write, deliverNow }) => {
     await checkPins(org, input.drafts);
     const now = Date.now();
+    const draftsJson = JSON.stringify(sortedPins(input.drafts));
+    const waiting = await org.publishRequests.pendingBy(actor.id, now);
+    // Asked again while it waits: the same request, and no second alert.
+    const same = waiting.find((r) => r.draftsJson === draftsJson);
+    if (same) return { request: view(same, now) };
+    if (waiting.length >= MAX_PENDING)
+      throw new ToolError('conflict', `${MAX_PENDING} of your publish requests are waiting: wait for one to be decided or to expire`, {
+        pending: waiting.length,
+      });
     const row = write(
-      org.publishRequests.stage.insert({
-        requestedByKind: actor.kind === 'agent' ? 'agent' : 'user',
-        requestedBy: actor.id,
-        clientId: actor.clientId ?? null,
-        draftsJson: JSON.stringify(input.drafts.map(({ kind, id, version }) => ({ kind, id, version }))),
-        reason: input.reason,
-        expiresAt: now + PUBLISH_REQUEST_TTL_MS,
-      }),
+      org.publishRequests.stage.insert(
+        {
+          requestedByKind: actor.kind === 'agent' ? 'agent' : 'user',
+          requestedBy: actor.id,
+          clientId: actor.clientId ?? null,
+          draftsJson,
+          reason: input.reason,
+          brandState: await org.brandKits.state(),
+          expiresAt: now + PUBLISH_REQUEST_TTL_MS,
+        },
+        now,
+      ),
     );
     for (const delivery of await announce({ org, write }, row, now)) deliverNow(delivery);
     return { request: view(row, now) };
@@ -212,7 +237,7 @@ async function pending(org: OrgScope, requestId: string, now: number): Promise<P
 const approvePublishRequest = defineTool({
   name: 'approve_publish_request',
   description:
-    'Approve a publish request: publish exactly the drafts it pins, at the versions it pins, as you. Refused with a conflict, details { id, version }, if one has changed since it was asked for (nothing is published: look at it and ask again), and if the request is no longer pending. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
+    'Approve a publish request: publish all the drafts it pins, at the versions it pins, as you, or nothing. Refused with a conflict, publishing nothing: details { id, version } if one has changed since it was asked for; { held } if one fails its checks (with why); { brand: true } if the brand kits, which go live with any publish, have changed since; { status } if the request is no longer pending. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -230,9 +255,25 @@ const approvePublishRequest = defineTool({
   }),
   handler: async (ctx) => {
     const { org, actor, input, write } = ctx;
+    const row = await pending(org, input.publishRequestId, Date.now());
+    if ((await org.brandKits.state()) !== row.brandState)
+      throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
+    const pins = pinsOf(row);
+    const published = await runPublish(ctx, pins, [], true);
+    // All or nothing: a pin held by its checks publishes none of them (the batch is not committed).
+    const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
+    const held = published.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));
+    if (held.length)
+      throw new ToolError(
+        'conflict',
+        `not every draft it asks for can be published: ${held.map((h) => `${h.kind.replace('_', ' ')} ${h.id}: ${h.problems.join('; ')}`).join(' / ')}`,
+        {
+          held,
+        },
+      );
+    write(org.brandKits.stage.unchanged(row.brandState));
+    // Its time is taken last, nearest the batch, whose guard refuses it past the request's expiry.
     const now = Date.now();
-    const row = await pending(org, input.publishRequestId, now);
-    const published = await runPublish(ctx, pinsOf(row));
     const decided = write(org.publishRequests.stage.decide(row, { status: 'approved', by: actor.id, now, publishId: published.publish?.id ?? null }));
     return { request: view(decided, now), published };
   },

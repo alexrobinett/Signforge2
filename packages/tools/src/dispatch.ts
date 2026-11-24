@@ -152,10 +152,16 @@ export async function dispatch<D extends DataScope>(
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
   if (tool.people && isAgent(caller.actor)) return fail('forbidden', `${tool.name} is for people only: a person does it in the CMS`);
   const grant = await grantOf(caller);
-  if (!permits(grant, tool)) {
-    if (permits({ ...grant, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
+  /** Refused unless `g` permits the tool. Asked again under a publish's lock, for each attempt, as the setting may have changed meanwhile. */
+  const refusedBy = (g: Grant): DispatchResult | undefined => {
+    if (permits(g, tool)) return undefined;
+    if (permits({ ...g, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
     return fail('forbidden', `${tool.name} needs the ${tool.scope} scope and at least the ${tool.minRole} role`);
-  }
+  };
+  const refused = refusedBy(grant);
+  if (refused) return refused;
+  // An editor publishes only while editors publish: the batch checks it again as it runs, so turning it off meanwhile fails it.
+  const onlyWhileEditorsPublish = caller.role === 'editor' && tool.scope === 'content:publish' && 'settings' in caller.org;
 
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
@@ -216,7 +222,8 @@ export async function dispatch<D extends DataScope>(
       targetId: target?.id ?? null,
       detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
     });
-    await caller.org.commit([...writes, ...audit.writes]);
+    const setting = onlyWhileEditorsPublish && 'settings' in caller.org ? caller.org.settings.stage.editorsPublish().writes : [];
+    await caller.org.commit([...setting, ...writes, ...audit.writes]);
   };
 
   /** What the handler asked to undo if the call does not succeed (`onDiscard`). Best effort: a failure is logged. */
@@ -296,6 +303,9 @@ export async function dispatch<D extends DataScope>(
     for (let attempt = 1; ; attempt++) {
       writes.length = 0;
       notices.length = 0;
+      // Under the lock and on every attempt: a setting changed while it waited or lost a race takes effect.
+      const now = refusedBy(await grantOf(caller));
+      if (now) return now;
       try {
         return await run();
       } catch (err) {

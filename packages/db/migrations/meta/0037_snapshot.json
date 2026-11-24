@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ac1127bd-608e-4d6a-baa6-e8df6a671192",
+  "id": "14db6c23-1c74-4b32-afd6-a0fa622805bb",
   "prevId": "e82e3022-203a-4541-ae43-c628809aa4c6",
   "tables": {
     "account": {
@@ -3850,6 +3850,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "brand_state": {
+          "name": "brand_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -3910,7 +3917,17 @@
         },
         "publish_requests_org_created_idx": {
           "name": "publish_requests_org_created_idx",
-          "columns": ["org_id", "created_at"],
+          "columns": ["org_id", "created_at", "id"],
+          "isUnique": false
+        },
+        "publish_requests_org_status_created_idx": {
+          "name": "publish_requests_org_status_created_idx",
+          "columns": ["org_id", "status", "created_at", "id"],
+          "isUnique": false
+        },
+        "publish_requests_org_asker_idx": {
+          "name": "publish_requests_org_asker_idx",
+          "columns": ["org_id", "requested_by", "status"],
           "isUnique": false
         }
       },
@@ -3921,6 +3938,15 @@
           "tableTo": "organization",
           "columnsFrom": ["org_id"],
           "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "publish_requests_org_id_publish_id_publishes_org_id_id_fk": {
+          "name": "publish_requests_org_id_publish_id_publishes_org_id_id_fk",
+          "tableFrom": "publish_requests",
+          "tableTo": "publishes",
+          "columnsFrom": ["org_id", "publish_id"],
+          "columnsTo": ["org_id", "id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

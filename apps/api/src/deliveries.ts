@@ -23,7 +23,7 @@ import {
   scoped,
   settleAlertDeliveries,
 } from '@signforge/db';
-import type { AlertEvent } from '@signforge/tools';
+import { type AlertEvent, approves, AUDIENCE_ROLES, orgSettings } from '@signforge/tools';
 import { MissingKey, openAlertSecret } from './data/cipher';
 import { dohResolver, FetchError, type FetchGuards, guardedPost } from './data/fetch';
 import type { EmailSender } from './email';
@@ -59,12 +59,12 @@ type DeliveryEnv = Pick<Env, 'DB' | 'DATA_SOURCE_KEY' | 'ENVIRONMENT'>;
 /** Where an attempt sends: the channel its delivery names, and for email the org's members. */
 interface Reach {
   channel: (orgId: string, kind: AlertChannelRow['kind']) => AlertChannelRow | undefined;
-  members: (orgId: string) => Promise<{ userId: string; email: string }[]>;
+  members: (orgId: string) => Promise<{ userId: string; email: string; role: string }[]>;
 }
 
 /** The org's members, read once per run or call. */
 function membersOnce(db: D1Database): Reach['members'] {
-  const read = new Map<string, Promise<{ userId: string; email: string }[]>>();
+  const read = new Map<string, Promise<{ userId: string; email: string; role: string }[]>>();
   return (orgId) => {
     let m = read.get(orgId);
     if (!m) read.set(orgId, (m = orgMembers(db, orgId)));
@@ -136,9 +136,11 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
 /** Send it on its channel; the receiver's HTTP status, or null for email. */
 async function send(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, event: AlertEvent): Promise<number | null> {
   if (row.channel === 'email') {
-    const member = (await reach.members(row.orgId)).find((m) => m.userId === row.toUserId);
-    if (!member) throw new Undeliverable('no-member');
-    await email.send({ to: member.email, subject: `SignForge: ${summary(event)}`, text: summary(event) });
+    const members = await reach.members(row.orgId);
+    const to = row.toUserId === null ? await approversOf(env, members, event) : members.filter((m) => m.userId === row.toUserId);
+    if (!to.length) throw new Undeliverable('no-member');
+    // One send each: a member who cannot be reached fails the delivery, which is tried again, as one member's is.
+    for (const m of to) await email.send({ to: m.email, subject: `SignForge: ${summary(event)}`, text: emailText(event) });
     return null;
   }
   const channel = reach.channel(row.orgId, row.channel);
@@ -164,6 +166,25 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(message)));
   return Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * An email delivery addressed to no one member (`publish.requested`, M4-09): the members its rule
+ * names who may approve now, not the asker. Read when it is sent, so asking costs the same however
+ * many members the org has.
+ */
+async function approversOf(env: DeliveryEnv, members: { userId: string; email: string; role: string }[], event: AlertEvent) {
+  if (event.type !== 'publish.requested') return [];
+  const settings = await orgSettings(scoped(env.DB, event.org.id));
+  const roles: readonly string[] = AUDIENCE_ROLES[settings.alerts.publish_requested.who];
+  return members.filter((m) => roles.includes(m.role) && approves(m.role, settings.editorsPublish) && m.userId !== event.data.by.id);
+}
+
+/** An email's text: its summary, and what a person does about it. */
+function emailText(event: AlertEvent): string {
+  if (event.type !== 'publish.requested') return summary(event);
+  const until = event.data.request.expiresAt;
+  return `${summary(event)}. Approve or decline it in SignForge before ${until} (UTC); after that it expires.\n\nWho gets these is in Settings, Notifications.`;
 }
 
 /** One line for an email subject and Slack's notification text. */

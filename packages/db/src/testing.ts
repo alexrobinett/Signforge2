@@ -361,14 +361,18 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.commit(agentGrant.writes);
   // The seeded agent's request to publish the template spot as it is (M4-09), pending: it expires
   // a century after the seeded hour, so it is pending whenever the tests run.
-  const publishRequest = o.publishRequests.stage.insert({
-    requestedByKind: 'agent',
-    requestedBy: agentGrant.row.id,
-    clientId: agentGrant.row.clientId,
-    draftsJson: JSON.stringify([{ kind: 'spot', id: templateSpot.id, version: templateSpot.rowVersion }]),
-    reason: 'Seeded request',
-    expiresAt: SEED_HOUR + 100 * 365 * 24 * 3_600_000,
-  });
+  const publishRequest = o.publishRequests.stage.insert(
+    {
+      requestedByKind: 'agent',
+      requestedBy: agentGrant.row.id,
+      clientId: agentGrant.row.clientId,
+      draftsJson: JSON.stringify([{ kind: 'spot', id: templateSpot.id, version: templateSpot.rowVersion }]),
+      reason: 'Seeded request',
+      brandState: await o.brandKits.state(),
+      expiresAt: SEED_HOUR + 100 * 365 * 24 * 3_600_000,
+    },
+    SEED_HOUR,
+  );
   await o.commit(publishRequest.writes);
 
   return {

@@ -177,7 +177,12 @@ export const publishRequestOutput = z.object({
   expiresAt: z.number(),
   decidedBy: z.string().nullable().describe('The user who approved or declined it'),
   decidedAt: z.number().nullable(),
-  publishId: z.string().nullable().describe('The publish its approval made; null until then, and when it changed no screen'),
+  publishId: z
+    .string()
+    .nullable()
+    .describe(
+      'The publish its approval made; null until then, and when there was nothing to publish: every pin already live at its version and no screen to change',
+    ),
   version: version.describe('Moves on when it is decided'),
 });
 export type PublishRequestView = z.infer<typeof publishRequestOutput>;

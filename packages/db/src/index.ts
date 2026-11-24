@@ -21,6 +21,7 @@ export {
   AUDIT_ROWS_PER_RUN,
   DEFAULT_AUDIT_RETENTION_DAYS,
   expireAlertDeliveries,
+  expirePublishRequests,
   expireAuditRows,
   expiredFeedImages,
   expireIdempotencyKeys,

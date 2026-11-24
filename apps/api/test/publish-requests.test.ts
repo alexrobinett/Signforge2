@@ -6,6 +6,7 @@
 // on every call by that member's role and the editors-publish setting (owner decision on Q7). And
 // each path's cost: D1 statements and Durable Object requests.
 import { draftChanged, published, scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { Client } from './client';
@@ -109,12 +110,22 @@ describe('who publishes', () => {
   });
 });
 
-/** The API's bindings, counting each D1 statement prepared and each Durable Object request. */
+/**
+ * The API's bindings, counting D1's work and each Durable Object RPC. `statements` is every statement
+ * prepared; `queries` what D1 counts against an invocation's 50: each statement run alone, and each
+ * batch once. `rpcs` names each method called on an object's stub (`acquire`, `release`, `write`).
+ */
 function counted() {
-  const seen = { statements: 0, objects: 0 };
+  const seen = { statements: 0, queries: 0, rpcs: [] as string[] };
+  let batched = 0;
   const db = new Proxy(env.DB, {
     get(target, prop) {
       if (prop === 'prepare') seen.statements++;
+      if (prop === 'batch')
+        return (statements: D1PreparedStatement[]) => {
+          batched += statements.length;
+          return target.batch(statements);
+        };
       const v = Reflect.get(target, prop, target);
       return typeof v === 'function' ? v.bind(target) : v;
     },
@@ -124,27 +135,56 @@ function counted() {
       get(target, key) {
         const v = Reflect.get(target, key);
         if (key !== 'get') return typeof v === 'function' ? v.bind(target) : v;
-        return (id: DurableObjectId) => {
-          seen.objects++;
-          return target.get(id);
-        };
+        return (id: DurableObjectId) =>
+          new Proxy(target.get(id), {
+            get(stub, method) {
+              const real = Reflect.get(stub, method);
+              if (typeof method !== 'string' || typeof real !== 'function') return real;
+              return (...args: unknown[]) => (seen.rpcs.push(method), Reflect.apply(real, stub, args));
+            },
+          });
       },
     });
   const bindings: Env = { ...env, DB: db, AGENT_GRANTS: objects(env.AGENT_GRANTS) as Env['AGENT_GRANTS'], ORGS: objects(env.ORGS) as Env['ORGS'] };
-  return { seen, bindings };
+  const result = () => ({ statements: seen.statements, queries: seen.statements - batched + (batched ? 1 : 0), rpcs: seen.rpcs });
+  return { result, bindings };
+}
+
+/** Members added as Better Auth leaves them: `n` editors, each one who may approve. */
+async function editors(orgId: string, n: number) {
+  for (let i = 0; i < n; i++) {
+    const userId = `${orgId}-editor-${i}`;
+    await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, '2026-11-24', '2026-11-24')")
+      .bind(userId, `Editor ${i}`, `${userId}@signforge.test`)
+      .run();
+    await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', '2026-11-24')")
+      .bind(`${userId}-m`, orgId, userId)
+      .run();
+  }
 }
 
 describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', () => {
-  it('asking, reading and deciding stay a handful of D1 statements and at most one Durable Object request', async () => {
+  it('on its costliest case, 30 approvers, Slack and a webhook, and screens to compile: asking, reading and deciding stay within it', async () => {
     const t = await team();
     const { token, spotId, version } = await agentEdited(t);
+    await editors(t.org.id, 30);
+    await t.owner.ok('/api/tools/set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0COST/B0COST/secretpart' });
+    await t.owner.ok('/api/tools/set_webhook_alert_channel', {
+      webhookUrl: 'https://ops.example.com/hooks/sf',
+      signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD',
+    });
+    await t.owner.ok('/api/tools/update_org_settings', { alerts: { publish_requested: { slack: true, webhook: true } } });
+    const org = scoped(env.DB, t.org.id);
+    for (const name of ['Door', 'Till', 'Lobby', 'Hall', 'Yard'])
+      await testScope(env.DB, t.org.id).screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
+    const other = await urlSpot(t.owner, 'other');
     const measure = async (run: (bindings: Env) => Promise<unknown>) => {
-      const { seen, bindings } = counted();
+      const { result, bindings } = counted();
       await run(bindings);
-      return { ...seen };
+      return result();
     };
     const asking = await measure((b) => mcpTool(token, 'request_publish', { drafts: [{ kind: 'spot', id: spotId, version }], reason: 'Weekend hours' }, b));
-    const [first] = await scoped(env.DB, t.org.id).publishRequests.list({ take: 1 });
+    const [first] = await org.publishRequests.list({ take: 1 });
     const reading = await measure((b) => mcpTool(token, 'get_publish_request', { publishRequestId: first!.id }, b));
     const listing = await measure((b) => mcpTool(token, 'list_publish_requests', { pending: true }, b));
     const owner = (b: Env) => {
@@ -152,17 +192,26 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       for (const [k, v] of t.owner.jar) c.jar.set(k, v);
       return c;
     };
-    const second: string = (await ask(token, spotId, version)).structuredContent.request.id;
+    const second: string = (await ask(token, other.id, other.version)).structuredContent.request.id;
     const declining = await measure((b) => owner(b).ok('/api/tools/decline_publish_request', { publishRequestId: second }));
     const approving = await measure((b) => owner(b).ok('/api/tools/approve_publish_request', { publishRequestId: first!.id }));
-    // Measured, as the most each may take: asking reads the token, the pins, the settings, members,
-    // channels and the agent's client, then writes the request, its deliveries and the audit row in one
-    // batch; its one object request is the agent's write limit (#107). A new statement fails this on purpose.
-    expect(asking).toEqual({ statements: 18, objects: 1 });
-    expect(reading).toEqual({ statements: 3, objects: 0 });
-    expect(listing).toEqual({ statements: 3, objects: 0 });
-    expect(declining).toEqual({ statements: 6, objects: 0 });
-    // A person's approval is a publish: the org's publish lock is its one object request.
-    expect(approving).toEqual({ statements: 26, objects: 1 });
+    // Its deliveries: Slack, the webhook, and one email to all 31 who may approve, whatever their number.
+    expect(
+      (await org.alertDeliveries.list({ take: 10 }))
+        .filter((d) => d.eventId.includes(first!.id))
+        .map((d) => d.channel)
+        .sort(),
+    ).toEqual(['email', 'slack', 'webhook']);
+    // Measured, as the most each may take. A new statement fails this on purpose: look at the budget, then raise it.
+    // Asking reads the token, the pins (three reads, however many), the asker's waiting requests, the brand
+    // state, the settings, members, channels and the agent's client, then writes the request, its three
+    // deliveries and the audit row in one batch; its one RPC is the agent's write limit (#107).
+    expect(asking).toEqual({ statements: 27, queries: 23, rpcs: ['write'] });
+    expect(reading).toEqual({ statements: 3, queries: 3, rpcs: [] });
+    expect(listing).toEqual({ statements: 3, queries: 3, rpcs: [] });
+    expect(declining).toEqual({ statements: 6, queries: 4, rpcs: [] });
+    // A person's approval is a publish, under the org's lock: acquire and release are its two RPCs.
+    expect(approving).toEqual({ statements: 28, queries: 20, rpcs: ['acquire', 'release'] });
+    for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
   });
 });

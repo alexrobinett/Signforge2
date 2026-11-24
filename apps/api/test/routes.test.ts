@@ -136,13 +136,17 @@ describe('requests', () => {
     // get_agent_grant's: an agent connected to this org by its owner.
     grantId = (await check((await agentToken(t, setup, org.id, ['content:read'])).access_token))!.grantId;
     // get_publish_request's: the agent's request to publish the spot.
-    const asked = testScope(env.DB, org.id).publishRequests.stage.insert({
-      requestedByKind: 'agent',
-      requestedBy: grantId,
-      draftsJson: JSON.stringify([{ kind: 'spot', id: spotId, version: 1 }]),
-      reason: 'Guarded',
-      expiresAt: Date.UTC(2100, 0, 1),
-    });
+    const asked = testScope(env.DB, org.id).publishRequests.stage.insert(
+      {
+        requestedByKind: 'agent',
+        requestedBy: grantId,
+        draftsJson: JSON.stringify([{ kind: 'spot', id: spotId, version: 1 }]),
+        reason: 'Guarded',
+        brandState: '',
+        expiresAt: Date.UTC(2100, 0, 1),
+      },
+      Date.UTC(2026, 10, 24),
+    );
     await testScope(env.DB, org.id).commit(asked.writes);
     publishRequestId = asked.row.id;
     // The same session, on a D1 binding that records writes.
