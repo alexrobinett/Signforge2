@@ -58,7 +58,9 @@ describe('a token for another resource', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
     expect((await listed(access_token)).status).toBe(200);
     const hash = await sha256Base64Url(access_token);
-    await env.DB.prepare('UPDATE oauthAccessToken SET resources = ? WHERE token = ?').bind(JSON.stringify(['https://elsewhere.example/mcp']), hash).run();
+    await env.DB.prepare('UPDATE oauthAccessToken SET resources = ? WHERE token = ?')
+      .bind(JSON.stringify(['https://elsewhere.example/mcp']), hash)
+      .run();
     const refused = await listed(access_token);
     expect(refused.status).toBe(401);
     expect(refused.challenge).toContain('error="invalid_token"');

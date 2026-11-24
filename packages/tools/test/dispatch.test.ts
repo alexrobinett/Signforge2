@@ -738,7 +738,7 @@ describe('screen notices', () => {
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
   });
 
-  it("are not sent, nor audited, for a credential revoked already when its owner was demoted between the read and the batch (#417)", async () => {
+  it('are not sent, nor audited, for a credential revoked already when its owner was demoted between the read and the batch (#417)', async () => {
     const { told, screens } = recorder();
     const cred = await testScope(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
     expect((await revoke(cred.id, screens)).ok).toBe(true);
@@ -746,8 +746,19 @@ describe('screen notices', () => {
     const { userId } = await seedTeam(env.DB, o.orgId);
     const now = new Date(0).toISOString();
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(`${o.orgId}-other`, 'Other', `${o.orgId}-other@signforge.test`, now, now),
-      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(`${o.orgId}-other-member`, o.orgId, `${o.orgId}-other`, now),
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        `${o.orgId}-other`,
+        'Other',
+        `${o.orgId}-other@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(
+        `${o.orgId}-other-member`,
+        o.orgId,
+        `${o.orgId}-other`,
+        now,
+      ),
     ]);
     const audited = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
     const demoted = racing({ ...caller('owner'), member: userId, services: { notify: screens } }, () =>

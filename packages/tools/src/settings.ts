@@ -109,8 +109,7 @@ const updateOrgSettings = defineTool({
     // Who publishes, and how long the audit log keeps its trail, are a person's (owner default on M4 Q7, #122): an agent
     // could otherwise widen its own publishing or erase the record of what it did. The CMS's own agent is one too.
     const kept = (['editorsPublish', 'auditRetentionDays'] as const).filter((k) => input[k] !== undefined);
-    if (isAgent(actor) && kept.length)
-      throw new ToolError('forbidden', `an agent cannot change ${kept.join(' or ')}: ask an owner to change it in the CMS`);
+    if (isAgent(actor) && kept.length) throw new ToolError('forbidden', `an agent cannot change ${kept.join(' or ')}: ask an owner to change it in the CMS`);
     const current = await org.settings.get();
     const row = write(
       await org.settings.stage.set(
