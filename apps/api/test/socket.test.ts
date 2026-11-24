@@ -448,4 +448,48 @@ describe('the order of reports (gh-44)', () => {
     expect(await reported(c)).toBe(M1);
     s.ws.close(1000);
   });
+
+  it("takes a socket's messages one at a time, so reports without a time land in the order sent (gh-177)", async () => {
+    const c = await setUp('ws-l');
+    const s = await connect(await ticketFor(c));
+    // What the object did, in order: each message's read of the screen's live credentials, and each message's return.
+    const log: string[] = [];
+    // The first message's read is held until the object has taken the second message. Held at the D1
+    // binding, which the object shares with the tests' isolate.
+    const held = Promise.withResolvers<void>();
+    let holdNext = true;
+    const d1 = Object.getPrototypeOf(env.DB) as D1Database;
+    const prepare = d1.prepare;
+    const prepared = vi.spyOn(d1, 'prepare').mockImplementation(function (this: D1Database, query) {
+      if (query.includes('"screen_credentials"')) log.push('read');
+      return prepare.call(this, query);
+    });
+    // Drizzle prepares, binds and runs a select in one go, so the first statement run is the first read.
+    const statement = Object.getPrototypeOf(prepare.call(env.DB, 'select 1')) as D1PreparedStatement;
+    const raw = statement.raw;
+    const ran = vi.spyOn(statement, 'raw').mockImplementation(async function (this: D1PreparedStatement, ...args) {
+      if (holdNext) {
+        holdNext = false;
+        await held.promise;
+      }
+      return raw.apply(this, args);
+    });
+    onTestFinished(() => {
+      prepared.mockRestore();
+      ran.mockRestore();
+    });
+    const from = taken.length;
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      while (taken.length < from + 2) await new Promise<void>((r) => takenWake.push(r));
+      const calls = taken.slice(from);
+      const done = calls.map((t) => t.done.then(() => void log.push('done')));
+      held.resolve();
+      await Promise.all(done);
+    });
+    expect(log).toEqual(['read', 'done', 'read', 'done']);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
 });
