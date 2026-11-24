@@ -314,9 +314,12 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
             <div className="relative">
               <ScreenThumb screen={s} />
               <ScreenStatus screen={s} now={now} className="absolute top-2.5 left-2.5" />
-              <Badge variant="stage" className="absolute top-2.5 right-2.5 font-mono text-2xs">
-                {s.orientation === 'portrait' ? '9:16' : '16:9'}
-              </Badge>
+              {/* Only a portrait screen says its ratio: landscape is every other tile's (#374). */}
+              {s.orientation === 'portrait' && (
+                <Badge variant="stage" className="absolute top-2.5 right-2.5 font-mono text-2xs">
+                  9:16
+                </Badge>
+              )}
             </div>
             <div className="flex flex-col gap-1.5 px-4 pt-3.5 pb-4">
               <div className="flex items-baseline justify-between gap-2">
@@ -329,7 +332,10 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 </Link>
                 {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
-              <p className="text-meta text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
+              <p className="text-meta text-muted-foreground">
+                {/* Nothing published is said once, by the thumbnail (#374). */}
+                {[s.kind === 'browser' && 'Test screen', where, s.state.reason !== 'nothing_published' && d.line].filter(Boolean).join(' · ')}
+              </p>
             </div>
           </li>
         );

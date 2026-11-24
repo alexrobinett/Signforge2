@@ -81,7 +81,7 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   await hydrated(page);
   await expect(form.getByText('88°F, overcast')).toBeVisible();
   await expect(form.getByText(/Checked (just now|.* ago)\./)).toBeVisible();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, '91°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '35-spot-source-weather');
@@ -140,7 +140,7 @@ test('a second spot for the same place and units shares the source; moving it le
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('The first check failed: the feed took too long to answer.', { exact: false })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, '78°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '36-spot-source-failing');
@@ -276,7 +276,7 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await hydrated(page);
   await expect(weather.getByText('88°F, overcast')).toBeVisible();
   await expect(news.getByRole('listitem').filter({ hasText: 'Night market opens on the square' })).toBeVisible();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, 'Atlanta 88°F'), { timeout: 10_000 }).toBe(true);
   await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
   await axe(page);

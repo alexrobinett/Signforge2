@@ -126,7 +126,7 @@ function GeneralSettings() {
           description="New screens start with these. Outside them a screen turns its panel off and keeps syncing."
         >
           {canEdit ? (
-            <DisplayHoursEditor value={hours} onChange={(displayHours) => edit({ displayHours })} />
+            <DisplayHoursEditor value={hours} onChange={(displayHours) => edit({ displayHours })} headed />
           ) : (
             <p className="text-sm">{describeHours(settings.displayHours)}</p>
           )}

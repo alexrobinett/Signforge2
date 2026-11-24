@@ -71,9 +71,9 @@ async function stageBetweenFades(on: Page): Promise<boolean> {
   return seen;
 }
 
-/** The stage is playing the spot, past its intro (`stageBetweenFades`). */
+/** The stage is playing the spot, past its intro (`stageBetweenFades`): drawn, its status says Preview ready. */
 async function stageSettled(on: Page) {
-  await expect(on.getByText('Drawn by the player your screens run.')).toBeVisible();
+  await expect(on.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready');
   await expect.poll(() => stageBetweenFades(on), { timeout: 15_000 }).toBe(true);
 }
 

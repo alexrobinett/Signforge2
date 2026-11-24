@@ -234,25 +234,26 @@ function ScreenPage() {
             <div className="overflow-hidden rounded-lg bg-stage p-2">
               <ScreenThumb screen={screen} className="rounded" />
             </div>
-            <figcaption className="flex flex-wrap justify-between gap-2 text-md">
-              <span>
-                {screen.showing?.spot ? (
-                  <>
-                    Should be showing <strong className="font-semibold">{screen.showing.spot.name}</strong>
-                    {screen.showing.spot.templateName && <span className="text-meta text-muted-foreground"> · {screen.showing.spot.templateName}</span>}
-                  </>
-                ) : screen.showing?.asleep ? (
-                  <>Should be asleep{screen.showing.wakesAt && ` until ${localClock(screen.showing.wakesAt, screen.timezone, now)}`}</>
-                ) : (
-                  'Nothing published to it yet'
-                )}
-              </span>
-              {screen.showing?.playlist && (
-                <span className="text-muted-foreground">
-                  First of {screen.showing.spots} in {screen.showing.playlist.name}
+            {/* Only with something to say: nothing published is said by the thumbnail (#374). A screen showing something always has a playlist or is asleep. */}
+            {screen.showing && (
+              <figcaption className="flex flex-wrap justify-between gap-2 text-md">
+                <span>
+                  {screen.showing.spot ? (
+                    <>
+                      Should be showing <strong className="font-semibold">{screen.showing.spot.name}</strong>
+                      {screen.showing.spot.templateName && <span className="text-meta text-muted-foreground"> · {screen.showing.spot.templateName}</span>}
+                    </>
+                  ) : screen.showing.asleep ? (
+                    <>Should be asleep{screen.showing.wakesAt && ` until ${localClock(screen.showing.wakesAt, screen.timezone, now)}`}</>
+                  ) : null}
                 </span>
-              )}
-            </figcaption>
+                {screen.showing.playlist && (
+                  <span className="text-muted-foreground">
+                    First of {screen.showing.spots} in {screen.showing.playlist.name}
+                  </span>
+                )}
+              </figcaption>
+            )}
             {screen.showing ? (
               <p className="text-meta text-muted-foreground">
                 {d.line}. Worked out from its published manifest, schedule and display hours, as the screen does; not a screenshot.
@@ -602,7 +603,7 @@ function HoursDialog({ screen }: { screen: ScreenView }) {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="grid gap-4">
-          <DisplayHoursEditor value={hours} onChange={editDraftHours} />
+          <DisplayHoursEditor value={hours} onChange={editDraftHours} headed />
           <SaveError />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>

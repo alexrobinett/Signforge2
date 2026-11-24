@@ -127,7 +127,7 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
               </fieldset>
             )}
           </div>
-          {!compact && <DisplayHoursEditor value={hours} onChange={setNewScreenHours} />}
+          {!compact && <DisplayHoursEditor value={hours} onChange={setNewScreenHours} headed={false} />}
           <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
             {error}
           </p>

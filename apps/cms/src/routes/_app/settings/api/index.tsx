@@ -162,13 +162,20 @@ function AgentTable({
                 <span className="block text-xs font-normal text-muted-foreground">{g.client.verified ? 'A SignForge app' : 'Unverified'}</span>
               </th>
               <td className="px-3 py-3">
-                <ul className="flex flex-wrap gap-1" aria-label="Scopes">
-                  {g.scopes.map((s) => (
-                    <li key={s}>
-                      <Badge className="font-mono text-foreground">{s}</Badge>
-                    </li>
-                  ))}
-                </ul>
+                {/* content:read is every agent's (#374): the cell names what it may do beyond reading. */}
+                {g.scopes.some((s) => s !== 'content:read') ? (
+                  <ul className="flex flex-wrap gap-1" aria-label="Scopes">
+                    {g.scopes
+                      .filter((s) => s !== 'content:read')
+                      .map((s) => (
+                        <li key={s}>
+                          <Badge className="font-mono text-foreground">{s}</Badge>
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <span className="text-muted-foreground">Reads only</span>
+                )}
               </td>
               <td className="px-3 py-3">
                 {names[g.grantedBy] ?? 'A former member'} · {grantedOn(g.createdAt)}

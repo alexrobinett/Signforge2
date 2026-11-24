@@ -64,7 +64,7 @@ test('make a playlist, add spots, and see the real player play the loop', async 
   await expect(page.getByText('4 spots · 20 s loop', { exact: false })).toBeVisible();
 
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, 'Good morning, Northside'), { timeout: 10_000 }).toBe(true);
   // The loop moves on to the next spot after 4 s.
   await expect.poll(() => stageShows(page, 'Lunch is served'), { timeout: 15_000 }).toBe(true);
@@ -204,7 +204,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
   });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
-  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   // The player's own document on the stage: the frame that holds the slots.
   let stage: Frame | undefined;
   await expect

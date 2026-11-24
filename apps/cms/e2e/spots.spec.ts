@@ -146,8 +146,8 @@ test('make a spot from a template, see it on the real player as you type, and ke
   const stage = page.getByRole('region', { name: 'Live preview' });
   await expect(stage.getByText('The draft, as a screen would show it. Screens play what is published.')).toBeVisible();
   // What the stage is doing, said politely as it changes.
-  await expect(stage.getByRole('status')).toHaveText(/Drawing…|Drawn by the player your screens run\./);
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText(/^(Drawing…|Preview ready)$/);
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 
   // A keystroke reaches the player's frame without a round trip: no request but the autosave's goes
@@ -321,7 +321,7 @@ test('every base template can be configured and previewed', async () => {
     for (const [name, def] of fields.filter(([, d]) => (d.type === 'date' || d.type === 'datetime') && d.default === undefined))
       await page.locator(`#field-${name}`).fill(def.type === 'date' ? '2026-12-24' : '2026-12-24T18:00');
     const stage = page.getByRole('region', { name: 'Live preview' });
-    await expect(stage.getByText('Drawn by the player your screens run.'), t.key).toBeVisible({ timeout: 30_000 });
+    await expect(stage.getByRole('status'), t.key).toHaveText('Preview ready', { timeout: 30_000 });
     // A text field changed in the form reaches the stage.
     const text = fields.find(([, d]) => d.type === 'text' && (d.maxLength ?? 99) >= 6);
     if (text) {
@@ -373,7 +373,7 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
     .getByRole('button', { name: /berries\.png/ })
     .click();
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
 
   await page.getByLabel('Look').selectOption('night');
   await page.getByLabel('Headline').fill('Pier 9 opens Monday');
@@ -465,7 +465,7 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   const drafts = async () => (await player()?.evaluate(() => Reflect.get(window, 'sfDrafts') ?? [])) ?? [];
   await expect(stage.getByText('Drawing…').first()).toBeAttached();
   await stage.scrollIntoViewIfNeeded();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   // Every draft the player was sent arrived with its frame in view: none while it was below the fold.
   const arrived = await drafts();
   expect(arrived.length).toBeGreaterThan(0);
@@ -536,7 +536,7 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 720 });
   release();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await page.unroute('**/player/index.html*');
 
   // The editor, not the window, decides: at 1024 with the agent's drawer open the stage stacks under the form, at full width.
