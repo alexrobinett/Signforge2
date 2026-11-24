@@ -73,27 +73,19 @@ const CHAT_MAX_TOKENS = 2048;
 
 /**
  * Never offered to the drawer, whatever the role (docs/proposals/cms-agent.md, Tools that reach an
- * address). Besides these, no tool that changes data, and no `org:manage` tool, is offered.
+ * address). Besides these, no tool that changes data, no `org:manage` tool and no `people` tool is
+ * offered: alert channels' and connections' changes, pairing a screen and approving a template are
+ * `people` (review of #419).
  */
 export const NEVER_OFFERED: ReadonlySet<string> = new Set([
   // Alert channels post an org's events to an address its owner gave.
   'get_alert_channels',
   'list_alert_deliveries',
-  'set_webhook_alert_channel',
-  'set_slack_alert_channel',
-  'test_alert_channel',
-  'retry_alert_delivery',
-  'remove_alert_channel',
   // Connections: a provider's OAuth, and its data afterwards.
   'list_connections',
-  'start_connection',
-  'finish_connection',
   'disconnect',
-  // A pairing code in a flyer or a feed would pair an attacker's device and send it what is published.
-  'claim_screen',
   // Code that runs on screens.
   'register_template_version',
-  'set_template_version_status',
   'publish_manifest_to_screen',
 ]);
 

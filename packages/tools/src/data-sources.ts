@@ -13,7 +13,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, isAgent, notFound, ToolError } from './tool';
 import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
@@ -198,7 +198,11 @@ const createDataSource = defineTool({
   },
   // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then.
   target: (_input, output: { dataSource: { id: string } } | undefined) => (output ? { kind: 'data_source', id: output.dataSource.id } : undefined),
-  handler: async ({ org, input, write, services: { feedUrls } }) => {
+  handler: async ({ org, actor, input, write, publishRight, services: { feedUrls } }) => {
+    // A provider source reads whatever its resource names through a person's connection, and get_data_source shows what it
+    // read: an agent binds a new resource only with the right to publish (#122, review of #419).
+    if (isAgent(actor) && input.format === 'provider')
+      publishRight("Reading a new resource through a person's connection needs the right to publish: ask a person to add it");
     const existing = await org.dataSources.list();
     if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);
     if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
@@ -244,8 +248,18 @@ const updateDataSource = defineTool({
   output: outputs.update_data_source,
   example: { dataSourceId: 'weather', refreshS: 600 },
   target,
-  handler: async ({ org, input, write, services: { feedUrls } }) => {
+  handler: async ({ org, actor, input, write, publishRight, services: { feedUrls } }) => {
     const row = await requireSource(org, input.dataSourceId);
+    // The poller takes a source's change to screens with no publish: an agent may make one that reaches them, or replaces
+    // its sealed address, only with the right to publish (#122, review of #419). A name alone reaches no screen.
+    if (isAgent(actor)) {
+      // Anything but its name, a field added later included.
+      const reaching = Object.entries(input).some(([k, v]) => v !== undefined && !['dataSourceId', 'name', 'ifVersion'].includes(k));
+      if (input.feedUrl !== undefined || input.resource !== undefined)
+        publishRight("Changing a source's address or resource needs the right to publish: screens follow it with no publish");
+      else if (reaching && (await publishedBinding(org, row.id)))
+        publishRight('Published spots show this source: changing it needs the right to publish, as screens follow it with no publish');
+    }
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
     if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
     if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
@@ -277,6 +291,10 @@ const updateDataSource = defineTool({
  * or calendar added by its address is a person's to delete.
  */
 export const madeBySpotEditor = (dataSourceId: string) => /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/.test(dataSourceId);
+
+/** Whether a spot's published version binds a field to `dataSourceId`: what screens show of it. */
+const publishedBinding = async (org: OrgScope, dataSourceId: string) =>
+  (await org.spots.list()).some((s) => sourcesBound(published(s)?.bindingsJson).includes(dataSourceId));
 
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {

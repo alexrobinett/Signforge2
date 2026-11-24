@@ -46,8 +46,17 @@ const REFUSED: Record<string, Record<string, unknown>> = {
   set_template_version_status: { templateVersionId: 'tpv_boundaries', status: 'approved' },
   // Connections: an account at a provider is a person's choice.
   start_connection: { provider: 'fake' },
-  // Who publishes, and how long the trail is kept.
+  finish_connection: { oauthState: 'state', code: 'code' },
+  // Who publishes, how long the trail is kept, and who hears an agent was refused.
   update_org_settings: { auditRetentionDays: 30 },
+  // Where alerts go: an agent could silence or redirect every one (review of #419).
+  set_slack_alert_channel: { webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX' },
+  set_webhook_alert_channel: { webhookUrl: 'https://evil.example/hook' },
+  remove_alert_channel: { channel: 'webhook' },
+  test_alert_channel: { channel: 'email' },
+  retry_alert_delivery: { alertDeliveryId: 'dlv_boundaries' },
+  // Pairing a screen: a code planted in a feed would pair a device that gets every publish (review of #419).
+  claim_screen: { code: 'ABCDEF', name: 'Lobby', timezone: 'UTC', orientation: 'landscape' },
   // Members: who joins (#321), role changes and removals.
   invite_member: { email: 'sam@example.com', role: 'viewer' },
   update_member_role: { memberId: 'mem_boundaries', role: 'owner' },
@@ -70,9 +79,15 @@ describe("an agent, even an owner's with every scope", () => {
     }
   });
 
-  it('is refused editorsPublish and auditRetentionDays, alone or with another field, and may change the rest', async () => {
+  it('is refused editorsPublish, auditRetentionDays and the agent_refused alert, alone or with another field, and may change the rest', async () => {
     for (const [via, caller] of Object.entries(agents())) {
-      for (const input of [{ editorsPublish: false }, { auditRetentionDays: 3650 }, { timezone: 'UTC', editorsPublish: true }]) {
+      for (const input of [
+        { editorsPublish: false },
+        { auditRetentionDays: 3650 },
+        { timezone: 'UTC', editorsPublish: true },
+        { alerts: { agent_refused: { email: false } } },
+        { alerts: { screen_offline: { email: false }, agent_refused: { who: 'owners' } } },
+      ]) {
         expect(await dispatch(registry, 'update_org_settings', input, caller), via).toMatchObject({
           ok: false,
           error: 'forbidden',
@@ -80,6 +95,7 @@ describe("an agent, even an owner's with every scope", () => {
         });
       }
       expect(await dispatch(registry, 'update_org_settings', { unreachableAfterMinutes: 20 }, caller), via).toMatchObject({ ok: true });
+      expect(await dispatch(registry, 'update_org_settings', { alerts: { screen_offline: { slack: false } } }, caller), via).toMatchObject({ ok: true });
     }
     // A person may.
     expect(await dispatch(registry, 'update_org_settings', { editorsPublish: false, auditRetentionDays: 400 }, owner())).toMatchObject({
@@ -99,5 +115,20 @@ describe("an agent, even an owner's with every scope", () => {
           error: 'forbidden',
           message: expect.stringContaining('for people only'),
         });
+  });
+
+  it("is refused in a handler only where the rule is partial: a tool that refuses an agent outright is `people` (review of #419)", () => {
+    /** Tools whose handler treats an agent apart, and why that is not a refusal of the whole tool. */
+    const PARTIAL: Record<string, string> = {
+      update_org_settings: 'refuses three fields; the rest are an agent’s to change',
+      create_data_source: 'a provider source needs the right to publish; a feed does not',
+      update_data_source: 'a change that reaches screens needs the right to publish; a name does not',
+      update_spot: 'an agent’s edit is held to the version it read',
+      update_playlist: 'an agent’s edit is held to the version it read',
+    };
+    const checks = (name: string) => /isAgent|refuseAgent/.test(String(registry.get(name)?.handler));
+    for (const tool of registry.values()) if (checks(tool.name)) expect(tool.people || tool.name in PARTIAL, tool.name).toBe(true);
+    // None listed that no longer treats an agent apart.
+    for (const name of Object.keys(PARTIAL)) expect(checks(name), name).toBe(true);
   });
 });

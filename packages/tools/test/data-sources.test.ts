@@ -1,8 +1,10 @@
 // Data source tools (M3-23): CRUD over an org's feeds, with the feed URL sealed before it is stored.
+import { contentJson } from '@signforge/db';
 import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type TableReader, ToolError } from '../src';
+import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type Scope, type TableReader, ToolError } from '../src';
+import { racing, unlimited } from './calls';
 import { memberOf } from './member';
 
 let o: SeededOrg;
@@ -287,5 +289,88 @@ describe('find_places', () => {
       ok: false,
       error: 'invalid_input',
     });
+  });
+});
+
+describe("an agent's change that reaches screens with no publish (#122, review of #419)", () => {
+  // An org of its own: the tests above fill the first one's ten sources.
+  let a: SeededOrg;
+  let person: Caller;
+  const userOf = (role: string) => `${a.orgId}-agent-${role}`;
+  const change = (name: string, input: unknown, caller = person) => dispatch(registry, name, input, caller);
+  /** An agent connected by a member in `role`, holding `scopes`; the poller takes a source's change to screens itself. */
+  const agent = (role: 'owner' | 'editor', scopes: Scope[]): Caller => ({
+    ...memberOf(testScope(env.DB, a.orgId), role, { feedUrls: sealer }),
+    actor: { kind: 'agent', id: `agt_${role}`, clientId: 'some-agent' },
+    scopes,
+    agentLimiter: unlimited,
+    member: userOf(role),
+  });
+  const drafts: Scope[] = ['content:read', 'content:draft'];
+  const publishes: Scope[] = [...drafts, 'content:publish'];
+  const sealed = async (id: string) => (await person.org.dataSources.get(id))?.urlEncrypted;
+
+  beforeAll(async () => {
+    a = await seedOrg(env.DB, 'feeds-agents');
+    person = memberOf(testScope(env.DB, a.orgId), 'editor', { feedUrls: sealer });
+    const now = new Date(0).toISOString();
+    for (const role of ['owner', 'editor'])
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(userOf(role), role, `${userOf(role)}@signforge.test`, now, now),
+        env.DB.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, ?)').bind(`mem-${userOf(role)}`, a.orgId, userOf(role), role, now),
+      ]);
+    for (const id of ['quiet', 'live'])
+      expect(await change('create_data_source', { id, name: id, format: 'json', feedUrl: `https://${id}.example.com/feed.json` })).toMatchObject({ ok: true });
+    // What screens show of `live`: a published spot binds it.
+    const spot = (await a.scope.spots.get(a.templateSpot))!;
+    const live = { ...JSON.parse(contentJson(spot)), bindingsJson: JSON.stringify({ title: { source: 'live', path: 'title' } }) };
+    await env.DB.prepare('UPDATE spots SET published_json = ? WHERE id = ?').bind(JSON.stringify(live), spot.id).run();
+  });
+
+  it("refuses a draft-only agent a source's address, wherever it is bound, keeping the sealed one", async () => {
+    for (const id of ['quiet', 'live']) {
+      const before = await sealed(id);
+      expect(await change('update_data_source', { dataSourceId: id, feedUrl: 'https://evil.example.com/feed.json' }, agent('owner', drafts))).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: expect.stringContaining('needs the right to publish'),
+      });
+      expect(await sealed(id)).toBe(before);
+    }
+  });
+
+  it("refuses a draft-only agent any change but the name to a source published spots show, and allows one no published spot shows", async () => {
+    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 600 }, agent('owner', drafts))).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await change('update_data_source', { dataSourceId: 'live', name: 'Live feed' }, agent('owner', drafts))).toMatchObject({ ok: true });
+    expect(await change('update_data_source', { dataSourceId: 'quiet', refreshS: 600 }, agent('owner', drafts))).toMatchObject({ ok: true });
+  });
+
+  it('lets an agent that may publish change it, held to the commit: one whose editors stop publishing meanwhile is refused', async () => {
+    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 900 }, agent('editor', publishes))).toMatchObject({ ok: true });
+    const before = await sealed('live');
+    const raced = racing(agent('editor', publishes), async () => person.org.commit((await person.org.settings.stage.set({ editorsPublish: false })).writes));
+    try {
+      expect(await change('update_data_source', { dataSourceId: 'live', feedUrl: 'https://other.example.com/feed.json' }, raced)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'Only owners publish in this organization',
+      });
+    } finally {
+      await person.org.commit((await person.org.settings.stage.set({ editorsPublish: true })).writes);
+    }
+    expect(await sealed('live')).toBe(before);
+  });
+
+  it("refuses a draft-only agent a new provider source, which reads a resource through a person's connection; a feed it may add", async () => {
+    expect(
+      await change('create_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Payroll!A1:Z99' }, agent('owner', drafts)),
+    ).toMatchObject({ ok: false, error: 'forbidden', message: expect.stringContaining('needs the right to publish') });
+    expect(await change('create_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, agent('owner', drafts))).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('leaves people as they were: an editor changes the address in the CMS', async () => {
+    expect(await change('update_data_source', { dataSourceId: 'live', feedUrl: 'https://cms.example.com/feed.json' })).toMatchObject({ ok: true });
   });
 });

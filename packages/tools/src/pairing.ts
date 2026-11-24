@@ -30,6 +30,8 @@ const claimScreen = defineTool({
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
+  // A pairing code can be planted in content an agent reads, and the device it pairs gets every publish (review of #419).
+  people: true,
   idempotent: true,
   needs: ['rateLimit'],
   input: z.object({

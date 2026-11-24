@@ -223,35 +223,36 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 
 From the M4 plan's Risks (#105). Each risk names the test that holds its guard, or says why it is accepted. `apps/api/test/agent-security.test.ts` and `packages/tools/test/agent-boundaries.test.ts` hold this pass's own tests.
 
-**Prompt injection through content.** Agents read text that others wrote: feed snapshots from the open web, spot data, members' names, publish-request reasons, template manifests and asset names. Any of it can carry instructions.
+**Prompt injection through content.** Agents read text that others wrote: feed snapshots from the open web, spot data, members' names, agent clients' names, publish-request reasons, template manifests and check reports, and asset names. Any of it can carry instructions.
 
 | Guard | Test |
 | --- | --- |
-| The `/mcp` instructions and every tool description are ours and static, with no org text in them. | `agent-security.test.ts`, prompt injection: org text planted in every source above never appears in `initialize` or `tools/list`. |
-| An output is data fields, never prose that merges with ours. Over `/mcp`, each result's text is the JSON of its structured content. | The same test, one read for each source. |
-| In the drawer, outputs, refusals and the conversation reach the model fenced (`<data>`, `<history>`), and org text cannot close a fence. A refusal is fenced too, as it can name a playlist or a spot (fixed in this pass). | `agent-chat.test.ts`: the fenced output; the refused drafts, each fenced. |
+| The `/mcp` instructions and every tool description are ours and static, with no org text in them. | `agent-security.test.ts`, prompt injection: org text planted in every source above (`test/planted.ts`) never appears in `initialize` or `tools/list`. |
+| An output is data fields, never prose that merges with ours. Over `/mcp`, each result's text is the JSON of its structured content. A template's sources are kept as their hash: no output carries them. An agent client's name with markup in it is withheld, as unverified. | The same test, one read for each source, an agent's draft and request naming it among them. |
+| In the drawer, outputs, refusals and the conversation reach the model fenced (`<data>`, `<history>`), and org text cannot close a fence. A refusal is fenced too, as it can name a playlist or a spot (fixed in this pass). The browser is sent cards and the answer, never a tool's output. | `agent-chat.test.ts`: every planted source read through the drawer, a read refused, and a pressed card refused naming a spot called `</data>`; the refused drafts. |
 | The flyer fill reads its material fenced. | `agent-inline.test.ts` |
 | Agents draft by default. Publishing needs a person, or `content:publish` that someone who may publish turned on at consent. | `agent-grants.test.ts`, a grant's org and scopes; `dispatch.test.ts`, `effectiveScopes` |
 | Approvals show the diff and the real player, not the agent's summary, and its reason as a quote in plain text. | `apps/cms/e2e/approvals.spec.ts` |
 | The write budget (30 a minute, 2,000 a day) bounds the damage. Every change is audited and can be undone. | `agent-limits.test.ts` |
 
 Accepted:
-- A person who grants `content:publish` accepts that the agent can be misled. The consent page says so.
+- A person who grants `content:publish` accepts that the agent can be misled. The consent page says so, in its publishing warning (`apps/cms/e2e/connect.spec.ts`).
 - A refusal's message over `/mcp` can name org content (a playlist, a spot holding sample text). It is a string field of the JSON result, as an output is.
-- An agent with `org:manage` may change the org's alert rules, `agent_refused` included. That is the owner's default on M4 Q7: agents may change every setting except `editorsPublish` and audit retention. A change is audited.
+- An agent with `org:manage` may change the org's alert rules but `agent_refused`, and the other settings but `editorsPublish` and audit retention. Where alerts go (the channels) is a person's.
 
 **Scope escalation.**
 
 | Path | Guard and test |
 | --- | --- |
 | A role or setting that changes after consent | Scopes are capped by the member's role and `editorsPublish` on every call, never only at consent. Tests: `mcp.test.ts` (a downgraded member's publish); `agent-security.test.ts` (editors-publish turned off mid-session: gone on the next call, back when turned on, the grant's own scopes kept). |
-| A change made in the moment between a call's read and its batch | The role is held to the batch for a publish, and for every owner tool, whatever it commits (#414, #417). Tests: `members.test.ts`, `publish-requests.test.ts`, `dispatch.test.ts` (screen notices), each with `racing`. |
+| A change made in the moment between a call's read and its batch | The role is held to the batch for a publish, and for every owner tool, whatever it commits (#414, #417). Tests: `members.test.ts`, `publish-requests.test.ts`, `dispatch.test.ts` (screen notices), each with `racing`. A lost role is `forbidden` on any attempt of a publish too (review of #419). |
 | Another org | The org comes from the grant alone. Tests: `mcp.test.ts` (never reaches another org); `packages/db` `agent-grants.test.ts`. |
 | A token for another resource | Audience binding: the provider issues tokens for `/mcp` alone, and `/mcp` takes only a token issued for it. Tests: `agent-security.test.ts`; `packages/db` `agent-grants.test.ts`. |
 | An expired or revoked token or grant | Checked on every call, in one statement. Tests: `mcp.test.ts` (revoked, and revoked in the CMS); `agent-security.test.ts` (an expired access token; a grant unused past its 90 days). |
 | A removed member | Removal, and leaving, revoke the member's grants and their tokens, and a code given before is refused. Test: `agent-grants.test.ts`, a membership ending. |
 | The wrong route tree | `/mcp` refuses a session cookie and any Origin; `/api` refuses a bearer token. Test: `mcp.test.ts`. |
-| The tools that would widen an agent's own power or hide its trail | Refused to agents, the CMS's own included, even an owner's with every scope. That covers grants, approving, declining and putting back requests, template approval, starting a connection, `editorsPublish`, audit retention, inviting, role changes, removals and the model key. Test: `agent-boundaries.test.ts`, which also holds every `people` tool to the rule. This pass fixed two holes: an agent could change `editorsPublish` and retention, and approve a template version, the one it registered included. |
+| The tools that would widen an agent's own power or hide its trail | Refused to agents, the CMS's own included, even an owner's with every scope, at the dispatcher (`people`, so `/mcp` lists none of them). That covers grants, approving, declining and putting back requests, template approval, connections, the alert channels, pairing a screen (a code planted in a feed would pair a device that gets every publish), the model key, inviting, role changes and removals; and in `update_org_settings`, `editorsPublish`, audit retention and the `agent_refused` alert. Tests: `agent-boundaries.test.ts`, which also holds every `people` tool to the rule and fails for a handler that refuses agents outright without `people`; `agent-security.test.ts`, over `/mcp`. Holes fixed in this pass: `editorsPublish` and retention, template approval, then (review of #419) the alert channels and the `agent_refused` alert, `claim_screen`, and seven tools refused only in their handlers, `finish_connection` not at all. |
+| A change a lesser scope makes that reaches screens with no publish | A feed's address or resource, or any change but the name to a source published spots show, is taken to screens by the poller: an agent needs the right to publish for it, held to the commit (`ctx.publishRight`). A new provider source, which reads a resource through a person's connection, needs it too: what it may read is not clear-cut, so a draft-only agent is refused it (review of #419). Tests: `data-sources.test.ts`; `agent-security.test.ts` over `/mcp`; `agent-chat.test.ts`, from the drawer. A person who may not publish still may change a source in the CMS, as before: the owner's call. |
 
 Residual risks, each tested:
 - **A registered client naming itself "SignForge" or "Claude".** Registration accepts any plain name. The consent page withholds a name that reads as ours and shows the app as unverified, with where its code goes. Tests: `client-names.test.ts`; `agent-grants.test.ts`, the consent page's name.

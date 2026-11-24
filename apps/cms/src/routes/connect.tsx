@@ -176,8 +176,9 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
                 <p className="flex gap-2.5 rounded-lg border border-status-updating bg-status-updating-muted px-3.5 py-3 text-sm leading-snug text-status-updating-foreground">
                   <TriangleAlertIcon className="mt-0.5 size-4 flex-none" aria-hidden />
                   <span>
-                    Publishing lets <ClientName client={client} /> change what every screen in <bdi>{org.name}</bdi> shows without asking. Each publish is in
-                    the audit log and can be undone.
+                    Publishing lets <ClientName client={client} /> change what every screen in <bdi>{org.name}</bdi> shows without asking. Text it reads,
+                    such as a feed or a spot someone else wrote, can mislead it into publishing what you did not mean. Each publish is in the audit log and
+                    can be undone.
                   </span>
                 </p>
               ) : (

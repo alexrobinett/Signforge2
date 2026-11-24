@@ -155,6 +155,8 @@ const setSlackAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   needs: ['alertSecrets'],
   input: z.object({ webhookUrl: slackWebhookUrl, ifVersion }),
   output: outputs.set_slack_alert_channel,
@@ -180,6 +182,8 @@ const setWebhookAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   needs: ['alertSecrets'],
   input: z
     .object({ webhookUrl: outgoingUrl.optional(), signingSecret: signingSecret.optional(), ifVersion })
@@ -211,6 +215,8 @@ const removeAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   input: z.object({ channel: z.enum(ALERT_CHANNEL_KINDS) }),
   output: outputs.remove_alert_channel,
   example: { channel: 'slack' },
@@ -229,6 +235,8 @@ const testAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   input: z.object({ channel: z.enum(ALERT_CHANNELS).describe('email goes to the member who asks') }),
   output: outputs.test_alert_channel,
   example: { channel: 'email' },
@@ -289,6 +297,8 @@ const retryAlertDelivery = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   input: z.object({ alertDeliveryId: id('alert delivery') }),
   output: outputs.retry_alert_delivery,
   example: { alertDeliveryId: 'dlv_0123456789' },

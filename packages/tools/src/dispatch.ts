@@ -222,12 +222,28 @@ async function dispatchCall<D extends DataScope>(
   // alone), and an owner's (review of #414: one demoted between the read and the batch is refused), for whatever the
   // batch commits, an audit row alone included (#417). An owner's change made through Better Auth stages nothing and
   // commits nothing here, and Better Auth checks the role as it makes it.
+  // A tool of a lesser scope whose call reaches screens all the same asks for the right to publish (`ctx.publishRight`):
+  // checked as it asks, and held to the commit as a publish's is (#122).
+  let holdsPublish = false;
   const roleRight = (): Write[] => {
     if (!tool.mutates || !('settings' in caller.org)) return [];
-    const publishing = tool.scope === 'content:publish';
+    const publishing = tool.scope === 'content:publish' || holdsPublish;
     if (!publishing && tool.minRole !== 'owner') return [];
-    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(tool.minRole)), publishing).writes;
+    const least = publishing && rank(tool.minRole) < rank('editor') ? 'editor' : tool.minRole;
+    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(least)), publishing).writes;
     return publishing && caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
+  };
+  /** The right the role guard held, lost by the commit: why, as the role and setting are now. */
+  const lostRight = async (): Promise<DispatchResult> => {
+    const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
+    if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
+    const now = await grantOf({ ...caller, role });
+    const refusal = refusedBy(now);
+    if (refusal) return refusal;
+    if (holdsPublish && !effectiveScopes(now).includes('content:publish'))
+      return fail('forbidden', now.role === 'editor' && !now.editorsPublish ? 'Only owners publish in this organization' : `${tool.name} needs the right to publish here`);
+    // Back by the time it is read: it changed and changed back meanwhile.
+    return fail('forbidden', `your right to ${tool.name} changed while it ran: read again and retry`);
   };
 
   const parsed = tool.input.safeParse(rawInput ?? {});
@@ -305,10 +321,7 @@ async function dispatchCall<D extends DataScope>(
     // else changed meanwhile (#417). Said in the tool's own words when it has them, else as the role and setting are now.
     if (err instanceof StaleVersionError && err.id === 'member') {
       if (refusal?.code === 'forbidden') return fail(refusal.code, refusal.message, refusal.details);
-      const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
-      if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
-      // Back by the time it is read: it changed and changed back meanwhile.
-      return refusedBy(await grantOf({ ...caller, role })) ?? fail('forbidden', `your right to ${tool.name} changed while it ran: read again and retry`);
+      return lostRight();
     }
     if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
@@ -317,8 +330,15 @@ async function dispatchCall<D extends DataScope>(
     return undefined;
   };
 
+  const publishRight = (why: string) => {
+    if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot ask for the right to publish`);
+    if (!effectiveScopes(grant).includes('content:publish')) throw new ToolError('forbidden', why);
+    holdsPublish = true;
+  };
+
   const run = async (): Promise<DispatchResult> => {
     let output: unknown;
+    holdsPublish = false;
     try {
       output = await tool.handler({
         org: caller.org,
@@ -333,6 +353,7 @@ async function dispatchCall<D extends DataScope>(
         notify,
         deliverNow,
         onDiscard,
+        publishRight,
       });
     } catch (err) {
       if (err instanceof ToolError) {
@@ -391,6 +412,8 @@ async function dispatchCall<D extends DataScope>(
         return await run();
       } catch (err) {
         if (!(err instanceof StaleVersionError)) throw err;
+        // The role guard, on any attempt: the right is gone, not a race to run again (#419).
+        if (err.id === 'member') return lostRight();
         if (attempt === PUBLISH_ATTEMPTS) return stale(err);
       }
     }

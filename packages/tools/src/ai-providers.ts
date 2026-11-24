@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { ifVersion } from './fields';
 import { AI_PROVIDERS, type aiProviderView, outputs } from './outputs';
 import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
-import { type Actor, defineTool, isAgent, ToolError } from './tool';
+import { defineTool, ToolError } from './tool';
 
 const viewOf = (p: AiProviderRow): z.infer<typeof aiProviderView> => ({
   provider: p.provider,
@@ -30,14 +30,6 @@ const viewOf = (p: AiProviderRow): z.infer<typeof aiProviderView> => ({
 });
 
 const target = (provider: string) => ({ kind: 'ai_provider', id: provider });
-
-function refuseAgents(actor: Actor) {
-  if (isAgent(actor))
-    throw new ToolError(
-      'forbidden',
-      "Only a person signed in to the CMS can change the organization's model key: it decides who pays and what data leaves SignForge. Ask an owner to do it in Settings, AI & agents",
-    );
-}
 
 const apiKey = z
   .string()
@@ -107,6 +99,8 @@ const saveAiProvider = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Who pays, and what data leaves SignForge: a person's.
+  people: true,
   needs: ['aiProviders'],
   input: z.object({
     provider: z.enum(AI_PROVIDERS),
@@ -123,7 +117,6 @@ const saveAiProvider = defineTool({
   example: { provider: 'anthropic', apiKey: 'sk-ant-api03-example-key-0000000000000000' },
   target: (input) => target(input.provider),
   handler: async ({ org, actor, input, write, services: { aiProviders } }) => {
-    refuseAgents(actor);
     const current = await org.aiProvider.get();
     const endpoint = input.provider === 'openai-compatible';
     if (!endpoint && (input.baseUrl !== undefined || input.acceptsImages !== undefined || input.jsonSchemaOutput !== undefined))
@@ -173,13 +166,14 @@ const testAiProvider = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Who pays, and what data leaves SignForge: a person's.
+  people: true,
   needs: ['aiProviders'],
   input: z.object({}),
   output: outputs.test_ai_provider,
   example: {},
   target: (_input, output) => target(output.provider.provider),
-  handler: async ({ org, actor, write, services: { aiProviders } }) => {
-    refuseAgents(actor);
+  handler: async ({ org, write, services: { aiProviders } }) => {
     const current = await org.aiProvider.get();
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
     const result = await aiProviders.test({ orgId: org.orgId, provider: current.provider, baseUrl: current.baseUrl }, current.keySealed);
@@ -207,12 +201,13 @@ const removeAiProvider = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Who pays, and what data leaves SignForge: a person's.
+  people: true,
   input: z.object({}),
   output: outputs.remove_ai_provider,
   example: {},
   target: (_input, output) => (output.provider ? target(output.provider) : undefined),
-  handler: async ({ org, actor, write }) => {
-    refuseAgents(actor);
+  handler: async ({ org, write }) => {
     const current = await org.aiProvider.get();
     if (!current) return { removed: false, provider: null };
     write(org.aiProvider.stage.remove());

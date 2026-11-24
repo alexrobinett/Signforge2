@@ -314,6 +314,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
    * provider issued). Run after the refusal or failure, its own failure logged: best effort.
    */
   onDiscard: (undo: () => Promise<void>) => void;
+  /**
+   * For a change of a lesser scope that reaches screens all the same (a live feed's address, an entry screens play):
+   * refused `forbidden` with `why` unless the caller may publish now, and the right held to the commit as a publish's is.
+   */
+  publishRight: (why: string) => void;
 }
 
 /**
