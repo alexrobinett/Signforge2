@@ -55,8 +55,7 @@ const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
 
 export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get, { queryClient, router }) => {
   const approvals = (change: (a: ApprovalsState) => ApprovalsState) => set((s) => ({ approvals: change(s.approvals) }));
-  const stage = (key: string, status: { playing: boolean; error: string | null }) =>
-    approvals((a) => ({ ...a, stages: { ...a.stages, [key]: status } }));
+  const stage = (key: string, status: { playing: boolean; error: string | null }) => approvals((a) => ({ ...a, stages: { ...a.stages, [key]: status } }));
   /** Everything a decision can change: the queue, drafts' published state, screens, the rollout and the sidebar's counts. */
   const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: ['org', orgId] });
   const links = new Map<string, ApprovalStageTarget>();

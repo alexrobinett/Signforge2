@@ -562,7 +562,11 @@ describe('putting a declined request back (#115)', () => {
     // Another editor, who did not decline it and may not publish now: refused.
     expect(await reopen(person('editor', `${o.orgId}-other-editor`), id)).toMatchObject({ ok: false, error: 'forbidden' });
     // An agent, with content:publish or without, and the CMS agent: people only.
-    for (const caller of [agent(), agent(['content:read', 'content:draft', 'content:publish'], 'owner'), person('owner', `${o.orgId}-owner`, CMS_AGENT_CLIENT_ID)])
+    for (const caller of [
+      agent(),
+      agent(['content:read', 'content:draft', 'content:publish'], 'owner'),
+      person('owner', `${o.orgId}-owner`, CMS_AGENT_CLIENT_ID),
+    ])
       expect(await reopen(caller, id)).toMatchObject({ ok: false, error: 'forbidden' });
     // The editor who declined it, though they may not decide it now.
     expect(await reopen(person('editor'), id)).toMatchObject({ ok: true });

@@ -199,7 +199,9 @@ const checkPublishRequestResult = z.object({
   refused: z
     .object({ error: z.string(), message: z.string() })
     .nullable()
-    .describe('Why approving it would be refused now (not pending, a pin changed since, the brand kits changed, a draft held); null if it would not be, sample text aside'),
+    .describe(
+      'Why approving it would be refused now (not pending, a pin changed since, the brand kits changed, a draft held); null if it would not be, sample text aside',
+    ),
   screens: z.array(z.object({ id: z.string(), name: z.string() })).describe('The screens approving it would switch now, by name'),
   held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Pinned drafts that fail their checks: approving publishes none of them'),
   samples: z

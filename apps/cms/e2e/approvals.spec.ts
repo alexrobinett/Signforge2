@@ -38,7 +38,13 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
   // The soup board, on a default playlist, published: the screen plays it.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  const { spot } = await tool(page, 'create_spot', { name: 'Soup board', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { greeting: 'Soup of the day' } });
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'Soup board',
+    kind: 'template',
+    templateVersionId: clock,
+    durationMs: 10_000,
+    data: { greeting: 'Soup of the day' },
+  });
   const { playlist } = await tool(page, 'create_playlist', { name: 'Deli', transition: { type: 'cut' }, spotIds: [spot.id] });
   await tool(page, 'set_default_playlist', { playlistId: playlist.id });
   await tool(page, 'publish', {});

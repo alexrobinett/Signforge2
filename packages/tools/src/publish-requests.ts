@@ -413,7 +413,12 @@ const checkPublishRequest = defineTool({
     const [spots, playlists, entries] = await Promise.all([org.spots.list(), org.playlists.list(), org.scheduleEntries.list()]);
     const changes = await Promise.all(
       pins.map(async (p) => {
-        const draft = p.kind === 'spot' ? spots.find((x) => x.id === p.id) : p.kind === 'playlist' ? playlists.find((x) => x.id === p.id) : entries.find((x) => x.id === p.id);
+        const draft =
+          p.kind === 'spot'
+            ? spots.find((x) => x.id === p.id)
+            : p.kind === 'playlist'
+              ? playlists.find((x) => x.id === p.id)
+              : entries.find((x) => x.id === p.id);
         const items = p.kind === 'playlist' ? await org.playlists.items(p.id) : undefined;
         // Both as `published_json` holds content (`contentJson`): the draft's now, and the published one's.
         const now: Record<string, unknown> | undefined = draft && JSON.parse(contentJson(draft, items));
@@ -447,7 +452,9 @@ const checkPublishRequest = defineTool({
     return {
       request,
       refused: held.length ? { error: 'conflict', message: 'not every draft it asks for can be published' } : null,
-      screens: result.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [{ id: x.screenId, name: names.get(x.screenId) ?? x.screenId }] : [])),
+      screens: result.screens.flatMap((x) =>
+        x.manifest && x.manifest.id !== x.current ? [{ id: x.screenId, name: names.get(x.screenId) ?? x.screenId }] : [],
+      ),
       held,
       samples: samples.map((x) => ({ spotId: x.id, name: x.name, version: x.version, fields: x.fields })),
       changes,

@@ -70,7 +70,10 @@ function ApiSettings() {
 function Waiting({ count }: { count: number }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-status-updating/40 bg-status-updating-muted px-4 py-3 text-status-updating-foreground">
+    <section
+      aria-labelledby={id}
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-status-updating/40 bg-status-updating-muted px-4 py-3 text-status-updating-foreground"
+    >
       <h2 id={id} className="text-base font-semibold">
         {count === 1 ? '1 publish waiting for approval' : `${count} publishes waiting for approval`}
       </h2>

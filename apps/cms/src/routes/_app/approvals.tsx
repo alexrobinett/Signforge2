@@ -94,7 +94,11 @@ function RequestCard({ item, orgId }: { item: ApprovalItem; orgId: string }) {
   const Icon = request.requestedBy.kind === 'agent' ? BotIcon : UserIcon;
   const { connectedBy } = request.requestedBy;
   return (
-    <article id={request.id} aria-labelledby={titleId} className={cn('flex scroll-mt-6 flex-col gap-4 rounded-xl border bg-card p-5', deciding === request.id && 'opacity-70')}>
+    <article
+      id={request.id}
+      aria-labelledby={titleId}
+      className={cn('flex scroll-mt-6 flex-col gap-4 rounded-xl border bg-card p-5', deciding === request.id && 'opacity-70')}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="grid size-9 flex-none place-items-center rounded-lg bg-foreground text-background">
