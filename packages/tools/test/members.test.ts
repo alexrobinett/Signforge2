@@ -207,8 +207,19 @@ describe("an owner's agent", () => {
     // Another owner first, as the org must keep one.
     const now = new Date(0).toISOString();
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(`${o.orgId}-second`, 'Second', `${o.orgId}-second@signforge.test`, now, now),
-      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(`${o.orgId}-member-2`, o.orgId, `${o.orgId}-second`, now),
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        `${o.orgId}-second`,
+        'Second',
+        `${o.orgId}-second@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").bind(
+        `${o.orgId}-member-2`,
+        o.orgId,
+        `${o.orgId}-second`,
+        now,
+      ),
     ]);
     const setRole = (role: Role) => env.DB.prepare('UPDATE member SET role = ? WHERE id = ?').bind(role, member()).run();
     const demoted = racing({ ...as('owner', members, manager), member: inviter }, () => setRole('editor'));

@@ -841,7 +841,9 @@ describe('confirmation cards (#269)', () => {
     const second = pressOf(await raw(await s.ask('Cancel the invitation for card-414')), 'q');
     await s.owner.ok('/api/auth/organization/cancel-invitation', { invitationId: again.id });
     expect(doneOf(await raw(await s.member.post('/api/agent/chat', second.body)))).toMatchObject({ ok: false });
-    const refused = (await s.scope.auditLog.list({ limit: 10 })).find((r) => r.action === 'cancel_invitation' && r.targetId === again.id && r.clientId === 'cms-agent');
+    const refused = (await s.scope.auditLog.list({ limit: 10 })).find(
+      (r) => r.action === 'cancel_invitation' && r.targetId === again.id && r.clientId === 'cms-agent',
+    );
     expect(JSON.parse(refused?.detailJson ?? '{}')).toMatchObject({ refused: {}, confirmed: { summary: 'Cancel an invitation' } });
     // Neither address reaches an editor's audit log, which the CSV export is made from; the owner's names both.
     const editor = new Client(s.owner.t);
@@ -863,7 +865,7 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
-  it("shows a viewer or an editor asking to cancel an invitation who may, and nothing of the invitation: not whose, nor its role (review of #414)", async () => {
+  it('shows a viewer or an editor asking to cancel an invitation who may, and nothing of the invitation: not whose, nor its role (review of #414)', async () => {
     for (const role of ['viewer', 'editor'] as const) {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({ role, steps: () => ({ calls: [{ name: 'cancel_invitation', input: ask.called }] }) });
@@ -872,7 +874,13 @@ describe('confirmation cards (#269)', () => {
       ask.called = { invitationId: invited.id };
       const all = await raw(await s.ask(`Cancel the invitation ${invited.id}`));
       const { card } = pressOf(all, 'q');
-      expect(card, role).toMatchObject({ tool: 'cancel_invitation', title: 'Cancel an invitation', lines: [], token: null, why: 'Only owners can do this: ask an owner.' });
+      expect(card, role).toMatchObject({
+        tool: 'cancel_invitation',
+        title: 'Cancel an invitation',
+        lines: [],
+        token: null,
+        why: 'Only owners can do this: ask an owner.',
+      });
       // Nowhere in what reaches the browser.
       expect(JSON.stringify(all), role).not.toContain(email);
       expect(JSON.stringify(all), role).not.toMatch(/as owner/);

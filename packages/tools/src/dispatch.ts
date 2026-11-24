@@ -302,7 +302,8 @@ async function dispatchCall<D extends DataScope>(
     const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data, actor: caller.actor });
     if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     // A role guard (`stillMay`): the member lost the role between the read and the batch.
-    if (err instanceof StaleVersionError && err.id === 'member') return fail('forbidden', `${tool.name} needs at least the ${tool.minRole} role, which you no longer have`);
+    if (err instanceof StaleVersionError && err.id === 'member')
+      return fail('forbidden', `${tool.name} needs at least the ${tool.minRole} role, which you no longer have`);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);

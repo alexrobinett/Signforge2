@@ -173,10 +173,18 @@ describe('list_audit_log', () => {
 
   it("hides the invitee a drawer card's summary names, on a confirmed cancel and on a refused press, rows written before the card withheld it (review of #414)", async () => {
     const log = scoped(env.DB, o.orgId).auditLog;
-    const confirmed = { summary: 'Cancel an invitation: The invitation for lee.invitee@example.com as editor stops working.', runId: 'run_1', callId: 'call_1' };
+    const confirmed = {
+      summary: 'Cancel an invitation: The invitation for lee.invitee@example.com as editor stops working.',
+      runId: 'run_1',
+      callId: 'call_1',
+    };
     const rows = [
       { input: { invitationId: 'inv_3' }, detail: { email: 'lee.invitee@example.com' }, confirmed },
-      { input: { invitationId: 'inv_3' }, refused: { error: 'conflict', message: 'invitation inv_3 was accepted, rejected or cancelled meanwhile' }, confirmed },
+      {
+        input: { invitationId: 'inv_3' },
+        refused: { error: 'conflict', message: 'invitation inv_3 was accepted, rejected or cancelled meanwhile' },
+        confirmed,
+      },
     ];
     for (const [i, detail] of rows.entries())
       await log.append({
