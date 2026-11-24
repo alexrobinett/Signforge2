@@ -6,6 +6,7 @@ import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import type { FetchGuards } from '../src/data/fetch';
+import { matchRows } from '../src/agent/inline-shapes';
 import { Client, clockLimits, email, testApp } from './client';
 
 const PUBLIC = '93.184.215.14';
@@ -599,5 +600,342 @@ describe('POST /api/agent/inline', () => {
     expect(s.web.fetched).toEqual([]);
     const form = await s.owner.request('POST', '/api/agent/inline', undefined, { 'content-type': 'text/plain' });
     expect(form.status).toBe(415);
+  });
+});
+
+// ------------------------------------------------------------------ updating a spot (#264)
+
+/** A menu: a title, items with a name, a price, a link and a switch, an accent colour. Its items may be fed by a table. */
+const MENU = {
+  id: 'menu',
+  version: '1.0.0',
+  name: 'Menu',
+  fields: {
+    title: { type: 'text', label: 'Title', default: 'Menu', maxLength: 32 },
+    items: {
+      type: 'list',
+      label: 'Items',
+      maxItems: 12,
+      item: {
+        name: { type: 'text', label: 'Name', maxLength: 36 },
+        price: { type: 'text', label: 'Price', maxLength: 10 },
+        link: { type: 'url', label: 'Link', default: '' },
+        hot: { type: 'boolean', label: 'Hot', default: false },
+      },
+    },
+    qr: { type: 'url', label: 'QR code link', default: '' },
+    accent: { type: 'color', label: 'Accent', default: '$brand.accent' },
+    // Choices of look and of what shows, which the agent leaves to the person (#264 review).
+    theme: { type: 'select', label: 'Theme', options: ['dark', 'light'], default: 'dark' },
+    ticker: { type: 'select', label: 'Ticker', options: ['on', 'off'], default: 'on' },
+  },
+  duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+  orientations: ['landscape', 'portrait'],
+  uses: [],
+  background: '#000000',
+  live: { source: 'table', fields: { items: 'rows' } },
+};
+
+const ROWS = [
+  { name: 'Latte', price: '$4.50', link: 'https://cafe.example/latte', hot: true },
+  { name: 'Mocha', price: '$5.00', link: '', hot: true },
+  { name: 'Scone', price: '$3.00', link: '', hot: false },
+];
+const MENU_DATA = { title: 'Morning', items: ROWS, qr: 'https://cafe.example/order', accent: '$brand.primary' };
+
+/** A fresh org with the menu template and one menu spot, its answers pushed once its key is known. */
+async function menu(options: Parameters<typeof setup>[0] & { bindings?: Record<string, unknown> } = {}) {
+  const answers: Answer[] = [];
+  const s = await setup({ ...options, answers });
+  const template = await s.scope.templates.insert({ key: 'menu', name: 'Menu' });
+  const version = await s.scope.templates.versions.insert({
+    templateId: template.id,
+    version: '1.0.0',
+    manifestJson: JSON.stringify(MENU),
+    bundleSha256: 'a'.repeat(64),
+    status: 'approved',
+  });
+  if (options.bindings) await s.scope.dataSources.insert({ id: 'dsrc_menu', name: 'Menu sheet', format: 'csv', urlEncrypted: 'sealed', refreshS: 300 });
+  const spot = await s.scope.spots.insert({
+    name: 'Breakfast',
+    kind: 'template',
+    durationMs: 8000,
+    templateVersionId: version.id,
+    dataJson: JSON.stringify(MENU_DATA),
+    ...(options.bindings && { bindingsJson: JSON.stringify(options.bindings) }),
+  });
+  const menuKey = `${s.org.id}/menu@1.0.0`;
+  const answer = (data: Record<string, unknown>, unsure: string[] = []) => answers.push({ template: menuKey, data, unsure });
+  const update = (source: unknown = { kind: 'link', url: LINK }) => s.member.post('/api/agent/inline', { source, spotId: spot.id });
+  const keep = (body: unknown) => s.member.post('/api/agent/inline/keep', body);
+  const stored = async () => {
+    const row = await s.scope.spots.get(spot.id);
+    return { version: row?.rowVersion, data: JSON.parse(row?.dataJson ?? '{}') };
+  };
+  return { ...s, spot, version, menuKey, answer, update, keep, stored };
+}
+
+describe('matchRows on a menu (#264)', () => {
+  const item = MENU.fields.items.item as never;
+  it('matches rows by their first text column, in any case and spacing, each at most once', () => {
+    const after = [{ name: ' latte ' }, { name: 'Scone' }, { name: 'Flat white' }, { name: 'Scone' }, { name: '' }];
+    expect(matchRows(item, ROWS, after)).toEqual({
+      pairs: [
+        [0, 0],
+        [2, 1],
+      ],
+      added: [2, 3, 4],
+      removed: [1],
+    });
+  });
+  it('matches by place in a list with no text column', () => {
+    const numbers = { n: { type: 'number', label: 'N' } } as never;
+    expect(matchRows(numbers, [{ n: 1 }, { n: 2 }], [{ n: 5 }])).toEqual({ pairs: [[0, 0]], added: [], removed: [1] });
+  });
+});
+
+describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
+  it("says what it would change in a menu from a photo of today's, writing nothing: changed, added and removed rows, other columns kept", async () => {
+    const m = await menu();
+    // Latte's price is up, the mocha is gone, a flat white is new (with a link printed on it), the title is not shown.
+    m.answer({
+      items: [
+        { name: 'latte', price: '$4.75' },
+        { name: 'Scone', price: '$3.00' },
+        { name: 'Flat white', price: '$4.00', link: 'https://evil.example/pay' },
+      ],
+    });
+    const before = await m.stored();
+    const auditBefore = await m.scope.auditLog.list({ limit: 50 });
+    const res = await m.update({ kind: 'image', mediaType: 'image/jpeg', data: JPEG });
+    const body = await res.json<any>();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.review).toMatchObject({ spotId: m.spot.id, version: before.version, before: MENU_DATA });
+    // The spot's rows in their order, the latte changed in place keeping its name, link and switch; the new one after.
+    expect(body.review.data).toEqual({
+      ...MENU_DATA,
+      items: [
+        { name: 'Latte', price: '$4.75', link: 'https://cafe.example/latte', hot: true },
+        { name: 'Scone', price: '$3.00', link: '', hot: false },
+        { name: 'Flat white', price: '$4.00', link: '', hot: false },
+      ],
+    });
+    expect(body.review.marks).toEqual({ items: { state: 'check', note: expect.any(String), links: ['https://evil.example/pay'] } });
+    // Nothing saved before Keep.
+    expect(await m.stored()).toEqual(before);
+    expect(await m.scope.auditLog.list({ limit: 50 })).toEqual(auditBefore);
+    // The model read the spot's values, fenced as data, and only its template.
+    const sent = m.model.asked[0]!.body;
+    expect(sent.messages[0].content.at(-1).text).toContain('<current>\n{"title":"Morning","items":[');
+    expect(sent.output_config.format.schema.properties.template.enum).toEqual([m.menuKey]);
+  });
+
+  it('keeps the latte when the photo calls it something else: the model is asked to name it as the spot does', async () => {
+    const m = await menu();
+    m.answer({ items: [{ name: 'Caffè latte', price: '$4.75' }, ...ROWS.slice(1).map(({ name, price }) => ({ name, price }))] });
+    const body = await (await m.update()).json<any>();
+    // Not the same key: the latte is removed and the caffè latte added, which the review shows as such.
+    expect(body.review.data.items.map((r: { name: string }) => r.name)).toEqual(['Mocha', 'Scone', 'Caffè latte']);
+  });
+
+  it('leaves a field the material does not show, and marks only what it changes', async () => {
+    const m = await menu();
+    m.answer({ title: 'Morning', items: ROWS.map(({ name, price }) => ({ name, price })) });
+    const body = await (await m.update()).json<any>();
+    expect(body.review.data).toEqual(MENU_DATA);
+    expect(body.review.marks).toEqual({});
+  });
+
+  it('never offers or changes a field the spot binds to a data source', async () => {
+    const m = await menu({ bindings: { items: { source: 'dsrc_menu', path: 'rows' } } });
+    m.answer({ title: 'Lunch', items: [{ name: 'Soup', price: '$6.00' }] });
+    const body = await (await m.update()).json<any>();
+    expect(body.review.data).toEqual({ ...MENU_DATA, title: 'Lunch' });
+    const listing = m.model.asked[0]!.body.messages[0].content.at(-1).text;
+    expect(listing).toContain('"title"');
+    expect(listing).not.toMatch(/<templates>[\s\S]*"items"[\s\S]*<\/templates>/);
+  });
+
+  it('keeps the review as the agent, through update_spot with the version it was made on', async () => {
+    const m = await menu();
+    m.answer({ items: [{ name: 'Latte', price: '$4.75' }] });
+    const { review } = await (await m.update()).json<any>();
+    const res = await m.keep({ spotId: m.spot.id, ifVersion: review.version, data: review.data });
+    const body = await res.json<any>();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.spot.data).toEqual(review.data);
+    expect((await m.stored()).data).toEqual(review.data);
+    const [entry] = await m.scope.auditLog.list({ limit: 1 });
+    const { user } = (await m.member.session()).body;
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'update_spot', targetId: m.spot.id });
+  });
+
+  it('refuses a Keep made on a version someone has saved over since, keeping their change', async () => {
+    const m = await menu();
+    m.answer({ items: [{ name: 'Latte', price: '$4.75' }] });
+    const { review } = await (await m.update()).json<any>();
+    // Someone saves the spot meanwhile.
+    expect((await m.owner.tool('update_spot', { spotId: m.spot.id, data: { ...MENU_DATA, title: 'Their title' }, ifVersion: review.version })).status).toBe(
+      200,
+    );
+    const res = await m.keep({ spotId: m.spot.id, ifVersion: review.version, data: review.data });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'conflict' });
+    expect((await m.stored()).data).toEqual({ ...MENU_DATA, title: 'Their title' });
+  });
+
+  it("refuses a Keep that changes a link, a colour, a switch, a row's link or a bound field, and writes nothing (#264, Untrusted content)", async () => {
+    const m = await menu();
+    const before = await m.stored();
+    const evil = 'https://evil.example/pay';
+    const rows = (change: Record<string, unknown>) => [{ ...ROWS[0], ...change }, ...ROWS.slice(1)];
+    for (const data of [
+      { ...MENU_DATA, qr: evil },
+      { ...MENU_DATA, accent: '$brand.accent' },
+      { ...MENU_DATA, items: rows({ link: evil }) },
+      { ...MENU_DATA, items: [...ROWS, { name: 'Pay', price: '$1', link: evil, hot: false }] },
+      { ...MENU_DATA, items: rows({ hot: false }) },
+      { ...MENU_DATA, url: evil },
+    ]) {
+      const res = await m.keep({ spotId: m.spot.id, ifVersion: before.version, data });
+      expect(res.status, JSON.stringify(data).slice(0, 120)).toBe(400);
+    }
+    // A row's own link may move with it, and text, prices and new rows with no link are the agent's to change.
+    const fine = { ...MENU_DATA, title: 'Lunch', items: [ROWS[2], ROWS[0], { name: 'Soup', price: '$6', link: '', hot: false }] };
+    expect((await m.keep({ spotId: m.spot.id, ifVersion: before.version, data: fine })).status).toBe(200);
+
+    const bound = await menu({ bindings: { items: { source: 'dsrc_menu', path: 'rows' } } });
+    const v = (await bound.stored()).version;
+    expect((await bound.keep({ spotId: bound.spot.id, ifVersion: v, data: { ...MENU_DATA, items: ROWS.slice(1) } })).status).toBe(400);
+  });
+
+  it("writes no choice, a look or what shows: the model's theme and ticker are dropped and marked, and refused at Keep (#264 review)", async () => {
+    const m = await menu();
+    m.answer({ title: 'Lunch', theme: 'light', ticker: 'off' });
+    const { review } = await (await m.update()).json<any>();
+    expect(review.data).toEqual({ ...MENU_DATA, title: 'Lunch' });
+    expect(review.marks).toEqual({
+      title: { state: 'filled' },
+      theme: { state: 'missing', note: expect.stringContaining('leaves to you') },
+      ticker: { state: 'missing', note: expect.stringContaining('leaves to you') },
+    });
+    // Not offered: the model is not told of them.
+    expect(m.model.asked[0]!.body.messages[0].content.at(-1).text).not.toMatch(/"theme"|"ticker"/);
+    for (const data of [
+      { ...MENU_DATA, theme: 'light' },
+      { ...MENU_DATA, ticker: 'off' },
+    ])
+      expect((await m.keep({ spotId: m.spot.id, ifVersion: review.version, data })).status, JSON.stringify(data).slice(-30)).toBe(400);
+    expect((await m.stored()).data).toEqual(MENU_DATA);
+    // A new spot's choices are marked for the person to make.
+    m.answer({ title: 'Lunch', theme: 'light' });
+    const made = await (await m.fill({ kind: 'link', url: LINK })).json<any>();
+    expect(made.spot.data.theme).toBeUndefined();
+    expect(made.marks.theme).toMatchObject({ state: 'missing', note: expect.stringContaining('leaves to you') });
+  });
+
+  it('refuses a row key that is no column, from Keep and from update_spot for every caller (#264 review)', async () => {
+    const m = await menu();
+    const v = (await m.stored()).version;
+    const rows = [{ ...ROWS[0], payUrl: 'https://evil.example/pay' }, ...ROWS.slice(1)];
+    const kept = await m.keep({ spotId: m.spot.id, ifVersion: v, data: { ...MENU_DATA, items: rows } });
+    expect(kept.status).toBe(400);
+    expect(await kept.json()).toMatchObject({ message: expect.stringContaining('has no column "payUrl"') });
+    const tool = await m.owner.tool('update_spot', { spotId: m.spot.id, data: { ...MENU_DATA, items: rows }, ifVersion: v });
+    expect(tool.status).toBe(400);
+    expect((await m.stored()).data).toEqual(MENU_DATA);
+  });
+
+  it('fills only a template spot of its own org, as a member who may change it', async () => {
+    const m = await menu({ role: 'viewer' });
+    expect((await m.update()).status).toBe(403);
+    expect((await m.keep({ spotId: m.spot.id, ifVersion: 1, data: MENU_DATA })).status).toBe(403);
+    expect(m.web.fetched).toEqual([]);
+
+    const o = await menu();
+    const web = await o.scope.spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' });
+    const res = await o.owner.post('/api/agent/inline', { source: { kind: 'link', url: LINK }, spotId: web.id });
+    expect(await res.json()).toMatchObject({ error: 'cannot_fill' });
+    // Another org's spot is no spot here.
+    const elsewhere = await o.owner.post('/api/agent/inline', { source: { kind: 'link', url: LINK }, spotId: m.spot.id });
+    expect(elsewhere.status).toBe(400);
+    // An update names its spot only.
+    const both = await o.owner.post('/api/agent/inline', { source: { kind: 'link', url: LINK }, spotId: o.spot.id, idempotencyKey: crypto.randomUUID() });
+    expect(both.status).toBe(400);
+    expect(o.web.fetched).toEqual([]);
+  });
+
+  it('counts a turn, and is refused with none left, before fetching anything', async () => {
+    const m = await menu({ save: { dailyTurnCeiling: 1 } });
+    m.answer({ title: 'Lunch' });
+    expect((await m.update()).status).toBe(200);
+    m.web.fetched.length = 0;
+    expect(await (await m.update()).json()).toMatchObject({ error: 'out_of_turns' });
+    expect(m.web.fetched).toEqual([]);
+  });
+
+  describe('stays within its budget per call (docs/proposals/cms-agent.md, The Free plan)', () => {
+    const SHORT = 'https://sho.rt/menu';
+    const pages = {
+      [SHORT]: () => Response.redirect('https://hop1.example/a', 302),
+      'https://hop1.example/a': () => Response.redirect('https://hop2.example/b', 302),
+      'https://hop2.example/b': () => Response.redirect(LINK, 302),
+      [LINK]: FLYER,
+    };
+    /** One call by the member, on a D1 binding that counts every statement prepared; its status, statements and fetches. */
+    async function measured(m: Awaited<ReturnType<typeof menu>>, path: string, body: unknown) {
+      let statements = 0;
+      const counting = new Proxy(env.DB, {
+        get(target, prop) {
+          if (prop === 'prepare') statements++;
+          const v = Reflect.get(target, prop, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+      });
+      const member = new Client(m.member.t, m.member.ip, { ...env, DB: counting });
+      for (const [k, v] of m.member.jar) member.jar.set(k, v);
+      m.model.asked.length = 0;
+      m.web.fetched.length = 0;
+      m.web.resolved.length = 0;
+      const res = await member.post(path, body);
+      return { res, statements, fetches: m.model.asked.length + m.web.fetched.length + 2 * m.web.resolved.length };
+    }
+    const RETRIED = (m: Awaited<ReturnType<typeof menu>>) => {
+      m.answer({ title: 'x'.repeat(40) });
+      m.answer({ title: 'Lunch', items: [{ name: 'Soup', price: '$6.00' }] });
+    };
+
+    it("an update's review from a short link with three redirects, and a retry: an editor's 7 D1 statements, 14 fetches", async () => {
+      const m = await menu({ role: 'editor', pages });
+      RETRIED(m);
+      const { res, statements, fetches } = await measured(m, '/api/agent/inline', { source: { kind: 'link', url: SHORT }, spotId: m.spot.id });
+      expect(res.status).toBe(200);
+      expect(m.model.asked).toHaveLength(2);
+      expect(m.web.fetched).toHaveLength(4);
+      expect(statements).toBeLessThanOrEqual(7);
+      expect(fetches).toBeLessThanOrEqual(14);
+    });
+
+    it("Keep: an editor's 10 D1 statements, and no fetch", async () => {
+      const m = await menu({ role: 'editor' });
+      const v = (await m.stored()).version;
+      const { res, statements, fetches } = await measured(m, '/api/agent/inline/keep', {
+        spotId: m.spot.id,
+        ifVersion: v,
+        data: { ...MENU_DATA, title: 'Lunch' },
+      });
+      expect(res.status).toBe(200);
+      expect(statements).toBeLessThanOrEqual(10);
+      expect(fetches).toBe(0);
+    });
+  });
+
+  it("fills a new spot's list that its template may feed from a table, which a new spot is not bound to", async () => {
+    const m = await menu();
+    m.answer({ title: 'Lunch', items: [{ name: 'Soup', price: '$6.00' }] });
+    const res = await m.fill({ kind: 'link', url: LINK });
+    const body = await res.json<any>();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.spot.data.items).toEqual([{ name: 'Soup', price: '$6.00', link: '', hot: false }]);
   });
 });

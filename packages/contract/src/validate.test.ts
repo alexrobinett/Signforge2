@@ -95,6 +95,16 @@ describe('validateSpotData', () => {
 
   const fields: Record<string, FieldDef> = { price: { type: 'number', label: 'Price', min: 0, max: 100, step: 0.5 } };
 
+  it("refuses a stored list row's key that is no column of the item, which every screen would carry unseen (#264)", () => {
+    const menu: Record<string, FieldDef> = {
+      items: { type: 'list', label: 'Items', item: { name: { type: 'text', label: 'Name' }, price: { type: 'text', label: 'Price', default: '' } } },
+    };
+    expect(validateSpotData(menu, { items: [{ name: 'Latte', price: '$4' }] }, {})).toEqual([]);
+    expect(validateSpotData(menu, { items: [{ name: 'Latte', payUrl: 'https://evil.example' }] }, {})).toEqual(['field "items" row 1 has no column "payUrl"']);
+    // A live value's rows may carry more than the template shows, as a feed's stories do.
+    expect(validateBoundValue(menu, 'items', [{ name: 'Latte', price: '$4', guid: 'x' }])).toEqual([]);
+  });
+
   it('holds a number to its min, max and step', () => {
     expect(validateSpotData(fields, { price: 9.5 }, {})).toEqual([]);
     expect(validateSpotData(fields, { price: -1 }, {})).toEqual(['field "price" must be at least 0']);

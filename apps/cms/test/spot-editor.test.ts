@@ -18,6 +18,7 @@ import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
 import { draftOf, fieldProblems } from '../src/lib/spots';
+import { type AgentSlice, createAgentSlice } from '../src/state/agent';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
 // The tab's org comes from the page's router, which a store test has none of.
@@ -180,7 +181,11 @@ describe('the stage (review of #97)', () => {
     const queryClient = new QueryClient();
     let hear: (e: unknown) => void = () => {};
     vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
-    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never));
+    // The stage plays an open review of the agent's (#264): the agent's slice is there, with none open.
+    const store = createStore<SpotEditorSlice & AgentSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      ...createAgentSlice(set as never, get as never, { router: {}, queryClient } as never),
+    }));
     const sha = 'b'.repeat(64);
     const image: SpotView = { ...spot('spt_img', 1), kind: 'image', url: null, assetId: 'ast_new' };
     const asset: AssetView = {

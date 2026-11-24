@@ -4,6 +4,8 @@
  * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). A template
  * with live fields gets a Source section instead of those fields (src/components/spots/source-section.tsx).
  * A spot the agent just filled (#263) opens with its marks and a banner (src/components/spots/fill-marks.tsx).
+ * Fill from a flyer updates a template spot (#264): its review takes the form's place, with the stage
+ * first on a phone, until it is kept or let go (src/components/spots/fill-review.tsx).
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
@@ -11,13 +13,16 @@ import { startData } from '@signforge/compiler/draft';
 import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound } from '@tanstack/react-router';
+import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
-import { FillBanner } from '~/components/spots/fill-marks';
+import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
+import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
+import { cn } from '~/lib/utils';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
@@ -90,6 +95,10 @@ function SpotEditor() {
   const undoFill = useAppStore((s) => s.undoFill);
   const fillWithAnother = useAppStore((s) => s.fillWithAnother);
   const takePhoto = useAppStore((s) => s.usePhotoFor);
+  const reviewing = useAppStore((s) => s.agent.reviews[spotId] !== undefined);
+  const openFill = useAppStore((s) => s.openSpotFill);
+  const undoUpdate = useAppStore((s) => s.undoUpdate);
+  const reviewAlsoOn = useAppStore((s) => s.reviewAlsoOn);
 
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
@@ -103,17 +112,38 @@ function SpotEditor() {
   const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-xl border">
+    // Clipped, not hidden: an overflow-hidden box is a scroll container, so the review's action bar would stick to it, not the page.
+    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
       <EditorHeader
         back={{ to: '/spots', label: 'Spots' }}
         title={draft.name || spot.name}
         about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
       >
+        {canManage && spot.kind === 'template' && version && !reviewing && (
+          <Button type="button" variant="outline" onClick={() => openFill(spotId)}>
+            <SparklesIcon aria-hidden />
+            Fill from a flyer
+          </Button>
+        )}
         {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />}
         {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
-      {filled && version && (
+      {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
+      {filled?.kind === 'update' && (
+        <UpdateBanner
+          changed={filled.changed ?? 0}
+          undoable={Object.keys(filled.before ?? {}).length > 0}
+          alsoOn={filled.alsoOn ?? []}
+          onReview={(other) => {
+            const o = filled.alsoOn?.find((x) => x.spotId === other);
+            if (o) void reviewAlsoOn(orgId, spotId, o);
+          }}
+          onUndo={() => undoUpdate(orgId, spotId)}
+          onDone={() => finishFill(spotId)}
+        />
+      )}
+      {filled?.kind === 'new' && version && (
         <FillBanner
           marks={filled.marks}
           from={filled.photo ? 'photo' : 'link'}
@@ -123,7 +153,13 @@ function SpotEditor() {
         />
       )}
       <div className="flex flex-1 flex-wrap items-stretch">
+        {reviewing && version && (
+          <div className="flex max-w-full flex-[1_1_360px] flex-col border-r bg-card px-4 pt-5 sm:px-6">
+            <FillReview spotId={spotId} fields={version.manifest.fields} />
+          </div>
+        )}
         <form
+          hidden={reviewing && version !== undefined}
           aria-label="Spot fields"
           onSubmit={(e) => e.preventDefault()}
           className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
@@ -252,7 +288,8 @@ function SpotEditor() {
             </EditorSection>
           </EditorFields>
         </form>
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col">
+        {/* While a review is open, a phone shows the stage playing the change first, the review under it. */}
+        <div className={cn('flex min-w-0 flex-[999_1_560px] flex-col', reviewing && 'max-sm:order-first')}>
           <PlayerStage
             target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit }}
             kits={brandKits}
