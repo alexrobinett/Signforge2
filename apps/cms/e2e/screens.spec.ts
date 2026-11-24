@@ -85,10 +85,10 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Nothing published is said by the thumbnail alone: no caption under it (#374).
   await expect(page.locator('figcaption')).toHaveCount(0);
 
-  // Live seconds do not move the page (#375): at phone width, heard 1 s and then 8 s ago, the status and
-  // actions stay put. The page's clock (10 s steps) is fixed on a step; the last sync is set before it.
+  // Live seconds do not move the page (#375): heard 1 s, then 8 s ago, at phone width. The page's clock
+  // (10 s steps, never before its load) is fixed an hour ahead, past any run; the sync is set before it.
   const lobbyId = new URL(page.url()).pathname.split('/').at(-1);
-  const step = Math.ceil(Date.now() / 10_000) * 10_000 + 10_000;
+  const step = Math.ceil(Date.now() / 10_000) * 10_000 + 3_600_000;
   await page.clock.setFixedTime(step);
   await page.setViewportSize({ width: 390, height: 844 });
   const heardLine = page.getByText(/^last heard \d+ s ago$/);

@@ -26,7 +26,7 @@ export function RolloutLegend({ publish, screens, now, reasons }: { publish: Pub
   const segs = segments(publish, screens, now);
   if (!reasons) {
     return (
-      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-meta text-foreground/80">
+      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-meta text-foreground/80 tabular-nums">
         {segs.map((s) => (
           <li key={s.outcome} className="flex items-center gap-2">
             <span aria-hidden className="size-2.5 shrink-0 rounded-xs" style={{ background: OUTCOME_COLOR[s.outcome] }} />
@@ -45,7 +45,7 @@ export function RolloutLegend({ publish, screens, now, reasons }: { publish: Pub
             <strong className="font-semibold tabular-nums">
               {s.count} {s.label}
             </strong>
-            <span className="text-sm text-muted-foreground">{s.why}</span>
+            <span className="text-sm text-muted-foreground tabular-nums">{s.why}</span>
             <span className="text-sm">{s.names.join(', ')}</span>
           </span>
         </li>

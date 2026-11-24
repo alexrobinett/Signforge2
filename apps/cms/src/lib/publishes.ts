@@ -37,7 +37,7 @@ const playsWord = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
   p.restoresRevision === null ? versionName(p) : `${versionName({ revision: p.restoresRevision })} again`;
 
 /** A publish's title: its version, and for a roll back where it went back to. */
-export const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
+const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
   p.restoresRevision === null ? versionName(p) : `${versionName(p)}: back to ${versionName({ revision: p.restoresRevision })}`;
 
 /**

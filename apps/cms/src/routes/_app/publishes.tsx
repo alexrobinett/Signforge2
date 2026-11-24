@@ -4,13 +4,14 @@
  * earlier publish can be rolled back to. Both stay current while the page is open
  * (src/queries/publishes.ts).
  */
+import { PublishTitle } from '~/components/publishes/latest-publish';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, publishTitle, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
@@ -77,11 +78,11 @@ function PublishesPage() {
                 Rollout of <span className="font-mono">{v}</span>
               </>
             ) : (
-              publishTitle(publish)
+              <PublishTitle publish={publish} />
             )}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            <strong className="text-base font-semibold text-foreground tabular-nums">{done}</strong> of {screens.length} playing it
+          <p className="text-sm text-muted-foreground tabular-nums">
+            <strong className="text-base font-semibold text-foreground">{done}</strong> of {screens.length} playing it
             {rolloutComplete(publish) ? ' · complete' : ''}
           </p>
         </div>
