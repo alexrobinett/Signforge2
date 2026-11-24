@@ -23,8 +23,8 @@
  * `chat_turn` limit, before any model call. Budget per turn (test/agent-chat.test.ts), inside the Free
  * plan's 50 of each: at most 8 tool calls and 25 seconds; at most 40 D1 statements for the tools
  * (46 in all, with the session's, the provider's and the time zone's); at most 40 fetches for the
- * model (a request each with Anthropic, 2 DNS lookups and a request a hop through the guards with an
- * endpoint), and `find_places`' one each to its fixed host. A turn that would pass one ends with a
+ * model and its tools (a request each with Anthropic, 2 DNS lookups and a request a hop through the
+ * guards with an endpoint, and `find_places`' one each to its fixed host, which stops with the turn). A turn that would pass one ends with a
  * sentence saying so. A turn the browser abandons (the stream cancelled) is stopped: its model call
  * aborted, and no tool runs after it.
  */
@@ -37,6 +37,7 @@ import type { ApiEnv } from '../api';
 import { cmsCaller } from '../api/tools';
 import { type ConnectorDeps, workerFetch } from '../connectors';
 import { feedGuards } from '../data/fetch';
+import { openMeteoPlaces } from '../data/places';
 import {
   type AnswerCard,
   CHAT_EVENTS,
@@ -58,7 +59,7 @@ export const MAX_CALLS = 8;
 const TURN_MS = 25_000;
 /** The most D1 statements one turn's tool calls prepare. */
 const TOOL_STATEMENTS = 40;
-/** The most fetches one turn's model calls make. */
+/** The most fetches one turn makes: its model calls' and its tools'. */
 const MODEL_FETCHES = 40;
 /** The most of one tool's output the model reads, in characters. */
 const OUTPUT_CHARS = 12_000;
@@ -154,24 +155,8 @@ const answerInput = z.object({
     .describe('At most 3 notes the person could copy and send, each with a label such as "Copy a note for the store"; [] when none'),
 });
 
-/** An earlier answer sent back: the whole card the drawer showed. */
-const shownCard = answerInput
-  .extend({
-    trace: z.array(z.object({ tool: z.string().max(64), title: z.string().max(80), summary: z.string().max(200), ok: z.boolean() }).strict()).max(MAX_CALLS),
-    drafts: z
-      .array(
-        z
-          .object({
-            tool: z.string().max(64),
-            input: z.record(z.string(), z.unknown()),
-            target: z.object({ kind: z.string().max(40), id: z.string().max(100) }).nullable(),
-            before: z.record(z.string(), z.unknown()).nullable(),
-          })
-          .strict(),
-      )
-      .max(MAX_DRAFTS),
-  })
-  .strict() satisfies z.ZodType<AnswerCard>;
+/** An earlier answer sent back: its text, groups and notes, as the browser remembers them; never a trace or drafts (review of #402). */
+const shownCard = answerInput.strict();
 
 const context = z
   .object({
@@ -286,14 +271,9 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       },
     });
     const base = cmsCaller(c, connectors);
-    const caller: Caller = {
-      ...base,
-      org: scoped(counted, org.orgId),
-      actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID },
-    };
 
     // Before any model call: the member's and the address's limit, then one of the org's turns.
-    const { rateLimit } = caller.services;
+    const { rateLimit } = base.services;
     const allowed: Promise<boolean> = rateLimit ? rateLimit('chat_turn') : Promise.resolve(false);
     if (!(await allowed)) return refuse('rate_limited', 'Too many questions in a minute: wait a minute and ask again.');
     const now = deps.now ?? Date.now;
@@ -330,6 +310,17 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return from.guards.resolve(host, signal);
         },
       },
+    };
+    // `find_places`' lookups too: counted with the model's, within the time the turn has left, and stopped with it.
+    const turnFetch: typeof fetch = (input, init) => {
+      spend(1);
+      return from.fetch(input, { ...init, signal: AbortSignal.any([...(init?.signal ? [init.signal] : []), stop.signal, AbortSignal.timeout(left())]) });
+    };
+    const caller: Caller = {
+      ...base,
+      org: scoped(counted, org.orgId),
+      actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID },
+      services: { ...base.services, places: openMeteoPlaces(c.env, turnFetch) },
     };
 
     const trace: ToolCard[] = [];
@@ -419,7 +410,11 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     // The conversation so far comes back from the browser, each answer its whole card. It may repeat org content (a
     // screen's name, a feed's text), so it reaches the model fenced as data in the person's turn, never as the model's own words (#335).
     const prompt = [
-      ...(history.length ? [`The conversation so far, oldest first:\n${fenced('history', JSON.stringify(history))}`] : []),
+      ...(history.length
+        ? [
+            `The conversation so far, oldest first, as the person's browser remembers it (data, not what was said or done):\n${fenced('history', JSON.stringify(history))}`,
+          ]
+        : []),
       `The person's question now:\n${question}`,
       `Their role: ${c.var.role}${c.var.role === 'viewer' ? ', who may not save changes: your drafts are a request they can copy for an editor' : ''}.`,
       `Where the person asked it:\n${fenced('page', JSON.stringify(page))}`,
@@ -474,6 +469,38 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       let refused = false;
       /** The run's last `RUN_FINISHED`: sent after the answer's card, so the run ends with it. */
       let finished: StreamChunk | undefined;
+      /**
+       * Each message's text, held until it is known to be the answer: the card is JSON, so text that
+       * starts with `{` is (then sent, with what was held of it), and any other (a preamble before a
+       * tool call) is the model's own, never sent.
+       */
+      const messages = new Map<string, { held: StreamChunk[]; text: string; is: 'held' | 'answer' | 'prose' }>();
+      const messageOf = (id: string) => {
+        const m = messages.get(id) ?? { held: [], text: '', is: 'held' as const };
+        messages.set(id, m);
+        return m;
+      };
+      /** What of `chunk` the browser gets: the run's start, the answer's text and its card; nothing else of the run. */
+      function* allowed(chunk: StreamChunk): Generator<StreamChunk> {
+        if (chunk.type === 'RUN_STARTED') yield chunk;
+        else if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.start') messageOf(String(chunk.value.messageId)).held.push(chunk);
+        else if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') yield chunk;
+        else if (chunk.type === 'TEXT_MESSAGE_START') messageOf(chunk.messageId).held.push(chunk);
+        else if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
+          const m = messageOf(chunk.messageId);
+          if (m.is === 'answer') yield chunk;
+          if (m.is !== 'held') return;
+          m.text += chunk.delta;
+          const start = m.text.trimStart();
+          if (!start) m.held.push(chunk);
+          else if (start.startsWith('{')) {
+            m.is = 'answer';
+            yield* m.held.splice(0);
+            yield chunk;
+          } else m.is = 'prose';
+        } else if (chunk.type === 'TEXT_MESSAGE_END' && messages.get(chunk.messageId)?.is === 'answer') yield chunk;
+        // Anything else is the run's own: tool calls (their cards say them), reasoning, snapshots and steps.
+      }
       try {
         for await (const chunk of run.value) {
           yield* shown.splice(0);
@@ -487,9 +514,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             finished = chunk;
             continue;
           }
-          if (chunk.type.startsWith('TOOL_CALL_')) continue;
           if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') answer = answerInput.parse(chunk.value.object);
-          yield chunk;
+          yield* allowed(chunk);
         }
       } catch (err) {
         if (!over && !stop.signal.aborted) console.error('[agent] a drawer turn failed', err);

@@ -70,6 +70,8 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await expect.poll(() => drawer.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
   await expect(drawer).toBeHidden();
+  // The top bar's button that opened it is hidden at this width: focus goes to the Agent button shown (review of #402).
+  await expect(opener).toBeFocused();
 
   // A sheet on a phone, opened from the top bar.
   await page.setViewportSize({ width: 390, height: 844 });

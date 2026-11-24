@@ -289,9 +289,15 @@ export function AgentDrawer() {
             e.preventDefault();
             // Still open: the window crossed the width where it turns modal, which draws it anew. Focus stays in it (#335).
             if (d.open) return;
-            // Once the sidebar has unfolded again: the button that opened it is drawn anew by then.
+            // Once the sidebar has unfolded again: the button that opened it is drawn anew by then. One hidden since (the
+            // window resized: the top bar's button on a wide screen, the sidebar's on a phone) gives way to the Agent
+            // button shown, then the page (review of #402).
             const opener = d.opener;
-            requestAnimationFrame(() => (document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`) ?? document.getElementById('main'))?.focus());
+            requestAnimationFrame(() => {
+              const shown = (el: HTMLElement | null) => (el?.checkVisibility() ? el : null);
+              const agent = [...document.querySelectorAll<HTMLElement>('[data-agent-opener]')].find((el) => el.checkVisibility());
+              (shown(document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`)) ?? agent ?? document.getElementById('main'))?.focus();
+            });
           }}
         >
           <header className="flex items-start gap-3 border-b bg-actor-agent-muted px-4 py-3">
@@ -349,7 +355,14 @@ export function AgentDrawer() {
                     ))}
                   </ol>
                 )}
-                {d.streaming ? <p className="whitespace-pre-wrap text-foreground">{d.streaming}</p> : <p>{d.progress.length ? 'Working…' : 'Thinking…'}</p>}
+                {/* The text as it is written is not read out: the live region below says the answer once it is whole (review of #402). */}
+                {d.streaming ? (
+                  <p aria-hidden className="whitespace-pre-wrap text-foreground">
+                    {d.streaming}
+                  </p>
+                ) : (
+                  <p>{d.progress.length ? 'Working…' : 'Thinking…'}</p>
+                )}
               </div>
             )}
             <p role="status" aria-live="polite" className="sr-only">

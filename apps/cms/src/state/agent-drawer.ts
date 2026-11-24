@@ -7,7 +7,7 @@
  * ended. Text shown of a turn that then fails is dropped: only a whole card is kept. The cards are the
  * drawer's own, kept here, never rebuilt from the client's messages (a pause would turn them back to
  * raw JSON, #346). The conversation lives only here, so a reload forgets it; each question sends it
- * back, the last `CHAT_HISTORY` turns of it, each answer its whole card.
+ * back, the last `CHAT_HISTORY` turns of it, each answer its card's text, groups and notes.
  *
  * An answer may hold drafts (#268): changes the agent proposes, written only when the person saves
  * them (`POST /api/agent/apply`). Their summary and reach are worked out here, from the pages' own
@@ -171,13 +171,20 @@ const idsOf = (params: unknown): Record<string, string> =>
 const closed = (): AgentDrawerState => ({ open: false, messages: [], question: '', asking: false, progress: [], streaming: '', opener: null });
 
 /**
- * The conversation sent back with a question: the person's words and each answer's whole card, the
+ * The conversation sent back with a question: the person's words and each answer's card, its text,
+ * groups and notes (never its trace or drafts, which the API does not take back as the tools'), the
  * last `CHAT_HISTORY` turns within `CHAT_HISTORY_CHARS`, the oldest left out first, starting with the
  * person's words. A turn that gave no answer is left out.
  */
 function historyOf(messages: readonly DrawerMessage[]): ChatTurn[] {
   let turns = messages
-    .flatMap((m): ChatTurn[] => (m.role === 'user' ? [{ role: 'user', text: m.text }] : m.role === 'assistant' ? [{ role: 'assistant', card: m.card }] : []))
+    .flatMap((m): ChatTurn[] =>
+      m.role === 'user'
+        ? [{ role: 'user', text: m.text }]
+        : m.role === 'assistant'
+          ? [{ role: 'assistant', card: { text: m.card.text, groups: m.card.groups, steps: m.card.steps } }]
+          : [],
+    )
     .slice(-CHAT_HISTORY);
   while (turns[0] && (turns[0].role === 'assistant' || JSON.stringify(turns).length > CHAT_HISTORY_CHARS)) turns = turns.slice(1);
   return turns;
@@ -208,6 +215,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   let running: ChatClient | null = null;
   /** The conversation's thread, for every turn of it; a new one once forgotten. */
   let thread: string | null = null;
+  /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
+  let conversation = 0;
 
   /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
   const drafts = (index: number, change: (d: Drafts) => Drafts) =>
@@ -229,7 +238,12 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     const orgId = orgOnScreen(router);
     if (!at || !orgId) return;
     const calls = at.card.drafts;
-    drafts(index, (d) => ({ ...d, shown: { state: 'working' } }));
+    // Only this conversation's: a drawer forgotten meanwhile (the org switched) holds another, or none.
+    const asked = conversation;
+    const write = (change: (d: Drafts) => Drafts) => {
+      if (conversation === asked) drafts(index, change);
+    };
+    write((d) => ({ ...d, shown: { state: 'working' } }));
     try {
       const [fleet, schedule, playlists, spots, templates] = await Promise.all([
         queryClient.query(screensQuery(orgId)),
@@ -254,9 +268,9 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const summaries = calls.map((call) => summarize(call, context));
       const problem = summaries.find((s) => 'problem' in s);
       const shown = summaries.filter((s) => 'lines' in s);
-      drafts(index, (d) => ({ ...d, shown: problem ? { state: 'failed', reason: problem.problem } : { state: 'shown', summaries: shown } }));
+      write((d) => ({ ...d, shown: problem ? { state: 'failed', reason: problem.problem } : { state: 'shown', summaries: shown } }));
     } catch {
-      drafts(index, (d) => ({ ...d, shown: { state: 'failed', reason: 'Could not read your screens, schedule and content to show what the changes do.' } }));
+      write((d) => ({ ...d, shown: { state: 'failed', reason: 'Could not read your screens, schedule and content to show what the changes do.' } }));
     }
   }
 
@@ -410,6 +424,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running?.stop();
       running = null;
       thread = null;
+      conversation++;
       const { open } = get().agentDrawer;
       set({ agentDrawer: closed() });
       if (open) get().setRightPanel(false);
@@ -490,7 +505,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
       else say({ role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false });
       mine((d) => ({ ...d, asking: false, progress: [] }));
-      running = null;
+      // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
+      if (running === turn) running = null;
       turn.dispose();
     },
   };

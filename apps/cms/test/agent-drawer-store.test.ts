@@ -169,7 +169,7 @@ describe('the agent drawer, in the store', () => {
     });
   });
 
-  it('sends the conversation so far with the next question, each answer its whole card, leaving out the errors', async () => {
+  it("sends the conversation so far with the next question, each answer its card's answer, leaving out the errors", async () => {
     const { store } = drawerStore();
     answer = (run) => stream(...events(run, { text: '', error: { code: 'over_budget', message: 'This needed more than 8 lookups, so I stopped.' } }));
     await store.getState().askAgent('First?');
@@ -182,10 +182,12 @@ describe('the agent drawer, in the store', () => {
         history: [
           { role: 'user', text: 'First?' },
           { role: 'user', text: 'Second?' },
-          { role: 'assistant', card: CARD },
+          // The card's answer: never its trace or drafts (review of #402).
+          { role: 'assistant', card: { text: CARD.text, groups: CARD.groups, steps: CARD.steps } },
         ],
       },
     });
+    expect(JSON.stringify(sent.at(-1)?.body.forwardedProps)).not.toContain('trace');
     // One thread for the conversation.
     expect(new Set(sent.map((s) => s.body.threadId)).size).toBe(1);
     expect(store.getState().agentDrawer.messages[1]).toEqual({ role: 'error', text: 'This needed more than 8 lookups, so I stopped.', inSettings: false });

@@ -13,11 +13,14 @@ vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/lib/live', () => ({ orgOnScreen: () => 'org_1' }));
 // The pages' reads, for the summaries: an empty org whose card template has a headline; each read
 // fails while `fail`, and the templates are read without the card's version while `stale` is above 0.
-const reads = vi.hoisted(() => ({ fail: false, stale: 0, templatesRead: 0 }));
+const reads = vi.hoisted(() => ({ fail: false, stale: 0, templatesRead: 0, hold: undefined as Promise<void> | undefined }));
 const CARD_VERSION = { id: 'tpv_card', manifest: { fields: { headline: { type: 'text', label: 'Headline' } } } };
 const read = (key: string, data: () => unknown) => ({
   queryKey: ['org', 'org_1', key],
-  queryFn: async () => (reads.fail ? Promise.reject(new Error('offline')) : data()),
+  queryFn: async () => {
+    await reads.hold;
+    return reads.fail ? Promise.reject(new Error('offline')) : data();
+  },
 });
 vi.mock('~/queries/screens', () => ({ screensQuery: () => read('screens', () => ({ screens: [], groups: [] })) }));
 vi.mock('~/queries/schedule', () => ({ scheduleQuery: () => read('schedule', () => ({ entries: [] })) }));
@@ -54,7 +57,7 @@ beforeEach(() => {
   tools.calls.length = 0;
   tools.failing.clear();
   tools.answer = () => ({});
-  Object.assign(reads, { fail: false, stale: 0, templatesRead: 0 });
+  Object.assign(reads, { fail: false, stale: 0, templatesRead: 0, hold: undefined });
   vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
     sent.push({ path, body: JSON.parse(String(init.body)) });
     const res = answers.shift();
@@ -110,6 +113,50 @@ function draftsStore() {
 }
 
 describe("the drawer's drafts, in the store", () => {
+  it("leaves the next org's turn be when the last org's drafts are still being worked out as the drawer is forgotten (review of #402)", async () => {
+    const { store } = draftsStore();
+    // The first turn's summary waits on the pages' reads.
+    let release: () => void = () => {};
+    reads.hold = new Promise((r) => {
+      release = r;
+    });
+    answers.push(turn());
+    const first = store.getState().askAgent('Make the headline punchier');
+    await vi.waitFor(() => expect(store.getState().agentDrawer.messages[1]).toMatchObject({ drafts: { shown: { state: 'working' } } }));
+    store.getState().forgetAgentDrawer();
+    // The next org's turn, which answers only once the first has finished.
+    let answer: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      answer = r;
+    });
+    answers.push((body) => {
+      const res = turn({ ...CARD, drafts: [] })(body);
+      return new Response(
+        new ReadableStream({
+          async start(c) {
+            await gate;
+            c.enqueue(new Uint8Array(await res.arrayBuffer()));
+            c.close();
+          },
+        }),
+        { headers: res.headers },
+      );
+    });
+    const second = store.getState().askAgent('What plays?');
+    reads.hold = undefined;
+    release();
+    await first;
+    answer();
+    await second;
+    expect(store.getState().agentDrawer).toMatchObject({
+      asking: false,
+      messages: [
+        { role: 'user', text: 'What plays?' },
+        { role: 'assistant', card: { text: CARD.text }, drafts: null },
+      ],
+    });
+  });
+
   it('writes nothing until saved; a save marks the spot in its editor and reloads it; Undo puts each back, the last first', async () => {
     const { store, reloaded, at } = draftsStore();
     answers.push(turn());
