@@ -919,7 +919,9 @@ describe('confirmation cards (#269)', () => {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({
         steps: (body) =>
-          body.messages.length === 1 ? { calls: [{ name: 'publish', input: ask.called }] } : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) },
+          body.messages.length === 1
+            ? { calls: [{ name: 'publish', input: ask.called }] }
+            : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) },
       });
       const playlist = await s.scope.playlists.insert({ name: 'All day', transitionJson: JSON.stringify({ type: 'cut' }) });
       const other = await s.scope.playlists.insert({ name: 'Night', transitionJson: JSON.stringify({ type: 'cut' }) });
