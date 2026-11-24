@@ -500,7 +500,12 @@ describe('deleting a spot (#242)', () => {
       {
         error: 'conflict',
         message: 'spot spt_a is in 2 playlists: "Lunch", "Main"; take it out of them first',
-        details: { playlists: [{ id: 'pls_lunch', name: 'Lunch' }, { id: 'pls_main', name: 'Main' }] },
+        details: {
+          playlists: [
+            { id: 'pls_lunch', name: 'Lunch' },
+            { id: 'pls_main', name: 'Main' },
+          ],
+        },
       },
       409,
     );
@@ -524,9 +529,15 @@ describe('deleting a spot (#242)', () => {
     const reply = withStatus();
     const a = spot('spt_a', 1);
     queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
-    store.setState((s) => ({
-      agent: { ...s.agent, filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } } },
-    }) as never);
+    store.setState(
+      (s) =>
+        ({
+          agent: {
+            ...s.agent,
+            filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } },
+          },
+        }) as never,
+    );
     void store.getState().fillWithAnother(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a' } }]);

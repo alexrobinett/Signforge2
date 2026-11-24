@@ -375,15 +375,19 @@ async function inUse(org: OrgScope, spotId: string): Promise<ToolError | undefin
   const playlists = (await org.spots.usedBy(spotId)).map((p) => ({ id: p.id, name: p.name }));
   if (!playlists.length) return undefined;
   const names = playlists.map((p) => `"${p.name}"`).join(', ');
-  return new ToolError('conflict', `spot ${spotId} is in ${playlists.length === 1 ? 'a playlist' : `${playlists.length} playlists`}: ${names}; take it out of them first`, {
-    playlists,
-  });
+  return new ToolError(
+    'conflict',
+    `spot ${spotId} is in ${playlists.length === 1 ? 'a playlist' : `${playlists.length} playlists`}: ${names}; take it out of them first`,
+    {
+      playlists,
+    },
+  );
 }
 
 const deleteSpot = defineTool({
   name: 'delete_spot',
   description:
-    "Delete a spot, its draft and its published version. Refused with a conflict while a playlist plays it, in its draft or its published version (details.playlists, each { id, name }): take it out of those first, and publish them if screens play them. Its assets and data sources are not deleted. Only a person may delete one: no agent is offered it. Returns { deleted: spotId }.",
+    'Delete a spot, its draft and its published version. Refused with a conflict while a playlist plays it, in its draft or its published version (details.playlists, each { id, name }): take it out of those first, and publish them if screens play them. Its assets and data sources are not deleted. Only a person may delete one: no agent is offered it. Returns { deleted: spotId }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,

@@ -439,14 +439,19 @@ describe('deleting a spot (#242)', () => {
     expect(await call('delete_spot', { spotId: id })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
-  it("refuses while a playlist plays it, in its draft or only in its published version, naming each, and writes nothing", async () => {
+  it('refuses while a playlist plays it, in its draft or only in its published version, naming each, and writes nothing', async () => {
     const { o, org, call } = await seeded('spot-del-used');
     const lunch = (await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }))).playlist as { id: string };
     expect(await call('delete_spot', { spotId: o.imageSpot })).toMatchObject({
       ok: false,
       error: 'conflict',
       message: expect.stringContaining('"Lunch"'),
-      details: { playlists: expect.arrayContaining([{ id: lunch.id, name: 'Lunch' }, { id: o.playlist, name: expect.any(String) }]) },
+      details: {
+        playlists: expect.arrayContaining([
+          { id: lunch.id, name: 'Lunch' },
+          { id: o.playlist, name: expect.any(String) },
+        ]),
+      },
     });
 
     // Published with it, then taken out of the drafts: screens may still play it.
@@ -466,7 +471,10 @@ describe('deleting a spot (#242)', () => {
   it('continues its versions when made again with its id, so an edit read before the delete is refused (draft_tombstones)', async () => {
     const { org, call } = await seeded('spot-del-tomb');
     const { spot } = await ok(call('create_spot', { name: 'Site', kind: 'url', url: 'https://example.com/a', idempotencyKey: 'spot-del-tomb' }));
-    const read = (await ok(call('update_spot', { spotId: (spot as { id: string }).id, name: 'Site, edited', ifVersion: 1 }))).spot as { id: string; version: number };
+    const read = (await ok(call('update_spot', { spotId: (spot as { id: string }).id, name: 'Site, edited', ifVersion: 1 }))).spot as {
+      id: string;
+      version: number;
+    };
     await ok(call('delete_spot', { spotId: read.id }));
     const again = await org.spots.insert({ id: read.id, name: 'Again', kind: 'url', durationMs: 10_000, url: 'https://example.com/b' });
     expect(again.rowVersion).toBe(read.version + 1);

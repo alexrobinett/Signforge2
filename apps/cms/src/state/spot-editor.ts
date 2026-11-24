@@ -128,7 +128,9 @@ function blocking(err: unknown): { id: string; name: string }[] {
   const listed = err instanceof Refusal && typeof err.details === 'object' && err.details !== null && 'playlists' in err.details ? err.details.playlists : [];
   return Array.isArray(listed)
     ? listed.flatMap((p: unknown) =>
-        typeof p === 'object' && p !== null && 'id' in p && 'name' in p && typeof p.id === 'string' && typeof p.name === 'string' ? [{ id: p.id, name: p.name }] : [],
+        typeof p === 'object' && p !== null && 'id' in p && 'name' in p && typeof p.id === 'string' && typeof p.name === 'string'
+          ? [{ id: p.id, name: p.name }]
+          : [],
       )
     : [];
 }

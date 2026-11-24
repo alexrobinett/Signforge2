@@ -333,12 +333,7 @@ function SpotEditor() {
               <ul className="list-disc pl-5">
                 {deleting.playlists.map((p) => (
                   <li key={p.id}>
-                    <Link
-                      to="/playlists/$playlistId"
-                      params={{ playlistId: p.id }}
-                      onClick={() => askDelete(false)}
-                      className="underline underline-offset-4"
-                    >
+                    <Link to="/playlists/$playlistId" params={{ playlistId: p.id }} onClick={() => askDelete(false)} className="underline underline-offset-4">
                       {p.name}
                     </Link>
                   </li>
