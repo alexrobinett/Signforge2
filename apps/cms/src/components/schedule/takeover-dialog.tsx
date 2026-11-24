@@ -12,7 +12,8 @@ import { NativeSelect } from '~/components/ui/select';
 import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
-import { DIALOG } from '~/state/schedule';
+import { DIALOG, firstDefaultOf } from '~/state/schedule';
+import { FirstDefaultChoice } from './first-default-note';
 import { TargetPicker } from './target-picker';
 
 const DAY_MS = 86_400_000;
@@ -93,6 +94,7 @@ export function TakeoverDialog({
             <Input id={`${id}-until`} type="datetime-local" value={d.until} onChange={(e) => edit({ until: e.target.value })} className="w-60 font-mono" />
             <p className="text-xs text-muted-foreground">In your time zone. At most 24 hours from now.</p>
           </div>
+          <FirstDefaultChoice playlists={playlists} value={firstDefaultOf(d)} onChange={(firstDefault) => edit({ firstDefault })} action="Taking over" />
           {(error || problem) && (
             <div role="alert" className="text-sm text-destructive">
               {problem ?? error}

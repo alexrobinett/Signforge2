@@ -15,8 +15,9 @@
 import { toast } from 'sonner';
 import { toggleOf } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
+import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
-import { versionsById } from '~/lib/spots';
+import { type SpotView, versionsById } from '~/lib/spots';
 import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
@@ -48,13 +49,14 @@ export interface PublishingSlice {
    * Publishes schedule entries (`entryIds`, else every one with a changed draft, removals too) with
    * their changed playlists and those playlists' changed spots.
    */
-  publishSchedule: (orgId: string, entryIds?: string[]) => Promise<void>;
+  /** `firstDefault`: with no default playlist yet, the one the person chose to make the default first (#243). */
+  publishSchedule: (orgId: string, entryIds?: string[], firstDefault?: string) => Promise<void>;
   /**
    * Publishes one schedule entry alone, pinned (#181): nobody else's drafts go with it. Its playlist
    * and that playlist's spots go too only when they have never been published, as the entry cannot
    * play without them; a published playlist's unpublished edits stay drafts.
    */
-  publishEntry: (orgId: string, entryId: string) => Promise<void>;
+  publishEntry: (orgId: string, entryId: string, firstDefault?: string) => Promise<void>;
   /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
   endTakeover: (orgId: string, entryId: string) => Promise<void>;
 }
@@ -147,7 +149,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const made = r.publish;
     const v = versionName(made);
     const failed = r.screens.filter((s) => s.outcome === 'failed').length;
+    // Named by the publish's answer, as published (#243).
+    const madeDefault = r.madeDefault && `${r.madeDefault.name} is now the default playlist: every screen plays it when nothing is scheduled.`;
     const notes = [
+      madeDefault,
       made.screens ? 'Each screen switches as it hears of it; the rollout says why any wait.' : reachesNone,
       held && `Held back: ${held.text}`,
       made.screens > 0 && failed > 0 && `${screensWord(failed)} could not take it and keep what they play.`,
@@ -185,11 +190,36 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     }
   }
 
+  /**
+   * Before a publish from the Schedule's dialogs with no default playlist yet (owner, #243): the one the
+   * person chose made the default first (`set_default_playlist`), and its pins, so the publish
+   * publishes it and its spots if they never were. [] when there is nothing to do (one chosen
+   * already, or none chosen); null when it was refused, which is said under `refused`.
+   */
+  async function madeDefault(choice: string | undefined, drafts: { playlists: PlaylistView[]; spots: SpotView[] }, refused: string): Promise<Pin[] | null> {
+    const chosen = choice ? drafts.playlists.find((p) => p.id === choice) : undefined;
+    if (!chosen || drafts.playlists.some((p) => p.isDefault)) return [];
+    try {
+      await callTool('set_default_playlist', { playlistId: chosen.id });
+    } catch (err) {
+      toast.error(refused, { description: toolMessage(err) });
+      return null;
+    }
+    if (chosen.published) return [];
+    const inIt = new Set(chosen.spotIds);
+    return [
+      { kind: 'playlist', id: chosen.id, version: chosen.version },
+      ...drafts.spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+    ];
+  }
+
   /** Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. */
   async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published') {
     pending(true);
     try {
-      await told(orgId, await callTool('publish', { drafts: pins }), undo, refused);
+      // Once each: a chosen default may be the entry's own playlist.
+      const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
+      await told(orgId, await callTool('publish', { drafts }), undo, refused);
       await refresh(orgId);
     } catch (err) {
       toast.error(refused, {
@@ -256,10 +286,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       }
     },
 
-    async publishSchedule(orgId, entryIds) {
+    async publishSchedule(orgId, entryIds, firstDefault) {
       const drafts = await readDrafts(orgId, 'Not published');
       if (!drafts) return;
       const { entries, playlists, spots } = drafts;
+      const defaultPins = await madeDefault(firstDefault, drafts, 'Not published');
+      if (!defaultPins) return;
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
       const needed = new Set(chosen.filter((e) => !e.deleted).map((e) => e.playlistId));
       const lists = playlists.filter((p) => needed.has(p.id));
@@ -270,17 +302,20 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
           ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
           ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+          ...defaultPins,
         ],
         !chosen.some((e) => e.takeover),
       );
     },
 
-    async publishEntry(orgId, entryId) {
+    async publishEntry(orgId, entryId, firstDefault) {
       // Called once the entry is saved: every way this ends without a publish says the draft is kept.
       const refused = 'Saved as a draft, not published';
       const drafts = await readDrafts(orgId, refused);
       if (!drafts) return;
       const { entries, playlists, spots } = drafts;
+      const defaultPins = await madeDefault(firstDefault, drafts, refused);
+      if (!defaultPins) return;
       const entry = entries.find((e) => e.id === entryId);
       if (!entry) {
         toast.error(refused, { description: 'The entry is no longer there: someone may have removed it.' });
@@ -295,6 +330,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           { kind: 'schedule_entry', id: entry.id, version: entry.version },
           ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
           ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+          ...defaultPins,
         ],
         true,
         refused,

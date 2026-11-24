@@ -165,6 +165,67 @@ describe('one entry published alone (#181)', () => {
   });
 });
 
+describe('the default chosen before a publish, with none yet (#243)', () => {
+  const list = (id: string, over: object) => ({ id, name: id, spotIds: [], version: 1, isDefault: false, published: true, draftChanged: false, ...over });
+  const mine = { ...entry('sch_mine', false), playlistId: 'pls_holiday', target: 'screen' as const, screenId: 'scr_1', version: 4 };
+  const names = () => vi.mocked(callTool).mock.calls.map(([name]) => name);
+
+  it('makes it the default first, then publishes it too when it was never published', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({
+      playlists: [list('pls_holiday', {}), list('pls_all_day', { published: false, version: 2, spotIds: ['spt_open'] })],
+    } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [list('spt_open', { published: false, version: 3 })] } as never);
+    vi.mocked(callTool).mockClear();
+    await setup([mine]).publishEntry(ORG, 'sch_mine', 'pls_all_day');
+    expect(names()).toEqual(['set_default_playlist', 'publish']);
+    expect(vi.mocked(callTool)).toHaveBeenNthCalledWith(1, 'set_default_playlist', { playlistId: 'pls_all_day' });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
+      drafts: [
+        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+        { kind: 'playlist', id: 'pls_all_day', version: 2 },
+        { kind: 'spot', id: 'spt_open', version: 3 },
+      ],
+    });
+  });
+
+  it('pins its own playlist once when the default chosen is it', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', { published: false, version: 3 })] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool).mockClear();
+    await setup([mine]).publishEntry(ORG, 'sch_mine', 'pls_holiday');
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
+      drafts: [
+        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+        { kind: 'playlist', id: 'pls_holiday', version: 3 },
+      ],
+    });
+  });
+
+  it('publishes without one when none was chosen, or the org has one since', async () => {
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', {})] } as never);
+    vi.mocked(callTool).mockClear();
+    await setup([mine]).publishEntry(ORG, 'sch_mine', '');
+    expect(names()).toEqual(['publish']);
+
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', {}), list('pls_main', { isDefault: true })] } as never);
+    vi.mocked(callTool).mockClear();
+    await setup([mine]).publishEntry(ORG, 'sch_mine', 'pls_holiday');
+    expect(names()).toEqual(['publish']);
+  });
+
+  it('publishes nothing when making it the default is refused, and says the entry is a draft', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', {})] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool).mockClear();
+    vi.mocked(callTool).mockRejectedValueOnce(new Refusal('forbidden', 'Only owners publish in this organization'));
+    await setup([mine]).publishEntry(ORG, 'sch_mine', 'pls_holiday');
+    expect(names()).toEqual(['set_default_playlist']);
+    const said = toast.getToasts().flatMap((t) => ('title' in t ? [{ title: t.title, description: t.description }] : []));
+    expect(said).toContainEqual({ title: 'Saved as a draft, not published', description: 'Only owners publish in this organization' });
+  });
+});
+
 describe('a held publish (#253)', () => {
   const spot = { id: 'spt_6r26', name: 'Breakfast board', templateVersionId: 'tv_promo', published: false, draftChanged: true, version: 2 };
   const playlist = { id: 'pls_main', name: 'All day', spotIds: ['spt_6r26'], version: 1, isDefault: true, published: false, draftChanged: true };

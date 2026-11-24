@@ -396,6 +396,31 @@ describe('the audit log', () => {
     });
   });
 
+  it("records a tool's auditDetail under its own key, redacted, never over the input", async () => {
+    const telling = defineTool({
+      name: 'rename_and_tell',
+      description: 'A test tool that adds to its audit row what its input does not name, with a secret and an input key in it.',
+      scope: 'content:draft',
+      minRole: 'editor',
+      mutates: true,
+      input: z.object({ screenId: z.string() }),
+      output: z.object({ done: z.boolean() }),
+      example: { screenId: 's' },
+      auditDetail: () => ({ input: 'not the input', token: 'tok_789', made: 'pls_1' }),
+      handler: async ({ org, input, write }) => {
+        write(org.screens.stage.update((await org.screens.get(input.screenId))!, { name: 'Told' }));
+        return { done: true };
+      },
+    });
+    expect(await dispatch(new Map([[telling.name, telling]]), telling.name, { screenId: o.screen }, caller('owner'))).toMatchObject({ ok: true });
+    const [entry] = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1 });
+    expect(entry!.detailJson).not.toContain('tok_789');
+    expect(JSON.parse(entry!.detailJson!)).toEqual({
+      input: { screenId: o.screen },
+      detail: { input: 'not the input', token: '[redacted]', made: 'pls_1' },
+    });
+  });
+
   it('redact() knows the usual names', () => {
     expect(
       redact({

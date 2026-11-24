@@ -138,6 +138,12 @@ const publishResult = z.object({
   promoted: z.array(draftRef).describe('Drafts this publish made live'),
   held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
   removed: z.array(draftRef).describe('Schedule entries deleted with this publish: deletions it applied, and takeovers that have ended'),
+  madeDefault: z
+    .object({ id: z.string(), name: z.string().describe('Its name as published') })
+    .nullable()
+    .describe(
+      "The playlist this publish made the organization's default, which every screen plays when nothing is scheduled: set when it had none and the regular schedule entries this publish made live on every screen at all hours all play this one playlist (#243). A takeover or a narrower entry never sets it. null otherwise",
+    ),
   removedDataSources: z
     .array(z.string())
     .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),

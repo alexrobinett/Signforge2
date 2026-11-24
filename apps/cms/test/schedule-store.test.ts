@@ -73,7 +73,8 @@ describe('a retried create (#149)', () => {
     await store.getState().startTakeover(ORG);
     expect(calls.map((c) => c.name)).toEqual(['start_takeover', 'start_takeover']);
     expect(calls[1]!.input.idempotencyKey).toBe(calls[0]!.input.idempotencyKey);
-    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1']);
+    // With the default to make first when there is none: the takeover's playlist, as the dialog prefills it (#243).
+    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], 'pls_flash');
   });
 
   it('the next new entry is a new creation, with a new key', async () => {
@@ -146,9 +147,10 @@ describe('a dialog closed while it saves, and opened again (review of #153, 2)',
     const again = store.getState().startTakeover(ORG);
     first.give({ status: 200, body: { entry: { id: 'sch_1' } } });
     await Promise.all([starting, again]);
+    // Each with its own dialog's default to make first, should there be none (#243).
     expect(publishSchedule.mock.calls).toEqual([
-      [ORG, ['sch_1']],
-      [ORG, ['sch_2']],
+      [ORG, ['sch_1'], 'pls_flash'],
+      [ORG, ['sch_2'], 'pls_lunch'],
     ]);
   });
 });
@@ -176,7 +178,7 @@ describe('save and publish (#181)', () => {
     await store.getState().saveAndPublishEntry(ORG);
     expect(calls.map((c) => c.name)).toEqual(['create_schedule_entry']);
     expect(calls[0]!.input).toMatchObject({ playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
-    expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1');
+    expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1', 'pls_holiday');
     expect(store.getState().schedule.entries).toEqual({});
   });
 
@@ -187,5 +189,38 @@ describe('save and publish (#181)', () => {
     await store.getState().saveAndPublishEntry(ORG);
     expect(publishEntry).not.toHaveBeenCalled();
     expect(store.getState().schedule.entries[DIALOG]).toMatchObject({ error: 'Choose a playlist that exists.' });
+  });
+});
+
+describe('the default playlist a publish from the dialogs asks for, with none yet (#243)', () => {
+  it('passes the one chosen for a narrower entry, prefilled with its playlist, or none', async () => {
+    const { store, publishEntry } = scheduleStore();
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_breakfast', target: 'screen', screenId: 'scr_1' });
+    replies.push(made);
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', 'pls_breakfast');
+
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_breakfast', target: 'org', from: '06:00', to: '10:30' });
+    store.getState().editEntry({ firstDefault: '' });
+    replies.push(made);
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', '');
+  });
+
+  it('passes none for an entry on every screen at all hours: its publish makes the default itself', async () => {
+    const { store, publishEntry } = scheduleStore();
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_all_day' });
+    replies.push(made);
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', undefined);
+  });
+
+  it("passes a takeover's chosen default, another playlist than its own", async () => {
+    const { store, publishSchedule } = scheduleStore();
+    store.getState().openTakeover(ORG, { playlistId: 'pls_flash' });
+    store.getState().editTakeover({ firstDefault: 'pls_all_day' });
+    replies.push(made);
+    await store.getState().startTakeover(ORG);
+    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], 'pls_all_day');
   });
 });

@@ -75,6 +75,7 @@ function stressOrg(change: { timezone?: string | null; status?: AssetView['statu
     brandKits: new Map(),
     brandAssignments: [],
     publishRevision: 0,
+    settingsVersion: 1,
     timezone: change.timezone === undefined ? golden.screen.timezone : change.timezone,
   };
 }

@@ -213,8 +213,19 @@ const inputOf = (e: AuditEntry): Record<string, unknown> => {
   return typeof input === 'object' && input !== null && !Array.isArray(input) ? { ...input } : e.detail;
 };
 
-/** What an entry did, in words. */
-export const whatText = (e: AuditEntry) => eventText({ action: e.action, input: inputOf(e) });
+/** The playlist a publish made the org's first default (#243), from its row's `detail`. */
+function madeDefaultOf(e: AuditEntry): string | undefined {
+  const more = e.detail.detail;
+  const made = typeof more === 'object' && more !== null && 'madeDefault' in more ? more.madeDefault : undefined;
+  return typeof made === 'object' && made !== null && 'name' in made ? text(made.name) : undefined;
+}
+
+/** What an entry did, in words: a publish that made the default says so. */
+export function whatText(e: AuditEntry): string {
+  const made = e.action === 'publish' ? madeDefaultOf(e) : undefined;
+  const words = eventText({ action: e.action, input: inputOf(e) });
+  return made ? `${words} · made ${made} the default playlist` : words;
+}
 
 /** What it was given, short: `name: Lobby · state: on`; the target's own id is left out, and a refusal says why. */
 export function detailText(e: AuditEntry): string {

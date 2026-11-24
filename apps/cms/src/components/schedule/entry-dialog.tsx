@@ -19,7 +19,8 @@ import type { SpotView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import { DIALOG, entryProblems, entryWhen } from '~/state/schedule';
+import { DIALOG, entryProblems, entryWhen, everywhereAlways, firstDefaultOf } from '~/state/schedule';
+import { FirstDefaultChoice, FirstDefaultNote } from './first-default-note';
 import { TargetPicker } from './target-picker';
 
 export function EntryDialog({
@@ -109,6 +110,18 @@ export function EntryDialog({
               ))}
             </NativeSelect>
           </div>
+          {/* Near the top, where it is seen before Save and publish (#243). */}
+          {canPublish &&
+            (everywhereAlways(d) ? (
+              <FirstDefaultNote playlists={playlists} playlistId={d.playlistId} action="Save and publish" />
+            ) : (
+              <FirstDefaultChoice
+                playlists={playlists}
+                value={firstDefaultOf(d)}
+                onChange={(firstDefault) => edit({ firstDefault })}
+                action="Save and publish"
+              />
+            ))}
           <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           {preview && (
             <section aria-label="What this screen will play" className="grid gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">

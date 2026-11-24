@@ -70,6 +70,8 @@ export interface OrgGraph {
   brandAssignments: BrandAssignment[];
   /** The org's publish revision as read with the rest: a publish commits only if it is still this. */
   publishRevision: number;
+  /** The settings' version as read: a default a publish sets commits only if no one set one since (#243). */
+  settingsVersion: number;
   /** The org's time zone for new screens, if it has one: the probe screen's. */
   timezone: string | null;
 }
@@ -117,6 +119,8 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     brandKits: new Map(brandKits.map((k) => [k.id, k])),
     brandAssignments,
     publishRevision: settings?.publishRevision ?? 0,
+    // An org with no settings row is at version 1 (`settings.stage.set`).
+    settingsVersion: settings?.rowVersion ?? 1,
     timezone: settings?.timezone ?? null,
   };
 }
@@ -524,7 +528,16 @@ export async function publishOrg(
   opts: CompileOptions,
   pins?: readonly DraftPin[],
   end: readonly string[] = [],
-): Promise<{ writes: Write[]; removals: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; read: OrgGraph; graph: OrgGraph }> {
+): Promise<{
+  writes: Write[];
+  removals: Write[];
+  drafts: DraftReport;
+  screens: ScreenPublish[];
+  revision: number;
+  read: OrgGraph;
+  graph: OrgGraph;
+  madeDefault: { id: string; name: string } | null;
+}> {
   const read = await loadOrg(org);
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
@@ -539,8 +552,16 @@ export async function publishOrg(
       }
     }
   }
-  const { graph, writes: promotions, removals, drafts } = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const { writes: promotions, removals, drafts } = promoted;
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
+  // With no default playlist no screen can be compiled, and a new org's first schedule entry would
+  // reach none (#243): one on every screen at all hours makes its playlist the default, in the same batch.
+  // Guarded by the settings' version as read: a default set by hand since (set_default_playlist moves
+  // no publish revision) fails the batch, and the publish runs again from a fresh read, which finds it.
+  const madeDefault = read.defaultPlaylist ? null : firstDefault(promoted.graph, drafts);
+  if (madeDefault) writes.push(...(await org.settings.stage.set({ defaultPlaylistId: madeDefault.id }, read.settingsVersion)).writes);
+  const graph = madeDefault ? { ...promoted.graph, defaultPlaylist: madeDefault.id } : promoted.graph;
   // A takeover whose published version has ended plays nowhere again, though its draft may run on.
   const now = opts.now.getTime();
   const compiled = { ...graph, entries: graph.entries.filter((r) => (published(r)?.endsAt ?? Number.POSITIVE_INFINITY) > now) };
@@ -564,5 +585,28 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph };
+  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+}
+
+/** Whether an entry plays on every screen at all hours, always: what a default playlist does. */
+function everywhereAlways(e: ScheduleEntryRow): boolean {
+  const days: unknown = e.daysJson ? JSON.parse(e.daysJson) : null;
+  const everyDay = days === null || (Array.isArray(days) && new Set(days).size === 7);
+  return e.target === 'org' && everyDay && !e.fromTime && !e.toTime && !e.startDate && !e.endDate && e.startsAt === null && e.endsAt === null;
+}
+
+/**
+ * The default an org with none gets from a publish: the playlist of the regular schedule entries it
+ * made live that play on every screen at all hours, if they all play one, published. Owner decision
+ * on #243: a takeover or a narrower entry never sets it (the CMS asks for one instead); nor do
+ * several such playlists, which would be a guess.
+ */
+function firstDefault(graph: OrgGraph, drafts: DraftReport): { id: string; name: string } | null {
+  const made = new Set(drafts.promoted.filter((d) => d.kind === 'schedule_entry').map((d) => d.id));
+  const playlists = new Set(graph.entries.filter((e) => made.has(e.id) && everywhereAlways(e)).map((e) => e.playlistId));
+  const [only] = playlists;
+  if (playlists.size !== 1 || only === undefined) return null;
+  const row = graph.playlists.find((p) => p.id === only);
+  const live = row && published(row);
+  return live ? { id: only, name: live.name } : null;
 }

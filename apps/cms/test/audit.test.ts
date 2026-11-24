@@ -24,6 +24,16 @@ describe('eventText', () => {
 });
 
 describe('the audit log in words', () => {
+  it('says a publish made the org’s first default playlist, by name, and only then (#243)', () => {
+    const publish = (detail: AuditEntry['detail']) => entry({ action: 'publish', target: { kind: 'publish', id: 'pub_1' }, detail });
+    expect(whatText(publish({ input: {}, detail: { madeDefault: { id: 'pls_1', name: 'Opening week' } } }))).toBe(
+      'Published · made Opening week the default playlist',
+    );
+    expect(whatText(publish({ input: {} }))).toBe('Published');
+    // Its detail stays the input's: the default is said once, in what was done.
+    expect(detailText(publish({ input: {}, detail: { madeDefault: { id: 'pls_1', name: 'Opening week' } } }))).toBe('');
+  });
+
   it('words a membership change from the fields it kept, and an agent refused for its limits', () => {
     expect(
       whatText(entry({ action: 'invite_member', target: { kind: 'invitation', id: 'inv_1' }, detail: { email: 'sam@example.com', role: 'editor' } })),

@@ -35,6 +35,11 @@ export interface EntryDraft {
   to: string;
   startDate: string;
   endDate: string;
+  /**
+   * With no default playlist yet (#243): the one to make the default before publishing, chosen in
+   * the dialog. Unset follows the entry's playlist; '' is none.
+   */
+  firstDefault?: string;
 }
 
 /** A takeover in its dialog: until when, as a `datetime-local` value in the browser's time zone. */
@@ -44,6 +49,8 @@ interface TakeoverDraft {
   groupId: string;
   screenId: string;
   until: string;
+  /** As an entry's: the default to make first when there is none (#243). Unset follows its playlist; '' is none. */
+  firstDefault?: string;
 }
 
 interface ScheduleState {
@@ -106,6 +113,15 @@ export const entryWhen = (d: EntryDraft) => ({
   startDate: d.startDate || null,
   endDate: d.endDate || null,
 });
+
+/**
+ * Whether the entry plays on every screen at all hours, always: one that makes its playlist the
+ * org's first default when published (the `publish` tool, #243). For any other, the dialog asks.
+ */
+export const everywhereAlways = (d: EntryDraft) => d.target === 'org' && d.days.length === 7 && !d.from && !d.to && !d.startDate && !d.endDate;
+
+/** The default the dialog's person chose to make first, when it asks (#243): its own choice, else the playlist it plays. */
+export const firstDefaultOf = (d: { playlistId: string; firstDefault?: string }) => d.firstDefault ?? d.playlistId;
 
 /** What is wrong with the dialog's entry, as a screen or the tools would refuse it: empty when it can be saved. */
 export function entryProblems(d: EntryDraft): string[] {
@@ -231,8 +247,11 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
     },
 
     async saveAndPublishEntry(orgId) {
+      // Read before the save, which drops the dialog's draft. On every screen at all hours, the publish makes the default itself.
+      const d = get().schedule.entries[DIALOG]?.edit;
+      const firstDefault = d && !everywhereAlways(d) ? firstDefaultOf(d) : undefined;
       const record = await saveDialogEntry(orgId);
-      if (record) await get().publishEntry(orgId, record);
+      if (record) await get().publishEntry(orgId, record, firstDefault);
     },
 
     async reloadEntry(orgId) {
@@ -266,12 +285,15 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
     editTakeover: (change) => takeovers.update(DIALOG, (d) => ({ ...d, ...change })),
 
     async startTakeover(orgId) {
-      if (get().schedule.takeovers[DIALOG]?.orgId !== orgId) return;
+      const draft = get().schedule.takeovers[DIALOG];
+      if (draft?.orgId !== orgId) return;
+      // A takeover never makes the default itself: the person's choice does, when there is none (#243).
+      const firstDefault = firstDefaultOf(draft.edit);
       // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
       const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
       if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
-      await get().publishSchedule(orgId, [made.record]);
+      await get().publishSchedule(orgId, [made.record], firstDefault);
     },
 
     closeScheduleDialog: close,

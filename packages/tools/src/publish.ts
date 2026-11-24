@@ -106,7 +106,7 @@ async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[]
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
     problems: s.problems,
   }));
-  const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, screens };
+  const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, madeDefault: result.madeDefault, screens };
   const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
   // Deleted entries go in the same batch as the switches; on their own they make no publish.
   write({ row: undefined, writes: result.removals });
@@ -138,7 +138,7 @@ async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[]
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. Returns { publish, promoted, held, removed, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -155,6 +155,8 @@ const publish = defineTool({
   output: outputs.publish,
   example: {},
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
+  // The default it set is a change of the org's settings: its row says so.
+  auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: (ctx) => runPublish(ctx, ctx.input.drafts),
 });
 
