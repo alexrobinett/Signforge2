@@ -7,7 +7,7 @@
  * ticked, and the selection added to a group or removed from one.
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -25,7 +25,7 @@ import { useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
-import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
+import { LatestPublish } from '~/components/publishes/latest-publish';
 import { PairScreenForm } from '~/components/screens/pair-screen-form';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { KIND_WORD, ScreenStatus } from '~/components/screens/status';
@@ -41,9 +41,7 @@ import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKi
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
-import { byWord, publishTitle } from '~/lib/publishes';
 import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
-import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
@@ -218,34 +216,6 @@ function ScreensPage() {
         <ScreenTable screens={shown} groups={groups} groupsOf={groupsOf} now={now} canManage={canManage} sort={sort} />
       )}
     </div>
-  );
-}
-
-/** The latest publish and how its rollout stands (board Screens A), linking to its reasons. */
-const app = getRouteApi('/_app');
-
-function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
-  const { data } = useQuery(publishQuery(orgId, null));
-  const me = app.useLoaderData().user.id;
-  const publish = data?.publish;
-  if (!publish || !data.screens.length) return null;
-  const at = new Date(publish.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  return (
-    <section aria-label="Latest publish" className="flex flex-col gap-3.5 rounded-[14px] border bg-card px-5 py-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <p className="text-[15px]">
-          <strong className="font-semibold">{publishTitle(publish)}</strong>{' '}
-          <span className="text-muted-foreground">
-            · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish, me)}
-          </span>
-        </p>
-        <Link to="/publishes" className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline sm:min-h-0 sm:py-1.5">
-          View rollout
-        </Link>
-      </div>
-      <RolloutBar publish={publish} screens={data.screens} now={now} />
-      <RolloutLegend publish={publish} screens={data.screens} now={now} />
-    </section>
   );
 }
 
