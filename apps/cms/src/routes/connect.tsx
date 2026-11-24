@@ -5,6 +5,7 @@
  * layout: the connection picks its own org, whichever the session has active. The provider's query
  * is read from the request as it signed it and carried as one parameter, `q`, from then on.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { Badge } from '~/components/ui/badge';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { BotIcon, TriangleAlertIcon } from 'lucide-react';
@@ -142,7 +143,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
               <fieldset className="flex flex-col gap-0.5">
                 <legend className="mb-2 font-semibold">It may</legend>
                 {offered.map((s) => (
-                  <label key={s} className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 ${isOn(s) ? 'bg-accent' : ''}`}>
+                  <label key={s} className={choiceVariants({ className: 'flex cursor-pointer items-start gap-3 rounded-lg p-3' })}>
                     <input
                       type="checkbox"
                       className="mt-px size-5 flex-none accent-primary"

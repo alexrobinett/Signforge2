@@ -44,6 +44,12 @@ const EDGES_ON: [string, string][] = [
   ['input', 'background'],
   ['ring', 'card'],
   ['ring', 'background'],
+  // A selected choice (#373, ui/choice.tsx): its primary edge against its own tint and the card or canvas
+  // around it; its focus ring, opaque, on a selected one's tint too.
+  ['primary', 'accent'],
+  ['primary', 'card'],
+  ['primary', 'background'],
+  ['ring', 'accent'],
   ...STATUSES.map((s): [string, string] => [`status-${s}`, 'card']),
   ...[1, 2, 3, 4, 5].map((n): [string, string] => [`chart-${n}`, 'card']),
 ];
@@ -145,3 +151,20 @@ for (const [theme, selector] of [
     }
   });
 }
+
+// The one selected look (#373, ui/choice.tsx): on the stage, a 20% stage-ring tint over the stage's
+// control groove with stage-foreground words; its edge, and the focus ring (also stage-ring), 3:1 on
+// the tint, the groove and the stage around it.
+it('a selected stage choice reads at 4.5:1, its edge and focus ring at 3:1', () => {
+  const t = tokens(':root');
+  const groove = t['stage-control'] ?? '';
+  const tint = over(t['stage-ring'] ?? '', groove, 0.2);
+  expect(contrastRatio(t['stage-foreground'] ?? '', tint)).toBeGreaterThanOrEqual(4.5);
+  for (const [name, bg] of [
+    ['tint', tint],
+    ['groove', groove],
+    ['stage', t.stage ?? ''],
+  ]) {
+    expect(contrastRatio(t['stage-ring'] ?? '', bg ?? ''), `--stage-ring on the ${name}`).toBeGreaterThanOrEqual(3);
+  }
+});

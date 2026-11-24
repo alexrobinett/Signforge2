@@ -47,8 +47,6 @@ async function sync(request: APIRequestContext, credential: string, display = { 
  * As if the screen stopped syncing `minutes` ago: its last sync moved back in the run's local D1,
  * which the dev API reads (`e2e/global-setup.ts`). Waiting out the org's 5-minute minimum would do the same, slowly.
  */
-const stopSyncing = (screenId: string, minutes: number) => d1(`UPDATE screens SET last_seen_at = last_seen_at - ${minutes * 60_000} WHERE id = '${screenId}'`);
-
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
   await page.goto('/sign-in');
   await hydrated(page);
@@ -281,8 +279,11 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await sync(request, credential, { on: true }, await publishImage(page, screenId, 'Specials'));
   await expect(tile.getByText('Playing Specials · as scheduled')).toBeVisible({ timeout: 30_000 });
 
-  // It stops syncing; the page, left open, says so within a poll.
-  await stopSyncing(screenId, 20);
+  // It stops syncing; the page, left open, says so within a poll. Its last sync is put 20 minutes
+  // before the page's own clock, fixed, so the minutes it shows do not depend on how long this takes.
+  const at = Date.now();
+  await page.clock.setFixedTime(at);
+  await d1(`UPDATE screens SET last_seen_at = ${at - 20 * 60_000} WHERE id = '${screenId}'`);
   await expect(tile.getByText('Unreachable 20 min · still playing Specials')).toBeVisible({ timeout: 30_000 });
   await expect(tile.getByText('Online')).toBeHidden();
   expect(await page.evaluate(() => 'sfStayed' in window)).toBe(true);

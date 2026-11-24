@@ -57,6 +57,16 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   // Every base template in templates/ shows the thumbnail the player drew, from the CMS's own assets.
   await opener.click();
   await expect(radios.first()).toBeChecked();
+  // Selected without colour (#373): under forced colors the checked template card's edge is thicker than the others'.
+  await page.emulateMedia({ forcedColors: 'active' });
+  const cardEdge = (i: number) =>
+    dialog
+      .getByRole('group', { name: 'Template' })
+      .locator('label')
+      .nth(i)
+      .evaluate((l) => getComputedStyle(l).borderTopWidth);
+  expect(await cardEdge(0)).not.toBe(await cardEdge(1));
+  await page.emulateMedia({ forcedColors: 'none' });
   const base = readdirSync(TEMPLATES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d): { id: string; name: string } => JSON.parse(readFileSync(join(TEMPLATES_DIR, d.name, 'template.json'), 'utf8')));

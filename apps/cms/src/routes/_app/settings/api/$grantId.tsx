@@ -6,6 +6,7 @@
  * days come from the call log (M4-08, `get_agent_grant_usage`): its numbers, its last refusal and its
  * recent calls, reads included, each change linked to its row in the audit log.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { ArrowLeftIcon, LoaderCircleIcon } from 'lucide-react';
 import { useId } from 'react';
@@ -134,7 +135,7 @@ function Scopes({ grant, mine, grantedBy }: { grant: AgentGrant; mine: ConnectSc
           {CONNECT_SCOPES.map((s) => {
             const why = lockedOn(s);
             return (
-              <label key={s} className={`flex items-start gap-3 rounded-lg p-3 ${shown.includes(s) ? 'bg-accent' : ''}`}>
+              <label key={s} className={choiceVariants({ className: 'flex items-start gap-3 rounded-lg p-3' })}>
                 <input
                   type="checkbox"
                   className="mt-px size-5 flex-none accent-primary"
