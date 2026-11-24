@@ -2,7 +2,7 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { liveSources, PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import { liveSources, PREVIEW_PROTOCOL, type ScreenManifest, type TemplateManifest } from '@signforge/contract';
 import news from '@signforge/template-news/template.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ComponentProps, createElement } from 'react';
@@ -219,8 +219,85 @@ describe('the stage (review of #97)', () => {
     store.getState().attachStage({ frame, orgId: ORG, spotId: image.id, orientation: 'landscape' });
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
     await held;
-    expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
+    expect(store.getState().spotEditor.refusals).toEqual(['Asset ast_new is still being checked']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('a stage out of view (#342)', () => {
+  it("posts only to a frame in view: a draft compiled out of view (its warnings kept current), or the player's failure there, is posted when the frame is seen", async () => {
+    const queryClient = new QueryClient();
+    let hear: (e: unknown) => void = () => {};
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
+    const manifest = { screen: 'preview' } as unknown as ScreenManifest;
+    let compiles = 0;
+    let finish = () => {};
+    let compiled = Promise.resolve();
+    const store = createStore<SpotEditorSlice & { playlistStageDraft: () => Promise<{ manifest: ScreenManifest; problems: string[] }> }>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      playlistStageDraft: async () => {
+        compiles++;
+        await compiled;
+        return { manifest, problems: [] };
+      },
+    }));
+    const posted: unknown[] = [];
+    // The frame's box in a 390×280 window: `top` moves it, as a scroll or a resize does.
+    let top = 0;
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f), innerWidth: 390, innerHeight: 280 });
+    const frame: Window = {
+      postMessage: (m: never) => posted.push(m),
+      frameElement: { getBoundingClientRect: () => ({ top, bottom: top + 100, left: 0, right: 390 }) },
+    } as never;
+    const say = (data: Record<string, unknown>) => hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, ...data } });
+    store.getState().attachStage({ frame, orgId: ORG, playlistId: 'pls_a', orientation: 'landscape' });
+    store.getState().seeStage(false);
+    say({ type: 'listening' });
+    await vi.advanceTimersByTimeAsync(0);
+    // Compiled, so the playlist's row warnings are current, but not posted.
+    expect([compiles, posted.length]).toEqual([1, 0]);
+
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+
+    // Moved out of view while it compiled: kept for when it is back.
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    store.getState().seeStage(false);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+    compiled = Promise.resolve();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+
+    // Resized while it compiled, the frame now below the window, before the observer says so: its box is measured, not trusted (re-check of #387).
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    top = 300;
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+    compiled = Promise.resolve();
+    top = 0;
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(3);
+
+    // Scrolled away while it plays: the player cannot draw there, which is not the draft's fault.
+    store.getState().seeStage(false);
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBeNull();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(4);
+    // In view, a failure is the stage's to say.
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBe('pls_a: not ready within 2000 ms');
   });
 });
 

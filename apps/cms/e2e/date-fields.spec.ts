@@ -38,7 +38,7 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(() => page.context().close());
 
-test('a new spot leaves a datetime with no default for the editor to pick, says it needs one, and saves the one picked', async () => {
+test('a new spot leaves a datetime with no default for the editor to pick, says it needs one once left empty, and saves the one picked', async () => {
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
@@ -52,12 +52,20 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   const target = page.getByLabel('Target');
   await expect(target).toHaveAttribute('type', 'datetime-local');
   await expect(target).toHaveValue('');
+  // Nothing is wrong with a field nobody has had the chance to fill (#359): left empty, it says so, in words.
+  await expect(target).not.toHaveAttribute('aria-invalid');
+  await expect(page.locator('#field-target-error')).toBeEmpty();
+  await target.focus();
+  await target.blur();
   await expect(target).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.locator('#field-target-error')).toHaveText('field "target" has no date and time yet');
+  await expect(page.locator('#field-target-error')).toHaveText('No date and time for Target: pick one.');
+  // Said where a screen reader hears it as it appears: a live region the field had all along (review of #387).
+  await expect(page.locator('#field-target-error')).toHaveAttribute('aria-live', 'polite');
+  await expect(target).toHaveAttribute('aria-describedby', 'field-target-error');
   // Its text starts empty too, not with the template's sample copy (#253).
   expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '', title: '' });
 
   await target.fill('2026-12-24T18:00');
-  await expect(page.locator('#field-target-error')).toHaveCount(0);
+  await expect(page.locator('#field-target-error')).toBeEmpty();
   await expect.poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 }).toEqual({ target: '2026-12-24T18:00', title: '' });
 });

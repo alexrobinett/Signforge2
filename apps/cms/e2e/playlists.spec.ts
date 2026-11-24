@@ -58,8 +58,8 @@ test('make a playlist, add spots, and see the real player play the loop', async 
 
   const list = page.getByRole('list', { name: 'Spots in play order' });
   await expect(list.getByRole('listitem')).toHaveCount(4);
-  // The photo promo has no photo: the stage plays the rest, and says why it left it out.
-  await expect(list.getByRole('listitem').nth(3)).toContainText('Not in the preview yet:');
+  // The photo promo has no photo: the stage plays the rest, and says why it left it out, in words (#359).
+  await expect(list.getByRole('listitem').nth(3)).toContainText('Not in the preview yet. No image for Background photo: choose one.');
   // Three 4 s clocks, and the promo's 8 s default: 20 s.
   await expect(page.getByText('4 spots · 20 s loop', { exact: false })).toBeVisible();
 

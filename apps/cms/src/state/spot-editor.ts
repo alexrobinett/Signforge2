@@ -16,6 +16,12 @@
  * its playlist on the same stage (a target with a `playlistId`): it compiles the draft
  * (`playlistStageDraft`, src/state/playlist-editor.ts) and asks for a redraw (`redrawStage`).
  *
+ * The player is sent a draft only while its frame is in view (`seeStage`, from the frame's
+ * IntersectionObserver): a browser runs no animation frames in a frame scrolled out of view, and a
+ * template waits for two before it is ready (the SDK's `sized`), so the player would time out (#342).
+ * The draft is still compiled out of view, so what it says (a playlist's left-out spots) stays
+ * current; one compiled out of view, or one the player failed out of view, is posted when the frame comes back.
+ *
  * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
  * the draft is compiled without its bindings, so the stage shows the fallback values. While the
@@ -28,6 +34,7 @@ import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { playerMessage } from '~/lib/preview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
+import { problemWords } from '~/lib/field-words';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
@@ -78,8 +85,8 @@ interface SpotEditorState {
   /** True while the draft cannot be drawn: the stage keeps the last frame it drew. */
   holding: boolean;
   /**
-   * While holding, why the draft cannot be a spot at all when no field of the form is marked for
-   * it: an image still being checked, a template version not approved. Empty when a field explains it.
+   * While holding, why the draft cannot be played, in words: a field's problem by its label (an
+   * empty one too, before its field is marked), an image still being checked, a template version not approved.
    */
   refusals: string[];
   /** Whether the player has said it plays the draft. */
@@ -91,6 +98,11 @@ interface SpotEditorState {
   /** The room the stage has on the page, for scaling the screen to fit; null until measured. */
   stageBox: { w: number; h: number } | null;
   newSpot: NewSpotDraft;
+  /**
+   * By spot, the fields a person has touched (changed, left or opened the picker of), and whether
+   * Publish was pressed: an empty field's problem shows only then (#359), not on a spot just made.
+   */
+  checks: Record<string, { touched: string[]; all: boolean }>;
   /** Delete's confirmation: open, deleting, or refused, with the playlists that play the spot when that is why. */
   deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[] };
 }
@@ -112,10 +124,16 @@ export interface SpotEditorSlice {
   /** Draws what the stage shows again, a moment after the last call: after an edit of the playlist it shows. */
   redrawStage: () => void;
   measureStage: (box: { w: number; h: number }) => void;
+  /** The stage scrolled into view or out of it. */
+  seeStage: (inView: boolean) => void;
   openNewSpot: (open: boolean) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft and opens its editor. */
   createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
+  /** A field of the spot touched: its empty-field problem may show now. */
+  touchField: (spotId: string, field: string) => void;
+  /** Publish pressed: every field's problem shows. */
+  checkAllFields: (spotId: string) => void;
   askDeleteSpot: (open: boolean) => void;
   /**
    * Deletes the spot, at the version the editor holds (as loaded, or as its own save left it), and goes
@@ -160,6 +178,7 @@ const initial: SpotEditorState = {
   stageError: null,
   stageBox: null,
   newSpot: newSpotDraft(),
+  checks: {},
   deleting: closedDelete(),
 };
 
@@ -169,6 +188,10 @@ interface StageLink {
   listening: Window | null;
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
+  /** Whether any of the stage is in the viewport, as its IntersectionObserver last said. */
+  inView: boolean;
+  /** A draw to make once the stage is back in view: asked for out of view, or failed there. */
+  owed: boolean;
 }
 
 /** The draft the spot's page shows and edits in `orgId`, or null for the spot as read (`shown`). */
@@ -176,6 +199,12 @@ export const spotShown = (e: SpotEditorState, orgId: string, spot: SpotView): Sp
   const d = e.drafts[spot.id];
   return d?.orgId === orgId ? shown(d, spot.version) : null;
 };
+
+/** Whether any of the stage's frame is in the viewport now, by its box: the player draws only there (#342). */
+function frameInView(frame: Window): boolean {
+  const box = frame.frameElement?.getBoundingClientRect();
+  return box !== undefined && box.bottom > 0 && box.right > 0 && box.top < window.innerHeight && box.left < window.innerWidth;
+}
 
 export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
@@ -246,8 +275,9 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       const now = new Date().toISOString();
       return table ? [{ id, version: 0, fetchedAt: now, checkedAt: now, data: table }] : [];
     };
-    // The stage shows one spot: its reasons need no "spot <id>:" before them.
-    const refusals = result.refused ? result.problems.map((p) => p.replace(`spot ${spot.id}: `, '')) : [];
+    // The stage shows one spot: its reasons need no "spot <id>:" before them, and its fields' are said by their labels (#359).
+    const fields = versionsById(templates).get(spot.templateVersionId ?? '')?.manifest.fields ?? {};
+    const refusals = result.manifest ? [] : result.problems.map((p) => problemWords(p.replace(`spot ${spot.id}: `, ''), fields));
     return { ...result, refusals, data: (await Promise.all(sources.map(latest))).flat() };
   }
 
@@ -268,11 +298,17 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       editor((x) => ({ ...x, holding: true, refusals: result.refusals ?? [] }));
       return;
     }
+    // Compiled whatever is in view, so what the draft leaves out (a playlist's row warnings) stays current; posted only to a frame in view,
+    // measured at this moment: the observer's last answer is stale after a resize while it compiled.
+    if (!stage.inView || !frameInView(t.frame)) {
+      stage.owed = true;
+      return;
+    }
     t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data: result.data ?? [] }, location.origin);
     editor((x) => ({ ...x, holding: false, refusals: [] }));
   }
 
-  const stage: StageLink = { target: null, listening: null, seq: 0 };
+  const stage: StageLink = { target: null, listening: null, seq: 0, inView: true, owed: false };
 
   /** What the stage's player says. Only the attached frame, on this origin, is listened to. */
   const hear = (e: MessageEvent) => {
@@ -282,6 +318,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       stage.listening = stage.target.frame;
       void redraw();
     } else if (msg?.type === 'playing') editor((x) => ({ ...x, playing: true, playingSpot: msg.spot, stageError: null }));
+    // Out of view the player cannot draw: not the draft's fault, so drawn again when the stage is seen.
+    else if (msg?.type === 'error' && !stage.inView) stage.owed = true;
     else if (msg?.type === 'error') editor((x) => ({ ...x, stageError: msg.message }));
   };
 
@@ -365,6 +403,13 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
 
     measureStage: (stageBox) => editor((e) => ({ ...e, stageBox })),
 
+    seeStage(inView) {
+      stage.inView = inView;
+      if (!inView || !stage.owed) return;
+      stage.owed = false;
+      void redraw();
+    },
+
     openNewSpot: (open) => editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() })),
     editNewSpot: (change) => editor((e) => ({ ...e, newSpot: { ...e.newSpot, ...change, error: null } })),
 
@@ -388,6 +433,14 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         editor((e) => ({ ...e, newSpot: { ...e.newSpot, pending: false, error: toolMessage(err) } }));
       }
     },
+
+    touchField(spotId, field) {
+      const was = get().spotEditor.checks[spotId] ?? { touched: [], all: false };
+      if (was.all || was.touched.includes(field)) return;
+      editor((e) => ({ ...e, checks: { ...e.checks, [spotId]: { ...was, touched: [...was.touched, field] } } }));
+    },
+
+    checkAllFields: (spotId) => editor((e) => ({ ...e, checks: { ...e.checks, [spotId]: { touched: e.checks[spotId]?.touched ?? [], all: true } } })),
 
     askDeleteSpot: (open) => editor((e) => ({ ...e, deleting: { ...closedDelete(), open } })),
 

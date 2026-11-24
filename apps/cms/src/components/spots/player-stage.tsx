@@ -87,6 +87,7 @@ export function PlayerStage({
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
+  const see = useAppStore((s) => s.seeStage);
   const box = useAppStore((s) => s.spotEditor.stageBox);
   const holding = useAppStore((s) => s.spotEditor.holding);
   const refusals = useAppStore((s) => s.spotEditor.refusals);
@@ -104,16 +105,26 @@ export function PlayerStage({
   const scale: Scale = search.scale ?? 'fit';
   const shown = scale === 'fit' ? fit : 1;
 
-  // The frame and what it shows, handed to the store whenever either changes.
+  // The frame and what it shows, handed to the store whenever either changes; and whether the frame
+  // itself is in view, where alone the player can draw (#342): the room around it may be in view when it is not.
   const frameRef = useCallback(
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
-      if (!frame) return;
+      if (!el || !frame) return;
       const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId, fallback };
       attach({ frame, orgId, orientation, brandKitId, ...shows });
-      return () => attach(null);
+      const inView = new IntersectionObserver((entries) => {
+        const last = entries.at(-1);
+        if (last) see(last.isIntersecting);
+      });
+      inView.observe(el);
+      return () => {
+        inView.disconnect();
+        see(true);
+        attach(null);
+      };
     },
-    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
+    [attach, see, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
   );
   // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
@@ -219,7 +230,7 @@ export function PlayerStage({
             {playlistId !== undefined
               ? 'Holding the last frame the player could show.'
               : refusals.length
-                ? `${playing ? 'Holding the last valid frame' : 'Not shown'}: ${refusals.join('; ')}.`
+                ? `${playing ? 'Holding the last valid frame' : 'Not shown yet'}. ${refusals.map((r) => `${r}.`).join(' ')}`
                 : 'Holding the last valid frame until the marked field is fixed.'}
           </span>
         ) : (

@@ -417,7 +417,7 @@ function LiveSource({
         </button>
         <div id={`${ids}.fallback`} hidden={!fallbackShown} className="flex flex-col gap-4 px-3 pb-4">
           <p className="text-sm text-muted-foreground">What screens show while the source has no fresh data. They start as the template's own values.</p>
-          <FieldForm fields={manifest.fields} shown={fallback} draft={draft} assets={assets} onChange={onChange} />
+          <FieldForm spotId={target.spot.id} fields={manifest.fields} shown={fallback} draft={draft} assets={assets} onChange={onChange} />
         </div>
       </div>
     </div>
