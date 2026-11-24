@@ -166,17 +166,20 @@ const deletePlaylist = defineTool({
 const setDefaultPlaylist = defineTool({
   name: 'set_default_playlist',
   description:
-    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Returns { playlist }.",
+    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Pass the organization settings' version you read (get_org_settings) as ifVersion so a default someone else chose since is not replaced: refused with a conflict if they changed. Returns { playlist }.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ playlistId: id('playlist') }),
+  input: z.object({
+    playlistId: id('playlist'),
+    ifVersion: ifVersion.optional().describe("The organization settings' version you read (get_org_settings): refused with a conflict if they changed since"),
+  }),
   output: outputs.set_default_playlist,
   example: { playlistId: 'pls_example' },
   target,
   handler: async ({ org, input, write }) => {
     const row = await requirePlaylist(org, input.playlistId);
-    write(await org.settings.stage.set({ defaultPlaylistId: row.id }));
+    write(await org.settings.stage.set({ defaultPlaylistId: row.id }, input.ifVersion));
     return { playlist: playlistView(row, await org.playlists.items(row.id), row.id) };
   },
   // Deleted between the read and the commit, the setting's foreign key fails the batch.

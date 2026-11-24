@@ -202,3 +202,18 @@ describe('playlist tools racing another commit (review of #97)', () => {
     expect(await editorCalls(racing)('update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
   });
 });
+
+describe('set_default_playlist with ifVersion (#336)', () => {
+  it('replaces no default someone chose since the settings were read: refused as changed, and it stays theirs', async () => {
+    const { o, call } = await setup('pl-default-guard');
+    const read = (await ok(call('get_org_settings', {}))).settings as { version: number };
+    // Someone else chooses one first.
+    expect(await ok(call('set_default_playlist', { playlistId: o.playlist }))).toMatchObject({ playlist: { id: o.playlist } });
+    const mine = await testScope(env.DB, o.orgId).playlists.insert({ name: 'Mine', transitionJson: JSON.stringify({ type: 'cut' }) });
+    expect(await call('set_default_playlist', { playlistId: mine.id, ifVersion: read.version })).toMatchObject({ ok: false, error: 'conflict' });
+    expect((await testScope(env.DB, o.orgId).settings.get())?.defaultPlaylistId).toBe(o.playlist);
+    // At the version as it is now, it is set.
+    const now = (await ok(call('get_org_settings', {}))).settings as { version: number };
+    expect(await ok(call('set_default_playlist', { playlistId: mine.id, ifVersion: now.version }))).toMatchObject({ playlist: { id: mine.id } });
+  });
+});
