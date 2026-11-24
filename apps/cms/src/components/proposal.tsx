@@ -49,6 +49,15 @@ function valueWords(c: Change, value: unknown, spotNames: ReadonlyMap<string, st
   return 'Set';
 }
 
+/**
+ * An agent as a page names it (the approvals queue's `askerName`): its client's plain name; "An agent" when
+ * the name may not be shown; "An agent no longer connected" only once it is gone.
+ */
+function agentName(a: { name: string | null; gone: boolean } | undefined): string {
+  if (a?.name) return a.name;
+  return a?.gone ? 'An agent no longer connected' : 'An agent';
+}
+
 export function ProposalPanel({
   orgId,
   kind,
@@ -102,7 +111,9 @@ export function ProposalPanel({
               {draft.proposed && by && (
                 <>
                   {' · Proposed by '}
-                  <bdi className="[overflow-wrap:anywhere]">{by.name ?? 'an agent'}</bdi>
+                  <bdi className="[overflow-wrap:anywhere]">
+                    {by.name ?? (by.kind === 'drawer' ? 'a member' : by.gone ? 'an agent no longer connected' : 'an agent')}
+                  </bdi>
                   {by.kind === 'mcp' ? ', via MCP' : ', from the agent drawer'}
                   {now - by.at < 60_000 ? ' · just now' : ` · ${ago(now - by.at)} ago`}
                 </>
@@ -199,12 +210,14 @@ export function ProposalPanel({
         <div className="flex flex-col gap-1.5">
           <h3 className="text-sm font-semibold">Audit log for this {what}</h3>
           <ol className="flex flex-col gap-1 text-sm">
-            {entries.map((e) => (
-              <li key={`${e.at}-${e.action}-${e.actor.id}`} className="flex flex-wrap gap-x-3">
+            {entries.map((e, i) => (
+              // Entries have no id, and two can share a time, an action and an actor: the strip's order, newest first, is fixed.
+              // biome-ignore lint/suspicious/noArrayIndexKey: the index disambiguates rows otherwise alike, in an order that never changes.
+              <li key={`${e.at}-${e.action}-${e.actor.id}-${i}`} className="flex flex-wrap gap-x-3">
                 <span className="text-muted-foreground tabular-nums">{auditTime(e.at, timezone, now)}</span>
                 <bdi className="font-medium [overflow-wrap:anywhere]">
-                  {/* The proposing agent by the name its chip gives it, not its client's id. */}
-                  {e.actor.kind === 'agent' && by?.kind === 'mcp' && e.actor.id === by.id && by.name ? `${by.name}, agent` : whoText(e, names, me)}
+                  {/* An agent by its client's plain name, never its id (as the approvals queue names an asker). */}
+                  {e.actor.kind === 'agent' ? `${agentName(draft.agents.find((a) => a.id === e.actor.id))}, agent` : whoText(e, names, me)}
                 </bdi>
                 <span>{ACTIONS[e.action]?.words ?? e.action.replaceAll('_', ' ')}</span>
               </li>

@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { grantClient } from './agent-grants';
 import { id } from './fields';
 import { outputs } from './outputs';
-import { type Actor, CMS_AGENT_CLIENT_ID, defineTool, isAgent, notFound } from './tool';
+import { type Actor, CMS_AGENT_CLIENT_ID, defineTool, isAgent, notFound, ToolError } from './tool';
 
 export type KeptKind = 'spot' | 'playlist';
 
@@ -30,7 +30,8 @@ export async function keptFor(
   items?: () => Promise<readonly string[]>,
 ): Promise<Staged> {
   if (!isAgent(actor)) return org.draftSnapshots.stage.clear(kind, row.id);
-  return org.draftSnapshots.stage.propose(kind, row.id, {
+  // Held to the draft's version as read, in the same batch, as every write of a kept draft is.
+  return org.draftSnapshots.stage.propose(kind, row, {
     contentJson: contentJson(row, await items?.()),
     sampleFieldsJson: 'sampleFieldsJson' in row ? row.sampleFieldsJson : null,
   });
@@ -42,21 +43,30 @@ const WRITES: Record<KeptKind, readonly string[]> = { spot: ['create_spot', 'upd
 /** The audit rows read for the author: an agent's proposal is the newest writes of it, after a person's Reject at most. */
 const AUTHOR_ROWS = 20;
 
-/** Who proposed the draft: the newest audit row by an agent that wrote it, named as a page names it; null if the log no longer has one. */
-async function proposedBy(org: OrgScope, kind: KeptKind, draftId: string) {
+/**
+ * The draft's newest audit rows, with every agent grant among them named as a page names it: its client's
+ * plain name, null when the name may not be shown, and `gone` once it is no longer connected (as the
+ * approvals queue names an asker). One read of the connected grants, however many.
+ */
+async function authorsOf(org: OrgScope, kind: KeptKind, draftId: string) {
   const rows = await org.auditLog.list({ limit: AUTHOR_ROWS, target: { kind, id: draftId } });
-  const row = rows.find((r) => WRITES[kind].includes(r.action) && (r.actorKind === 'agent' || r.clientId === CMS_AGENT_CLIENT_ID));
+  const ids = [...new Set(rows.filter((r) => r.actorKind === 'agent').map((r) => r.actorId))];
+  const connected = ids.length ? new Map((await org.agentGrants.connected()).map((c) => [c.grant.id, grantClient(c).name])) : new Map<string, string | null>();
+  return { rows, agents: ids.map((id) => ({ id, name: connected.get(id) ?? null, gone: !connected.has(id) })) };
+}
+
+/** Who proposed the draft: the newest of its audit rows by an agent that wrote it, named as a page names it; null if the log no longer has one. */
+async function proposedBy(org: OrgScope, kind: KeptKind, authors: Awaited<ReturnType<typeof authorsOf>>) {
+  const row = authors.rows.find((r) => WRITES[kind].includes(r.action) && (r.actorKind === 'agent' || r.clientId === CMS_AGENT_CLIENT_ID));
   if (!row) return null;
-  let name: string | null = null;
-  if (row.actorKind === 'agent') {
-    const [connected] = await org.agentGrants.connected({ grantId: row.actorId });
-    name = connected ? grantClient(connected).name : null;
-  } else name = (await org.members.list()).find((m) => m.userId === row.actorId)?.name || null;
+  const agent = row.actorKind === 'agent' ? authors.agents.find((a) => a.id === row.actorId) : undefined;
+  const name = agent ? agent.name : (await org.members.list()).find((m) => m.userId === row.actorId)?.name || null;
   return {
     kind: row.actorKind === 'agent' ? ('mcp' as const) : ('drawer' as const),
     id: row.actorId,
     clientId: row.clientId,
     name,
+    gone: agent?.gone ?? false,
     at: row.at,
   };
 }
@@ -89,7 +99,7 @@ function changesOf(now: Record<string, unknown>, was: Record<string, unknown>) {
 const getAgentDraft = defineTool({
   name: 'get_agent_draft',
   description:
-    "Whether a spot's or playlist's draft is an agent's proposal (#116), and what it changes: who proposed it (from the audit log: null once the log no longer has it), whether a Reject set an agent's draft aside (rejected: revert_spot_draft or revert_playlist_draft again puts it back), and the draft's changes against its published version, field by field (a template spot's data, assets and bindings by field key; a playlist's items as spot ids). Give spotId or playlistId. Returns { kind, id, version, proposed, by, rejected, publishedVersion, changes }.",
+    "Whether a spot's or playlist's draft is an agent's proposal (#116), and what it changes: who proposed it (from the audit log: null once the log no longer has it), whether a Reject set an agent's draft aside (rejected: revert_spot_draft or revert_playlist_draft again puts it back), and the draft's changes against its published version, field by field (a template spot's data, assets and bindings by field key; a playlist's items as spot ids); and the agents among its newest audit rows, by name as a page shows it (agents). Give spotId or playlistId. Returns { kind, id, version, proposed, by, rejected, agents, publishedVersion, changes }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -108,6 +118,7 @@ const getAgentDraft = defineTool({
       kind === 'playlist' ? org.playlists.items(row.id) : Promise.resolve(undefined),
     ]);
     const proposed = kept?.holds === 'person';
+    const authors = await authorsOf(org, kind, row.id);
     // Both as `published_json` holds content: the draft's now, and the published one's.
     const now: Record<string, unknown> = JSON.parse(contentJson(row, items));
     const was: Record<string, unknown> | null = row.publishedJson ? JSON.parse(row.publishedJson) : null;
@@ -116,7 +127,8 @@ const getAgentDraft = defineTool({
       id: row.id,
       version: row.rowVersion,
       proposed,
-      by: proposed ? await proposedBy(org, kind, row.id) : null,
+      by: proposed ? await proposedBy(org, kind, authors) : null,
+      agents: authors.agents,
       rejected: kept?.holds === 'agent',
       publishedVersion: row.publishedVersion,
       changes: was ? changesOf(now, was) : [],
@@ -135,6 +147,21 @@ export const spotContent = z.object({
   fit: z.enum(['cover', 'contain']).nullable(),
   url: z.string().nullable(),
 });
+
+/**
+ * Why a Reject or Keep's batch was refused when the draft is still the version shown: what is kept beside
+ * it changed first, as another Reject, a Keep or a publish decided it (review of #410), or a spot a
+ * playlist's Reject puts back was deleted. Else the dispatcher's own word for a stale version.
+ */
+export async function decidedMeanwhile(org: OrgScope, kind: KeptKind, draftId: string, version: number) {
+  const row = kind === 'spot' ? await org.spots.get(draftId) : await org.playlists.get(draftId);
+  if (!row) return notFound(kind, draftId);
+  if (row.rowVersion !== version) return undefined;
+  return new ToolError('conflict', `this ${kind}'s agent draft was kept, rejected or published meanwhile, or what it puts back changed: read it again`, {
+    id: draftId,
+    version,
+  });
+}
 
 /** Reject and Keep: a person's decision on a draft, as an editor may change it (`people`: never an agent's own). */
 export const DECIDING = { scope: 'content:draft', minRole: 'editor', mutates: true, people: true } as const;

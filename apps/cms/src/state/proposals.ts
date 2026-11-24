@@ -7,6 +7,7 @@
  * while one is waiting to save, as that save ends the proposal itself.
  */
 import { toast } from 'sonner';
+import { orgOnScreen } from '~/lib/live';
 import { callTool, toolMessage } from '~/lib/tools';
 import { proposalKeys } from '~/queries/proposals';
 import type { SliceCreator } from './store';
@@ -25,7 +26,7 @@ export interface ProposalsSlice {
   keepProposal: (orgId: string, kind: Kind, id: string, version: number) => Promise<void>;
 }
 
-export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { queryClient }) => {
+export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { queryClient, router }) => {
   const pending = (p: string | null) => set({ proposals: { pending: p } });
   /** The editor's draft and the proposal, read again. */
   const reread = async (orgId: string, kind: Kind, id: string) => {
@@ -34,17 +35,22 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
       queryClient.invalidateQueries({ queryKey: proposalKeys.all(orgId) }),
     ]);
   };
-  /** One action at a time, said in a toast either way. */
+  /** Whether the tab still shows `orgId`: an answer, or an Undo pressed, after it moved to another org does nothing there. */
+  const showing = (orgId: string) => orgOnScreen(router) === orgId;
+  /**
+   * One action at a time, said in a toast either way: pending until the editor has read the draft again, so
+   * a second press cannot go from the version the first changed (review of #410).
+   */
   const run = async (orgId: string, kind: Kind, id: string, act: () => Promise<void>, refused: string) => {
-    if (get().proposals.pending) return;
+    if (get().proposals.pending || !showing(orgId)) return;
     pending(`${kind}:${id}`);
     try {
       await act();
     } catch (err) {
-      toast.error(refused, { description: toolMessage(err) });
+      if (showing(orgId)) toast.error(refused, { description: toolMessage(err) });
     } finally {
+      if (showing(orgId)) await reread(orgId, kind, id);
       pending(null);
-      await reread(orgId, kind, id);
     }
   };
 
@@ -57,11 +63,13 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
         kind,
         id,
         async () => {
+          // Sent for `orgId`: a tab whose org changed meanwhile is refused (ORG_CHANGED), never acting on the other.
           const out =
             kind === 'spot'
-              ? await callTool('revert_spot_draft', { spotId: id, ifVersion: version })
-              : await callTool('revert_playlist_draft', { playlistId: id, ifVersion: version });
+              ? await callTool('revert_spot_draft', { spotId: id, ifVersion: version }, orgId)
+              : await callTool('revert_playlist_draft', { playlistId: id, ifVersion: version }, orgId);
           const now = 'spot' in out ? out.spot.version : out.playlist.version;
+          if (!showing(orgId)) return;
           if (!out.rejected) {
             toast("The agent's draft is back");
             return;
@@ -81,8 +89,9 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
         kind,
         id,
         async () => {
-          if (kind === 'spot') await callTool('keep_spot_draft', { spotId: id, ifVersion: version });
-          else await callTool('keep_playlist_draft', { playlistId: id, ifVersion: version });
+          if (kind === 'spot') await callTool('keep_spot_draft', { spotId: id, ifVersion: version }, orgId);
+          else await callTool('keep_playlist_draft', { playlistId: id, ifVersion: version }, orgId);
+          if (!showing(orgId)) return;
           toast("Kept the agent's draft", { description: 'It is the draft now. Publish it when you are ready.' });
         },
         'Not kept',

@@ -11,7 +11,7 @@
 import type { Transition } from '@signforge/contract';
 import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type PlaylistRow } from '@signforge/db';
 import { z } from 'zod';
-import { DECIDING, keptFor, playlistContent, shownVersion } from './agent-drafts';
+import { DECIDING, decidedMeanwhile, keptFor, playlistContent, shownVersion } from './agent-drafts';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
@@ -167,14 +167,14 @@ const revertPlaylistDraft = defineTool({
     const items = await org.playlists.items(row.id);
     // The two swap: the draft there now is kept beside the one put back.
     const rejected = kept.holds === 'person';
-    write(
-      org.draftSnapshots.stage.keep('playlist', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row, items), sampleFieldsJson: null }),
-    );
+    // Still kept as read when the batch runs: a Keep, Reject or publish committed first refuses this one.
+    write(org.draftSnapshots.stage.holding('playlist', row.id, kept.holds));
+    write(org.draftSnapshots.stage.keep('playlist', row, rejected ? 'agent' : 'person', { contentJson: contentJson(row, items), sampleFieldsJson: null }));
     const playlist = write(await org.playlists.stage.update(row, { name: back.name, transitionJson: back.transitionJson }, input.ifVersion, back.items));
     return { playlist: playlistView(playlist, back.items, (await org.settings.get())?.defaultPlaylistId), rejected };
   },
   // A spot it puts back was deleted since: its item fails the batch.
-  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+  refuseFailedCommit: ({ org, input }) => decidedMeanwhile(org, 'playlist', input.playlistId, input.ifVersion),
 });
 
 const keepPlaylistDraft = defineTool({
@@ -191,10 +191,13 @@ const keepPlaylistDraft = defineTool({
     if ((await org.draftSnapshots.get('playlist', row.id))?.holds !== 'person')
       throw new ToolError('conflict', `playlist ${row.id} is not an agent's proposal`);
     // Held to the version shown in the batch too: an edit landing first refuses it.
+    // Held to the version shown, and to the agent's proposal, in the batch too: an edit, a Reject, a Keep or a publish landing first refuses it.
     write(org.playlists.stage.unchanged(row));
+    write(org.draftSnapshots.stage.holding('playlist', row.id, 'person'));
     write(org.draftSnapshots.stage.clear('playlist', row.id));
     return { playlist: await viewOf(org, row) };
   },
+  refuseFailedCommit: ({ org, input }) => decidedMeanwhile(org, 'playlist', input.playlistId, input.ifVersion),
 });
 
 /**

@@ -52,19 +52,19 @@ export const MAX_DRAFTS = 5;
  * plan's 50 a request. A save's drafts are costed before any is written (`saveStatements`), and
  * the turn drafts no more than one save holds.
  */
-export const SAVE_STATEMENTS = 47;
+export const SAVE_STATEMENTS = 48;
 
 /**
  * Each draft's D1 statements, saved by an editor (whose role check reads the org's settings): its
  * target read again, the write and its audit row; a screen's view reads its status too. A spot's or
  * playlist's keeps the draft it replaces beside it (#116), the drawer's saves being an agent's
- * proposal: one statement more, and a playlist's read of its items. A playlist's
+ * proposal: the kept draft and the draft's version guard with it, and a playlist's read of its items. A playlist's
  * order takes 2 more for every 24 spots, their check and their rows, 24 a statement. Measured in
  * test/agent-chat.test.ts, which holds `saveStatements` to them.
  */
 const STATEMENTS: Record<string, number> = {
-  update_spot: 9,
-  update_playlist: 13,
+  update_spot: 10,
+  update_playlist: 14,
   update_schedule_entry: 7,
   create_schedule_entry: 7,
   rename_screen: 16,

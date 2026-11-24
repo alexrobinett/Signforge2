@@ -32,7 +32,8 @@
  * fetches. 14 fetches in all with Anthropic; an endpoint's requests go through the guards too, each
  * up to 12 with its same-origin redirects, 36 in all. The photo is passed on without being decoded.
  * An update's review reads the spot instead of the templates, and writes nothing: the same fetches, and
- * at most 7 D1 statements. Keep makes no fetch and no model call, and at most 10 D1 statements.
+ * at most 7 D1 statements. Keep makes no fetch and no model call, and at most 12 D1 statements: the agent's update is its
+ * proposal, so the draft it replaces is kept beside it, with the draft's version guard (#116).
  */
 import { startData, startValue } from '@signforge/compiler/draft';
 import { MAX_URL_BYTES, templateKey, validateSpotField, type FieldDef, type ScalarFieldDef, type TemplateManifest } from '@signforge/contract';

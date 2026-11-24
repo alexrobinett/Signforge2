@@ -577,6 +577,11 @@ export async function publishOrg(
   removals: Write[];
   /** A pin's guard that it is still the version pinned, for the ones not promoted: commit them whatever else is, as `removals`. */
   pinGuards: Write[];
+  /**
+   * What is kept beside each spot and playlist this publish covers (#116), cleared: every one it pins, or
+   * with no pins every one, changed or not, but those it held back. Commit them whatever else is, as `removals`.
+   */
+  keptCleared: Write[];
   /** The org's brand state as this publish read it (`brandStateOf`): what its manifests were compiled with. */
   brand: string;
   drafts: DraftReport;
@@ -664,7 +669,14 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, pinGuards, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+  // A draft it covers is no longer an agent's proposal, though it needed no promotion (published as it is, or put back as
+  // published): every one it pins, or with no pins every one, but those it held back. Only those with one kept, so a publish
+  // that changes nothing still writes nothing. One kept after this read is an agent's newer draft, which this publish does not cover.
+  const held = new Set(drafts.held.map((h) => pinKey(h.kind, h.id)));
+  const keptCleared = (await org.draftSnapshots.kept())
+    .filter((k) => (!pinned || pinned.has(pinKey(k.kind, k.id))) && !held.has(pinKey(k.kind, k.id)))
+    .flatMap((k) => org.draftSnapshots.stage.clear(k.kind, k.id).writes);
+  return { writes, removals, pinGuards, keptCleared, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
 }
 
 /** Whether an entry plays on every screen at all hours, always: what a default playlist does. */

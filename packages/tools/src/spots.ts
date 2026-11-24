@@ -24,7 +24,7 @@ import {
 } from '@signforge/contract';
 import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
-import { DECIDING, keptFor, shownVersion, spotContent } from './agent-drafts';
+import { DECIDING, decidedMeanwhile, keptFor, shownVersion, spotContent } from './agent-drafts';
 import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
 import { page, pageInput } from './paging';
 import { loadOrg, previewInput, spotDraft } from './publishing';
@@ -340,13 +340,16 @@ const updateSpot = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
-  input: z.object({
-    spotId: id('spot'),
-    name: name('spot').optional(),
-    durationMs: durationMs.optional(),
-    ...kindInput,
-    ifVersion,
-  }),
+  input: z
+    .object({
+      spotId: id('spot'),
+      name: name('spot').optional(),
+      durationMs: durationMs.optional(),
+      ...kindInput,
+      ifVersion,
+    })
+    // An edit that changes nothing writes nothing to guard it, so it is refused, as update_playlist's is (review of #410).
+    .refine((v) => [v.name, v.durationMs, v.data, v.assets, v.bindings, v.assetId, v.fit, v.url].some((x) => x !== undefined), 'nothing to change'),
   output: outputs.update_spot,
   example: { spotId: 'spt_example', name: 'Fresh picked', durationMs: 12_000 },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
@@ -417,9 +420,10 @@ const revertSpotDraft = defineTool({
     const back = spotContent.parse(JSON.parse(kept.contentJson));
     // The two swap: the draft there now is kept beside the one put back.
     const rejected = kept.holds === 'person';
+    // Still kept as read when the batch runs: a Keep, Reject or publish committed first refuses this one.
+    write(org.draftSnapshots.stage.holding('spot', row.id, kept.holds));
     write(
-      org.draftSnapshots.stage.keep('spot', row.id, {
-        holds: rejected ? 'agent' : 'person',
+      org.draftSnapshots.stage.keep('spot', row, rejected ? 'agent' : 'person', {
         contentJson: contentJson(row),
         sampleFieldsJson: row.sampleFieldsJson,
       }),
@@ -427,6 +431,7 @@ const revertSpotDraft = defineTool({
     const spot = write(await org.spots.stage.update(row, { ...back, sampleFieldsJson: kept.sampleFieldsJson }, input.ifVersion));
     return { spot: spotView(spot), rejected };
   },
+  refuseFailedCommit: ({ org, input }) => decidedMeanwhile(org, 'spot', input.spotId, input.ifVersion),
 });
 
 const keepSpotDraft = defineTool({
@@ -441,11 +446,13 @@ const keepSpotDraft = defineTool({
   handler: async ({ org, input, write }) => {
     const row = await spotAt(org, input.spotId, input.ifVersion);
     if ((await org.draftSnapshots.get('spot', row.id))?.holds !== 'person') throw new ToolError('conflict', `spot ${row.id} is not an agent's proposal`);
-    // Held to the version shown in the batch too: an edit landing first refuses it.
+    // Held to the version shown, and to the agent's proposal, in the batch too: an edit, a Reject, a Keep or a publish landing first refuses it.
     write(org.spots.stage.unchanged(row));
+    write(org.draftSnapshots.stage.holding('spot', row.id, 'person'));
     write(org.draftSnapshots.stage.clear('spot', row.id));
     return { spot: spotView(row) };
   },
+  refuseFailedCommit: ({ org, input }) => decidedMeanwhile(org, 'spot', input.spotId, input.ifVersion),
 });
 
 const getSpotPreview = defineTool({

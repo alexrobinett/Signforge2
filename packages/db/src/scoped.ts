@@ -461,6 +461,18 @@ export async function rolloutCounts(db: Db, where: SQL | undefined): Promise<Map
   return out;
 }
 
+/** A draft whose kept draft (#116) is written: the version and incarnation it was read at. */
+interface KeptDraft {
+  id: string;
+  rowVersion: number;
+  incarnation: string | null;
+}
+/** What is kept of a draft: its content as `contentJson` holds it, and a spot's sample-text marks. */
+interface KeptContent {
+  contentJson: string;
+  sampleFieldsJson: string | null;
+}
+
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
   const db: Db = drizzle(d1);
@@ -479,6 +491,14 @@ export function scoped(d1: D1Database, orgId: string) {
   /** A spot's or a playlist's kept draft (#116), by the draft's kind and id. */
   const keptFor = (kind: 'spot' | 'playlist', id: string) => and(eq(ds.orgId, orgId), kind === 'spot' ? eq(ds.spotId, id) : eq(ds.playlistId, id));
   const clearKept = (kind: 'spot' | 'playlist', id: string): Staged => staged(undefined, db.delete(ds).where(keptFor(kind, id)));
+  /** A kept draft's row: its content fields alone, then the org and the draft it is kept for, which nothing given can override. */
+  const keptRow = (kind: 'spot' | 'playlist', id: string, holds: 'person' | 'agent', kept: KeptContent) => {
+    const content = { holds, contentJson: kept.contentJson, sampleFieldsJson: kept.sampleFieldsJson, createdAt: Date.now() };
+    return { content, row: { ...content, orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null } };
+  };
+  /** The guard that the draft is still the version read: a kept draft is never written without it in the same batch. */
+  const draftAt = (kind: 'spot' | 'playlist', draft: KeptDraft): Write =>
+    versionGuard(db, orgId, (kind === 'spot' ? s.spots : s.playlists) as typeof s.spots, draft.id, draft.rowVersion, draft.incarnation);
   const publishes = entity(db, orgId, s.publishes, 'pub');
   const pr = s.publishRequests;
   const publishRequests = entity(db, orgId, pr, 'prq');
@@ -1187,11 +1207,6 @@ export function scoped(d1: D1Database, orgId: string) {
           await checkSpot(patch);
           return spotRows.stage.update(current, patch, ifVersion);
         },
-        /** Published, as every draft is; its kept draft (#116) goes with it: the draft on screens is no longer an agent's proposal. */
-        publish: (row: typeof s.spots.$inferSelect): Staged<typeof s.spots.$inferSelect> => {
-          const made = spotRows.stage.publish(row);
-          return { row: made.row, writes: [...made.writes, ...clearKept('spot', row.id).writes] };
-        },
       },
     },
 
@@ -1262,11 +1277,6 @@ export function scoped(d1: D1Database, orgId: string) {
           const replace = staged(undefined, db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, current.id))), ...itemRows(current.id, items));
           return { row: row.row, writes: [...row.writes, ...replace.writes] };
         },
-        /** Published, as every draft is; its kept draft (#116) goes with it. */
-        publish: (row: typeof s.playlists.$inferSelect, items?: readonly string[]): Staged<typeof s.playlists.$inferSelect> => {
-          const made = playlists.stage.publish(row, items);
-          return { row: made.row, writes: [...made.writes, ...clearKept('playlist', row.id).writes] };
-        },
       },
     },
 
@@ -1278,33 +1288,48 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     draftSnapshots: {
       get: (kind: 'spot' | 'playlist', id: string) => db.select().from(ds).where(keptFor(kind, id)).get(),
+      /** Every draft with one kept beside it, by kind and id: what a publish may have to clear. */
+      kept: async () =>
+        (await db.select({ spotId: ds.spotId, playlistId: ds.playlistId }).from(ds).where(eq(ds.orgId, orgId)).all()).flatMap(
+          (r): { kind: 'spot' | 'playlist'; id: string }[] =>
+            r.spotId ? [{ kind: 'spot', id: r.spotId }] : r.playlistId ? [{ kind: 'playlist', id: r.playlistId }] : [],
+        ),
       stage: {
-        /** Keep `kept` beside the draft, replacing whatever was kept. */
-        keep: (kind: 'spot' | 'playlist', id: string, kept: { holds: 'person' | 'agent'; contentJson: string; sampleFieldsJson: string | null }): Staged =>
-          staged(
-            undefined,
-            db
-              .insert(ds)
-              .values({ orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null, ...kept, createdAt: Date.now() })
-              .onConflictDoUpdate({ target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId], set: { ...kept, createdAt: Date.now() } }),
-          ),
         /**
-         * Keep `contentJson` as the person's draft an agent writes over, unless one is kept already: one
-         * statement, with no read first. What a Reject set aside (the agent's) is replaced; a person's stays.
+         * Keep `kept` beside `draft`, replacing whatever was kept: refused (`StaleVersionError`) unless the
+         * draft is still the version read, as every write of a kept draft is (review of #410).
          */
-        propose: (kind: 'spot' | 'playlist', id: string, kept: { contentJson: string; sampleFieldsJson: string | null }): Staged => {
-          const values = { holds: 'person' as const, ...kept, createdAt: Date.now() };
-          return staged(
-            undefined,
-            db
-              .insert(ds)
-              .values({ orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null, ...values })
-              .onConflictDoUpdate({
-                target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId],
-                set: values,
-                setWhere: eq(ds.holds, 'agent'),
-              }),
-          );
+        keep: (kind: 'spot' | 'playlist', draft: KeptDraft, holds: 'person' | 'agent', kept: KeptContent): Staged => {
+          const { content, row } = keptRow(kind, draft.id, holds, kept);
+          const target = kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId];
+          return {
+            row: undefined,
+            writes: [draftAt(kind, draft), ...staged(undefined, db.insert(ds).values(row).onConflictDoUpdate({ target, set: content })).writes],
+          };
+        },
+        /**
+         * Keep `kept` as the person's draft an agent writes over `draft` with, unless one is kept already:
+         * no read first. What a Reject set aside (the agent's) is replaced; a person's stays. Held to the
+         * draft's version as read, as `keep` is.
+         */
+        propose: (kind: 'spot' | 'playlist', draft: KeptDraft, kept: KeptContent): Staged => {
+          const { content, row } = keptRow(kind, draft.id, 'person', kept);
+          const target = kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId];
+          const insert = db
+            .insert(ds)
+            .values(row)
+            .onConflictDoUpdate({ target, set: content, setWhere: eq(ds.holds, 'agent') });
+          return { row: undefined, writes: [draftAt(kind, draft), ...staged(undefined, insert).writes] };
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `draft_snapshot`) unless, as it runs,
+         * what is kept beside the draft still holds `holds`. A Reject or Keep decided from a read loses to a
+         * Keep, Reject or publish that committed first (review of #410).
+         */
+        holding: (kind: 'spot' | 'playlist', id: string, holds: 'person' | 'agent'): Staged => {
+          const still = sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${keptFor(kind, id)} AND ${ds.holds} = ${holds})`;
+          const stale = async () => ((await db.select().from(ds).where(keptFor(kind, id)).get())?.holds === holds ? undefined : 0);
+          return { row: undefined, writes: [staleGuard(db, orgId, 'draft_snapshot', 0, still, stale)] };
         },
         clear: clearKept,
       },

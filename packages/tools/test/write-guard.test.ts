@@ -135,7 +135,7 @@ async function proposed(o: SeededOrg, kind: 'spot' | 'playlist') {
     .run();
   const row = kind === 'spot' ? await o.scope.spots.get(id) : await o.scope.playlists.get(id);
   const items = kind === 'playlist' ? await o.scope.playlists.items(id) : undefined;
-  await o.scope.commit(o.scope.draftSnapshots.stage.keep(kind, id, { holds: 'person', contentJson: contentJson(row!, items), sampleFieldsJson: null }).writes);
+  await o.scope.commit(o.scope.draftSnapshots.stage.keep(kind, row!, 'person', { contentJson: contentJson(row!, items), sampleFieldsJson: null }).writes);
 }
 
 /** Clear what would make a tool's example refuse before it writes. */

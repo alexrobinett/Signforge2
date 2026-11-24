@@ -698,11 +698,21 @@ const agentDraftOutput = z.object({
       id: z.string().describe('The agent grant, or for the drawer the member who saved it'),
       clientId: z.string().nullable(),
       name: z.string().nullable().describe("The agent's client name as a page shows it, or the member's; null when not to be shown"),
+      gone: z.boolean().describe('The agent is no longer connected'),
       at: z.number().describe('When it last wrote the draft'),
     })
     .nullable()
     .describe("Who proposed it, from the audit log's newest row of an agent writing it; null when not proposed, or the log no longer has it"),
   rejected: z.boolean().describe("A Reject set an agent's draft aside: the same revert call puts it back"),
+  agents: z
+    .array(
+      z.object({
+        id: z.string().describe('An agent grant'),
+        name: z.string().nullable().describe("Its client's name as a page shows it; null when the name may not be shown, or it is gone"),
+        gone: z.boolean().describe('No longer connected'),
+      }),
+    )
+    .describe("The agents among the draft's newest audit rows, named for its audit log strip"),
   publishedVersion: z.number().nullable().describe('The version screens have; null if never published'),
   changes: z
     .array(

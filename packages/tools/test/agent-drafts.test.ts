@@ -176,3 +176,95 @@ describe("an agent's draft of a playlist", () => {
     expect(await draftOf('playlist', o.playlist)).toMatchObject({ proposed: false, rejected: false });
   });
 });
+
+describe('the races and paths of review round 1 (#410)', () => {
+  const kept = async () => (await scope().draftSnapshots.get('spot', o.templateSpot))?.holds ?? null;
+  const decisions = async (action: string) =>
+    (await scope().auditLog.list({ limit: 20, target: { kind: 'spot', id: o.templateSpot } })).filter((r) => r.action === action).length;
+
+  it('refuses an edit that changes nothing, and never keeps a draft without the draft still at the version read', async () => {
+    const theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
+    expect(await dispatch(registry, 'update_spot', { spotId: o.templateSpot }, person())).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await kept()).toBe('person');
+    // A kept draft written from a read the draft has since moved on from: the batch writes nothing.
+    const read = await spot();
+    await edit(person(), 13_000, theirs);
+    await expect(scope().commit(scope().draftSnapshots.stage.propose('spot', read, { contentJson: '{}', sampleFieldsJson: null }).writes)).rejects.toThrow();
+    await expect(
+      scope().commit(scope().draftSnapshots.stage.keep('spot', read, 'agent', { contentJson: '{}', sampleFieldsJson: null }).writes),
+    ).rejects.toThrow();
+    expect(await kept()).toBeNull();
+  });
+
+  it("a Keep committed between a Reject's read and its batch refuses the Reject: the kept draft stays, nothing set aside", async () => {
+    const theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
+    const raced = racing(person(), () => call(person(), 'keep_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }));
+    expect(await dispatch(registry, 'revert_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('kept, rejected or published meanwhile'),
+    });
+    expect((await spot()).durationMs).toBe(12_000);
+    expect(await kept()).toBeNull();
+  });
+
+  it("a publish committed between a Reject's read and its batch refuses the Reject: what was published stays the draft", async () => {
+    const theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
+    const raced = racing(person(), () => call(person('owner'), 'publish', {}));
+    expect(await dispatch(registry, 'revert_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(published(await spot())?.durationMs).toBe(12_000);
+    expect((await spot()).durationMs).toBe(12_000);
+    expect(await kept()).toBeNull();
+  });
+
+  it('of two Keeps, or a publish and a Keep, one decides it: the other is refused, with no second audit row', async () => {
+    let theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
+    let raced = racing(person(), () => call(person(), 'keep_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }));
+    expect(await dispatch(registry, 'keep_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await decisions('keep_spot_draft')).toBe(1);
+
+    theirs = await edit(agent(), 13_000, theirs);
+    raced = racing(person(), () => call(person('owner'), 'publish', {}));
+    expect(await dispatch(registry, 'keep_spot_draft', { spotId: o.templateSpot, ifVersion: theirs }, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await decisions('keep_spot_draft')).toBe(1);
+    expect(await kept()).toBeNull();
+  });
+
+  it('a publish that covers the draft ends the proposal though the draft needs no promotion: edited back to as published, or rejected back', async () => {
+    await call(person('owner'), 'publish', {});
+    const live = await spot();
+    // A person edits, then the agent edits it back to what is published: nothing to promote.
+    const mine = await edit(person(), 13_000, live.rowVersion);
+    await edit(agent(), live.durationMs, mine);
+    expect(await kept()).toBe('person');
+    await call(person('owner'), 'publish', {});
+    expect(await kept()).toBeNull();
+    expect(await draftOf()).toMatchObject({ proposed: false, rejected: false });
+
+    // Rejected back to the published version, then a publish pinning it: the set-aside agent's draft goes too.
+    const theirs = await edit(agent(), 14_000, (await spot()).rowVersion);
+    await call(person(), 'revert_spot_draft', { spotId: o.templateSpot, ifVersion: theirs });
+    expect(await kept()).toBe('agent');
+    const now = await spot();
+    await call(person('owner'), 'publish', { drafts: [{ kind: 'spot', id: now.id, version: now.rowVersion }] });
+    expect(await kept()).toBeNull();
+    // A publish that covers nothing kept still writes nothing.
+    const audit = (await scope().auditLog.list({ limit: 50 })).length;
+    expect(await call(person('owner'), 'publish', {})).toMatchObject({ publish: null });
+    expect((await scope().auditLog.list({ limit: 50 })).length).toBe(audit);
+  });
+});
+
+describe("the agents in a draft's audit log strip (#410)", () => {
+  it('are named by their plain name; one whose name may not be shown is unnamed but connected; one disconnected is gone', async () => {
+    const theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
+    await call(person(), 'revert_spot_draft', { spotId: o.templateSpot, ifVersion: theirs });
+    // Rejected: no proposal, but the strip still names the agent that wrote it.
+    expect(await draftOf()).toMatchObject({ proposed: false, by: null, agents: [{ id: o.agentGrant, name: 'Seeded agent', gone: false }] });
+    // A name that reads as SignForge is not shown (as /connect withholds it), yet the agent is still connected.
+    await env.DB.prepare('UPDATE agent_grants SET client_name = ? WHERE id = ?').bind('SI6NFOR6E', o.agentGrant).run();
+    expect((await draftOf()).agents).toEqual([{ id: o.agentGrant, name: null, gone: false }]);
+    await env.DB.prepare('UPDATE agent_grants SET revoked_at = ? WHERE id = ?').bind(Date.now(), o.agentGrant).run();
+    expect((await draftOf()).agents).toEqual([{ id: o.agentGrant, name: null, gone: true }]);
+  });
+});

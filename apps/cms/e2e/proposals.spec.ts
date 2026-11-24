@@ -62,6 +62,8 @@ test("an agent's edit over /mcp shows as its proposal; Reject puts the person's 
   await expect.poll(async () => (await tool(page, 'get_spot', { spotId: spot.id })).spot.data.greeting).toBe('Opening soon');
   const rejected = page.getByRole('region', { name: /Rejected/ });
   await expect(rejected.getByRole('button', { name: "Put the agent's draft back" })).toBeVisible();
+  // Its audit log strip still names the agent by its client's name, never its id (review of #410).
+  await expect(rejected.getByRole('listitem').filter({ hasText: 'Draft changed' }).first()).toContainText('Deli bot, agent');
   // Its Undo: the agent's, a proposal again.
   await page.locator('[data-sonner-toast]').filter({ hasText: "Rejected the agent's draft" }).getByRole('button', { name: 'Undo' }).click();
   await expect.poll(async () => (await tool(page, 'get_spot', { spotId: spot.id })).spot.data.greeting).toBe('Tomato basil soup');
