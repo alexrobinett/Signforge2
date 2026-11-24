@@ -7,18 +7,19 @@
  * What it reads is the seam (`DraftReads`): the tools read the org's rows, the CMS its asset and
  * template views.
  */
-import type {
-  Binding,
-  DataSource,
-  FieldDef,
-  Orientation,
-  ScalarFieldDef,
-  Playlist,
-  ScreenManifest,
-  Sha256,
-  Spot,
-  TableMapping,
-  TemplateManifest,
+import {
+  liveSources,
+  type Binding,
+  type DataSource,
+  type FieldDef,
+  type Orientation,
+  type ScalarFieldDef,
+  type Playlist,
+  type ScreenManifest,
+  type Sha256,
+  type Spot,
+  type TableMapping,
+  type TemplateManifest,
 } from '@signforge/contract';
 import { compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from './index';
 
@@ -116,6 +117,38 @@ export const startData = (fields: Record<string, FieldDef>) =>
             : [[name, startValue(def)]],
     ),
   );
+
+/**
+ * A text or list field's sample (#360): the template's own default, the copy its thumbnail shows;
+ * a text with none stands in with its label, as the thumbnail does (an empty default stands: a
+ * clock's greeting left empty greets by the time of day). A list with no default stays
+ * empty: stand-in rows would be someone's content to delete, and three of them put Announcement's
+ * stage past the player's 2 s ready time on a laptop. Undefined for every other field, which starts
+ * as `startData` starts it. The editor marks a value equal to its sample until it is replaced.
+ */
+export function sampleValue(def: FieldDef): unknown {
+  if (def.type === 'text') return (def.default ?? def.label).slice(0, def.maxLength);
+  if (def.type === 'list') return def.default ?? [];
+  return undefined;
+}
+
+/**
+ * A new spot's data from the New spot dialog (#360): `startData`, with each text and list holding
+ * its sample, so the stage plays at once and the person edits rather than writes. This reverses
+ * #253's empty text for the dialog only; the editor marks each sample instead, so none is
+ * published by accident. A live field keeps `startData`'s value: it is the fallback screens show
+ * when its source is down, which the form does not draw while bound, so a sample there would reach
+ * screens unseen (#253's headlines). The agent's fill keeps `startData`: it writes the copy itself.
+ */
+export function sampleData(m: Pick<TemplateManifest, 'fields' | 'live'>): Record<string, unknown> {
+  const live = new Set(m.live ? Object.values(liveSources(m.live)).flatMap((source) => Object.keys(source.fields)) : []);
+  return {
+    ...startData(m.fields),
+    ...Object.fromEntries(
+      Object.entries(m.fields).flatMap(([name, def]) => ((def.type === 'text' || def.type === 'list') && !live.has(name) ? [[name, sampleValue(def)]] : [])),
+    ),
+  };
+}
 
 /** A spot's draft (or published version), as `get_spot` gives it. */
 export interface SpotDraft {

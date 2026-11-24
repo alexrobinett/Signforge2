@@ -3,8 +3,11 @@
  * src/state/agent.ts); or a template (its newest approved version), an image from the library, or
  * a web page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
+ * A template spot is named after its template until the person types a name, and starts with its
+ * sample copy (`sampleData`, #360), which the editor marks until it is replaced. While Create is
+ * off, the dialog says why.
  */
-import { startData } from '@signforge/compiler/draft';
+import { sampleData } from '@signforge/compiler/draft';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { PlusIcon } from 'lucide-react';
@@ -15,9 +18,9 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { usableVersions, type TemplateView } from '~/lib/spots';
+import { nextName, usableVersions, type TemplateView } from '~/lib/spots';
 import thumbnails from '~/lib/template-thumbnails.json';
-import { assetsQuery } from '~/queries/spots';
+import { assetsQuery, spotsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
 const KINDS = [
@@ -37,19 +40,30 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const fillSpot = useAppStore((s) => s.fillNewSpot);
   const forgetFill = useAppStore((s) => s.forgetFill);
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
+  const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
   const usable = usableVersions(templates);
   const chosen = usable.find((u) => u.version.id === d.templateVersionId) ?? usable[0];
   const image = assets.find((a) => a.id === d.assetId);
   // Try another template fills the template picked below; a first fill lets the agent choose.
   const pinned = fill.again ? chosen : undefined;
 
-  const ready =
-    d.name.trim() !== '' && (d.kind === 'template' ? chosen !== undefined : d.kind === 'url' ? safeUrl(d.url.trim()) : image !== undefined) && !d.pending;
+  const name = d.name ?? (d.kind === 'template' && chosen ? nextName(chosen.template.name, spots) : '');
+  const why =
+    d.kind === 'template' && !chosen
+      ? 'No template is approved for use yet.'
+      : d.kind === 'image' && !image
+        ? 'Choose an image first.'
+        : d.kind === 'url' && !safeUrl(d.url.trim())
+          ? 'Enter the page’s https address first.'
+          : name.trim() === ''
+            ? 'Give the spot a name first.'
+            : null;
+  const ready = why === null && !d.pending;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (d.kind === 'template' && chosen && d.templateVersionId !== chosen.version.id) edit({ templateVersionId: chosen.version.id });
     const m = chosen?.version.manifest;
-    void create(orgId, d.kind === 'template' && m ? { durationMs: m.duration.defaultMs, data: startData(m.fields) } : undefined);
+    void create(orgId, name, d.kind === 'template' && m ? { durationMs: m.duration.defaultMs, data: sampleData(m) } : undefined);
   };
 
   /** Enter on a template creates the spot, or goes to its name while it has none. */
@@ -147,13 +161,16 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           )}
           <div className="space-y-2">
             <Label htmlFor="new-spot-name">Name</Label>
-            <Input id="new-spot-name" value={d.name} onChange={(e) => edit({ name: e.target.value })} maxLength={100} />
+            <Input id="new-spot-name" value={name} onChange={(e) => edit({ name: e.target.value })} maxLength={100} />
           </div>
           <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
             {d.error}
           </p>
-          <div className="flex justify-end">
-            <Button type="submit" disabled={!ready}>
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+            <p id="new-spot-why" className="text-sm text-muted-foreground empty:hidden">
+              {why}
+            </p>
+            <Button type="submit" disabled={!ready} aria-describedby={why ? 'new-spot-why' : undefined}>
               {d.pending ? 'Creating…' : 'Create spot'}
             </Button>
           </div>

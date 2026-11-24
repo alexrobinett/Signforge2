@@ -203,6 +203,15 @@ const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
 export const spotWhat = (s: Pick<SpotView, 'kind' | 'templateVersionId'>, versions: Map<string, TemplateVersionView>) =>
   s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
+/** A new spot's name from its template's (#360): the name itself while no spot has it, else the first free "Name 2", "Name 3", … */
+export function nextName(base: string, spots: readonly { name: string }[]): string {
+  const taken = new Set(spots.map((s) => s.name));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
+}
+
 /** Whether screens have it, in words. */
 export const publishWord = (s: Pick<SpotView, 'published' | 'draftChanged'>) =>
   !s.published ? 'Draft, never published' : s.draftChanged ? 'Published, with unpublished changes' : 'Published';

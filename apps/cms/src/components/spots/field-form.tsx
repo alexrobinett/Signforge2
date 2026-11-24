@@ -6,11 +6,13 @@
  * under it in words (src/lib/field-words.ts); an empty field's only once it is touched or Publish
  * was pressed (#359), so a spot just made is not a page of errors. A choice shows its option's label.
  * Values a spot leaves out show the template's default. A spot the agent just filled (#263) shows
- * its marks (./fill-marks.tsx) until each field is edited.
+ * its marks (./fill-marks.tsx) until each field is edited. A text or list still holding its
+ * template's sample (#360, a new spot's start) says so, and a sample text is selected when focused,
+ * so typing replaces it.
  */
 import type { FieldMark } from '@signforge/api/agent-inline';
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
-import { startValue } from '@signforge/compiler/draft';
+import { sampleValue, startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { MarkNote, MarkPill } from '~/components/spots/fill-marks';
@@ -46,6 +48,23 @@ const BRAND_WORD: Record<string, string> = {
 
 const fieldClass = 'flex flex-col gap-1.5';
 
+/** Whether a text or list still holds its template's sample: the same value, so an edit clears it. */
+const isSample = (def: FieldDef, value: unknown) => {
+  const sample = sampleValue(def);
+  // Empty is no sample: nothing is there to replace.
+  const empty = sample === '' || (Array.isArray(sample) && sample.length === 0);
+  return sample !== undefined && !empty && JSON.stringify(value) === JSON.stringify(sample);
+};
+
+/** The mark on a field that still holds sample copy. */
+function SampleNote({ id, rows }: { id: string; rows?: boolean }) {
+  return (
+    <p id={id} className="text-sm text-muted-foreground">
+      {rows ? 'Sample rows. Replace them before you publish.' : 'Sample text. Replace it before you publish.'}
+    </p>
+  );
+}
+
 /**
  * A field's problems, in a live region that is always in the accessibility tree, so one that appears
  * (on leaving the field, #359) is announced: empty, it is only visually hidden, never removed.
@@ -65,6 +84,7 @@ function ScalarInput({
   value,
   invalid,
   describedBy,
+  sample = false,
   onChange,
   onBlur,
 }: {
@@ -73,6 +93,8 @@ function ScalarInput({
   value: unknown;
   invalid: boolean;
   describedBy?: string;
+  /** A text holding its sample: focusing it selects it all. */
+  sample?: boolean;
   onChange: (v: unknown) => void;
   /** Left: the field is touched. */
   onBlur?: () => void;
@@ -80,7 +102,15 @@ function ScalarInput({
   const aria = { 'aria-invalid': invalid || undefined, 'aria-describedby': describedBy, onBlur };
   switch (def.type) {
     case 'text':
-      return <Input id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} {...aria} />;
+      return (
+        <Input
+          id={id}
+          value={typeof value === 'string' ? value : ''}
+          onFocus={sample ? (e) => e.currentTarget.select() : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          {...aria}
+        />
+      );
     case 'url':
       return (
         <Input
@@ -268,6 +298,7 @@ function ListField({
   const setRows = (next: Record<string, unknown>[]) => onChange((d) => ({ ...d, data: { ...d.data, [name]: next } }));
   const full = def.maxItems !== undefined && rows.length >= def.maxItems;
   const blank = Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, startValue(d)]));
+  const sample = isSample(def, rows);
   return (
     <fieldset className="flex flex-col gap-3">
       <legend className="mb-1.5 font-medium">
@@ -284,6 +315,7 @@ function ListField({
         )}
       </legend>
       {mark && <MarkNote id={`field-${name}-mark`} mark={mark} />}
+      {sample && <SampleNote id={`field-${name}-sample`} rows />}
       {rows.map((row, i) => (
         // Rows have no ids of their own; their place is who they are.
         // biome-ignore lint/suspicious/noArrayIndexKey: a row is its position in the list.
@@ -399,7 +431,9 @@ export function FieldForm({
         const id = `field-${name}`;
         const errorId = `${id}-error`;
         const markId = `${id}-mark`;
-        const describedBy = [p && errorId, mark && markId].filter(Boolean).join(' ') || undefined;
+        const sampleId = `${id}-sample`;
+        const sample = isSample(def, value);
+        const describedBy = [p && errorId, mark && markId, sample && sampleId].filter(Boolean).join(' ') || undefined;
         const set = (v: unknown) => edit((d) => ({ ...d, data: { ...d.data, [name]: v } }));
         return (
           <div key={name} className={def.type === 'boolean' ? 'flex flex-wrap items-center gap-x-3 gap-y-1.5' : fieldClass}>
@@ -422,10 +456,12 @@ export function FieldForm({
               value={value}
               invalid={p !== undefined}
               describedBy={describedBy}
+              sample={sample}
               onChange={set}
               onBlur={() => touch(spotId, name)}
             />
             {mark && <MarkNote id={markId} mark={mark} />}
+            {sample && <SampleNote id={sampleId} />}
             <Problems id={errorId} problems={p} />
           </div>
         );

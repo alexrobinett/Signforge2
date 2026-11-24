@@ -69,13 +69,25 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   await expect(dialog).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  // Keyboard only: Enter on a template with no name goes to the name; then back, an arrow moves the choice, Enter creates.
+  // Keyboard only. The name follows the template until one is typed (#360). Cleared, Create says
+  // why it is off, and Enter on a template goes to the name; then back, an arrow moves the choice, Enter creates.
+  const templateName = (i: number) => dialog.getByRole('group', { name: 'Template' }).locator('label').nth(i).textContent();
+  const name = dialog.getByLabel('Name');
+  const create = dialog.getByRole('button', { name: 'Create spot' });
   await opener.focus();
   await page.keyboard.press('Enter');
-  await radios.first().focus();
+  await expect(name).toHaveValue((await templateName(0))?.trim() ?? '');
+  await radios.nth(1).check();
+  await expect(name).toHaveValue((await templateName(1))?.trim() ?? '');
+  await name.fill('');
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAccessibleDescription('Give the spot a name first.');
+  await radios.first().check();
+  await expect(name).toHaveValue('');
   await page.keyboard.press('Enter');
-  await expect(dialog.getByLabel('Name')).toBeFocused();
+  await expect(name).toBeFocused();
   await page.keyboard.type('Picked by keyboard');
+  await expect(create).toBeEnabled();
   await page.keyboard.press('Shift+Tab');
   await expect(radios.first()).toBeFocused();
   await page.keyboard.press('ArrowRight');
@@ -279,10 +291,22 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
   await page.getByRole('radio', { name: 'Announcement', exact: true }).check();
+  // Named after its template (#360): this spec's first Announcement.
+  await expect(page.getByLabel('Name')).toHaveValue('Announcement');
+  await axe(page);
+  await shots(page, '35-new-spot-named');
   await page.getByLabel('Name').fill('Pier 9 opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Pier 9 opening', level: 1 })).toBeVisible();
   await hydrated(page);
+  // It starts with the template's sample copy, marked until replaced; focusing a sample selects it, so typing replaces it.
+  const headline = page.getByLabel('Headline');
+  await expect(headline).toHaveValue('Pier 9 opens on Monday');
+  await expect(headline).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
+  await headline.focus();
+  expect(await headline.evaluate((i) => i instanceof HTMLInputElement && i.selectionStart === 0 && i.selectionEnd === i.value.length)).toBe(true);
+  await axe(page);
+  await shots(page, '35-spot-editor-sample');
   // Every image field needs an image, the photo too: the one the test above uploaded.
   await page.getByRole('button', { name: 'Choose image for Photo' }).click();
   await page
@@ -294,6 +318,7 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
 
   await page.getByLabel('Look').selectOption('night');
   await page.getByLabel('Headline').fill('Pier 9 opens Monday');
+  await expect(page.getByLabel('Headline')).not.toHaveAccessibleDescription(/Sample text/);
   await expect.poll(() => stageShows(page, 'Pier 9 opens Monday'), { timeout: 10_000 }).toBe(true);
   // No address, no code: it appears once one is typed, named by its label.
   const qr = async () => {

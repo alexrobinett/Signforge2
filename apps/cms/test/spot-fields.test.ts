@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
-import { startData } from '@signforge/compiler/draft';
+import { sampleData, startData } from '@signforge/compiler/draft';
 import { typedFields } from '../src/lib/live-data';
 import { fieldProblems, type SpotDraft } from '../src/lib/spots';
 import { StoreProvider } from '../src/state/provider';
@@ -232,5 +232,28 @@ describe('a new spot in the editor (#359)', () => {
     expect(cell).toContain('aria-describedby="field-facts-error"');
     expect(/<input[^>]*id="field-facts-0-value"[^>]*>/.exec(html)?.[0]).not.toContain('aria-invalid="true"');
     expect(html).toContain('Facts, row 1, Label is longer than 4 characters.');
+  });
+});
+
+describe('a new spot’s sample in the editor (#360)', () => {
+  const fields: Record<string, FieldDef> = {
+    headline: { type: 'text', label: 'Headline', default: 'Pier 9 opens on Monday' },
+    items: { type: 'list', label: 'Items', item: { name: { type: 'text', label: 'Name' } }, default: [{ name: 'Espresso' }] },
+  };
+  const html = (data: Record<string, unknown>) => {
+    const draft: SpotDraft = { name: 'Pier', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
+    return formHtml({ fields, shown: fields, draft, assets: [] });
+  };
+
+  it('is marked as sample, and the mark describes the field, until it is replaced', () => {
+    const sample = html(sampleData({ fields }));
+    expect(sample).toContain('Sample text. Replace it before you publish.');
+    expect(sample).toContain('Sample rows. Replace them before you publish.');
+    expect(/<input[^>]*id="field-headline"[^>]*>/.exec(sample)?.[0]).toContain('aria-describedby="field-headline-sample"');
+
+    const edited = html({ headline: 'Pier 9 opens on Tuesday', items: [{ name: 'Tea' }] });
+    expect(edited).not.toContain('Sample text');
+    expect(edited).not.toContain('Sample rows');
+    expect(html({ headline: 'Opens Tuesday', items: [] })).not.toContain('Sample rows');
   });
 });
