@@ -21,10 +21,9 @@ import {
   type Grant,
   OVERRIDE_LIMIT_MS,
   permits,
-  publishOrg,
+  dryPublish,
   refusedPress,
   registry,
-  type SampleAck,
   sha256Hex,
   ToolError,
 } from '@signforge/tools';
@@ -113,11 +112,15 @@ async function spotsLive(org: OrgScope, playlist: PlaylistRow): Promise<Record<s
   return Object.fromEntries(rows.flatMap((s) => (s ? [[s.id, s.publishedVersion]] : [])));
 }
 
-/** What a publish would do, worked out as it would, writing nothing: what a publish card shows and a press is held to. */
-async function publishSees(org: OrgScope, pins: DraftPin[], allow: SampleAck[], now: number) {
-  const dry = await publishOrg(org, { hash: sha256Hex, now: new Date(now) }, pins, [], false, allow);
+/**
+ * What a publish would do, worked out as it would, writing nothing: what a publish card shows and a press is held to. A spot
+ * still holding its template's sample text (#360, #392) is named, exactly as the publish would refuse it (`dryPublish`).
+ */
+async function publishSees(org: OrgScope, pins: DraftPin[], now: number) {
+  const { result: dry, samples } = await dryPublish(org, { hash: sha256Hex, now: new Date(now) }, pins, false);
   return {
     dry,
+    samples,
     // The screens it would switch, the default and the brand kits their manifests are compiled with: the publish's guards.
     held: {
       ifScreens: dry.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : [])).sort(),
@@ -152,9 +155,6 @@ async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[
   return { pins, names };
 }
 
-/** What a publish refused for sample text names (#360): each spot, at its version, and its fields still holding the sample. */
-const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) })) });
-
 /** A calendar's or a sheet's source: the resource read at the provider, in full, through its connection (#351 review). */
 const resourceLines = (called: Row) => (called.resource === undefined ? [] : [`Reads this at the provider, through its connection: ${str(called.resource)}`]);
 
@@ -174,20 +174,14 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds
       // back. A spot still holding its template's sample text (#360, #392) is listed on the card, exactly as the publish
       // would refuse it, and acknowledged by the press: the model's own allowSample, which an agent may not give, is never taken.
-      const dryRun = (allow: SampleAck[]) => publishSees(org, pins, allow, at.now);
-      let samples: z.output<typeof sampleRefusal>['spots'] = [];
       let seen: Awaited<ReturnType<typeof publishSees>>;
       try {
-        seen = await dryRun([]).catch(async (err: unknown) => {
-          if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
-          samples = sampleRefusal.parse(err.details).spots;
-          return dryRun(samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })));
-        });
+        seen = await publishSees(org, pins, at.now);
       } catch (err) {
         if (err instanceof ToolError) throw new CardProblem(err.message, { cause: err });
         throw err;
       }
-      const { dry, held } = seen;
+      const { dry, held, samples } = seen;
       const reach = held.ifScreens.length;
       const { allowSample: _theirs, ...asked } = called;
       return {

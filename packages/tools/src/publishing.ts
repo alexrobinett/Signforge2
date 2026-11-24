@@ -49,6 +49,7 @@ import {
 import { renditionView } from './assets';
 import { kitColors } from './brand';
 import { ended } from './schedule';
+import { z } from 'zod';
 import { ToolError } from './tool';
 
 type Orientation = Screen['orientation'];
@@ -522,6 +523,28 @@ export interface SampleAck {
   fields: string[];
 }
 
+/** What a publish refused for sample text names (#360): each spot, at its version, and its fields still holding the sample. */
+const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) })) });
+
+/**
+ * A publish worked out as `publishOrg` works it out, writing nothing, for a person to see before they
+ * press (the agent drawer's publish card, #351; the approvals queue, #115): the spots it would refuse
+ * for their template's sample text are named, and it is worked out again acknowledging exactly those,
+ * as the person's press does. Any other refusal is thrown.
+ */
+export async function dryPublish(org: OrgScope, opts: CompileOptions, pins: readonly DraftPin[], exact: boolean, loaded?: OrgGraph) {
+  // The org read once, for the first run and the one acknowledging sample text alike: nothing is written between them.
+  const graph = loaded ?? (await loadOrg(org));
+  const run = (allow: SampleAck[]) => publishOrg(org, opts, pins, [], exact, allow, [], graph);
+  try {
+    return { result: await run([]), samples: [] };
+  } catch (err) {
+    if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
+    const { spots } = sampleRefusal.parse(err.details);
+    return { result: await run(spots.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields }))), samples: spots };
+  }
+}
+
 /**
  * Promote drafts, then compile every screen from the published graph. A screen that cannot be
  * compiled is reported and the others still publish. Stages writes; the caller commits them with
@@ -538,6 +561,7 @@ export interface SampleAck {
  * writes commit, its drafts promoted. `removals` delete schedule entries: commit them with the
  * rest, and also when no draft was promoted and no screen changed, which makes no publish. `added`:
  * schedule entries the caller staged before these writes in its batch, read as if they were there.
+ * `loaded`: the org as the caller read it (`loadOrg`), for a dry run that needs it twice; else read here.
  */
 export async function publishOrg(
   org: OrgScope,
@@ -547,6 +571,7 @@ export async function publishOrg(
   exact = false,
   allowSample: readonly SampleAck[] = [],
   added: readonly ScheduleEntryRow[] = [],
+  loaded?: OrgGraph,
 ): Promise<{
   writes: Write[];
   removals: Write[];
@@ -562,8 +587,8 @@ export async function publishOrg(
   madeDefault: { id: string; name: string } | null;
 }> {
   // Entries staged earlier in the same batch (`publish_takeover`): read as if they were there, so the publish promotes them with the rest.
-  const loaded = await loadOrg(org);
-  const read = added.length ? { ...loaded, entries: [...loaded.entries, ...added] } : loaded;
+  const base = loaded ?? (await loadOrg(org));
+  const read = added.length ? { ...base, entries: [...base.entries, ...added] } : base;
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
     const rows: Record<DraftKind, DraftRow[]> = { spot: read.spots, playlist: read.playlists, schedule_entry: read.entries };

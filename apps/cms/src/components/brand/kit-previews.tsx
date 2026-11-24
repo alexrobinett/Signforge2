@@ -7,6 +7,7 @@ import { SCREEN_BOX } from '@signforge/contract';
 import { Link } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useHydrated } from '~/lib/hydrated';
+import { useWidthRef } from '~/lib/measured';
 import { PLAYER_URL } from '~/lib/preview';
 import type { SpotView } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
@@ -32,15 +33,7 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
     },
     [attach, orgId, kitId, spotId, templateVersionId],
   );
-  const boxRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      if (!el) return;
-      const seen = new ResizeObserver(([entry]) => entry && measure(Math.round(entry.contentRect.width)));
-      seen.observe(el);
-      return () => seen.disconnect();
-    },
-    [measure],
-  );
+  const boxRef = useWidthRef(measure);
 
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1.5">

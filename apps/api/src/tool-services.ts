@@ -78,6 +78,7 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
       return user.success && ip.success;
     },
     notify: screenNotifier(env),
+    cmsOrigin: env.CMS_ORIGIN,
     deliverNow:
       orgId === null
         ? undefined

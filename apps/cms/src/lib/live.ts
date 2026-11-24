@@ -58,3 +58,6 @@ export const useCanManage = () => useRole() !== 'viewer';
 
 /** Whether the member may publish here: the tools the shell lists for them include it (an editor loses it when only owners publish). */
 export const useCanPublish = () => app.useLoaderData().tools.some((t) => t.name === 'publish');
+
+/** Whether the member may approve or decline publish requests (#115): the shell's tools include it, as publishing's do. */
+export const useCanApprove = () => app.useLoaderData().tools.some((t) => t.name === 'approve_publish_request');

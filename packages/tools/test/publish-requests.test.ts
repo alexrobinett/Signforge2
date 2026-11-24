@@ -48,7 +48,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const services = () => ({ ...fakeServices, deliverNow: (id: string) => void delivered.push(id) });
+const CMS = 'https://cms.signforge.test';
+const services = () => ({ ...fakeServices, cmsOrigin: CMS, deliverNow: (id: string) => void delivered.push(id) });
 const person = (role: Role, userId = `${o.orgId}-${role === 'owner' ? 'owner' : role}`, clientId = 'cms'): Caller => ({
   org: testScope(env.DB, o.orgId),
   role,
@@ -107,7 +108,7 @@ describe('an agent asks, a person approves', () => {
     expect(asked).toMatchObject({ actorKind: 'agent', actorId: o.agentGrant, clientId: 'agent-app', targetKind: 'publish_request' });
     expect(decided).toMatchObject({ actorKind: 'user', actorId: `${o.orgId}-owner`, targetKind: 'publish_request' });
     expect(JSON.parse(decided.detailJson!).detail).toEqual({
-      requestedBy: { kind: 'agent', id: o.agentGrant, clientId: 'agent-app' },
+      requestedBy: { kind: 'agent', id: o.agentGrant, clientId: 'agent-app', name: 'Seeded agent', connectedBy: null, gone: false },
       publishId: made.publish.id,
     });
     // The agent learns the outcome.
@@ -178,7 +179,14 @@ describe('who decides', () => {
     const version = await editSpot(person('editor'), o.imageSpot, 9_000);
     expect(await dispatch(registry, 'publish', {}, person('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
     const { request } = await ask(person('editor'), [{ kind: 'spot', id: o.imageSpot, version }]);
-    expect(request.requestedBy).toEqual({ kind: 'user', id: `${o.orgId}-editor`, clientId: 'cms' });
+    expect(request.requestedBy).toEqual({
+      kind: 'user',
+      id: `${o.orgId}-editor`,
+      clientId: 'cms',
+      name: `editor of ${o.orgId}`,
+      connectedBy: null,
+      gone: false,
+    });
     await call(person('owner'), 'update_org_settings', { editorsPublish: true });
     expect(await approve('editor')).toMatchObject({ ok: true });
   });
@@ -250,7 +258,8 @@ describe('asking', () => {
       occurredAt: new Date(request.createdAt).toISOString(),
       org: { id: o.orgId, name: o.orgId },
       data: {
-        request: { id: request.id, url: null, drafts: 1, expiresAt: new Date(request.expiresAt).toISOString() },
+        // The approvals queue, at the request (#115).
+        request: { id: request.id, url: `${CMS}/approvals#${request.id}`, drafts: 1, expiresAt: new Date(request.expiresAt).toISOString() },
         by: { kind: 'agent', id: o.agentGrant, name: 'Seeded agent' },
       },
     });
@@ -282,6 +291,9 @@ function racing(caller: Caller, before: () => Promise<unknown>): Caller {
 const scope = () => testScope(env.DB, o.orgId);
 const pendingStill = async (id: string) => expect((await scope().publishRequests.get(id))!.status).toBe('pending');
 const approve = (caller: Caller, publishRequestId: string) => dispatch(registry, 'approve_publish_request', { publishRequestId }, caller);
+
+/** A url spot of its own, for drafts no other request pins. */
+const otherSpotNamed = (name: string) => scope().spots.insert({ name, kind: 'url', durationMs: 5_000, url: `https://example.com/${name}` });
 
 /** A second template spot like the seeded one: a draft of its own. */
 async function otherSpot() {
@@ -528,5 +540,199 @@ describe('the second re-check of #386', () => {
       details: { requestId: second },
     });
     expect((await scope().publishRequests.pendingBy(o.agentGrant, Date.now())).filter((r) => r.draftsJson.includes(`"version":${version}`))).toHaveLength(1);
+  });
+});
+
+describe('putting a declined request back (#115)', () => {
+  /** A request the agent asked, declined by `by`. */
+  async function declined(by: Caller) {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    await call(by, 'decline_publish_request', { publishRequestId: request.id });
+    return request.id as string;
+  }
+  const reopen = (caller: Caller, publishRequestId: string) => dispatch(registry, 'reopen_publish_request', { publishRequestId }, caller);
+
+  it('puts it back to pending, undecided, audited as the person, with no second alert; it can be approved then', async () => {
+    const id = await declined(person('editor'));
+    delivered = [];
+    const alerts = (await scope().alertDeliveries.list({ take: 50 })).length;
+    expect(await reopen(person('editor'), id)).toMatchObject({ ok: true, output: { request: { status: 'pending', decidedBy: null, decidedAt: null } } });
+    expect(delivered).toEqual([]);
+    expect((await scope().alertDeliveries.list({ take: 50 })).length).toBe(alerts);
+    const [row] = await scope().auditLog.list({ limit: 1 });
+    expect(row).toMatchObject({ action: 'reopen_publish_request', actorKind: 'user', actorId: `${o.orgId}-editor`, targetId: id });
+    expect((await call(agent(), 'get_publish_request', { publishRequestId: id })).request.status).toBe('pending');
+    expect(await approve(person('owner'), id)).toMatchObject({ ok: true });
+  });
+
+  it('by the person who declined it, or someone who may decide it; not another who may not, and never an agent', async () => {
+    const id = await declined(person('editor'));
+    await call(person('owner'), 'update_org_settings', { editorsPublish: false });
+    // Another editor, who did not decline it and may not publish now: refused.
+    expect(await reopen(person('editor', `${o.orgId}-other-editor`), id)).toMatchObject({ ok: false, error: 'forbidden' });
+    // An agent, with content:publish or without, and the CMS agent: people only.
+    for (const caller of [
+      agent(),
+      agent(['content:read', 'content:draft', 'content:publish'], 'owner'),
+      person('owner', `${o.orgId}-owner`, CMS_AGENT_CLIENT_ID),
+    ])
+      expect(await reopen(caller, id)).toMatchObject({ ok: false, error: 'forbidden' });
+    // The editor who declined it, though they may not decide it now.
+    expect(await reopen(person('editor'), id)).toMatchObject({ ok: true });
+    // An owner, who may decide it, though another declined it.
+    await call(person('owner'), 'update_org_settings', { editorsPublish: true });
+    await call(person('editor'), 'decline_publish_request', { publishRequestId: id });
+    expect(await reopen(person('owner'), id)).toMatchObject({ ok: true });
+  });
+
+  it('refuses one not declined, and one expired', async () => {
+    expect(await reopen(person('owner'), o.publishRequest)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'pending' } });
+    const id = await declined(person('owner'));
+    vi.setSystemTime(START + PUBLISH_REQUEST_TTL_MS);
+    expect(await reopen(person('owner'), id)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'expired' } });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
+  it("refuses once the same drafts were asked for again since, and at the asker's cap: one request waits for the drafts, never two", async () => {
+    const id = await declined(person('owner'));
+    const pin = JSON.parse((await scope().publishRequests.get(id))!.draftsJson);
+    const { request: again } = await ask(agent(), pin);
+    expect(await reopen(person('owner'), id)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('asked for again since it was declined'),
+      details: { requestId: again.id },
+    });
+    // The other declined, the asker fills its cap with other drafts: still refused, and it stays declined.
+    await call(person('owner'), 'decline_publish_request', { publishRequestId: again.id });
+    const waiting = (await scope().publishRequests.pendingBy(o.agentGrant, Date.now())).length;
+    for (let i = waiting; i < MAX_PENDING; i++) {
+      const s = await otherSpotNamed(`cap-${i}`);
+      await ask(agent(), [{ kind: 'spot', id: s.id, version: s.rowVersion }], `Cap ${i}`);
+    }
+    expect(await reopen(person('owner'), id)).toMatchObject({ ok: false, error: 'conflict', details: { pending: MAX_PENDING } });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
+  it('holds the right to decide to the commit when another person put it back: one demoted meanwhile is refused', async () => {
+    const id = await declined(person('owner'));
+    // The editor did not decline it: they may put it back only while they may decide it, checked again in the batch.
+    const raced = racing(person('editor'), () => call(person('owner'), 'update_org_settings', { editorsPublish: false }));
+    expect(await reopen(raced, id)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
+  it('commits one of two put back from one read, and none once it is decided again between its read and its batch', async () => {
+    const id = await declined(person('owner'));
+    const row = (await scope().publishRequests.get(id))!;
+    await scope().commit(scope().publishRequests.stage.reopen(row, Date.now(), MAX_PENDING).writes);
+    await expect(scope().commit(scope().publishRequests.stage.reopen(row, Date.now(), MAX_PENDING).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    // Declined again, then put back by one while another declines it once more between its read and its batch.
+    await call(person('owner'), 'decline_publish_request', { publishRequestId: id });
+    const raced = racing(person('owner'), async () => {
+      await call(person('owner'), 'reopen_publish_request', { publishRequestId: id });
+      await call(person('owner'), 'decline_publish_request', { publishRequestId: id });
+    });
+    expect(await reopen(raced, id)).toMatchObject({ ok: false, error: 'conflict' });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+});
+
+describe('checking what approving would do (#115)', () => {
+  it('says the default it read and the one approving would make, and how many screens play each pinned spot now', async () => {
+    // Nothing is published, and the org has no default: an entry on every screen at all hours makes its playlist the first one (#243).
+    const entry = await scope().scheduleEntries.insert({ playlistId: o.playlist, priority: 1, target: 'org' });
+    const pins = [
+      { kind: 'schedule_entry', id: entry.id, version: entry.rowVersion },
+      { kind: 'playlist', id: o.playlist, version: (await scope().playlists.get(o.playlist))!.rowVersion },
+      { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) },
+      { kind: 'spot', id: o.imageSpot, version: await spotVersion(o.imageSpot) },
+    ];
+    const { request } = await ask(agent(), pins, 'Opening week');
+    const seen = await check(request.id);
+    expect(seen).toMatchObject({ refused: null, defaultPlaylistId: null, madeDefault: { id: o.playlist } });
+    // In the request's order: its pins are kept sorted.
+    expect(seen.liveOn).toEqual([
+      { spotId: o.imageSpot, screens: 0 },
+      { spotId: o.templateSpot, screens: 0 },
+    ]);
+    await approve(person('owner'), request.id);
+    // Now on every screen, by the default it made.
+    const again = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version: await editSpot(agent(), o.templateSpot, 12_000) }]);
+    expect((await check(again.request.id)).liveOn).toEqual([{ spotId: o.templateSpot, screens: 1 }]);
+  });
+
+  it('approves only while the screens it switches and the default are as checked: either changed refuses it, publishing nothing', async () => {
+    const { request } = await askedOnScreen();
+    const seen = await check(request.id);
+    const held = { ifScreens: seen.screens.map((x: { id: string }) => x.id), ifDefault: seen.defaultPlaylistId };
+    expect(held).toEqual({ ifScreens: [o.screen], ifDefault: o.playlist });
+    const approveAs = () => dispatch(registry, 'approve_publish_request', { publishRequestId: request.id, ...held }, person('owner'));
+    // A screen added since: it would switch that one too.
+    const added = await scope().screens.insert({ name: 'Annex', timezone: 'UTC', orientation: 'landscape' });
+    expect(await approveAs()).toMatchObject({ ok: false, error: 'conflict', details: { screens: [o.screen, added.id].sort() } });
+    await scope().commit(scope().screens.stage.delete(added.id).writes);
+    // Another default since.
+    const other = await scope().playlists.insert({ name: 'Other', transitionJson: JSON.stringify({ type: 'cut' }) });
+    await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: other.id })).writes);
+    expect(await approveAs()).toMatchObject({ ok: false, error: 'conflict', details: { defaultPlaylistId: other.id } });
+    expect((await scope().publishRequests.get(request.id))!.status).toBe('pending');
+    expect(published((await scope().spots.get(o.templateSpot))!)?.durationMs).not.toBe(12_000);
+    // As checked again: approved.
+    await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
+    expect(await approveAs()).toMatchObject({ ok: true });
+  });
+
+  const check = (publishRequestId: string) => call(person('viewer'), 'check_publish_request', { publishRequestId });
+  /** The seeded playlist made the default and published, so its screen plays it; then the agent edits its spot and asks. */
+  const askedOnScreen = async () => {
+    await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
+    await call(person('owner'), 'publish', {});
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    return { request, version };
+  };
+
+  it('names the screens it would switch, what each pin changes and the sample text it would publish, as approve takes it', async () => {
+    // Its screen plays the seeded playlist, whose spot the request pins.
+    const { request, version } = await askedOnScreen();
+    const seen = await check(request.id);
+    expect(seen).toMatchObject({
+      request: { id: request.id, requestedBy: { kind: 'agent', name: 'Seeded agent' } },
+      refused: null,
+      held: [],
+      samples: [],
+      changes: [{ kind: 'spot', id: o.templateSpot, fresh: false, fields: ['durationMs'] }],
+    });
+    expect(seen.screens.map((x: { id: string }) => x.id)).toEqual([o.screen]);
+    // Its spot still holding its template's sample text: listed as approve's allowSample takes it.
+    await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+      .bind(JSON.stringify({ texts: ['headline'], lists: {} }), o.templateSpot)
+      .run();
+    const { samples } = await check(request.id);
+    expect(samples).toEqual([{ spotId: o.templateSpot, name: expect.any(String), version, fields: ['headline'] }]);
+    const allowSample = samples.map(({ spotId, version, fields }: { spotId: string; version: number; fields: string[] }) => ({ spotId, version, fields }));
+    expect(await approve(person('owner'), request.id)).toMatchObject({ ok: false, error: 'sample_text' });
+    expect(await dispatch(registry, 'approve_publish_request', { publishRequestId: request.id, allowSample }, person('owner'))).toMatchObject({ ok: true });
+    expect(await check(request.id)).toMatchObject({ refused: { error: 'conflict', message: expect.stringContaining('approved') } });
+  });
+
+  it('says why approving would be refused: a pin changed since, the brand kits changed', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 12_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    expect(await check(request.id)).toMatchObject({ refused: null, changes: [{ id: o.templateSpot, fresh: true, fields: [] }] });
+    await editSpot(person('editor'), o.templateSpot, 15_000);
+    expect(await check(request.id)).toMatchObject({ refused: { error: 'conflict' }, screens: [] });
+  });
+
+  it("gets a spot's published version, shaped as the draft, with the version published", async () => {
+    await call(person('owner'), 'publish', {});
+    const live = (await scope().spots.get(o.templateSpot))!;
+    await editSpot(person('editor'), o.templateSpot, 15_000);
+    const { spot } = await call(person('viewer'), 'get_spot', { spotId: o.templateSpot, published: true });
+    expect(spot).toMatchObject({ id: o.templateSpot, durationMs: live.durationMs, version: live.rowVersion, published: true });
+    const other = await otherSpot();
+    expect(await dispatch(registry, 'get_spot', { spotId: other.id, published: true }, person('viewer'))).toMatchObject({ ok: false, error: 'not_found' });
   });
 });

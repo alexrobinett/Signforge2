@@ -1,5 +1,6 @@
 import {
   CalendarClockIcon,
+  InboxIcon,
   ImagesIcon,
   LayersIcon,
   LayoutDashboardIcon,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/assets' | '/integrations' | '/audit' | '/settings';
+  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/approvals' | '/assets' | '/integrations' | '/audit' | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -69,6 +70,16 @@ export const SECTIONS: Section[] = [
     icon: SendIcon,
     description: 'What went to screens, when and by whom, how each rollout stands, and rolling screens back.',
     empty: { title: 'Nothing published yet', body: 'Publish a spot or a playlist from its editor, and its rollout to each screen shows here.' },
+  },
+  {
+    to: '/approvals',
+    label: 'Approvals',
+    icon: InboxIcon,
+    description: 'Agents and members who may not publish asked to put these on screens. Nothing has changed on any screen yet.',
+    empty: {
+      title: 'Nothing is waiting for approval',
+      body: 'When an agent without the publish scope, or a member who may not publish, asks to put drafts on screens, the request waits here.',
+    },
   },
   {
     to: '/assets',

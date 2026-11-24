@@ -16,6 +16,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known/$'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
+import { Route as AppApprovalsRouteImport } from './routes/_app/approvals'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
@@ -74,6 +75,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountRoute = AppAccountRouteImport.update({
   id: '/account',
   path: '/account',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppApprovalsRoute = AppApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAssetsRoute = AppAssetsRouteImport.update({
@@ -213,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
+  '/approvals': typeof AppApprovalsRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
@@ -245,6 +252,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
+  '/approvals': typeof AppApprovalsRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
@@ -279,6 +287,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/_app/account': typeof AppAccountRoute
+  '/_app/approvals': typeof AppApprovalsRoute
   '/_app/assets': typeof AppAssetsRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/integrations': typeof AppIntegrationsRoute
@@ -315,6 +324,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/.well-known/$'
     | '/account'
+    | '/approvals'
     | '/assets'
     | '/audit'
     | '/integrations'
@@ -347,6 +357,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/.well-known/$'
     | '/account'
+    | '/approvals'
     | '/assets'
     | '/audit'
     | '/integrations'
@@ -380,6 +391,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/.well-known/$'
     | '/_app/account'
+    | '/_app/approvals'
     | '/_app/assets'
     | '/_app/audit'
     | '/_app/integrations'
@@ -468,6 +480,13 @@ declare module '@tanstack/react-router' {
       path: '/account'
       fullPath: '/account'
       preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/approvals': {
+      id: '/_app/approvals'
+      path: '/approvals'
+      fullPath: '/approvals'
+      preLoaderRoute: typeof AppApprovalsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/assets': {
@@ -678,6 +697,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRoute
+  AppApprovalsRoute: typeof AppApprovalsRoute
   AppAssetsRoute: typeof AppAssetsRoute
   AppAuditRoute: typeof AppAuditRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
@@ -696,6 +716,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRoute,
+  AppApprovalsRoute: AppApprovalsRoute,
   AppAssetsRoute: AppAssetsRoute,
   AppAuditRoute: AppAuditRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
