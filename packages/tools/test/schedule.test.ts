@@ -109,11 +109,12 @@ describe('schedule entries', () => {
 
   it('lists the unpublished entries alone, newest edit first, counting them all (#357)', async () => {
     const { call, breakfast, lunch, publish } = await setup('sch-unpublished');
-    const first = (await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'org', priority: 1 }))).entry;
+    type Entry = { id: string; version: number };
+    const first = (await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'org', priority: 1 }))).entry as Entry;
     await publish(first);
-    const second = (await ok(call('create_schedule_entry', { playlistId: lunch, target: 'org', priority: 2 }))).entry;
+    const second = (await ok(call('create_schedule_entry', { playlistId: lunch, target: 'org', priority: 2 }))).entry as Entry;
     const page = await ok(call('list_schedule_entries', { unpublished: true, limit: 1 }));
-    expect(page.entries.map((e: { id: string }) => e.id)).toEqual([second.id]);
+    expect((page.entries as Entry[]).map((e) => e.id)).toEqual([second.id]);
     expect(page.total).toBe(1);
     expect((await ok(call('list_schedule_entries', {}))).total).toBe(2);
   });

@@ -147,8 +147,7 @@ describe('spot drafts', () => {
 
   it('lists by kind, or the unpublished only, and counts every spot the filters match (#357)', async () => {
     const { call, version } = await setup('spots-filters');
-    const made = [];
-    for (const name of ['One', 'Two', 'Three']) made.push((await ok(call('create_spot', { name, kind: 'template', templateVersionId: version }))).spot);
+    for (const name of ['One', 'Two', 'Three']) await ok(call('create_spot', { name, kind: 'template', templateVersionId: version }));
     const page = await ok(call('list_spots', { unpublished: true, limit: 2 }));
     expect(page.spots).toHaveLength(2);
     expect(page.total).toBe(3);

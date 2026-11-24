@@ -42,10 +42,11 @@ describe('playlist drafts', () => {
     expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [], total: 0 });
     await ok(call('set_default_playlist', { playlistId: lunch }));
     expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [{ id: lunch, isDefault: true }], total: 1 });
-    const { playlists, total } = await ok(call('list_playlists', { unpublished: true }));
-    expect(playlists.every((p: { draftChanged: boolean }) => p.draftChanged)).toBe(true);
-    expect(total).toBe(playlists.length);
-    expect(playlists.map((p: { id: string }) => p.id)).toContain(lunch);
+    const listed = await ok(call('list_playlists', { unpublished: true }));
+    const playlists = listed.playlists as { id: string; draftChanged: boolean }[];
+    expect(playlists.every((p) => p.draftChanged)).toBe(true);
+    expect(listed.total).toBe(playlists.length);
+    expect(playlists.map((p) => p.id)).toContain(lunch);
   });
 
   it('reorders, renames and changes the transition with ifVersion, and refuses an edit from an old read', async () => {
