@@ -231,14 +231,18 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
 
   it('changes a feed within the budget (the Free plan: 50 D1 queries an invocation)', async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
+    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
     const publisher = (await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish'])).access_token;
     const drafter = (await agentToken(t, owner, org.id, ['content:read', 'content:draft'])).access_token;
     // Each grant's first call writes its last use (hourly): made before any is measured.
     for (const token of [publisher, drafter]) expect((await listed(token)).status).toBe(200);
     const measured = (token: string, input: Record<string, unknown>) =>
       measure(async (b) => {
-        expect(await mcpTool(token, 'update_data_source', { dataSourceId: 'menu', ...input }, b)).toMatchObject({ structuredContent: { dataSource: { id: 'menu' } } });
+        expect(await mcpTool(token, 'update_data_source', { dataSourceId: 'menu', ...input }, b)).toMatchObject({
+          structuredContent: { dataSource: { id: 'menu' } },
+        });
       });
     const address = await measured(publisher, { feedUrl: 'https://menu.example.com/later.json' });
     const refresh = await measured(publisher, { refreshS: 600 });

@@ -417,10 +417,23 @@ describe('schedule entries', () => {
     const now = new Date(0).toISOString();
     const userId = `${org.orgId}-editor-user`;
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(userId, 'Ed', `${userId}@signforge.test`, now, now),
-      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(`${userId}-m`, org.orgId, userId, now),
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        userId,
+        'Ed',
+        `${userId}@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(
+        `${userId}-m`,
+        org.orgId,
+        userId,
+        now,
+      ),
     ]);
-    const raced = racing({ ...memberOf(org, 'editor'), member: userId }, async () => org.commit((await org.settings.stage.set({ editorsPublish: false })).writes));
+    const raced = racing({ ...memberOf(org, 'editor'), member: userId }, async () =>
+      org.commit((await org.settings.stage.set({ editorsPublish: false })).writes),
+    );
     expect(await dispatch(registry, 'delete_schedule_entry', { scheduleEntryId: entry.id }, raced)).toMatchObject({
       ok: false,
       error: 'forbidden',

@@ -126,8 +126,7 @@ describe("an agent, even an owner's with every scope", () => {
     // A backstop, not the rule: a handler that names a check of agents (or a helper that makes one) must declare it.
     // A check in a helper not named here escapes it, so the declaration, read by people, is what holds.
     const AGENT_CHECKS = /isAgent|peopleAllowSample|keptFor/;
-    for (const tool of tools)
-      if (AGENT_CHECKS.test(String(tool.handler))) expect(tool.people || tool.partialAgents !== undefined, tool.name).toBe(true);
+    for (const tool of tools) if (AGENT_CHECKS.test(String(tool.handler))) expect(tool.people || tool.partialAgents !== undefined, tool.name).toBe(true);
     // And every declaration is borne out by its handler, so none is left once the rule goes.
     for (const tool of tools) if (tool.partialAgents !== undefined) expect(AGENT_CHECKS.test(String(tool.handler)), tool.name).toBe(true);
   });

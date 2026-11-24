@@ -1103,13 +1103,15 @@ describe('confirmation cards (#269)', () => {
     });
   });
 
-  it("offers an editor no press for a data source change while only owners publish: screens follow it with no publish (reviews of #419)", async () => {
+  it('offers an editor no press for a data source change while only owners publish: screens follow it with no publish (reviews of #419)', async () => {
     const ask: { name?: string; called?: Record<string, unknown> } = {};
     const s = await setup({
       role: 'editor',
       steps: (body) => (body.messages.length === 1 ? { calls: [{ name: ask.name!, input: ask.called }] } : ANSWER),
     });
-    expect((await s.owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(200);
+    expect(
+      (await s.owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status,
+    ).toBe(200);
     const before = await s.scope.dataSources.get('menu');
     expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
     const cardFor = async (name: string, called: Record<string, unknown>) => {
@@ -1121,7 +1123,13 @@ describe('confirmation cards (#269)', () => {
     expect(await cardFor('update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' })).toMatchObject(refused);
     expect(await cardFor('update_data_source', { dataSourceId: 'menu', refreshS: 900 })).toMatchObject(refused);
     expect(
-      await cardFor('create_data_source', { name: 'Rota', format: 'provider', connectionId: 'con_rota', resource: 'Rota!A1:D20', idempotencyKey: 'rota-key-0001' }),
+      await cardFor('create_data_source', {
+        name: 'Rota',
+        format: 'provider',
+        connectionId: 'con_rota',
+        resource: 'Rota!A1:D20',
+        idempotencyKey: 'rota-key-0001',
+      }),
     ).toMatchObject(refused);
     expect(await s.scope.dataSources.get('menu')).toEqual(before);
     // A name alone reaches no screen: its card can be pressed.

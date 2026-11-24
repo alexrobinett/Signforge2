@@ -256,7 +256,7 @@ const updateDataSource = defineTool({
     // meanwhile, a rolled-back screen still syncing it): an agent changes anything but its name only with the right to
     // publish, held to the commit (#122, reviews of #419). A name alone reaches no screen.
     if (isAgent(actor) && reachesScreens(input))
-      publishRight("Changing a data source needs the right to publish: screens follow its changes with no publish. Its name alone may change");
+      publishRight('Changing a data source needs the right to publish: screens follow its changes with no publish. Its name alone may change');
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
     if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
     if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
