@@ -537,7 +537,7 @@ describe('sample text the server refuses (#360)', () => {
     const done = store.getState().publishSchedule(ORG);
     await asked(store);
     // The templates could not be read here: the fields are named as they are.
-    expect(store.getState().publishing.sampleCheck?.words).toBe('headline and body still have sample text.');
+    expect(store.getState().publishing.sampleCheck?.words).toBe('In Pier 9, headline and body still have sample text.');
     store.getState().publishAnyway();
     expect(await done).toBe(true);
     expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
@@ -720,11 +720,12 @@ describe('sample text the server refuses (#360)', () => {
 
 describe("the sidebar's Publish (#361)", () => {
   const ORG_ROUTER = { navigate: vi.fn(), state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
-  /** The publishing slice on a page of org_1, `switchingTo` the tab's own switch on its way, or null. */
-  function sidebarStore(switchingTo: string | null = null) {
-    return createStore<PublishingSlice & { orgs: { switchingTo: string | null } }>()((set, get) => ({
+  type Orgs = { switchingTo: string | null; drafts: Record<string, { pending: boolean }> };
+  /** The publishing slice on a page of org_1, `switchingTo` the tab's own switch on its way, or null; `creating` an org being made. */
+  function sidebarStore(switchingTo: string | null = null, creating = false) {
+    return createStore<PublishingSlice & { orgs: Orgs }>()((set, get) => ({
       ...createPublishingSlice(set as never, get as never, { router: ORG_ROUTER, queryClient: new QueryClient() } as never),
-      orgs: { switchingTo },
+      orgs: { switchingTo, drafts: { dialog: { pending: creating } } },
     }));
   }
   const spot = (id: string, version: number, over: object = {}) => ({ id, name: id, version, draftChanged: true, published: false, ...over });
@@ -787,6 +788,15 @@ describe("the sidebar's Publish (#361)", () => {
     expect(vi.mocked(getSpots)).not.toHaveBeenCalled();
   });
 
+  it('is refused while the tab makes a new org, reading nothing', async () => {
+    drafts([spot('spt_a', 3)]);
+    vi.mocked(getSpots).mockClear();
+    const store = sidebarStore(null, true);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toBeNull();
+    expect(vi.mocked(getSpots)).not.toHaveBeenCalled();
+  });
+
   it('offers no publish for more than one publish takes', async () => {
     drafts(Array.from({ length: 501 }, (_, i) => spot(`spt_${i}`, 1)));
     const store = sidebarStore();
@@ -796,18 +806,41 @@ describe("the sidebar's Publish (#361)", () => {
     expect(vi.mocked(callTool)).not.toHaveBeenCalled();
   });
 
-  it('says what it does with no default playlist: only scheduled screens change, or it makes the first default', async () => {
+  it('says what it does with no default playlist, as the server decides: it makes the first default, or no screen changes', async () => {
     const lunch = { id: 'pls_main', name: 'Lunch', isDefault: false, draftChanged: false };
     drafts([], [lunch], [{ ...entry('sch_1', false), target: 'group', groupId: 'grp_1' }]);
     const store = sidebarStore();
     await store.getState().askPublishAll(ORG);
-    expect(store.getState().publishing.all?.defaultWords).toBe('There is no default playlist yet: only the screens a schedule entry reaches will change.');
+    // No entry on every screen at all hours: the server compiles no screen without a default.
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: null });
     drafts([], [lunch], [entry('sch_2', false)]);
     await store.getState().askPublishAll(ORG);
-    expect(store.getState().publishing.all?.defaultWords).toContain('this publish makes Lunch the default');
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: 'Lunch' });
+    // Every day spelled out, seven distinct days, is every day, as the server reads it; six is not.
+    drafts([], [lunch], [{ ...entry('sch_3', false), days: [0, 1, 2, 3, 4, 5, 6] }]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: 'Lunch' });
+    drafts([], [lunch], [{ ...entry('sch_4', false), days: [1, 2, 3, 4, 5, 6] }]);
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all?.noDefault).toEqual({ makes: null });
     drafts([], [{ ...lunch, isDefault: true }], [entry('sch_2', false)]);
     await store.getState().askPublishAll(ORG);
-    expect(store.getState().publishing.all?.defaultWords).toBeNull();
+    expect(store.getState().publishing.all?.noDefault).toBeNull();
+  });
+
+  it('finds nothing to publish: says so, counts again, and never sends an empty publish', async () => {
+    drafts([spot('spt_a', 3, { draftChanged: false })]);
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const store = createStore<PublishingSlice & { orgs: Orgs }>()((set, get) => ({
+      ...createPublishingSlice(set as never, get as never, { router: ORG_ROUTER, queryClient } as never),
+      orgs: { switchingTo: null, drafts: {} },
+    }));
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ pins: [] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', ORG, 'overview'] });
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
   });
 
   it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins acknowledging exactly what it showed (#360)', async () => {

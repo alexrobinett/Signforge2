@@ -1,8 +1,11 @@
 // Overview (#357) and its setup checklist (#334): worked out from the tools' answers, so each step
 // ticks itself off only once screens have it, Playing now shows what screens report applying, and
 // hiding the checklist is kept per browser like the sidebar's fold, merged across tabs.
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
+import { NotCurrent } from '../src/components/screens/not-current';
 import { listOutOfDate } from '../src/lib/fleet-status';
 import { playingNow, SHOWN_DRAFTS, setupSteps, unpublished } from '../src/lib/overview';
 import type { ScreenView } from '../src/lib/screen-types';
@@ -147,5 +150,18 @@ describe('hiding the setup checklist', () => {
     connectUi(blocked as never, { router } as never);
     blocked.getState().hideSetup('org_b');
     expect(blocked.getState().ui.setupHidden).toEqual(['org_b']);
+  });
+});
+
+describe('the not-current notice', () => {
+  const html = (heardAt: number) => renderToStaticMarkup(createElement(NotCurrent, { failing: true, heardAt, now: 3_600_000 }));
+
+  it('says nothing has been heard yet when the first read failed, with no time', () => {
+    expect(html(0)).toContain('Status is not current.</strong> SignForge hasn’t answered yet. This page keeps trying.');
+    expect(html(0)).not.toMatch(/since|ago|1970/);
+  });
+
+  it('says since when after a read that worked', () => {
+    expect(html(60_000)).toContain('59 min ago');
   });
 });

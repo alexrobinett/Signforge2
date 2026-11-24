@@ -10,11 +10,13 @@ import { createUiSlice } from '../src/state/ui';
 
 const orgs = vi.hoisted(() => ({ switchOrganization: vi.fn(async () => {}), createOrganization: vi.fn() }));
 vi.mock('~/lib/orgs', () => orgs);
+vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
 
 const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}) };
 const deps = { router, queryClient: {} } as never;
-/** The slices these commands touch, with the settings slice's and the agent drawer's one action they call. */
+/** The slices these commands touch, with the settings slice's, the agent drawer's and the sidebar Publish's one action they call. */
 const forgetAgentDrawer = vi.fn();
+const cancelPublishAll = vi.fn();
 const appStore = () =>
   createStore<any>()((set, get) => ({
     ...createUiSlice(set, get, deps),
@@ -22,6 +24,7 @@ const appStore = () =>
     ...createCommandMenuSlice(set, get, deps),
     forgetOrgSettings: () => {},
     forgetAgentDrawer,
+    cancelPublishAll,
   }));
 
 describe('orgCommands', () => {
@@ -147,6 +150,16 @@ describe('switching org', () => {
     await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
     expect(orgs.switchOrganization).toHaveBeenCalledTimes(1);
     expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the sidebar's Publish question before the switch: what it read is the last org's (review of #395)", async () => {
+    const store = appStore();
+    cancelPublishAll.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(async () => {
+      expect(cancelPublishAll).toHaveBeenCalledTimes(1);
+    });
+    await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
+    expect(cancelPublishAll).toHaveBeenCalledTimes(1);
   });
 });
 

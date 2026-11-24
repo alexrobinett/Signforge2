@@ -89,12 +89,16 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
     <AlertDialog open onOpenChange={(open) => !open && cancel()}>
       <AlertDialogContent onCloseAutoFocus={returnFocus}>
         <AlertDialogHeader>
-          <AlertDialogTitle>{all.pins ? `Publish ${changes(total)}?` : 'Publish every unpublished change?'}</AlertDialogTitle>
+          <AlertDialogTitle>
+            {!all.pins ? 'Publish every unpublished change?' : total === 0 ? 'Everything is already published' : `Publish ${changes(total)}?`}
+          </AlertDialogTitle>
           <AlertDialogDescription className="max-h-60 space-y-2 overflow-y-auto">
             {!all.pins ? (
               <span className="flex items-center gap-2">
                 <LoaderCircleIcon className="size-4 animate-spin" aria-hidden /> Reading what is not published…
               </span>
+            ) : total === 0 ? (
+              <span className="block">Every change in this organization is on its screens already. There is nothing to publish.</span>
             ) : all.tooMany ? (
               <span className="block">
                 {total} changes are not published, more than one publish takes ({MAX_PINS}). Publish them from their own pages, or from Overview's list.
@@ -105,14 +109,27 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
                   {whatGoes(all.counts)}, as drafted now, by everyone in this organization. Screens switch as they hear of it. A change made after this was read
                   is not published with it.
                 </span>
-                {all.defaultWords && <span className="block">{all.defaultWords}</span>}
+                {all.noDefault?.makes && (
+                  <span className="block">
+                    There is no default playlist yet: this publish makes {all.noDefault.makes} the default, which every screen plays when nothing else is
+                    scheduled.
+                  </span>
+                )}
+                {all.noDefault && !all.noDefault.makes && (
+                  <span className="block">
+                    No screen will change until there's a default playlist.{' '}
+                    <Link to="/playlists" onClick={cancel} className="font-medium text-foreground underline underline-offset-4">
+                      Choose a default playlist
+                    </Link>
+                  </span>
+                )}
               </>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          {all.tooMany ? (
+          <AlertDialogCancel>{all.pins && total === 0 ? 'Close' : 'Cancel'}</AlertDialogCancel>
+          {all.pins && total === 0 ? null : all.tooMany ? (
             <Button asChild>
               <Link to="/" hash="unpublished" onClick={cancel}>
                 Open Overview

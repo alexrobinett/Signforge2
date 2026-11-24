@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
 
 let calls: { name: string; input: unknown }[] = [];
 let reply: { status: number; body: unknown } = { status: 200, body: {} };
@@ -249,6 +250,7 @@ describe('a tool refused for sample text (#360)', () => {
     store.getState().openCommandMenu();
     await store.getState().chooseCommand(entry('publish'));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'overview'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'screenStatus'] });
   });
 
   it('Edit first runs nothing more, and says nothing went wrong', async () => {

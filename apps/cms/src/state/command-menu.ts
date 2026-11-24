@@ -18,6 +18,7 @@ import {
 } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
 import { overviewKey } from '~/lib/overview';
+import { screenStatusQuery } from '~/queries/screens';
 import { callTool, callToolByName, sampleAcks, sampleTextOf, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
@@ -107,9 +108,13 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       finish(from, true, null);
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) {
-        // A publish, or any draft written, changes Overview and the sidebar's counts (#361), which no loader reads.
+        // A publish, or any draft written, changes Overview and the sidebar's counts (#361), and a
+        // publish or a revoke what screens are doing, which no loader reads.
         const orgId = orgOnScreen(router);
-        if (orgId) void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
+        if (orgId) {
+          void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
+          void queryClient.invalidateQueries({ queryKey: screenStatusQuery(orgId).queryKey });
+        }
         await router.invalidate();
       }
     } catch (err) {

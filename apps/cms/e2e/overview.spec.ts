@@ -228,7 +228,9 @@ test('at 390 px the sidebar Publish asks in one dialog a screen reader finds, sa
   await opener.click();
   const ask = page.getByRole('alertdialog', { name: 'Publish 1 unpublished change?' });
   await expect(ask).toContainText('1 spot, as drafted now');
-  await expect(ask).toContainText('There is no default playlist yet: only the screens a schedule entry reaches will change.');
+  // With no default playlist the server compiles no screen: the dialog says so, with the way to choose one.
+  await expect(ask).toContainText("No screen will change until there's a default playlist.");
+  await expect(ask.getByRole('link', { name: 'Choose a default playlist' })).toHaveAttribute('href', '/playlists');
   await expect(page.getByRole('alertdialog')).toHaveCount(1);
   await axe(page);
   await shots(page, '115-publish-all-phone');
@@ -240,6 +242,8 @@ test('at 390 px the sidebar Publish asks in one dialog a screen reader finds, sa
   await opener.click();
   await ask.getByRole('button', { name: 'Publish', exact: true }).click();
   const sample = page.getByRole('alertdialog', { name: 'Publish sample text?' });
+  // Named, though it is the only one: the sidebar's Publish shows no spot.
+  await expect(sample).toContainText('In Fire drill,');
   await expect(sample).toContainText('still have sample text. Publish anyway?');
   await sample.getByRole('button', { name: 'Edit first' }).click();
   await expect(sample).toBeHidden();

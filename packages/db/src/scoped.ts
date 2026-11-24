@@ -72,7 +72,7 @@ export class NotInOrgError extends Error {
  * version and the org's publish revision move on by themselves, a draft's incarnation is fixed at
  * insert, and a draft's published version is written only by `stage.publish` (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt' | 'publishedVersion';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -311,14 +311,15 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
     ...rows,
     /**
      * How many of the org's drafts have changes screens do not have, in one SQL count (#361): never
-     * published, or edited since (a publish keeps `updated_at` as it was). An edit put back as it was
-     * still counts, which `draftChanged` would not, so it is for a count shown, never for what to publish.
+     * published, or edited since, by version, not by time (an edit in the publish's millisecond
+     * counts). An edit put back as it was still counts, which `draftChanged` would not, so it is for
+     * a count shown, never for what to publish.
      */
     countUnpublished: async (): Promise<number> => {
       const found = await db
         .select({ n: sql<number>`count(*)`.mapWith(Number) })
         .from(t)
-        .where(and(eq(t.orgId, orgId), or(isNull(t.publishedAt), gt(t.updatedAt, t.publishedAt))))
+        .where(and(eq(t.orgId, orgId), or(isNull(t.publishedVersion), gt(t.rowVersion, t.publishedVersion))))
         .get();
       return found?.n ?? 0;
     },
@@ -355,7 +356,7 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
 function publisher<T extends DraftTable>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
   return (row: T['$inferSelect'], items?: readonly string[]): Staged<T['$inferSelect']> => {
-    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now() };
+    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now(), publishedVersion: row.rowVersion };
     const promoted = staged(
       { ...row, ...set },
       db
