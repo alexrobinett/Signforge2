@@ -10,3 +10,9 @@ const DRAWN: Record<string, string> = thumbnails;
 
 export const templateThumbnail = (template: Pick<TemplateView, 'owner' | 'key'>): string | undefined =>
   template.owner === 'base' && template.key in DRAWN ? `/template-thumbnails/${template.key}.webp` : undefined;
+
+/** The same, for a template as a manifest names it: `base/clock@1.2.4` (#362). */
+export function manifestTemplateThumbnail(template: string): string | undefined {
+  const key = /^base\/([^@]+)@/.exec(template)?.[1];
+  return key ? templateThumbnail({ owner: 'base', key }) : undefined;
+}

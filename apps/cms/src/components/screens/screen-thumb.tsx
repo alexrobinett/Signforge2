@@ -1,11 +1,12 @@
 /**
- * What a screen should be showing, small: an image the spot shows (from the org's files), else
- * the spot's name on the template's dark frame. Not a render: live rendered thumbnails wait for
- * `PlayerStage` (M3-16).
+ * What a screen should be showing, small: an image the spot shows (from the org's files), else its
+ * base template's thumbnail drawn by the player (#362), else the spot's name and its template's name
+ * on a dark frame. Not a render of the spot's own text: that is the stage's, in the spot editor.
  */
 import { sessionBlobPath } from '@signforge/contract';
 import { MoonIcon } from 'lucide-react';
 import type { ScreenView } from '~/lib/screen-types';
+import { manifestTemplateThumbnail } from '~/lib/template-thumbnail';
 import { cn } from '~/lib/utils';
 
 export function ScreenThumb({
@@ -20,6 +21,7 @@ export function ScreenThumb({
   const s = screen.showing;
   const portrait = screen.orientation === 'portrait';
   const dim = screen.state.kind === 'asleep' ? 'opacity-35' : screen.state.kind === 'unreachable' ? 'opacity-80' : '';
+  const drawn = s?.spot?.template ? manifestTemplateThumbnail(s.spot.template) : undefined;
   const label = !s ? 'Nothing published yet' : s.asleep ? 'Asleep for display hours' : s.spot ? `Should be showing: ${s.spot.name}` : 'Nothing to show';
   return (
     <div className={cn('relative flex aspect-video justify-center overflow-hidden bg-[#0e0f12] text-white', className)} role="img" aria-label={label}>
@@ -32,12 +34,14 @@ export function ScreenThumb({
           </span>
         ) : s.spot?.image ? (
           <img src={sessionBlobPath(s.spot.image)} alt="" className="size-full object-cover" loading="lazy" />
+        ) : drawn ? (
+          <img src={drawn} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
           <span className={cn('flex flex-col items-center gap-1 px-3 text-center', size === 'row' && 'gap-0')}>
             <span className={cn('font-semibold', size === 'row' ? 'line-clamp-2 text-[10px] leading-tight' : 'text-lg leading-snug')}>
               {s.spot?.name ?? 'Nothing to show'}
             </span>
-            {size === 'tile' && s.spot?.template && <span className="font-mono text-[11px] text-[#b4b6be]">{s.spot.template}</span>}
+            {size === 'tile' && s.spot?.templateName && <span className="text-xs text-[#b4b6be]">{s.spot.templateName}</span>}
           </span>
         )}
       </div>

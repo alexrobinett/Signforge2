@@ -21,6 +21,26 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
+test('with no spots, the page is the template gallery; a template opens New spot with it picked (#362)', async () => {
+  await page.goto('/spots');
+  await hydrated(page);
+  const gallery = page.getByRole('region', { name: 'No spots yet' });
+  const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
+  await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  await axe(page);
+  await shots(page, '28-spots-gallery');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '28-spots-gallery-phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await clock.click();
+  const dialog = page.getByRole('dialog', { name: 'New spot' });
+  await expect(dialog.getByRole('group', { name: 'Template' }).getByRole('radio', { name: 'Clock', exact: true })).toBeChecked();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
 test('choose a template by its thumbnail, by keyboard alone, in two columns on a phone (#259)', async () => {
   await page.goto('/spots');
   await hydrated(page);
@@ -145,6 +165,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByLabel('Greeting (empty for good morning/afternoon/evening)')).toHaveValue('Good to see you');
   await page.getByRole('link', { name: 'Spots' }).first().click();
   await expect(page.getByRole('link', { name: /Lobby clock/ })).toContainText('Clock · Draft, never published');
+  await expect(page.getByRole('link', { name: /Lobby clock/ }).locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
 });
 
 test('a change someone else made while the editor was open is not overwritten', async () => {

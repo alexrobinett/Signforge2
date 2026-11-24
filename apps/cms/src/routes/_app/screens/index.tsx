@@ -307,7 +307,6 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-4">
       {screens.map((s) => {
         const d = describeScreen(s, now);
-        const v = versionText(s);
         const where = groupsOf
           .get(s.id)
           ?.map((g) => g.name)
@@ -330,14 +329,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 >
                   {s.name}
                 </Link>
-                {s.desiredManifestId && (
-                  <span
-                    className={cn('font-mono text-xs tabular-nums', v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground')}
-                    title="Version (manifest id)"
-                  >
-                    {v.text}
-                  </span>
-                )}
+                {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
               <p className="text-[13px] text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
             </div>

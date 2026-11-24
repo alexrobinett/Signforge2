@@ -166,6 +166,8 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
   await hydrated(page);
   const row = page.getByRole('link', { name: /Lunch loop/ });
   await expect(row).toContainText('1 spot · 4 s loop · Crossfade 0.8 s · Draft, never published');
+  // Its first spot, small: the clock the player drew (#362).
+  await expect(row.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
   await axe(page);
   await shots(page, '45-playlists');
   await page.setViewportSize({ width: 390, height: 844 });
