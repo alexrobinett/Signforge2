@@ -48,11 +48,15 @@ const target = (input: { playlistId: string }) => ({ kind: 'playlist', id: input
 const listPlaylists = defineTool({
   name: 'list_playlists',
   description:
-    "List the organization's playlists, the drafts as last edited, most recently edited first, a page at a time, each with its spots in play order. Each says whether it is published and whether its draft differs. Returns { playlists: Playlist[], next }; pass next as cursor for the following page.",
+    "List the organization's playlists, the drafts as last edited, most recently edited first, a page at a time, each with its spots in play order. Each says whether it is published and whether its draft differs. Filter to the default playlist, or to the unpublished ones. Returns { playlists: Playlist[], next, total }: total counts every playlist the filters match; pass next as cursor for the following page.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: z.object({
+    ...pageInput,
+    isDefault: z.boolean().optional().describe('true: only the default playlist (none while there is none)'),
+    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
+  }),
   output: outputs.list_playlists,
   example: {},
   handler: async ({ org, input }) => {
@@ -60,8 +64,11 @@ const listPlaylists = defineTool({
     // a version are never older than it, and an edit made from this listing's version is safe.
     const rows = await org.playlists.list();
     const [items, settings] = await Promise.all([org.playlists.allItems(), org.settings.get()]);
-    const { rows: shown, next } = page(rows, (p) => [-p.updatedAt, p.id], input);
-    return { playlists: shown.map((p) => playlistView(p, items.get(p.id) ?? [], settings?.defaultPlaylistId)), next };
+    const views = rows
+      .map((p) => playlistView(p, items.get(p.id) ?? [], settings?.defaultPlaylistId))
+      .filter((p) => (input.isDefault === undefined || p.isDefault === input.isDefault) && (!input.unpublished || p.draftChanged));
+    const { rows: shown, next } = page(views, (p) => [-p.updatedAt, p.id], input);
+    return { playlists: shown, next, total: views.length };
   },
 });
 

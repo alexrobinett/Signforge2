@@ -107,6 +107,17 @@ describe('schedule entries', () => {
     expect(entries).toHaveLength(3);
   });
 
+  it('lists the unpublished entries alone, newest edit first, counting them all (#357)', async () => {
+    const { call, breakfast, lunch, publish } = await setup('sch-unpublished');
+    const first = (await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'org', priority: 1 }))).entry;
+    await publish(first);
+    const second = (await ok(call('create_schedule_entry', { playlistId: lunch, target: 'org', priority: 2 }))).entry;
+    const page = await ok(call('list_schedule_entries', { unpublished: true, limit: 1 }));
+    expect(page.entries.map((e: { id: string }) => e.id)).toEqual([second.id]);
+    expect(page.total).toBe(1);
+    expect((await ok(call('list_schedule_entries', {}))).total).toBe(2);
+  });
+
   it('refuses an entry a screen would refuse, one aimed wrongly, or at what does not exist', async () => {
     const { call, lobby, front, breakfast } = await setup('sch-refuse');
     const make = (over: Record<string, unknown>) => call('create_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby, ...over });

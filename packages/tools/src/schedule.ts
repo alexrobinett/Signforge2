@@ -173,16 +173,17 @@ const entryTarget = (input: { scheduleEntryId: string }) => ({ kind: 'schedule_e
 const listEntries = defineTool({
   name: 'list_schedule_entries',
   description:
-    "List the organization's schedule entries and takeovers, the drafts as last edited, ordered by id, a page at a time: which playlist each plays where and when. Each says whether it is published and whether its draft differs. Returns { entries: ScheduleEntry[], next }; pass next as cursor for the following page.",
+    "List the organization's schedule entries and takeovers, the drafts as last edited, ordered by id, a page at a time: which playlist each plays where and when. Each says whether it is published and whether its draft differs. Filtered to the unpublished ones (removals waiting for a publish included), they come most recently edited first. Returns { entries: ScheduleEntry[], next, total }: total counts every entry the filter matches; pass next as cursor for the following page.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: z.object({ ...pageInput, unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'), }),
   output: outputs.list_schedule_entries,
   example: {},
   handler: async ({ org, input }) => {
-    const { rows, next } = page(await org.scheduleEntries.list(), (e) => [e.id], input);
-    return { entries: rows.map(entryView), next };
+    const views = (await org.scheduleEntries.list()).map(entryView).filter((e) => !input.unpublished || e.draftChanged);
+    const { rows, next } = page(views, (e) => (input.unpublished ? [-e.updatedAt, e.id] : [e.id]), input);
+    return { entries: rows, next, total: views.length };
   },
 });
 
