@@ -110,6 +110,20 @@ describe('who publishes', () => {
   });
 });
 
+/** What `run` costs on bindings that count it (`counted`). */
+async function measure(run: (bindings: Env) => Promise<unknown>) {
+  const { result, bindings } = counted();
+  await run(bindings);
+  return result();
+}
+
+/** `who`, signed in as they are, calling through `bindings`. */
+function as(who: Client, bindings: Env) {
+  const c = new Client(who.t, who.ip, bindings);
+  for (const [k, v] of who.jar) c.jar.set(k, v);
+  return c;
+}
+
 /**
  * The API's bindings, counting D1's work and each Durable Object RPC. `statements` is every statement
  * prepared; `queries` what D1 counts against an invocation's 50: each statement run alone, and each
@@ -191,20 +205,11 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     for (const name of ['Door', 'Till', 'Lobby', 'Hall', 'Yard'])
       await testScope(env.DB, t.org.id).screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
     const other = await urlSpot(t.owner, 'other');
-    const measure = async (run: (bindings: Env) => Promise<unknown>) => {
-      const { result, bindings } = counted();
-      await run(bindings);
-      return result();
-    };
     const asking = await measure((b) => mcpTool(token, 'request_publish', { drafts: [{ kind: 'spot', id: spotId, version }], reason: 'Weekend hours' }, b));
     const [first] = await org.publishRequests.list({ take: 1 });
     const reading = await measure((b) => mcpTool(token, 'get_publish_request', { publishRequestId: first!.id }, b));
     const listing = await measure((b) => mcpTool(token, 'list_publish_requests', { pending: true }, b));
-    const owner = (b: Env) => {
-      const c = new Client(t.owner.t, t.owner.ip, b);
-      for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-      return c;
-    };
+    const owner = (b: Env) => as(t.owner, b);
     const second: string = (await ask(token, other.id, other.version)).structuredContent.request.id;
     const declining = await measure((b) => owner(b).ok('/api/tools/decline_publish_request', { publishRequestId: second }));
     const approving = await measure((b) => owner(b).ok('/api/tools/approve_publish_request', { publishRequestId: first!.id }));
@@ -245,16 +250,7 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       pins.push({ kind: 'playlist', id: p.id, version: (await scope.playlists.get(p.id))!.rowVersion });
     }
     const requestId: string = (await mcpTool(token, 'request_publish', { drafts: pins, reason: 'Sixteen menus' })).structuredContent.request.id;
-    const measure = async (run: (bindings: Env) => Promise<unknown>) => {
-      const { result, bindings } = counted();
-      await run(bindings);
-      return result();
-    };
-    const owner = (b: Env) => {
-      const c = new Client(t.owner.t, t.owner.ip, b);
-      for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-      return c;
-    };
+    const owner = (b: Env) => as(t.owner, b);
     let seen: { samples: unknown[]; refused: unknown } | undefined;
     const checking = await measure(async (b) => {
       seen = await owner(b).ok('/api/tools/check_publish_request', { publishRequestId: requestId });

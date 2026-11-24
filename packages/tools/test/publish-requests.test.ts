@@ -664,10 +664,7 @@ describe('checking what approving would do (#115)', () => {
   });
 
   it('approves only while the screens it switches and the default are as checked: either changed refuses it, publishing nothing', async () => {
-    await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
-    await call(person('owner'), 'publish', {});
-    const version = await editSpot(agent(), o.templateSpot, 12_000);
-    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const { request } = await askedOnScreen();
     const seen = await check(request.id);
     const held = { ifScreens: seen.screens.map((x: { id: string }) => x.id), ifDefault: seen.defaultPlaylistId };
     expect(held).toEqual({ ifScreens: [o.screen], ifDefault: o.playlist });
@@ -688,13 +685,18 @@ describe('checking what approving would do (#115)', () => {
   });
 
   const check = (publishRequestId: string) => call(person('viewer'), 'check_publish_request', { publishRequestId });
-
-  it('names the screens it would switch, what each pin changes and the sample text it would publish, as approve takes it', async () => {
-    // Its screen plays the seeded playlist, whose spot the request pins.
+  /** The seeded playlist made the default and published, so its screen plays it; then the agent edits its spot and asks. */
+  const askedOnScreen = async () => {
     await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
     await call(person('owner'), 'publish', {});
     const version = await editSpot(agent(), o.templateSpot, 12_000);
     const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    return { request, version };
+  };
+
+  it('names the screens it would switch, what each pin changes and the sample text it would publish, as approve takes it', async () => {
+    // Its screen plays the seeded playlist, whose spot the request pins.
+    const { request, version } = await askedOnScreen();
     const seen = await check(request.id);
     expect(seen).toMatchObject({
       request: { id: request.id, requestedBy: { kind: 'agent', name: 'Seeded agent' } },
