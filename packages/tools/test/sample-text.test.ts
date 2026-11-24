@@ -1,7 +1,7 @@
 // Sample text on the server (#360): a spot New spot starts with its template's sample copy records
 // those fields; a saved edit takes a field out; a publish, or a publish request's approval, that
-// would put a spot with any live is refused (sample_text) unless a person allows it, and an agent
-// cannot allow it. Spots made before, or another way, have none.
+// would put a spot with any live is refused (sample_text) unless a person acknowledges exactly what
+// it named (the spot, its version, its fields), and an agent cannot. Spots made before, or another way, have none.
 import { published } from '@signforge/db';
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
@@ -43,6 +43,7 @@ async function sampleSpot() {
   return (await call(person(), 'create_spot', { name: 'Fresh', kind: 'template', templateVersionId, sample: true })).spot;
 }
 const pin = (spot: { id: string; version: number }) => ({ drafts: [{ kind: 'spot', id: spot.id, version: spot.version }] });
+const ack = (spot: { id: string; version: number }, fields = ['title']) => [{ spotId: spot.id, version: spot.version, fields }];
 
 describe('sample text on the server', () => {
   it('records what New spot started with; spots made another way have none', async () => {
@@ -62,21 +63,40 @@ describe('sample text on the server', () => {
     expect(await dispatch(registry, 'publish', pin(spot), person())).toMatchObject({
       ok: false,
       error: 'sample_text',
-      details: { spots: [{ id: spot.id, name: 'Fresh', fields: ['title'] }] },
+      details: { spots: [{ id: spot.id, name: 'Fresh', version: spot.version, fields: ['title'] }] },
     });
     // Every changed draft, as ⌘K's publish with no drafts sends it: refused the same way.
     expect(await dispatch(registry, 'publish', {}, person())).toMatchObject({ ok: false, error: 'sample_text' });
     expect(published((await testScope(env.DB, o.orgId).spots.get(spot.id))!)).toBeUndefined();
   });
 
-  it('publishes it when a person allows it; an agent may not, even with the right to publish', async () => {
+  it('publishes it when a person acknowledges what was named; an agent may not, even with the right to publish', async () => {
     const spot = await sampleSpot();
-    expect(await dispatch(registry, 'publish', { ...pin(spot), allowSample: true }, agent(['content:read', 'content:publish']))).toMatchObject({
+    expect(await dispatch(registry, 'publish', { ...pin(spot), allowSample: ack(spot) }, agent(['content:read', 'content:publish']))).toMatchObject({
       ok: false,
       error: 'forbidden',
     });
-    const made = await call(person(), 'publish', { ...pin(spot), allowSample: true });
+    const made = await call(person(), 'publish', { ...pin(spot), allowSample: ack(spot) });
     expect(made.promoted).toContainEqual({ kind: 'spot', id: spot.id });
+  });
+
+  it('covers only the spots, versions and fields acknowledged: anything else is refused again', async () => {
+    const spot = await sampleSpot();
+    // A field the person was not shown, or another version of the spot.
+    expect(await dispatch(registry, 'publish', { allowSample: ack(spot, []) }, person())).toMatchObject({ ok: false, error: 'sample_text' });
+    expect(await dispatch(registry, 'publish', { allowSample: ack({ ...spot, version: spot.version + 1 }) }, person())).toMatchObject({
+      ok: false,
+      error: 'sample_text',
+    });
+    // A draft with sample text made after the person was asked: every changed draft, as ⌘K sends it, names only that one.
+    const later = await sampleSpot();
+    expect(await dispatch(registry, 'publish', { allowSample: ack(spot) }, person())).toMatchObject({
+      ok: false,
+      error: 'sample_text',
+      details: { spots: [{ id: later.id }] },
+    });
+    const made = await call(person(), 'publish', { allowSample: [...ack(spot), ...ack(later)] });
+    expect(made.promoted).toEqual(expect.arrayContaining([{ kind: 'spot', id: spot.id }, { kind: 'spot', id: later.id }]));
   });
 
   it('lets a field go once a saved edit changes it, and then publishes without asking', async () => {
@@ -96,7 +116,7 @@ describe('sample text on the server', () => {
       error: 'sample_text',
       details: { spots: [{ id: spot.id, fields: ['title'] }] },
     });
-    const { request: approved } = await call(person(), 'approve_publish_request', { publishRequestId: request.id, allowSample: true });
+    const { request: approved } = await call(person(), 'approve_publish_request', { publishRequestId: request.id, allowSample: ack(spot) });
     expect(approved.status).toBe('approved');
   });
 });

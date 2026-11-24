@@ -177,32 +177,36 @@ function compactSample(s: SampleFields): SampleFields | null {
 }
 
 /**
- * What is left of a draft's sample fields after a saved edit from `before` to `after` (#360): a
- * text whose value changed, or that is bound now, is out; a list bound now is out, and otherwise
- * loses each cell that changed, row by row. One row removed takes its marks with it, the rows after
- * it moving up; any other change of length marks off the rows that no longer line up. Null for none.
+ * What is left of a draft's sample fields after a saved edit from `before` to `after` (#360). Each
+ * field is compared as screens get it, its template default standing in for a value left out: a
+ * text bound now, or showing other words, is out. A list bound now is out; otherwise each row now
+ * is matched with the row before it whose marked cells it still holds the most of, wherever it
+ * moved, and keeps the marks on those cells. A row with none of them, new or rewritten, has none.
+ * Null for nothing left.
  */
 export function sampleAfterEdit(
   sample: SampleFields,
+  fields: Record<string, FieldDef>,
   before: { data: Record<string, unknown> },
   after: { data: Record<string, unknown>; bindings: Record<string, unknown> },
 ): SampleFields | null {
-  const texts = sample.texts.filter((f) => !(f in after.bindings) && same(before.data[f], after.data[f]));
+  const shown = (data: Record<string, unknown>, f: string) => {
+    const def = fields[f];
+    return data[f] ?? (def && 'default' in def ? def.default : undefined);
+  };
+  const texts = sample.texts.filter((f) => !(f in after.bindings) && same(shown(before.data, f), shown(after.data, f)));
   const lists: Record<string, string[][]> = {};
   for (const [f, rows] of Object.entries(sample.lists)) {
     if (f in after.bindings) continue;
-    const was = rowsOf(before.data[f]);
-    const now = rowsOf(after.data[f]);
-    let kept = rows;
-    let old = was;
-    if (now.length === was.length - 1) {
-      const at = was.findIndex((r, i) => !same(r, now[i]));
-      if (at >= 0 && same(was.slice(at + 1), now.slice(at))) {
-        kept = rows.filter((_, i) => i !== at);
-        old = was.filter((_, i) => i !== at);
-      }
-    }
-    lists[f] = kept.map((keys, i) => (i < now.length && i < old.length ? keys.filter((k) => same(cell(old[i], k), cell(now[i], k))) : []));
+    const was = rowsOf(shown(before.data, f));
+    const left = rows.map((keys, i) => ({ keys, row: was[i] }));
+    lists[f] = rowsOf(shown(after.data, f)).map((now) => {
+      const held = left.map(({ keys, row }) => keys.filter((k) => same(cell(row, k), cell(now, k))));
+      const best = held.reduce((b, keys, i) => (keys.length > (held[b]?.length ?? 0) ? i : b), -1);
+      if (best < 0) return [];
+      left.splice(best, 1);
+      return held[best] ?? [];
+    });
   }
   return compactSample({ texts, lists });
 }

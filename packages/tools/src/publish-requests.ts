@@ -25,7 +25,7 @@ import { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 import { id, idempotencyKey } from './fields';
 import { AUDIENCE_ROLES, draftPin, outputs, type PublishRequestView } from './outputs';
 import { keysetPage, pageInput } from './paging';
-import { peopleAllowSample, runPublish } from './publish';
+import { peopleAllowSample, runPublish, sampleAcks } from './publish';
 import type { DraftPin } from './publishing';
 import { orgSettings } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
@@ -245,7 +245,7 @@ async function pending(org: OrgScope, requestId: string, now: number): Promise<P
 const approvePublishRequest = defineTool({
   name: 'approve_publish_request',
   description:
-    'Approve a publish request: publish all the drafts it pins, at the versions it pins, as you, or nothing. Refused with a conflict, publishing nothing: details { id, version } if one has changed since it was asked for; { held } if one fails its checks (with why); { brand: true } if the brand kits, which go live with any publish, have changed since; { status } if the request is no longer pending; sample_text, details { spots }, if a spot it would promote still holds the sample text of its template, unless allowSample. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
+    'Approve a publish request: publish all the drafts it pins, at the versions it pins, as you, or nothing. Refused with a conflict, publishing nothing: details { id, version } if one has changed since it was asked for; { held } if one fails its checks (with why); { brand: true } if the brand kits, which go live with any publish, have changed since; { status } if the request is no longer pending; sample_text, details { spots }, if a spot it would promote still holds the sample text of its template, unless allowSample names it as refused. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -253,7 +253,9 @@ const approvePublishRequest = defineTool({
   people: true,
   input: z.object({
     publishRequestId: id('publish request'),
-    allowSample: z.boolean().optional().describe("Publish spots still holding their template's sample text anyway, once you have seen them named"),
+    allowSample: sampleAcks
+      .optional()
+      .describe("The spots a sample_text refusal named, { spotId, version, fields } as named: publish them with their template's sample text anyway, once you have seen them"),
   }),
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },

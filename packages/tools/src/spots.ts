@@ -344,8 +344,8 @@ const updateSpot = defineTool({
     const row = await requireSpot(org, input.spotId);
     refuseOtherKinds(row.kind, input);
     const bound = await bindingsOf(org, input.bindings);
-    if (row.kind === 'template' && row.templateVersionId) {
-      const t = await requireVersion(org, row.templateVersionId);
+    const t = row.kind === 'template' && row.templateVersionId ? await requireVersion(org, row.templateVersionId) : null;
+    if (t) {
       checkTemplateDraft(t, {
         durationMs: input.durationMs ?? row.durationMs,
         data: input.data ?? parsed(row.dataJson) ?? {},
@@ -360,6 +360,7 @@ const updateSpot = defineTool({
       sample &&
       sampleAfterEdit(
         sample,
+        t?.manifest.fields ?? {},
         { data: parsed(row.dataJson) ?? {} },
         { data: input.data ?? parsed(row.dataJson) ?? {}, bindings: bound ?? parsed(row.bindingsJson) ?? {} },
       );

@@ -242,16 +242,17 @@ describe('compileProbe', () => {
 });
 
 describe('a spot’s sample fields (#360)', () => {
-  const fields: Record<string, FieldDef> = {
-    headline: { type: 'text', label: 'Headline', default: 'Doors open' },
-    greeting: { type: 'text', label: 'Greeting', default: '' },
-    facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label' }, value: { type: 'text', label: 'Value' } } },
-  };
   const rows = [
     { label: 'A', value: '1' },
     { label: 'B', value: '2' },
     { label: 'C', value: '3' },
   ];
+  // The facts' default is the sample rows, as New spot starts a list from its template's default.
+  const fields: Record<string, FieldDef> = {
+    headline: { type: 'text', label: 'Headline', default: 'Doors open' },
+    greeting: { type: 'text', label: 'Greeting', default: '' },
+    facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label' }, value: { type: 'text', label: 'Value' } }, default: rows },
+  };
   const data = { headline: 'Doors open', greeting: '', facts: rows };
   const sample = sampleFieldsOf({ fields }, data) ?? { texts: [], lists: {} };
 
@@ -270,24 +271,38 @@ describe('a spot’s sample fields (#360)', () => {
   });
 
   it('lose a text whose saved value changed, or that is bound, and keep one saved unchanged', () => {
-    expect(sampleAfterEdit(sample, { data }, { data, bindings: {} })).toEqual(sample);
-    expect(sampleAfterEdit(sample, { data }, { data: { ...data, headline: 'Closed' }, bindings: {} })?.texts).toEqual([]);
-    expect(sampleAfterEdit(sample, { data }, { data, bindings: { headline: {} } })?.texts).toEqual([]);
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: {} })).toEqual(sample);
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, headline: 'Closed' }, bindings: {} })?.texts).toEqual([]);
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: { headline: {} } })?.texts).toEqual([]);
   });
 
   it('lose a list cell by cell, a row once every cell is edited, and a bound list whole', () => {
-    const one = sampleAfterEdit(sample, { data }, { data: { ...data, facts: [{ label: 'X', value: '1' }, rows[1], rows[2]] }, bindings: {} });
+    const one = sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [{ label: 'X', value: '1' }, rows[1], rows[2]] }, bindings: {} });
     expect(one?.lists.facts).toEqual([['value'], ['label', 'value'], ['label', 'value']]);
-    expect(sampleAfterEdit(sample, { data }, { data, bindings: { facts: {} } })).toEqual({ texts: ['headline'], lists: {} });
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: { facts: {} } })).toEqual({ texts: ['headline'], lists: {} });
   });
 
   it('drop a removed row, the rows after it moving up, and mark nothing on an added one', () => {
-    expect(sampleAfterEdit(sample, { data }, { data: { ...data, facts: [rows[0], rows[2]] }, bindings: {} })?.lists.facts).toEqual([
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [rows[0], rows[2]] }, bindings: {} })?.lists.facts).toEqual([
       ['label', 'value'],
       ['label', 'value'],
     ]);
-    expect(sampleAfterEdit(sample, { data }, { data: { ...data, facts: [...rows, { label: 'D', value: '4' }] }, bindings: {} })?.lists.facts).toEqual([
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [...rows, { label: 'D', value: '4' }] }, bindings: {} })?.lists.facts).toEqual([
       ['label', 'value'],
+      ['label', 'value'],
+      ['label', 'value'],
+      [],
+    ]);
+  });
+
+  it('keep a text or list left out, which screens show as its template default, sample still', () => {
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { greeting: '' }, bindings: {} })).toEqual(sample);
+  });
+
+  it('follow rows that moved, by what they hold, not where they are', () => {
+    const swapped = [{ ...rows[2], value: 'Three' }, rows[1], rows[0]];
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: swapped }, bindings: {} })?.lists.facts).toEqual([
+      ['label'],
       ['label', 'value'],
       ['label', 'value'],
     ]);
@@ -295,6 +310,6 @@ describe('a spot’s sample fields (#360)', () => {
 
   it('are none once every piece is edited', () => {
     const edited = { headline: 'Closed', greeting: '', facts: rows.map((r) => ({ label: `${r.label}!`, value: `${r.value}!` })) };
-    expect(sampleAfterEdit(sample, { data }, { data: edited, bindings: {} })).toBeNull();
+    expect(sampleAfterEdit(sample, fields, { data }, { data: edited, bindings: {} })).toBeNull();
   });
 });
