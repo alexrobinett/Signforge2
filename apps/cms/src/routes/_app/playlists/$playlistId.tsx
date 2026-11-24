@@ -13,6 +13,7 @@ import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
+import { ProposalPanel } from '~/components/proposal';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
@@ -161,6 +162,18 @@ function PlaylistEditor() {
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
       </EditorHeader>
       <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
+      {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
+      {!gone && (
+        <ProposalPanel
+          orgId={orgId}
+          kind="playlist"
+          id={playlistId}
+          version={playlist.version}
+          spotNames={new Map(spots.map((x) => [x.id, x.name]))}
+          unsaved={status !== 'saved'}
+          canDecide={canManage}
+        />
+      )}
       {gone && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex flex-wrap items-center gap-3">

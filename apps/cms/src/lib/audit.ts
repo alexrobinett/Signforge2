@@ -107,9 +107,13 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
+  revert_spot_draft: { group: 'Spots', words: "Agent's draft rejected, or put back" },
+  keep_spot_draft: { group: 'Spots', words: "Agent's draft kept" },
   delete_spot: { group: 'Spots', words: 'Deleted' },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
+  revert_playlist_draft: { group: 'Playlists', words: "Agent's draft rejected, or put back" },
+  keep_playlist_draft: { group: 'Playlists', words: "Agent's draft kept" },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
@@ -269,6 +273,15 @@ export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: 
     case 'system':
       return e.actor.id === 'sf-push' ? 'sf push' : 'SignForge';
   }
+}
+
+/**
+ * An agent named as a page names it (the approvals queue's `askerName`, #410): its client's plain name and ", agent";
+ * "An agent" when the name may not be shown; "An agent no longer connected" only once it is gone.
+ */
+export function agentWho(a: { name: string | null; gone: boolean } | undefined): string {
+  if (a?.name) return `${a.name}, agent`;
+  return a?.gone ? 'An agent no longer connected' : 'An agent';
 }
 
 /** What it came through: the CMS, an agent's client, a screen, or the system. */

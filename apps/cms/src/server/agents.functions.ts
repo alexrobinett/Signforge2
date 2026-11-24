@@ -9,19 +9,10 @@ import { createServerFn } from '@tanstack/react-start';
 import { getRequest } from '@tanstack/react-start/server';
 import { type AgentTool, parseAgentTools } from '~/lib/agents';
 import { detailText, whatText } from '~/lib/audit';
-import type { Member } from '~/lib/settings';
 import { Refusal } from '~/lib/tools';
 import { callApi } from './api.server';
+import { names } from './members.server';
 import { all, inOrg, tool } from './tools.server';
-
-/** Members' names by user id, for who granted each agent. */
-async function names(): Promise<Record<string, string>> {
-  const res = await callApi('/api/auth/organization/list-members?limit=200');
-  if (!res.ok) throw new Error(`member list failed: ${res.status}`);
-  // Better Auth's answer (better-auth 1.7.25, pinned), as the other settings pages read it.
-  const { members }: { members: Member[] } = await res.json();
-  return Object.fromEntries(members.map((m) => [m.userId, m.user.name || m.user.email]));
-}
 
 /** The tools this member may use, with each one's scope and role: what an agent they connect could be granted. */
 async function tools(): Promise<AgentTool[]> {

@@ -3,6 +3,7 @@
 // Used by connect.spec.ts and agents.spec.ts, each from its own address.
 import { createHash, randomBytes } from 'node:crypto';
 import { expect, request as playwrightRequest, type Page } from '@playwright/test';
+import { hydrated } from './helpers';
 import { CMS_URL } from './servers';
 
 /** The stub's loopback callback, as a native MCP client registers one. */
@@ -77,4 +78,17 @@ export async function callbackOf(page: Page, act: () => Promise<void>): Promise<
   await expect.poll(() => reached?.href).toBeTruthy();
   await page.unroute(`${CALLBACK}**`);
   return reached!;
+}
+
+/**
+ * A stub agent called `name`, connected with the consent page's defaults (drafting, no publishing) by
+ * the member signed in on `page`, from `address`: the stub and its access token.
+ */
+export async function connectStub(page: Page, name: string, address: string) {
+  const stub = await stubClient(name, address);
+  await page.goto(stub.authorizeUrl);
+  await hydrated(page);
+  const back = await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
+  const token = (await stub.exchange(back.searchParams.get('code')!)).body.access_token!;
+  return { stub, token };
 }

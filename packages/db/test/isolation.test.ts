@@ -473,6 +473,53 @@ describe('composite foreign keys', () => {
   });
 });
 
+describe('kept drafts (#116, draft_snapshots)', () => {
+  it("are read, cleared and written by org B's scope for org B alone, whatever ids or fields it is handed", async () => {
+    const [a, b] = [s.a.scope, s.b.scope];
+    const spotA = (await a.spots.get(s.a.templateSpot))!;
+    await a.commit(a.draftSnapshots.stage.keep('spot', spotA, 'person', { contentJson: '{"name":"A"}', sampleFieldsJson: null }).writes);
+    // Read and cleared with org A's id: nothing of org A's.
+    expect(await b.draftSnapshots.get('spot', s.a.templateSpot)).toBeUndefined();
+    expect(await b.draftSnapshots.kept()).toEqual([]);
+    await b.commit(b.draftSnapshots.stage.clear('spot', s.a.templateSpot).writes);
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ orgId: s.a.orgId, holds: 'person' });
+    // Kept or proposed for org A's spot: refused, as org B has no such draft at that version, and org A's is untouched.
+    await expect(b.commit(b.draftSnapshots.stage.keep('spot', spotA, 'agent', { contentJson: '{}', sampleFieldsJson: null }).writes)).rejects.toThrow();
+    await expect(b.commit(b.draftSnapshots.stage.propose('spot', spotA, { contentJson: '{}', sampleFieldsJson: null }).writes)).rejects.toThrow();
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
+    // Handed another org's id and keys among its content, org B's own draft is still the one written: its org and keys come last.
+    const spotB = (await b.spots.get(s.b.templateSpot))!;
+    const sneaky = {
+      contentJson: '{"name":"B"}',
+      sampleFieldsJson: null,
+      orgId: s.a.orgId,
+      spotId: s.a.templateSpot,
+      playlistId: s.a.playlist,
+      holds: 'agent',
+    };
+    await b.commit(b.draftSnapshots.stage.propose('spot', spotB, sneaky).writes);
+    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({
+      orgId: s.b.orgId,
+      spotId: s.b.templateSpot,
+      playlistId: null,
+      holds: 'person',
+    });
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
+    await b.commit(b.draftSnapshots.stage.keep('spot', spotB, 'person', sneaky).writes);
+    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({ orgId: s.b.orgId, holds: 'person', contentJson: '{"name":"B"}' });
+    await a.commit(a.draftSnapshots.stage.clear('spot', s.a.templateSpot).writes);
+    await b.commit(b.draftSnapshots.stage.clear('spot', s.b.templateSpot).writes);
+  });
+
+  it('cannot point into another org, even written around the repository', async () => {
+    const insert = env.DB.prepare(
+      "INSERT INTO draft_snapshots (org_id, spot_id, playlist_id, holds, content_json, created_at) VALUES (?, ?, ?, 'person', '{}', 0)",
+    );
+    await expect(insert.bind(s.b.orgId, s.a.templateSpot, null).run()).rejects.toThrow(/FOREIGN KEY/);
+    await expect(insert.bind(s.b.orgId, null, s.a.playlist).run()).rejects.toThrow(/FOREIGN KEY/);
+  });
+});
+
 describe('findMembership', () => {
   it("returns a member's role and nothing for anyone else", async () => {
     const at = new Date().toISOString();
