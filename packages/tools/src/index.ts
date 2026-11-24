@@ -42,7 +42,7 @@ export {
   type ToolContext,
   type ToolServices,
 } from './tool';
-export { type ClientRedirect, destinationOf, plainName, shownClient } from './agent-clients';
+export { type ClientRedirect, destinationOf, plainName, shownClient, shownClientName } from './agent-clients';
 export { dispatch, describeTools, effectiveScopes, grantOf, overLimit, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';

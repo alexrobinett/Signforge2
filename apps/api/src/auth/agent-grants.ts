@@ -34,6 +34,8 @@ export interface GrantDeps {
     userId: string;
     clientId: string;
     clientName: string | null;
+    /** The redirect it asked to send the code to: the audit row names a withheld client by its host. */
+    redirectUri: string;
     scopes: Scope[];
   }): Promise<{ ok: true; grantId: string; scopes: Scope[] } | { ok: false; refused: 'not_a_member' | 'no_scopes' }>;
   /** Revokes the user's grants in the org, and their tokens, audited as `by`. */
@@ -119,7 +121,14 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
           const chosen = (ctx.body.scopes ?? []).filter((s) => requested.includes(s));
           const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
           if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
-          const made = await grants.create({ orgId: ctx.body.organizationId, userId: session.user.id, clientId, clientName: client.name, scopes: chosen });
+          const made = await grants.create({
+            orgId: ctx.body.organizationId,
+            userId: session.user.id,
+            clientId,
+            clientName: client.name,
+            redirectUri: query.get('redirect_uri') ?? '',
+            scopes: chosen,
+          });
           if (!made.ok && made.refused === 'not_a_member') throw new APIError('FORBIDDEN', { message: 'you are not a member of that organization' });
           if (!made.ok) throw new APIError('BAD_REQUEST', { message: 'choose at least one scope this client asked for and your role allows' });
           link.grantId = made.grantId;

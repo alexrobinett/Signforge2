@@ -134,7 +134,11 @@ function AgentTable({ grants, names, at }: { grants: AgentGrant[]; names: Record
               <td className="py-3 pl-3 text-right">
                 <Button asChild variant="outline" size="sm">
                   <Link to="/settings/api/$grantId" params={{ grantId: g.id }}>
-                    Manage<span className="sr-only"> {g.client.name ?? 'this unverified app'}</span>
+                    Manage
+                    <span className="sr-only">
+                      {' '}
+                      <AgentName client={g.client} />
+                    </span>
                   </Link>
                 </Button>
               </td>

@@ -1,12 +1,14 @@
 // Settings › API & agents (M4-07, #112): a stub MCP client connects through /connect and is listed;
 // turning screens:manage off on its page refuses its next rename_screen with forbidden; Disconnect
-// gives its next call 401. Light and dark, desktop and phone, with axe at each.
+// gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
+// reads as SignForge is named by its host on the list, the audit log and its CSV, never by its name.
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { callbackOf, stubClient } from './agent-stub';
 import { axe, createOrg, hydrated, shots, signInAs } from './helpers';
 
 /** This spec's own client addresses, so its sign-ins and registrations have their own rate limits. */
-const ADDRESS = { owner: '192.0.2.171', stub: '192.0.2.172' };
+const ADDRESS = { owner: '192.0.2.171', stub: '192.0.2.172', namer: '192.0.2.173' };
 
 test('a connected agent is listed, loses a scope and is disconnected, each from its next call', async ({ page }) => {
   await signInAs(page, `e2e-agents-${Date.now()}@example.com`, ADDRESS.owner);
@@ -71,4 +73,30 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await expect(page.getByText('No agents are connected yet.')).toBeVisible();
   expect(await stub.mcpStatus(accessToken)).toBe(401);
   await stub.dispose();
+});
+
+test('a client whose name reads as SignForge is named by its host on the list, the audit log and its CSV', async ({ page }) => {
+  await signInAs(page, `e2e-agents-names-${Date.now()}@example.com`, ADDRESS.namer);
+  await createOrg(page, 'Ospreys Mill', ADDRESS.namer);
+  const stub = await stubClient('SI6NFOR6E', ADDRESS.stub);
+  await page.goto(stub.authorizeUrl);
+  await hydrated(page);
+  await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
+  await stub.dispose();
+
+  await page.goto('/settings/api');
+  await hydrated(page);
+  await expect(page.getByRole('row', { name: /An unverified app at 127\.0\.0\.1:33418/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Manage An unverified app at 127.0.0.1:33418' })).toBeVisible();
+  expect(await page.content()).not.toContain('SI6NFOR6E');
+
+  await page.goto('/audit');
+  await hydrated(page);
+  await expect(page.getByRole('row', { name: /Agent connected/ })).toBeVisible();
+  expect(await page.content()).not.toContain('SI6NFOR6E');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  const csv = readFileSync(await (await download).path(), 'utf8');
+  expect(csv).toContain('create_agent_grant');
+  expect(csv).not.toContain('SI6NFOR6E');
 });

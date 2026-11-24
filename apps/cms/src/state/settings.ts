@@ -453,10 +453,17 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         return { ...s, disconnecting: grantId ? { orgId, grantId } : null, errors: grantId ? withoutKey(s.errors, `disconnect:${grantId}`) : s.errors };
       }),
     async disconnectAgent(orgId, grantId) {
-      const done = await run(agents(orgId), `disconnect:${grantId}`, () => callTool('revoke_agent_grant', { grantId }), 'Disconnected');
-      if (!done) return;
-      patch((s) => (s.disconnecting?.grantId === grantId ? { ...s, disconnecting: null } : s));
-      if (orgOnScreen(router) === orgId) await router.navigate({ to: '/settings/api' });
+      const done = await run(
+        agents(orgId),
+        `disconnect:${grantId}`,
+        async () => {
+          await callTool('revoke_agent_grant', { grantId });
+          // To the list before the reload: the agent's own page has nothing to show once it is gone.
+          if (orgOnScreen(router) === orgId) await router.navigate({ to: '/settings/api' });
+        },
+        'Disconnected',
+      );
+      if (done) patch((s) => (s.disconnecting?.grantId === grantId ? { ...s, disconnecting: null } : s));
     },
 
     async reloadSettings(orgId, at) {

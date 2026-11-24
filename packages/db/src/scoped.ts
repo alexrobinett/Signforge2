@@ -2135,7 +2135,8 @@ export function scoped(d1: D1Database, orgId: string) {
          */
         revoke: (grant: typeof ag.$inferSelect, by: string, now: number): Staged<typeof ag.$inferSelect> => {
           if (grant.revokedAt !== null) return { row: grant, writes: [] };
-          const revoked = grants.stage.update(grant, { revokedAt: now, revokedBy: by });
+          // Guarded by the version read: of two revokes from one read, the second commits nothing.
+          const revoked = grants.stage.update(grant, { revokedAt: now, revokedBy: by }, grant.rowVersion);
           const ours = db
             .select({ id: ag.id })
             .from(ag)

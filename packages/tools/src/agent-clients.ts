@@ -134,11 +134,17 @@ export type ClientRedirect = ReturnType<typeof destinationOf>;
  * plain (else `name: null`), and where its code goes (`redirectUri`, as registered or asked for).
  */
 export function shownClient(clientId: string, name: string | null, redirectUri: string) {
-  const verified = FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId);
-  return {
-    id: clientId,
-    name: verified ? (name ?? clientId) : (plainName(name ?? '') ?? null),
-    verified,
-    redirect: destinationOf(redirectUri, verified),
-  };
+  const verified = isFirstParty(clientId);
+  return { id: clientId, name: shownClientName(clientId, name), verified, redirect: destinationOf(redirectUri, verified) };
+}
+
+const isFirstParty = (clientId: string) => FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId);
+
+/**
+ * A client's name as a page or the audit log may show it: SignForge's own as registered; another's
+ * only when plain (`plainName`), else null. What the audit log records, and how it reads rows written
+ * before it did (M4-07's review).
+ */
+export function shownClientName(clientId: string, name: string | null): string | null {
+  return isFirstParty(clientId) ? (name ?? clientId) : (plainName(name ?? '') ?? null);
 }

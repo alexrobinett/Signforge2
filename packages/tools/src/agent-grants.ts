@@ -114,12 +114,14 @@ const updateAgentGrantScopes = defineTool({
     const row = await requireGrant(org, role, actor, input.grantId);
     const wanted = SCOPES.filter((s) => input.scopes.includes(s));
     if (!wanted.includes('content:read')) throw new ToolError('invalid_input', 'content:read is always on: an agent can do nothing without it');
+    // Only what is added is checked: a scope it keeps may be above the granter's role now (they were
+    // made an editor since), and lowering another must not wait for that.
+    const added = wanted.filter((s) => !scopesOf(row.grant).includes(s));
     if (row.grant.userId === actor.id) {
-      const beyond = wanted.filter((s) => !mine.includes(s));
+      const beyond = added.filter((s) => !mine.includes(s));
       if (beyond.length) throw new ToolError('forbidden', `you may grant only what you may do yourself: not ${beyond.join(', ')}`);
-    } else {
-      const raised = wanted.filter((s) => !scopesOf(row.grant).includes(s));
-      if (raised.length) throw new ToolError('forbidden', `only the member who granted it may add scopes: not ${raised.join(', ')}`);
+    } else if (added.length) {
+      throw new ToolError('forbidden', `only the member who granted it may add scopes: not ${added.join(', ')}`);
     }
     const grant = write(org.agentGrants.stage.update(row.grant, { scopesJson: JSON.stringify(wanted) }, input.ifVersion));
     return { grant: grantView({ ...row, grant }) };

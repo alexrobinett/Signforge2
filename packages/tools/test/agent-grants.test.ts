@@ -116,6 +116,21 @@ describe('who changes a grant', () => {
     });
   });
 
+  it('lets its granter lower it while it keeps a scope above their role now (an owner made an editor since)', async () => {
+    // Connected as an owner, with org:manage; the granter is an editor now.
+    const kept = await grant('gt-editor', ['content:read', 'screens:manage', 'org:manage']);
+    expect(await call(person('editor'), 'update_agent_grant_scopes', { grantId: kept, scopes: ['content:read', 'org:manage'] })).toMatchObject({
+      ok: true,
+      output: { grant: { scopes: ['content:read', 'org:manage'] } },
+    });
+    // Adding back a scope an editor may grant still works.
+    expect(
+      await call(person('editor'), 'update_agent_grant_scopes', { grantId: kept, scopes: ['content:read', 'screens:manage', 'org:manage'] }),
+    ).toMatchObject({
+      ok: true,
+    });
+  });
+
   it("an owner lowers another member's grant, never raises it; and nobody else touches it", async () => {
     const editors = await grant('gt-editor', ['content:read', 'content:draft']);
     const owner = person('owner');
@@ -164,6 +179,47 @@ describe('who changes a grant', () => {
       error: 'not_found',
     });
     expect(await call(person('owner'), 'revoke_agent_grant', { grantId: editors })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+});
+
+describe('two revokes at once', () => {
+  it('commit once: the other is refused, and one audit row is written', async () => {
+    const g = await grant('gt-owner', ['content:read']);
+    const results = await Promise.all([
+      call(person('owner'), 'revoke_agent_grant', { grantId: g }),
+      call(person('owner'), 'revoke_agent_grant', { grantId: g }),
+    ]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ ok: false, error: expect.stringMatching(/^(conflict|not_found)$/) });
+    expect((await scoped(env.DB, ORG).auditLog.list({ limit: 1000 })).filter((e) => e.targetId === g && e.action === 'revoke_agent_grant')).toHaveLength(1);
+  });
+});
+
+describe('the audit log', () => {
+  it("shows a connection's client only as a page may name it, in rows written before that rule too", async () => {
+    const org = scoped(env.DB, ORG);
+    const write = (clientId: string, clientName: string) =>
+      org.auditLog.append({
+        actorKind: 'user',
+        actorId: 'gt-owner',
+        clientId: 'cms',
+        action: 'create_agent_grant',
+        targetKind: 'agent_grant',
+        targetId: `agt_old_${clientId}`,
+        detailJson: JSON.stringify({ clientId, clientName, scopes: ['content:read'] }),
+      });
+    await write('old-posing', 'SI6NFOR6E');
+    await write('old-plain', 'Claude Code (signforge)');
+    await write('sf-cli', 'SignForge CLI');
+    const r = await call(person('owner'), 'list_audit_log', { action: 'create_agent_grant', limit: 200 });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const nameOf = (id: string) =>
+      (r.output as { entries: { target: { id: string } | null; detail: { clientName?: unknown } }[] }).entries.find((e) => e.target?.id === id)?.detail
+        .clientName;
+    expect(nameOf('agt_old_old-posing')).toBeNull();
+    expect(nameOf('agt_old_old-plain')).toBe('Claude Code (signforge)');
+    expect(nameOf('agt_old_sf-cli')).toBe('SignForge CLI');
+    expect(JSON.stringify(r.output)).not.toContain('SI6NFOR6E');
   });
 });
 
