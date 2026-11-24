@@ -1,6 +1,6 @@
 /**
  * The model providers behind the built-in agent (docs/proposals/cms-agent.md, Providers): one
- * interface, so the inline and chat routes (#263, #267) do not know which provider answers. Both are
+ * interface, so the inline and chat routes (#263, #267, #350) do not know which provider answers. Both are
  * TanStack AI adapters (#349): Anthropic's, and `openaiCompatibleText` for an OpenAI-compatible
  * endpoint (#262) at the address its owner gave. Model ids are never in code: an org chooses exact
  * ids from its provider's list, and the API's configuration names the demo model (#265).
@@ -15,13 +15,13 @@
  * (`problem`): never the provider's body, never the key.
  */
 import type { AiKey, AiProviders, AiProviderTest } from '@signforge/tools';
-import { type AnyTextAdapter, chat, type ChatMiddleware, maxIterations, type ModelMessage, type StreamChunk } from '@tanstack/ai';
+import { type AnyTextAdapter, chat, type ChatMiddleware, type StreamChunk } from '@tanstack/ai';
 import { type AnthropicChatModel, createAnthropicChat } from '@tanstack/ai-anthropic';
 import { openaiCompatibleText } from '@tanstack/ai-openai/compatible';
 import { z } from 'zod';
 import { workerFetch } from '../connectors';
 import { openAiKey, sealAiKey } from '../connectors/vault';
-import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedStream, mediaType, type ModelCall } from '../data/fetch';
+import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, type GuardedStream, guardedStream, mediaType, type ModelCall } from '../data/fetch';
 
 /** What the agent's routes ask of a provider. */
 interface ModelProvider {
@@ -29,46 +29,7 @@ interface ModelProvider {
   listModels(): Promise<string[]>;
   /** One structured call (#263): the model's answer to `request`, as JSON text to its schema; null when it gave none (it refused). */
   fill(request: FillRequest): Promise<string | null>;
-  /** One step of a tool loop (#267): the model's text and the tools it calls next, none when it is done. */
-  chat(request: ChatRequest): Promise<ChatStep>;
 }
-
-/** A tool the model is offered: its name, what it does, and its input's JSON schema. */
-export interface ChatTool {
-  name: string;
-  description: string;
-  schema: Record<string, unknown>;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  /** As the model wrote it: parsed by the tool it names, never trusted here. */
-  input: unknown;
-}
-
-/** A conversation as both providers are told it: the person's words, the model's steps, and the tools' results. */
-export type ChatTurn =
-  | { role: 'user'; text: string }
-  | { role: 'assistant'; text: string; calls: ToolCall[] }
-  | { role: 'tool'; results: { id: string; content: string; error: boolean }[] };
-
-export interface ChatRequest {
-  model: string;
-  system: string;
-  turns: ChatTurn[];
-  tools: ChatTool[];
-}
-
-/** The model's step: its text, and the tools it calls; `refused` when it would not answer. */
-export interface ChatStep {
-  text: string;
-  calls: ToolCall[];
-  refused: boolean;
-}
-
-/** The most one step of the drawer's loop may be, in tokens. */
-const CHAT_MAX_TOKENS = 2048;
 
 /** What an inline call asks a model: our instructions, the material as fenced text and maybe an image, and the answer's JSON schema. */
 export interface FillRequest {
@@ -126,19 +87,12 @@ interface Opened {
   /** A call's limits, for a call given `timeoutMs`. */
   call: (timeoutMs: number) => ModelCall;
   adapter: WithAdapter;
-  /**
-   * A tool call's input as the provider's protocol has it: Anthropic's starts as `{}`, so one with no
-   * input streamed is `{}` (the adapter's parse); an endpoint's is the text it sent, `''` included,
-   * for the tool to refuse what is not JSON.
-   */
-  toolInput: 'parsed' | 'text';
 }
 
 function anthropic(apiKey: string, base: string, reach: ModelReach): Opened {
   return {
     base,
     modelsPath: '/v1/models?limit=100',
-    toolInput: 'parsed',
     // Anthropic's own fixed address (in dev, the e2e's stub): only its origin, as it is not an address a person typed.
     call: (timeoutMs) => ({
       origin: new URL(base).origin,
@@ -169,7 +123,6 @@ function endpoint(apiKey: string, baseUrl: string, guards: FetchGuards): Opened 
   return {
     base: baseUrl,
     modelsPath: '/models',
-    toolInput: 'text',
     call: (timeoutMs) => ({
       origin: URL.canParse(baseUrl) ? new URL(baseUrl).origin : baseUrl,
       headers: ENDPOINT_HEADERS,
@@ -240,44 +193,6 @@ function refusals(): { middleware: ChatMiddleware; refused: () => boolean; text:
     refused: () => refused,
     text: () => (finished ? text : undefined),
   };
-}
-
-/** The conversation as TanStack AI's messages: a tool's results one message each, an error marked as one. */
-const messagesOf = (turns: ChatTurn[]): ModelMessage[] =>
-  turns.flatMap((t): ModelMessage[] => {
-    if (t.role === 'user') return [{ role: 'user', content: t.text }];
-    if (t.role === 'assistant')
-      return [
-        {
-          role: 'assistant',
-          content: t.text || null,
-          toolCalls: t.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.input) } })),
-        },
-      ];
-    return t.results.map((r) => ({ role: 'tool', toolCallId: r.id, content: r.content, ...(r.error && { error: r.content }) }));
-  });
-
-/** A tool call's arguments as the model sent them: parsed if JSON, else as written (`''` too), for the tool to refuse. */
-function argumentsOf(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    if (err instanceof SyntaxError) return text;
-    throw err;
-  }
-}
-
-/** The tool calls a step's chunks hold, in the order the model made them, each input as `toolInput` says. */
-function callsOf(chunks: StreamChunk[], toolInput: Opened['toolInput']): ToolCall[] {
-  const calls = new Map<string, { name: string; args: string; parsed?: unknown }>();
-  for (const chunk of chunks) {
-    if (chunk.type === 'TOOL_CALL_START') calls.set(chunk.toolCallId, { name: chunk.toolCallName, args: '' });
-    const call = calls.get(('toolCallId' in chunk && chunk.toolCallId) || '');
-    if (!call) continue;
-    if (chunk.type === 'TOOL_CALL_ARGS') call.args += chunk.delta;
-    if (chunk.type === 'TOOL_CALL_END' && chunk.input !== undefined) call.parsed = chunk.input;
-  }
-  return [...calls].map(([id, c]) => ({ id, name: c.name, input: toolInput === 'parsed' && c.parsed !== undefined ? c.parsed : argumentsOf(c.args) }));
 }
 
 /** An answer that came whole, not streamed (Anthropic's to a forced tool, for a model id its adapter does not know). */
@@ -366,25 +281,6 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
             return wrote || null;
           }
         }),
-      chat: ({ model, system, turns, tools }) =>
-        opened.adapter(model, async (adapter) => {
-          const seen = refusals();
-          // One step: the tools have no `execute`, so the model's calls come back to the drawer's loop, which runs them.
-          const { text, chunks } = await chat({
-            adapter,
-            wrapFetch,
-            threadId: crypto.randomUUID(),
-            systemPrompts: [system],
-            messages: messagesOf(turns),
-            tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.schema })),
-            stream: false,
-            agentLoopStrategy: maxIterations(1),
-            modelOptions: { max_tokens: CHAT_MAX_TOKENS },
-            middleware: [seen.middleware],
-            debug: false,
-          });
-          return { text, calls: callsOf(chunks, opened.toolInput), refused: seen.refused() };
-        }),
     },
   };
 }
@@ -449,21 +345,36 @@ export async function fillWith(
 }
 
 /**
- * One step of the drawer's tool loop with an org's provider and its key (#267), given `timeout` ms:
- * the model's step, or why not in a word. A key sealed under a rotated CONNECTION_KEY reads as refused.
+ * A drawer turn's model (#350), for `use` to run `chat()` on: the org's adapter for `model`, and the
+ * fetch every request of the turn goes through, the guards' as for any call, each given the time the
+ * turn has left (`left`). `problem` says in a word a failure the guards saw; undefined for none (an
+ * answer the adapter or `chat()` refused, which its event says). Undefined
+ * when the key does not open (sealed under a rotated CONNECTION_KEY: as good as refused).
  */
-export async function chatWith(
+export async function turnWith<T>(
   env: Pick<Env, 'CONNECTION_KEY' | 'ENVIRONMENT' | 'ANTHROPIC_BASE_URL'>,
   key: AiKey,
   sealed: string,
   reach: ModelReach,
-  request: ChatRequest,
-  timeout: number,
-): Promise<{ ok: true; step: ChatStep } | { ok: false; problem: Problem }> {
+  model: string,
+  left: () => number,
+  use: <A extends AnyTextAdapter>(adapter: A, wrapFetch: () => typeof globalThis.fetch) => T,
+): Promise<{ value: T; problem: () => Problem | undefined } | undefined> {
   const opened = await openModel(env, key, sealed, reach);
-  if (!opened) return { ok: false, problem: 'refused' };
-  const answered = await attempt(opened, timeout, (p) => p.chat(request));
-  return answered.ok ? { ok: true, step: answered.value } : answered;
+  if (!opened) return undefined;
+  let last: GuardedStream | undefined;
+  const fetch: typeof globalThis.fetch = (input, init) => {
+    last = guardedStream(opened.call(left()));
+    return last.fetch(input, init);
+  };
+  const value = await opened.adapter(model, async (adapter) => use(adapter, () => fetch));
+  return {
+    value,
+    problem: () => {
+      const failure = last?.failure();
+      return failure && problemOf(failure);
+    },
+  };
 }
 
 /**

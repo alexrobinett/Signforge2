@@ -29,12 +29,16 @@ export function anthropicStream(id: string, model: string, blocks: Block[], stop
   ]);
 }
 
-/** An OpenAI-compatible endpoint's streamed completion: the message's text and tool calls as chunks, then `finish` and `[DONE]`. */
-export function completionStream(message: { content?: string; toolCalls?: { id: string; name: string; arguments: string }[] }, finish: string): Response {
+/** An OpenAI-compatible endpoint's streamed completion: its reasoning, the message's text and tool calls as chunks, then `finish` and `[DONE]`. */
+export function completionStream(
+  message: { reasoning?: string; content?: string; toolCalls?: { id: string; name: string; arguments: string }[] },
+  finish: string,
+): Response {
   const chunk = (delta: Record<string, unknown>, finishReason: string | null = null) =>
     `data: ${JSON.stringify({ id: 'chatcmpl-1', object: 'chat.completion.chunk', model: 'model', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
   return sse([
     chunk({ role: 'assistant' }),
+    ...(message.reasoning ? [chunk({ reasoning_content: message.reasoning })] : []),
     ...(message.content ? [chunk({ content: message.content })] : []),
     ...(message.toolCalls ?? []).map((c, index) =>
       chunk({ tool_calls: [{ index, id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } }] }),
