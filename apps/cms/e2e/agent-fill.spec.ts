@@ -23,6 +23,8 @@ test('a member fills a new spot from a link and from a photo, checks the marked 
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
   const dialog = page.getByRole('dialog');
+  // One filled button in the dialog, Create spot; filling from a flyer is the other way in (#364).
+  await expect(dialog.locator('[data-slot="button"][data-variant="default"]')).toHaveText(['Create spot']);
   await dialog.getByLabel('Or a link').fill(LINK);
   await dialog.getByRole('button', { name: 'Fill a new spot' }).click();
   await expect(dialog.getByRole('alert')).toContainText('No model is set up for the agent yet');

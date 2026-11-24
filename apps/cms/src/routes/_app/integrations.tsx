@@ -6,9 +6,10 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { CloudOffIcon, XIcon } from 'lucide-react';
+import { CloudOffIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { SourcesDialog } from '~/components/integrations/sources-dialog';
 import { PageHeader } from '~/components/page';
+import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -141,10 +142,11 @@ function IntegrationsPage() {
           </Button>
         </div>
       )}
+      <FailingSources sources={sources} clock={clock} canManage={canManage} />
       {/* Sources first and "Missing one?" last on a phone; beside the catalogue on a wide screen (the board). */}
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-[auto_1fr]">
         <aside aria-label="Sources and accounts" className="flex flex-col gap-3.5 lg:col-start-2 lg:row-start-1">
-          <FeedingNow sources={sources} clock={clock} canManage={canManage} notCurrent={notCurrent} heardAt={dataUpdatedAt} />
+          <FeedingNow sources={sources} clock={clock} notCurrent={notCurrent} heardAt={dataUpdatedAt} />
           {(connections.length > 0 || providers.length > 0) && (
             <Accounts orgId={orgId} connections={connections} providers={providers} sources={sources} canManage={canManage} />
           )}
@@ -262,23 +264,50 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
   );
 }
 
-/** The board's "Feeding screens now": every source, its last good check, and a failing one in words with its fix. */
+/**
+ * A failing source, at the top of the page (#364): what is wrong in words, the spots it feeds, and its
+ * fix as the page's one filled button, so the urgent thing is not a link in the margin.
+ */
+function FailingSources({ sources, clock, canManage }: { sources: ListedSource[]; clock: Clock; canManage: boolean }) {
+  const openSources = useAppStore((s) => s.openSources);
+  return sources
+    .filter((s) => s.failures > 0)
+    .map((s) => (
+      <Alert key={s.id} variant="destructive">
+        <TriangleAlertIcon aria-hidden />
+        <AlertTitle>
+          {KIND_WORD[s.format]} · {s.name}
+        </AlertTitle>
+        <AlertDescription className="text-foreground">
+          <p>
+            {failingWords(s, clock)}
+            {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
+          </p>
+          {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
+          {canManage && hasAddress(s) && (
+            <Button type="button" className="mt-1 justify-self-start" onClick={() => openSources(kindOf(s.format), { editing: s.id })}>
+              {FIX_WORD[s.format]}
+              <span className="sr-only"> for {s.name}</span>
+            </Button>
+          )}
+        </AlertDescription>
+      </Alert>
+    ));
+}
+
+/** The board's "Feeding screens now": every source and its last good check; a failing one's fix is at the top of the page. */
 function FeedingNow({
   sources,
   clock,
-  canManage,
   notCurrent,
   heardAt,
 }: {
   sources: ListedSource[];
   clock: Clock;
-  canManage: boolean;
   /** The page's poll is failing: what it shows is what SignForge last said, at `heardAt`. */
   notCurrent: boolean;
   heardAt: number;
 }) {
-  const openSources = useAppStore((s) => s.openSources);
-  const failing = sources.filter((s) => s.failures > 0);
   return (
     <section aria-labelledby="now-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
       <h2 id="now-h" className="text-lg font-semibold tracking-tight">
@@ -314,25 +343,6 @@ function FeedingNow({
       ) : (
         <p className="text-sm text-muted-foreground">No data sources yet. Connect a feed or a calendar from the list.</p>
       )}
-      {failing.map((s) => (
-        <div key={s.id} className="flex flex-col gap-1.5">
-          <p className="text-sm text-muted-foreground">
-            {failingWords(s, clock)}
-            {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
-          </p>
-          {s.format === 'json' && <p className="text-sm text-muted-foreground">{weatherFixWords(s)}</p>}
-          {canManage && hasAddress(s) && (
-            <button
-              type="button"
-              className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
-              onClick={() => openSources(kindOf(s.format), { editing: s.id })}
-            >
-              {FIX_WORD[s.format]}
-              <span className="sr-only"> for {s.name}</span>
-            </button>
-          )}
-        </div>
-      ))}
     </section>
   );
 }
@@ -385,7 +395,7 @@ function Accounts({
               {canManage && (
                 <span className="flex flex-wrap gap-2">
                   {c.status !== 'active' && (
-                    <Button disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
+                    <Button variant="outline" disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
                       {busy(c.id, 'connect') ? 'Opening…' : 'Reconnect'}
                     </Button>
                   )}

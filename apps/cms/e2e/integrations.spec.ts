@@ -105,9 +105,12 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await hydrated(owner);
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(now.getByText('failed 2×')).toBeVisible();
-  await expect(now).toContainText(
+  // The failing calendar's fix, at the top of the page as its one filled button (#364).
+  const failing = owner.locator('[data-slot="alert"]').filter({ hasText: 'iCal · Break room' });
+  await expect(failing).toContainText(
     /The Break room calendar answers with an error: its last 2 checks failed\. Its screens show the (?:\w{3} )?\d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
   );
+  await expect(owner.getByRole('main').locator('[data-slot="button"][data-variant="default"]')).toHaveText(['Fix the iCal URL for Break room']);
   await expect(now.getByText('RSS · Northside blog')).toBeVisible();
   await expect(owner.getByText('1 calendar · failing')).toBeVisible();
   await expect(owner.getByText('1 feed', { exact: true })).toBeVisible();
@@ -128,13 +131,14 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await owner.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await shots(owner, '61-integrations-phone');
+  await axe(owner);
   await owner.setViewportSize({ width: 1440, height: 1100 });
 });
 
 test('fixing the URL clears the failing state after the next poll, and a bound source cannot be deleted', async () => {
   test.setTimeout(120_000);
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
-  await now.getByRole('button', { name: 'Fix the iCal URL for Break room' }).click();
+  await owner.getByRole('button', { name: 'Fix the iCal URL for Break room' }).click();
   const dialog = owner.getByRole('dialog', { name: 'iCal calendars' });
   await expect(dialog.getByLabel('New address for Break room')).toBeFocused();
   await axe(owner);
@@ -149,7 +153,7 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   // The next poll succeeds: the open page shows its time within its 30-second refresh.
   await pollFound(orgId, calendar);
   await expect(now.getByText('checking')).toHaveCount(0, { timeout: 45_000 });
-  await expect(now).not.toContainText('answers with an error');
+  await expect(owner.getByRole('main')).not.toContainText('answers with an error');
   await expect(owner.getByText('1 calendar', { exact: true })).toBeVisible();
 
   // Delete asks first, saying the address must be typed again; a source a spot reads is not deleted, one no spot reads is.
@@ -184,8 +188,9 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await pollsFailed(orgId, weather.id, 1);
   await owner.reload();
   await hydrated(owner);
-  await expect(now).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
-  await expect(now.getByRole('button', { name: /for Weather, Portland$/ })).toHaveCount(0);
+  const weatherAlert = owner.locator('[data-slot="alert"]').filter({ hasText: 'Weather · Weather, Portland' });
+  await expect(weatherAlert).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
+  await expect(weatherAlert.getByRole('button')).toHaveCount(0);
   await owner.getByRole('button', { name: 'Manage Weather' }).click();
   const forecasts = owner.getByRole('dialog', { name: 'Weather' });
   await expect(forecasts.getByRole('button', { name: 'Delete Weather, Portland' })).toBeVisible();

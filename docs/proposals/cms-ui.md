@@ -28,7 +28,7 @@ Tenant branding does not re-theme the CMS in v1 (decided in `brand-and-editor.md
 | Component | Change |
 | --- | --- |
 | `badge` | variants `online`, `updating`, `asleep`, `offline`, `draft`, `published`, each with a leading dot |
-| `button` | keep the six variants; add `size: "xs"` for table row actions |
+| `button` | keep the six variants; add `size: "xs"` for table row actions. One filled (`default`) button per view, its one primary action; the rest are outline or ghost (#364). A button says its variant (`data-variant`), which the e2e checks |
 | `table` | `density: compact | comfortable`; sticky header; numeric columns right-aligned with tabular figures |
 | `input`, `select`, `textarea` | an `invalid` state wired to the contract's problem messages |
 | `sidebar` | the app nav (Screens, Spots, Playlists, Schedules, Brand kits, Audit log) and the settings nav, collapsible to icons |
