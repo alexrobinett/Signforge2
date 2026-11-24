@@ -191,6 +191,72 @@ function DraftsCard({ index }: { index: number }) {
   );
 }
 
+/**
+ * A confirmation card (#269): what pressing it does, to what and until when, an address in full and
+ * what fetches it, whether it can be undone; then the press, or who may press it. Nothing runs until
+ * pressed, and it runs once.
+ */
+function ConfirmCardView({ index }: { index: number }) {
+  const m = useAppStore((s) => s.agentDrawer.messages[index]);
+  const asking = useAppStore((s) => s.agentDrawer.asking);
+  const press = useAppStore((s) => s.pressConfirm);
+  const dismiss = useAppStore((s) => s.dismissConfirm);
+  if (m?.role !== 'confirm') return null;
+  const { card } = m;
+  return (
+    <section aria-label={card.title} className="flex flex-col gap-2 rounded-lg border border-status-updating bg-card p-3 text-sm">
+      <p className="font-medium">{card.title}</p>
+      <ul className="flex flex-col gap-1">
+        {card.lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      {card.address && (
+        <div className="flex flex-col gap-1">
+          <p className="text-muted-foreground">{card.address.fetches} fetches this address:</p>
+          <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs break-all">{card.address.url}</code>
+        </div>
+      )}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
+        <dt className="font-medium">When</dt>
+        <dd>{card.when}</dd>
+        <dt className="font-medium">Undo</dt>
+        <dd>{card.undo}</dd>
+      </dl>
+      <p role="alert" className="font-medium text-destructive empty:hidden">
+        {m.error}
+      </p>
+      {m.press === 'offered' ? (
+        card.token ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" disabled={asking} onClick={() => void press(index)}>
+              {card.press}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                dismiss(index);
+                // The card's buttons go with it: focus goes on to the question, where the person goes next.
+                document.getElementById('agent-question')?.focus();
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <p className="font-medium">{card.why}</p>
+        )
+      ) : (
+        <p className="font-medium">
+          {m.press === 'pressing' ? 'Doing it…' : m.press === 'done' ? 'Done.' : m.press === 'dismissed' ? 'Cancelled: nothing was done.' : null}
+        </p>
+      )}
+    </section>
+  );
+}
+
 /** A tool call's card: the tool's title, and what the call did. */
 function CallCard({ card }: { card: ToolCard }) {
   return (
@@ -270,9 +336,17 @@ export function AgentDrawer() {
       : 'Thinking…'
     : last?.role === 'assistant'
       ? last.card.text
-      : last?.role === 'error'
-        ? last.text
-        : '';
+      : last?.role === 'confirm'
+        ? last.press === 'dismissed'
+          ? 'Cancelled: nothing was done.'
+          : last.press === 'refused'
+            ? (last.error ?? 'It was not done.')
+            : last.press === 'done'
+              ? 'Done.'
+              : `${last.card.title}. ${last.card.lines.join(' ')} ${last.card.token ? `Press ${last.card.press} to do it, or Cancel.` : (last.card.why ?? '')}`
+        : last?.role === 'error'
+          ? last.text
+          : '';
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     void ask();
@@ -308,7 +382,7 @@ export function AgentDrawer() {
             <div className="min-w-0 flex-1">
               <DialogPrimitive.Title className="font-medium text-actor-agent">Agent</DialogPrimitive.Title>
               <DialogPrimitive.Description id="agent-drawer-about" className="text-sm text-foreground">
-                It reads your organization to answer, and drafts changes you see before you save them.
+                It reads your organization to answer, drafts changes you see before you save them, and asks you to press before anything goes live.
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close asChild>
@@ -330,6 +404,8 @@ export function AgentDrawer() {
                       <AnswerCard card={m.card} />
                       {m.drafts && <DraftsCard index={i} />}
                     </>
+                  ) : m.role === 'confirm' ? (
+                    <ConfirmCardView index={i} />
                   ) : (
                     <p className="text-sm font-medium text-destructive">
                       {m.text}

@@ -30,6 +30,8 @@ export interface ChatContext {
   history: ChatTurn[];
   /** Where the drawer was asked: the CMS path and the record ids in it. */
   page: { path: string; ids: Record<string, string> };
+  /** On a press of a confirmation card (#269), its token: the run it paused resumes. */
+  confirm?: string;
 }
 
 /** A group of screens the answer is about: one cause at one place, as "both Bayside screens, silent since 09:14". */
@@ -78,10 +80,54 @@ export interface AnswerCard {
 /**
  * The names of the `CUSTOM` events the route sends: a tool call's card (`ToolCard`), the answer's text
  * as far as it is written (`{ text }`, '' when a message turned out not to be the answer), and the
- * answer's card (`AnswerCard`). With `RUN_STARTED`, `RUN_FINISHED` and `RUN_ERROR`, nothing else of
- * the run reaches the browser.
+ * answer's card (`AnswerCard`), or, for a tool only a press may run, its confirmation card
+ * (`ConfirmCard`, #269), the run paused for it, and, after a press, what the action did (`ConfirmDone`).
+ * With `RUN_STARTED`, `RUN_FINISHED` (never a pause in it) and `RUN_ERROR`,
+ * nothing else of the run reaches the browser.
  */
-export const CHAT_EVENTS = { call: 'signforge.call', text: 'signforge.text', answer: 'signforge.answer' } as const;
+export const CHAT_EVENTS = {
+  call: 'signforge.call',
+  text: 'signforge.text',
+  answer: 'signforge.answer',
+  confirm: 'signforge.confirm',
+  done: 'signforge.done',
+} as const;
+
+/**
+ * What a press of a confirmation card did (`signforge.done`), from the action's own result, never the
+ * model's word: done, or refused and why (the card is spent either way).
+ */
+export interface ConfirmDone {
+  tool: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * A tool the drawer runs only when the person presses its card (#269): publishing, a takeover, a
+ * deletion, revoking, a live screen command, or reaching an address. The run pauses for it; pressed,
+ * the card's `token` (one use, for this member, until `expiresAt`, bound to the input exactly as shown)
+ * resumes it (`forwardedProps.confirm`), and the tool runs then, as the member, checked as they press.
+ */
+export interface ConfirmCard {
+  /** The tool the model asked for. */
+  tool: string;
+  title: string;
+  /** What happens, in plain words: to what, how many screens, until when. */
+  lines: string[];
+  /** An address it reaches, in full, and what fetches it: for an address card. */
+  address: { url: string; fetches: string } | null;
+  /** When it happens: now, or at the next publish. */
+  when: string;
+  /** How it is undone, or that it is not. */
+  undo: string;
+  /** The button's words. */
+  press: string;
+  /** Null when the member may not do this: `why` says who may. */
+  token: string | null;
+  why: string | null;
+  expiresAt: number;
+}
 
 /** What a save of the drafts did: each written in order, the first refused stopping the rest. */
 export interface ApplyAnswer {
@@ -99,5 +145,7 @@ export const CHAT_PROBLEMS = [
   'unreachable',
   'model_refused',
   'busy',
+  // A confirmation card pressed twice, by someone else, after it ran out, or with other input than it showed (#269).
+  'stale_card',
 ] as const;
 export type ChatProblem = (typeof CHAT_PROBLEMS)[number];

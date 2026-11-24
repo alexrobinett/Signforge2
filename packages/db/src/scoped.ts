@@ -750,6 +750,20 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       stage: {
         ...screens.stage,
+        /** Nothing written: the batch is refused (`StaleVersionError`, id `screens`) unless the org's screens are still exactly `ids`. */
+        are: (ids: readonly string[]): Staged => {
+          const sc = s.screens;
+          const want = [...ids].sort().join(',');
+          const now = sql`COALESCE((SELECT group_concat(id, ',') FROM (SELECT ${sc.id} AS id FROM ${sc} WHERE ${sc.orgId} = ${orgId} ORDER BY ${sc.id})), '')`;
+          const stale = async () =>
+            (await screens.list())
+              .map((x) => x.id)
+              .sort()
+              .join(',') === want
+              ? undefined
+              : 0;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'screens', 0, sql`${now} = ${want}`, stale)] };
+        },
         /** As `setDesiredManifest`, staged. Stages nothing for a screen the org does not have. */
         setDesiredManifest: (screenId: string, manifestId: string): Staged => {
           const sc = s.screens;

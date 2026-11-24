@@ -1,13 +1,17 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
 import {
+  askEntry,
   commandEntries,
   foundValues,
   movesSelection,
   needsInput,
   NULL_CHOICE,
+  pageQuestions,
   parseToolList,
   pointerMovesSelection,
+  readsAsSentence,
+  asksFirst,
   resultText,
   selectedItem,
   targetActions,
@@ -23,8 +27,9 @@ const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: 
 const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {
-  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review).
-  const PER_SCREEN = ['restart_screen'];
+  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review);
+  // publish_takeover is the takeover dialog's own work, which the menu's takeover row opens (#351).
+  const PER_SCREEN = ['restart_screen', 'publish_takeover'];
 
   it('lists every tool an owner may use: the whole registry, but for Restart', () => {
     expect(toolNames('owner').sort()).toEqual(
@@ -244,5 +249,53 @@ describe("what counts as the member moving ⌘K's selection (#180)", () => {
     expect(pointerMovesSelection(null, 'tool:test_alert_channel')).toBe(false);
     expect(pointerMovesSelection({ value: 'tool:test_alert_channel', disabled: false }, 'tool:test_alert_channel')).toBe(false);
     expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: true }, 'tool:test_alert_channel')).toBe(false);
+  });
+});
+
+describe('Ask agent in ⌘K (#270)', () => {
+  it('reads a question or a request as a sentence for the agent; one or two words, and a command however long, still find pages, records and tools first', () => {
+    for (const q of ['screens', 'bayside door', '  rename   ', 'publish now', 'pair a screen', 'take over Bayside now', 'Bayside closes at 2 for the storm'])
+      expect(readsAsSentence(q), q).toBe(false);
+    for (const q of ['why are screens behind', 'Which screens need me?', 'behind screens?', 'show me what plays now']) expect(readsAsSentence(q), q).toBe(true);
+    expect(askEntry('  why are screens behind ', true)).toMatchObject({
+      kind: 'ask',
+      id: 'ask:typed',
+      label: 'Ask agent: why are screens behind',
+      question: 'why are screens behind',
+    });
+    expect(askEntry('screens', false)).toMatchObject({ id: 'ask:typed:last' });
+  });
+
+  it('puts the agent first only when nothing listed matches what was typed well, by its name or the start of it (review of #406)', () => {
+    const names = ['Why Not Bakery front window', 'Go to Screens', 'Breakfast'];
+    expect(asksFirst('why are screens behind', names)).toBe(true);
+    // A screen named as typed, or starting with it: found first.
+    expect(asksFirst('Why not bakery front window', names)).toBe(false);
+    expect(asksFirst('why not bakery', names)).toBe(false);
+    // Not a question or a request: never first.
+    expect(asksFirst('bakery front window lights', [])).toBe(false);
+  });
+
+  it('lists the developer tools for an owner only, marked to go under Developer', () => {
+    const DEVELOPER = ['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places'];
+    const owner = commandEntries(listed('owner'), true)
+      .filter((e) => e.kind === 'tool' && e.developer)
+      .map((e) => (e.kind === 'tool' ? e.tool.name : ''));
+    expect(owner.sort()).toEqual([...DEVELOPER].sort());
+    for (const role of ['editor', 'viewer'] as const) {
+      const names = commandEntries(listed(role), false).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
+      for (const name of DEVELOPER) expect(names, `${role}: ${name}`).not.toContain(name);
+    }
+  });
+
+  it("suggests three questions for the page shown: its section's, a record's page by its section's, else Overview's", () => {
+    expect(pageQuestions('/screens/scr_1').map((q) => q.label)).toEqual([
+      'Which screens need me, and why?',
+      'Which screens went quiet today?',
+      'Which screens are behind the last publish?',
+    ]);
+    expect(pageQuestions('/settings/ai')[0]?.label).toBe('Who can publish in this organization?');
+    expect(pageQuestions('/')).toHaveLength(3);
+    for (const s of SECTIONS) expect(pageQuestions(s.to), s.to).toHaveLength(3);
   });
 });

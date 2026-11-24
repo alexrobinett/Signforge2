@@ -9,7 +9,7 @@ import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, dispatch, manifestKey, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
+import { defineTool, dispatch, manifestKey, registry, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
 import { pendingFor } from './connectors-stub';
 import { fakeServices } from './services';
 
@@ -145,6 +145,14 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
   renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
+  // Its playlist published first, as it publishes only the takeover beside what it pins.
+  publish_takeover: (o) =>
+    dispatch(
+      registry,
+      'publish',
+      {},
+      { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-g', clientId: 'test' }, blobs: env.BLOBS, services: fakeServices },
+    ),
   // A saved key to test, or to remove.
   test_ai_provider: (o) => savedKey(o),
   remove_ai_provider: (o) => savedKey(o),
@@ -175,6 +183,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
 /** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
 const INPUT: Record<string, (o: SeededOrg, example: unknown) => unknown> = {
   start_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
+  publish_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
   // A draft pinned at the version it is: the seeded spot's first.
   request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend opening hours' }),
 };

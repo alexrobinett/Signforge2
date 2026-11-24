@@ -3,7 +3,7 @@
 // streams the answer's text and drops it when the turn fails, keeps each answer's whole card and sends
 // them back with the next question, and says why a turn gave no answer. The API is a stubbed fetch;
 // nothing waits on a clock.
-import { type AnswerCard, CHAT_EVENTS, type ToolCard } from '@signforge/api/agent-chat';
+import { type AnswerCard, CHAT_EVENTS, type ConfirmCard, type ToolCard } from '@signforge/api/agent-chat';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
@@ -250,6 +250,118 @@ describe('the agent drawer, in the store', () => {
         { role: 'user', text: 'Why?' },
         { role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false },
       ],
+    });
+  });
+
+  describe('a confirmation card (#269)', () => {
+    const CONFIRM: ConfirmCard = {
+      tool: 'restart_screen',
+      title: 'Restart a screen',
+      lines: ['Bayside door restarts now: it goes blank for a moment, then plays again.'],
+      address: null,
+      when: 'Now, on the live screen',
+      undo: 'Nothing to undo.',
+      press: 'Restart',
+      token: 'tok_1',
+      why: null,
+      expiresAt: 1,
+    };
+    const sse = (run: { runId: string; threadId: string }, ...events: object[]) =>
+      stream(...events.map((e) => `data: ${JSON.stringify({ timestamp: 1, ...run, ...e })}\n\n`));
+    /** A turn that pauses at the card: the card, then the run's end, which carries no pause and no model input. */
+    const pausing = (run: { runId: string; threadId: string }) =>
+      sse(run, { type: 'RUN_STARTED' }, { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: CONFIRM }, { type: 'RUN_FINISHED', finishReason: 'tool_calls' });
+    const DONE: AnswerCard = {
+      ...CARD,
+      text: 'Bayside door restarted.',
+      trace: [{ tool: 'restart_screen', title: 'Restart screen', summary: 'Restarted a screen', ok: true }],
+    };
+    /** A press's run: what the action did (`done`), then the model's answer, or its end without one. */
+    const pressed = (done: { ok: boolean; message: string }, answered: boolean) => (run: { runId: string; threadId: string }) =>
+      sse(
+        run,
+        { type: 'RUN_STARTED' },
+        { type: 'CUSTOM', name: CHAT_EVENTS.done, value: { tool: 'restart_screen', ...done } },
+        ...(answered
+          ? [
+              { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: DONE },
+              { type: 'RUN_FINISHED', finishReason: 'stop' },
+            ]
+          : [{ type: 'RUN_ERROR', code: 'unreadable', message: 'The model gave no answer it could show. Ask again.' }]),
+      );
+
+    it("pressed, sends the question again with the card's token and nothing of the call, once, and shows the answer", async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart the Bayside door');
+      expect(store.getState().agentDrawer).toMatchObject({ asking: false, messages: [{ role: 'user' }, { role: 'confirm', card: CONFIRM, press: 'offered' }] });
+      answer = pressed({ ok: true, message: 'Restarted a screen' }, true);
+      await store.getState().pressConfirm(1);
+      const body = sent.at(-1)?.body;
+      expect(body).toMatchObject({
+        messages: [{ role: 'user', content: 'Restart the Bayside door' }],
+        forwardedProps: { confirm: 'tok_1', page: { path: '/screens/scr_1' } },
+      });
+      expect(body).not.toHaveProperty('resume');
+      expect(body.messages).toHaveLength(1);
+      expect(store.getState().agentDrawer).toMatchObject({
+        asking: false,
+        messages: [{ role: 'user' }, { role: 'confirm', press: 'done' }, { role: 'assistant', card: DONE }],
+      });
+      // Pressed once: again, nothing is sent.
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(2);
+    });
+
+    it('says done or not from what the action did, never from the model: refused with an answer after it, done with none (review of #406)', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      answer = pressed({ ok: false, message: 'Not done: the screen is gone. This card is spent: ask again for a new one.' }, true);
+      await store.getState().pressConfirm(1);
+      expect(store.getState().agentDrawer.messages[1]).toMatchObject({
+        press: 'refused',
+        error: 'Not done: the screen is gone. This card is spent: ask again for a new one.',
+      });
+
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      answer = pressed({ ok: true, message: 'Restarted a screen' }, false);
+      await store.getState().pressConfirm(4);
+      expect(store.getState().agentDrawer.messages[4]).toMatchObject({ press: 'done', error: null });
+      expect(store.getState().agentDrawer.asking).toBe(false);
+    });
+
+    it('sends nothing when let go, and says why a press was refused before it ran', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      store.getState().dismissConfirm(1);
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(1);
+      expect(store.getState().agentDrawer.messages[1]).toMatchObject({ role: 'confirm', press: 'dismissed' });
+
+      await store.getState().askAgent('Restart it');
+      answer = () => Response.json({ error: 'stale_card', message: 'This card has run out. Ask again for a new one.' }, { status: 409 });
+      await store.getState().pressConfirm(3);
+      expect(store.getState().agentDrawer.messages[3]).toMatchObject({
+        role: 'confirm',
+        press: 'refused',
+        error: 'This card has run out. Ask again for a new one.',
+      });
+      // Said once, on the card: no error message after it (review of #406).
+      expect(store.getState().agentDrawer.messages).toHaveLength(4);
+      expect(store.getState().agentDrawer.asking).toBe(false);
+    });
+
+    it('lets a card waiting for its press go when the org changes: pressed after, it sends nothing', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart it');
+      store.getState().forgetAgentDrawer();
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(1);
+      expect(store.getState().agentDrawer.messages).toEqual([]);
     });
   });
 

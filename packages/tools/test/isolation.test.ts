@@ -186,6 +186,8 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
   'create_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
   'start_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
   'start_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
+  'publish_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
+  'publish_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
   'update_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
   'update_schedule_entry.screenId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'screen', screenId: s.a.screen, ifVersion: 1 }),
   // A provider source takes a resource with its connection, and no feed URL.

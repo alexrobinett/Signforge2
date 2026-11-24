@@ -536,7 +536,8 @@ export interface SampleAck {
  * request) only if it is pinned, as nothing else is touched. `revision` is the org's publish revision as read; the
  * publish moves it to the next. `read` is the org as read, and `graph` as it will be once the
  * writes commit, its drafts promoted. `removals` delete schedule entries: commit them with the
- * rest, and also when no draft was promoted and no screen changed, which makes no publish.
+ * rest, and also when no draft was promoted and no screen changed, which makes no publish. `added`:
+ * schedule entries the caller staged before these writes in its batch, read as if they were there.
  */
 export async function publishOrg(
   org: OrgScope,
@@ -545,6 +546,7 @@ export async function publishOrg(
   end: readonly string[] = [],
   exact = false,
   allowSample: readonly SampleAck[] = [],
+  added: readonly ScheduleEntryRow[] = [],
 ): Promise<{
   writes: Write[];
   removals: Write[];
@@ -559,7 +561,9 @@ export async function publishOrg(
   graph: OrgGraph;
   madeDefault: { id: string; name: string } | null;
 }> {
-  const read = await loadOrg(org);
+  // Entries staged earlier in the same batch (`publish_takeover`): read as if they were there, so the publish promotes them with the rest.
+  const loaded = await loadOrg(org);
+  const read = added.length ? { ...loaded, entries: [...loaded.entries, ...added] } : loaded;
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
     const rows: Record<DraftKind, DraftRow[]> = { spot: read.spots, playlist: read.playlists, schedule_entry: read.entries };

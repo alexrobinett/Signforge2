@@ -272,7 +272,7 @@ const approvePublishRequest = defineTool({
     const { org, actor, input, write } = ctx;
     const row = await pending(org, input.publishRequestId, Date.now());
     const pins = pinsOf(row);
-    const published = await runPublish(ctx, pins, [], { brand: row.brandState }, undefined, peopleAllowSample(ctx));
+    const published = await runPublish(ctx, pins, [], { exact: true, brand: row.brandState }, peopleAllowSample(ctx));
     // All or nothing: a pin held by its checks publishes none of them (the batch is not committed).
     const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
     const held = published.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));

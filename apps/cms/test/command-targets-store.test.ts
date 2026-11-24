@@ -96,7 +96,7 @@ describe('a call on its way across closing and opening again', () => {
     const { store } = menuStore();
     const held = holdNextCall();
     const list = { name: 'list_screens', description: 'List the screens.', mutates: false, fields: [] };
-    const entry: CommandEntry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [] };
+    const entry: CommandEntry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [], developer: false };
     store.getState().openCommandMenu();
     const first = store.getState().chooseCommand(entry);
     await held.sent;
@@ -213,6 +213,7 @@ describe('a tool refused for sample text (#360)', () => {
     label: name,
     tool: { name, description: '', mutates: true, fields: [] },
     keywords: [],
+    developer: false,
   });
 
   for (const name of ['publish', 'approve_publish_request'])
@@ -261,5 +262,33 @@ describe('a tool refused for sample text (#360)', () => {
     expect(calls.map((c) => c.name)).toEqual(['publish']);
     expect(toast.error).not.toHaveBeenCalled();
     expect(store.getState().commandMenu.running).toBe(false);
+  });
+});
+
+describe('asking the agent from the menu (#270)', () => {
+  /** The menu with the drawer's two actions it calls, recorded. */
+  function asking() {
+    const asked: { opened: number; questions: string[] } = { opened: 0, questions: [] };
+    const store = createStore<CommandMenuSlice & { ui: object; openAgentDrawer: () => void; askAgent: (q: string) => Promise<void> }>()((set, get) => ({
+      ui: {},
+      openAgentDrawer: () => void asked.opened++,
+      askAgent: async (q: string) => void asked.questions.push(q),
+      ...createCommandMenuSlice(set as never, get as never, { router: { navigate: vi.fn(), invalidate: vi.fn() } } as never),
+    }));
+    return { store, asked };
+  }
+
+  it('opens the drawer and asks the question; Enter closes the menu, ⌘Enter keeps it open', async () => {
+    const { store, asked } = asking();
+    store.getState().openCommandMenu();
+    await store
+      .getState()
+      .chooseCommand({ kind: 'ask', id: 'ask:typed', label: 'Ask agent: why are screens behind', question: 'why are screens behind', keywords: [] });
+    expect(asked).toEqual({ opened: 1, questions: ['why are screens behind'] });
+    expect(store.getState().commandMenu.open).toBe(false);
+    store.getState().openCommandMenu();
+    store.getState().askFromMenu('what plays now', true);
+    expect(asked.questions).toEqual(['why are screens behind', 'what plays now']);
+    expect(store.getState().commandMenu.open).toBe(true);
   });
 });

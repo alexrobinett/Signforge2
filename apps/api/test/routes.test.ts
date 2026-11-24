@@ -13,7 +13,7 @@ import { agentToken, check } from './oauth';
 
 /**
  * Every route that is not a GET, and why it may change data. `/api` allows exactly Better Auth,
- * the tool route, and the agent's inline fill and its Keep. Other trees list each route with its reason; a screen reporting about
+ * the tool route, the agent's inline fill and its Keep, its drafts' save, and its drawer's presses. Other trees list each route with its reason; a screen reporting about
  * itself on `/v1/device` (M3-07's sync) goes here too, as a deliberate decision.
  */
 const WRITERS: Record<string, string> = {
@@ -22,7 +22,7 @@ const WRITERS: Record<string, string> = {
   'POST /api/agent/apply':
     "the drawer's drafts the person saved (#268): each a drafting tool through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /api/agent/chat':
-    "reads only: a turn of the agent's drawer (#267), POST because the body is a conversation; its tool calls are reads through the dispatcher (it writes nothing of ours, checked below)",
+    "a turn of the agent's drawer (#267): a question reads only, POST because the body is a conversation (it writes nothing of ours, checked below); a press of its confirmation card (#269) runs that one tool through the dispatcher as the member via cms-agent, once, its audit row carrying the card (agent-chat.test.ts)",
   'POST /api/agent/inline/keep':
     "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
   'POST /api/agent/inline':
@@ -85,7 +85,7 @@ describe('the route table', () => {
     expect(unexpected, 'a new route that is not a GET: make it a tool, or list it in WRITERS with a reason').toEqual([]);
   });
 
-  it("allows exactly Better Auth, the tool route, and the agent's routes to change data on /api, the drawer's only reading", () => {
+  it("allows exactly Better Auth, the tool route, and the agent's routes to change data on /api, the drawer's only on a press", () => {
     expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual([
       'POST /api/auth/*',
       'POST /api/tools/:name',

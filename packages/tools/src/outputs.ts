@@ -821,6 +821,7 @@ export const outputs = {
   }),
   publish: publishResult,
   end_takeover: publishResult,
+  publish_takeover: publishResult.extend({ entry: entryOutput.describe('The takeover, as published') }),
   request_publish: publishRequestResult,
   list_publish_requests: z.object({ requests: z.array(publishRequestOutput), next: nextOutput }),
   get_publish_request: publishRequestResult,

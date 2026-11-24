@@ -4,7 +4,7 @@ import { published, type OrgScope, type Write } from '@signforge/db';
 import { seedOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { dispatch, registry } from '../src';
+import { dispatch, publishOrg, registry, sha256Hex } from '../src';
 import { editorCalls, ok } from './calls';
 import { memberOf } from './member';
 
@@ -330,5 +330,72 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
       racing(org, () => chooseDefault(org, other.id)),
       { drafts: [], ifDefault: o.playlist },
     );
+  });
+
+  it('holds a publish to the screens, default and brand kits a card showed, to its batch: a change between its read and its batch refuses it, writing nothing (#406)', async () => {
+    const { o, org } = await setup('pl-publish-held');
+    const owner = (scope: OrgScope) => (name: string, input: unknown) => dispatch(registry, name, input, memberOf(scope, 'owner'));
+    await chooseDefault(org, o.playlist);
+    const other = await org.playlists.insert({ name: 'Other', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const spot = (await org.spots.get(o.templateSpot))!;
+    const playlist = (await org.playlists.get(o.playlist))!;
+    const image = (await org.spots.get(o.imageSpot))!;
+    const drafts = [
+      { kind: 'spot' as const, id: spot.id, version: spot.rowVersion },
+      { kind: 'spot' as const, id: image.id, version: image.rowVersion },
+      { kind: 'playlist' as const, id: playlist.id, version: playlist.rowVersion },
+    ];
+    // What the drawer's card reads and binds (apps/api/src/agent/confirm.ts): the screens it switches, the default, the brand state.
+    const dry = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts);
+    const ifScreens = dry.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : []));
+    expect(ifScreens).toEqual([o.screen]);
+    const input = { drafts, ifDefault: o.playlist, ifBrand: dry.brand, ifScreens };
+    /** Published through `scope`, whose batch `change` races: refused as `why`, with no publish made and the spot not published. */
+    const refusedFor = async (change: () => Promise<unknown>, why: Record<string, unknown>) => {
+      const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+      expect(await owner(racing(org, change))('publish', input)).toMatchObject({ ok: false, error: 'conflict', details: why });
+      expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+      expect(published((await org.spots.get(spot.id))!)).toBeUndefined();
+    };
+    // Another default, between its read and its batch.
+    await refusedFor(() => chooseDefault(org, other.id), { defaultPlaylistId: other.id });
+    await chooseDefault(org, o.playlist);
+    // A brand kit made.
+    const kit = await org.brandKits.insert({
+      name: 'House',
+      colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
+      shape: 'soft',
+    });
+    await org.commit(org.brandKits.stage.delete(kit.id).writes);
+    await refusedFor(
+      () =>
+        org.brandKits.insert({
+          name: 'Later',
+          colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
+          shape: 'soft',
+        }),
+      { brand: true },
+    );
+    // A screen added: it would switch that one too.
+    const fresh = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts);
+    const now = { ...input, ifBrand: fresh.brand };
+    const added = await (async () => {
+      const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+      let made = '';
+      const raced = racing(org, async () => {
+        made = (await org.screens.insert({ name: 'Annex', timezone: 'UTC', orientation: 'landscape' })).id;
+      });
+      const out = await owner(raced)('publish', now);
+      expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+      expect(published((await org.spots.get(spot.id))!)).toBeUndefined();
+      return { out, made };
+    })();
+    expect(added.out).toMatchObject({ ok: false, error: 'conflict', details: { screens: [o.screen, added.made].sort() } });
+    // As shown, with nothing changed: published.
+    const shown = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts);
+    const switches = shown.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : []));
+    expect(await ok(owner(org)('publish', { ...input, ifBrand: shown.brand, ifScreens: switches }))).toMatchObject({
+      promoted: expect.arrayContaining([{ kind: 'spot', id: spot.id }]),
+    });
   });
 });

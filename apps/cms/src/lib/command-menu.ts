@@ -25,12 +25,79 @@ export interface ToolListing {
 
 export type CommandEntry =
   | { kind: 'go'; id: string; label: string; to: Section['to']; keywords: string[] }
-  | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[] }
+  /** `developer`: a tool for building on SignForge, listed to owners only, under Developer (#270). */
+  | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[]; developer: boolean }
   /** `start_takeover` for a member who may publish: the takeover dialog, which sends it at once, as the Schedule page's does (#253). */
   | { kind: 'takeover'; id: string; label: string; tool: ToolListing; keywords: string[] }
   | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] }
   /** The agent's drawer (#267). */
-  | { kind: 'agent'; id: string; label: string; keywords: string[] };
+  | { kind: 'agent'; id: string; label: string; keywords: string[] }
+  /** A question for the agent (#270): what was typed, or one suggested for the page. */
+  | { kind: 'ask'; id: string; label: string; question: string; keywords: string[] };
+
+/**
+ * Tools for building on SignForge, not for running signage: under Developer, for owners only (#270).
+ * Menu curation only: the API's permissions are unchanged, and an editor may still call them through
+ * `/api/tools` or an agent, as their role allows. The menu just leaves them out of an editor's list.
+ */
+const DEVELOPER_TOOLS: ReadonlySet<string> = new Set(['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places']);
+
+/** Words a question or a request to the agent starts with. */
+const ASKING =
+  /^(why|what|which|who|whose|when|where|how|is|are|was|were|do|does|did|can|could|should|would|will|has|have|tell|show|explain|help|please|find out|list)\b/i;
+
+/**
+ * Whether what was typed reads as a question or a request for the agent rather than a page, record or
+ * tool to find (#270): two words or more ending with a question mark, or three or more starting as a
+ * question or a request ("why are two screens behind", "show me what plays"). A short command ("pair a
+ * screen", "take over Bayside now") does not, however long.
+ */
+export function readsAsSentence(query: string): boolean {
+  const q = query.trim();
+  const words = q.split(/\s+/).filter(Boolean).length;
+  return (words >= 2 && q.endsWith('?')) || (words >= 3 && ASKING.test(q));
+}
+
+/**
+ * Whether the agent's row goes first (#270, review of #406): only when what was typed reads as a question
+ * or a request and nothing listed matches it well, none of `names` (screens, groups, spots, playlists and
+ * the menu's own rows) being it or starting with it. A five-word screen name is found, not asked about.
+ */
+export function asksFirst(query: string, names: readonly string[]): boolean {
+  const q = query.trim().toLowerCase();
+  return readsAsSentence(query) && !names.some((n) => n.toLowerCase().startsWith(q));
+}
+
+/** The row that asks the agent what was typed: `first` above what was found, else below it (`asksFirst`). */
+export const askEntry = (query: string, first: boolean): CommandEntry => ({
+  kind: 'ask',
+  id: first ? 'ask:typed' : 'ask:typed:last',
+  label: `Ask agent: ${query.trim()}`,
+  question: query.trim(),
+  keywords: [query],
+});
+
+/** Three questions the empty menu suggests for the page shown (#270), by its section. */
+const QUESTIONS: Record<string, readonly [string, string, string]> = {
+  '/': ['Which screens need me, and why?', 'What changed since the last publish?', 'What is on screen now?'],
+  '/screens': ['Which screens need me, and why?', 'Which screens went quiet today?', 'Which screens are behind the last publish?'],
+  '/spots': ['Which spots have unpublished changes?', 'Which spots play nowhere?', 'Which spots still show sample text?'],
+  '/playlists': ['Which playlists play nowhere?', 'Which playlists have unpublished changes?', 'What does the default playlist play?'],
+  '/schedule': ['What plays on each screen now?', 'Which takeovers are running?', 'What changes on screens tomorrow?'],
+  '/assets': ['Which images play nowhere?', 'Which assets are the largest?', 'Which spots use this week’s photos?'],
+  '/integrations': ['Which data sources failed their last read?', 'Which spots use each data source?', 'When did each feed last update?'],
+  '/audit': ['Who changed what today?', 'What did the agent do this week?', 'Who published last, and what?'],
+  '/publishes': ['Did the last publish reach every screen?', 'What changed in the last publish?', 'Which screens missed a publish?'],
+  '/settings': ['Who can publish in this organization?', 'What are the display hours?', 'Which alerts are set up?'],
+};
+
+/** The empty menu's questions for `path`: its section's, a record's page by its section's, else Overview's. */
+export function pageQuestions(path: string): CommandEntry[] {
+  const section = Object.keys(QUESTIONS)
+    .filter((to) => (to === '/' ? path === '/' : path === to || path.startsWith(`${to}/`)))
+    .sort((a, b) => b.length - a.length)[0];
+  return (QUESTIONS[section ?? '/'] ?? []).map((question, i) => ({ kind: 'ask', id: `ask:page:${i}`, label: question, question, keywords: [question] }));
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -86,24 +153,26 @@ const labelOf = (description: string) =>
     .trim();
 
 /**
- * Navigation first, in sidebar order, then the tools in registry order. A takeover is sent at once
+ * Navigation first, in sidebar order, then the tools in registry order, the developer tools only for
+ * an owner (`owner`, #270). A takeover is sent at once
  * wherever the CMS offers it, so `start_takeover`, which only drafts one, opens the takeover dialog
  * for a member who may publish; one who may not can only draft it, as its own words say. Restart is
  * left out: a found screen offers it only once it is in touch (`targetActions`), and the tool would
  * say Sent to one that is not (#253).
  */
-export function commandEntries(tools: ToolListing[]): CommandEntry[] {
+export function commandEntries(tools: ToolListing[], owner = true): CommandEntry[] {
   const publishes = tools.some((t) => t.name === 'publish');
   return [
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
     { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
     ...tools
-      .filter((t) => t.name !== 'restart_screen')
+      // The takeover dialog already makes and publishes one at once (`takeover`): publish_takeover, the agent drawer's, is not listed beside it.
+      .filter((t) => t.name !== 'restart_screen' && t.name !== 'publish_takeover' && (owner || !DEVELOPER_TOOLS.has(t.name)))
       .map((tool): CommandEntry => {
         const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
         return tool.name === 'start_takeover' && publishes
           ? { kind: 'takeover', label: 'Take over screens now…', ...entry }
-          : { kind: 'tool', label: labelOf(tool.description), ...entry };
+          : { kind: 'tool', label: labelOf(tool.description), developer: DEVELOPER_TOOLS.has(tool.name), ...entry };
       }),
   ];
 }

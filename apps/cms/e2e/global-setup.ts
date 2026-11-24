@@ -25,6 +25,7 @@ import {
   STUB_CARD,
   STUB_DRAFT,
   STUB_DRAFTED,
+  STUB_TAKEN,
   STUB_FILL,
   STUB_MENU,
 } from './servers';
@@ -65,8 +66,9 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 /**
  * The drawer's scripted turn: a tool to call, or the answer's card (#350: the card as JSON text, the
  * structured output asked with the tools). On a spot's page (#268): read the spot, draft a punchier
- * headline and a QR link from its data as read, then `STUB_DRAFTED`. Anywhere else (#267): read the
- * screens' status, then `STUB_CARD`.
+ * headline and a QR link from its data as read, then `STUB_DRAFTED`. Asked about the storm (#269): read
+ * the playlists, take every screen over with the first for an hour (the run pauses there for the
+ * person's press), then `STUB_TAKEN`. Anywhere else (#267): read the screens' status, then `STUB_CARD`.
  */
 function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } | { card: object } {
   // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
@@ -78,6 +80,14 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
   const result = Array.isArray(last) && last[0]?.type === 'tool_result' ? String(last[0].content) : undefined;
   const asked = messages.at(-2)?.content;
   const lastCall = Array.isArray(asked) ? asked.find((b: { type: string }) => b.type === 'tool_use')?.name : undefined;
+  if (/storm/i.test(first)) {
+    if (!result) return { name: 'list_playlists', input: {} };
+    if (lastCall === 'list_playlists') {
+      const read = JSON.parse(result.replace(/^<data>\n/, '').replace(/\n<\/data>$/, ''));
+      return { name: 'start_takeover', input: { playlistId: read.playlists[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() } };
+    }
+    return { card: { groups: [], steps: [], ...STUB_TAKEN } };
+  }
   if (!spotId) return result ? { card: STUB_CARD } : { name: 'list_screen_status', input: {} };
   if (!result) return { name: 'get_spot', input: { spotId } };
   if (lastCall === 'get_spot') {
