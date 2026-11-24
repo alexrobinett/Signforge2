@@ -181,7 +181,7 @@ describe('the AI provider tools', () => {
         expect(await call(name, input, as('owner', actor)), `${actor.clientId} ${name}`).toMatchObject({
           ok: false,
           error: 'forbidden',
-          message: expect.stringContaining('Only a person'),
+          message: expect.stringContaining('for people only'),
         });
     expect(await scoped(env.DB, o.orgId).aiProvider.get()).toEqual(before);
   });

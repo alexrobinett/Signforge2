@@ -108,7 +108,8 @@ describe('alert channels', () => {
     const email = await call('test_alert_channel', { channel: 'email' });
     expect(email).toMatchObject({ ok: true, output: { delivery: { channel: 'email' } } });
     expect((await scoped(env.DB, o.orgId).alertDeliveries.list({ take: 1 }))[0]?.toUserId).toBe('user-owner');
-    expect(await dispatch(registry, 'test_alert_channel', { channel: 'email' }, as('owner', 'agent'))).toMatchObject({ error: 'invalid_input' });
+    // Where alerts go is a person's (review of #419): an agent is refused before anything is read.
+    expect(await dispatch(registry, 'test_alert_channel', { channel: 'email' }, as('owner', 'agent'))).toMatchObject({ error: 'forbidden' });
   });
 
   it('retries a failed delivery now, but not a delivered one', async () => {
