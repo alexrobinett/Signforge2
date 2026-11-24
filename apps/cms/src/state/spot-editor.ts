@@ -33,6 +33,7 @@
 import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { playerMessage } from '~/lib/preview';
+import { overviewKey } from '~/lib/overview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { problemWords } from '~/lib/field-words';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
@@ -343,6 +344,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       queryClient.setQueryData(spotKeys.one(orgId, spotId), saved);
       void dropUnbound(orgId, spot, saved);
       void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+      void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
       return { version: saved.version };
     },
     invalid: ({ orgId, edit }, spotId) => {
@@ -427,6 +429,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         const spot = (await callTool('create_spot', { name: d.name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         await router.navigate({ to: '/spots/$spotId', params: { spotId: spot.id } });
         editor((e) => ({ ...e, newSpot: newSpotDraft() }));
       } catch (err) {
@@ -453,6 +456,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         await router.navigate({ to: '/spots' });
         queryClient.removeQueries({ queryKey: spotKeys.one(orgId, spotId), exact: true });
         await queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         editor((e) => ({ ...e, deleting: closedDelete() }));
         return true;
       } catch (err) {

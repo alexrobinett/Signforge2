@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { orgOnScreen } from '~/lib/live';
 import type { ScheduleEntryView } from '~/lib/schedule';
 import { callTool, toolMessage } from '~/lib/tools';
+import { overviewKey } from '~/lib/overview';
 import { scheduleKey, scheduleQuery } from '~/queries/schedule';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
@@ -149,7 +150,8 @@ export function entryProblems(d: EntryDraft): string[] {
 
 export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { router, queryClient }) => {
   const patch = (fn: (s: ScheduleState) => ScheduleState) => set((s) => ({ schedule: fn(s.schedule) }));
-  const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: scheduleKey(orgId) });
+  const refresh = (orgId: string) =>
+    Promise.all([queryClient.invalidateQueries({ queryKey: scheduleKey(orgId) }), queryClient.invalidateQueries({ queryKey: overviewKey(orgId) })]);
   const common = { makeId: () => crypto.randomUUID(), currentOrg: () => orgOnScreen(router), clock: realClock };
 
   const entries = createVersionedDrafts<EntryDraft>({

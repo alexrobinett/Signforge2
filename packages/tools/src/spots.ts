@@ -225,16 +225,21 @@ async function checkMedia(org: OrgScope, kind: 'image' | 'video', assetId: strin
 const listSpots = defineTool({
   name: 'list_spots',
   description:
-    "List the organization's spots, the drafts as last edited, most recently edited first, a page at a time. Each says whether it is published and whether its draft differs. Returns { spots: Spot[], next }; pass next as cursor for the following page.",
+    "List the organization's spots, the drafts as last edited, most recently edited first, a page at a time. Each says whether it is published and whether its draft differs. Filter by kind, or to the unpublished ones. Returns { spots: Spot[], next, total }: total counts every spot the filters match; pass next as cursor for the following page.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: z.object({
+    ...pageInput,
+    kind: z.enum(SPOT_KINDS).optional().describe('Only spots of this kind'),
+    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
+  }),
   output: outputs.list_spots,
   example: {},
   handler: async ({ org, input }) => {
-    const { rows, next } = page(await org.spots.list(), (s) => [-s.updatedAt, s.id], input);
-    return { spots: rows.map(spotView), next };
+    const views = (await org.spots.list()).map(spotView).filter((s) => (!input.kind || s.kind === input.kind) && (!input.unpublished || s.draftChanged));
+    const { rows, next } = page(views, (s) => [-s.updatedAt, s.id], input);
+    return { spots: rows, next, total: views.length };
   },
 });
 

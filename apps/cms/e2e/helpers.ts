@@ -429,3 +429,17 @@ export async function holdFirst(page: Page, path: string) {
   });
   return { arrived, calls: () => calls };
 }
+
+/**
+ * `email` joins the org `owner` is on as an editor: invited by the owner (whose page closes), then
+ * signed in on `page` from `address`, accepting.
+ */
+export async function joinAsEditor(owner: Page, page: Page, email: string, address: string) {
+  const invited = await owner.request.post('/api/auth/organization/invite-member', { headers: { origin: CMS_URL }, data: { email, role: 'editor' } });
+  expect(invited.status(), await invited.text()).toBe(200);
+  const { id: invitationId } = (await invited.json()) as { id: string };
+  await owner.close();
+  await signInAs(page, email, address);
+  const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
+  expect(accepted.status(), await accepted.text()).toBe(200);
+}

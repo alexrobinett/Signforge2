@@ -24,6 +24,9 @@ test('a session that ends while the app is open goes to sign-in and back, from a
   await hydrated(page);
   await signInAs(page, `e2e-ended-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Harbour Books', ADDRESS);
+  // Overview reads what screens are doing as it opens (#357): the session ends after that read has
+  // answered, so the link, not the read, is what finds it ended.
+  await page.waitForLoadState('networkidle');
 
   await page.context().clearCookies();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
