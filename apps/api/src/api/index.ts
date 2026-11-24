@@ -10,9 +10,9 @@
  * - A CMS tab names the org it shows in `TAB_ORG_HEADER` (#129). `/api/session`, `requireOrg`
  *   and Better Auth's org calls refuse a call from a tab whose org is no longer the session's:
  *   the member switched org in another tab. Callers with no tab (agents, scripts) send none.
- * - `/api/tools` serves the tool registry (./tools.ts). It and the agent's inline fill
- *   (`/api/agent/inline`, ../agent/inline.ts) are the only routes here that change data, both only
- *   through the dispatcher, but for the OAuth callback (./connections.ts), a GET because a provider
+ * - `/api/tools` serves the tool registry (./tools.ts). It and the agent's inline fill and its Keep
+ *   (`/api/agent/inline` and `/api/agent/inline/keep`, ../agent/inline.ts) are the only routes here
+ *   that change data, all only through the dispatcher, but for the OAuth callback (./connections.ts), a GET because a provider
  *   redirects the browser to it, which changes data only by running `finish_connection` through
  *   the dispatcher; test/routes.test.ts fails if another one does.
  */

@@ -1,5 +1,5 @@
-// The guard: on `/api`, only Better Auth, the tool route and the agent's inline fill change data,
-// and the last two change it only through the dispatcher, which writes the audit log. The test enumerates the
+// The guard: on `/api`, only Better Auth, the tool route and the agent's inline fill and its Keep
+// change data, and the last three change it only through the dispatcher, which writes the audit log. The test enumerates the
 // Worker's routes, so a new route fails here until it is either read-only or listed below.
 import { seedBaseTemplate, testScope } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
@@ -11,12 +11,14 @@ import { Client, email, testApp } from './client';
 
 /**
  * Every route that is not a GET, and why it may change data. `/api` allows exactly Better Auth,
- * the tool route and the agent's inline fill. Other trees list each route with its reason; a screen reporting about
+ * the tool route, and the agent's inline fill and its Keep. Other trees list each route with its reason; a screen reporting about
  * itself on `/v1/device` (M3-07's sync) goes here too, as a deliberate decision.
  */
 const WRITERS: Record<string, string> = {
   'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations',
   'POST /api/tools/:name': 'the tool registry, through the dispatcher',
+  'POST /api/agent/inline/keep':
+    "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
   'POST /api/agent/inline':
     "the agent's fill from a flyer, photo or link (#263): one create_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /admin/screens/:screen/missing': 'reads only: POST because the body is a manifest',
@@ -74,10 +76,11 @@ describe('the route table', () => {
     expect(unexpected, 'a new route that is not a GET: make it a tool, or list it in WRITERS with a reason').toEqual([]);
   });
 
-  it('allows exactly Better Auth, the tool route and the inline fill to change data on /api', () => {
+  it('allows exactly Better Auth, the tool route, and the inline fill and its Keep to change data on /api', () => {
     expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual([
       'POST /api/auth/*',
       'POST /api/tools/:name',
+      'POST /api/agent/inline/keep',
       'POST /api/agent/inline',
     ]);
     // Every listed writer still exists, so the list cannot rot.
@@ -195,6 +198,13 @@ describe('requests', () => {
     const res = await member.post('/api/agent/inline', { source: { kind: 'link', url: 'https://bakery.example/' }, idempotencyKey: 'guard-fill-1' });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(ours()).toEqual(['spots', 'idempotency_keys', 'audit_log']);
+
+    // Keep of an update (#264): the spot and its audit row, and nothing for the review before it.
+    const made = (await res.json()) as { spot: { id: string; version: number } };
+    writes.length = 0;
+    const kept = await member.post('/api/agent/inline/keep', { spotId: made.spot.id, ifVersion: made.spot.version, data: { title: 'Kept' } });
+    expect(kept.status, await kept.clone().text()).toBe(200);
+    expect(ours()).toEqual(['spots', 'audit_log']);
   });
 });
 
