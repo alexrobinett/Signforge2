@@ -914,7 +914,7 @@ describe('confirmation cards (#269)', () => {
     });
   });
 
-  describe('a publish card holds the press to what it showed (review of #406)', () => {
+  describe('a publish card holds the press to what it showed, guarded to its commit (review of #406)', () => {
     async function publishCard(called: (ids: { playlist: string; spot: string; other: string }) => Record<string, unknown>) {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({
@@ -950,13 +950,13 @@ describe('confirmation cards (#269)', () => {
     it('a screen added since', async () => {
       const s = await publishCard(() => ({}));
       await s.scope.screens.insert({ name: 'Bayside annex', timezone: 'UTC', orientation: 'landscape' });
-      await s.refused(/The screens it would switch changed since the card was made/);
+      await s.refused(/the screens this publish would switch have changed since they were shown/);
     });
 
     it('another default since', async () => {
       const s = await publishCard(() => ({}));
       await s.scope.commit((await s.scope.settings.stage.set({ defaultPlaylistId: s.other.id })).writes);
-      await s.refused(/The default playlist changed since the card was made/);
+      await s.refused(/the default playlist is now/);
     });
 
     it('a brand kit made since', async () => {
@@ -966,13 +966,40 @@ describe('confirmation cards (#269)', () => {
         colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
         shape: 'soft',
       });
-      await s.refused(/The brand kits changed since the card was made/);
+      await s.refused(/the brand kits have changed/);
     });
 
     it('a pinned draft changed since', async () => {
       const s = await publishCard(() => ({}));
       await env.DB.prepare('UPDATE spots SET row_version = row_version + 1 WHERE id = ?').bind(s.spot.id).run();
       await s.refused(/has changed since it was chosen for this publish/);
+    });
+
+    it('none: a first publish, held to there being no default, makes its playlist the default', async () => {
+      const ask: { called?: Record<string, unknown> } = {};
+      const s = await setup({
+        steps: (body) =>
+          body.messages.length === 1 ? { calls: [{ name: 'publish', input: ask.called }] } : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) },
+      });
+      const playlist = await s.scope.playlists.insert({ name: 'All day', transitionJson: JSON.stringify({ type: 'cut' }) });
+      const spot = await s.scope.spots.insert({ name: 'Pier 9', kind: 'url', durationMs: 10_000, url: 'https://example.com/pier' });
+      await s.scope.playlists.setItems(playlist.id, [spot.id]);
+      const pl = (await s.scope.playlists.get(playlist.id))!;
+      // On every screen at all hours: what makes an org's first default (#243).
+      const entry = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, priority: 1, target: 'org' });
+      ask.called = {
+        drafts: [
+          { kind: 'spot', id: spot.id, version: spot.rowVersion },
+          { kind: 'playlist', id: playlist.id, version: pl.rowVersion },
+          { kind: 'schedule_entry', id: entry.id, version: entry.rowVersion },
+        ],
+      };
+      const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
+      expect(card.lines).toContain('Changes what 3 screens play; each switches as it hears of it.');
+      expect(doneOf(await raw(await s.member.post('/api/agent/chat', body)))).toMatchObject({ ok: true });
+      expect((await s.scope.settings.get())?.defaultPlaylistId).toBe(playlist.id);
+      const audit = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'publish');
+      expect(JSON.parse(audit?.detailJson ?? '{}').input).toMatchObject({ ifDefault: null, ifScreens: expect.any(Array), ifBrand: expect.any(String) });
     });
 
     it('an ifDefault that is not the default', async () => {

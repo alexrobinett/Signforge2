@@ -96,37 +96,52 @@ async function switchScreens(
   return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
 }
 
+/** What a publish is held to, each checked against what it compiled and guarded in its batch. */
+interface HeldTo {
+  /** An approved request's: nothing removed that it does not pin. */
+  exact?: boolean;
+  /** The brand state (`brandKits.state`) the manifests must be compiled with. */
+  brand?: string;
+  /** The default playlist the manifests must be compiled with; null: none. */
+  ifDefault?: string | null;
+  /** The screens it must switch, exactly, by id. */
+  screens?: readonly string[];
+}
+
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
  * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
- * approved request (`exact`: nothing removed that it does not pin; `brand`, the brand state it was
- * asked under, which the manifests must be compiled with, held to the commit). `ifDefault`: the
- * default the manifests must be compiled with, held to the commit too. `added`: entries staged before
- * this in the call's batch (`publish_takeover`).
+ * approved request. `held`: what it may publish only while it is still so (`HeldTo`), each held to
+ * the commit. `added`: entries staged before this in the call's batch (`publish_takeover`).
  */
 export async function runPublish(
   ctx: ToolContext<unknown>,
   drafts: readonly DraftPin[] | undefined,
   end: readonly string[] = [],
-  approval?: { brand: string },
-  ifDefault?: string,
+  held: HeldTo = {},
   allowSample: readonly SampleAck[] = [],
   added: readonly ScheduleEntryRow[] = [],
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined, allowSample, added);
+  const { brand, ifDefault, screens: switching } = held;
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, held.exact ?? false, allowSample, added);
   // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
   // would pass a second read, and its batch then guards the very rows the manifests were made from.
-  if (approval && result.brand !== approval.brand)
+  if (brand !== undefined && result.brand !== brand)
     throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
   // `ifDefault` against the default as compiled, not as read before: one switched and switched back
   // while it compiled would pass a check made first, and its manifests fall back to the other.
   const moved = ifDefault === undefined ? undefined : defaultConflict(result.read.defaultPlaylist, ifDefault);
   if (moved) throw moved;
-  // The pins' guards, the brand state's and the default's go with the batch whether or not anything else is written.
+  const switches = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.screenId] : [])).sort();
+  if (switching !== undefined && switches.join(',') !== [...switching].sort().join(','))
+    throw new ToolError('conflict', 'the screens this publish would switch have changed since they were shown: ask again', { screens: switches });
+  // The pins' guards, the brand state's, the default's and the screens' go with the batch whether or not anything else is written.
   write({ row: undefined, writes: result.pinGuards });
-  if (approval) write(org.brandKits.stage.unchanged(result.brand));
+  if (brand !== undefined) write(org.brandKits.stage.unchanged(result.brand));
   if (ifDefault !== undefined) write(org.settings.stage.defaultIs(ifDefault));
+  // The screens as compiled: one added or deleted before the batch fails it, and the publish runs again from a fresh read.
+  if (switching !== undefined) write(org.screens.stage.are(result.read.screens.map((s) => s.id)));
   const screens = result.screens.map((s) => ({
     screenId: s.screenId,
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
@@ -193,9 +208,24 @@ const publish = defineTool({
   publishes: true,
   input: z.object({
     ifDefault: id('playlist')
+      .nullable()
       .optional()
       .describe(
-        "Publish only while this playlist is the organization's default: for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
+        "Publish only while this playlist is the organization's default (null: while it has none): for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
+      ),
+    ifBrand: z
+      .string()
+      .max(200_000)
+      .optional()
+      .describe(
+        'Publish only while the brand kits and their assignments are as they were shown: their state as the agent drawer\'s publish card read it. Refused with a conflict, details { brand: true }, otherwise, checked again as it commits',
+      ),
+    ifScreens: z
+      .array(id('screen'))
+      .max(5000)
+      .optional()
+      .describe(
+        'Publish only if it switches exactly these screens, as they were shown. Refused with a conflict, details { screens }, the ones it would switch now, otherwise; a screen added or deleted before it commits makes it read again',
       ),
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
@@ -218,7 +248,7 @@ const publish = defineTool({
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: async (ctx) => {
     const { input } = ctx;
-    return runPublish(ctx, input.drafts, [], undefined, input.ifDefault, peopleAllowSample(ctx));
+    return runPublish(ctx, input.drafts, [], { ifDefault: input.ifDefault, brand: input.ifBrand, screens: input.ifScreens }, peopleAllowSample(ctx));
   },
 });
 
@@ -271,8 +301,7 @@ const publishTakeover = defineTool({
       ctx,
       [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])],
       [],
-      undefined,
-      undefined,
+      {},
       [],
       [made],
     );

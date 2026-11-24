@@ -113,28 +113,19 @@ async function spotsLive(org: OrgScope, playlist: PlaylistRow): Promise<Record<s
   return Object.fromEntries(rows.flatMap((s) => (s ? [[s.id, s.publishedVersion]] : [])));
 }
 
-/** What a publish would do, worked out as it would, writing nothing: what a publish card shows and a press holds it to. */
+/** What a publish would do, worked out as it would, writing nothing: what a publish card shows and a press is held to. */
 async function publishSees(org: OrgScope, pins: DraftPin[], allow: SampleAck[], now: number) {
   const dry = await publishOrg(org, { hash: sha256Hex, now: new Date(now) }, pins, [], false, allow);
   return {
     dry,
-    bound: {
-      // The screens it would switch, the default and the brand kits their manifests are compiled with.
-      screens: dry.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : [])).sort(),
-      defaultPlaylistId: dry.read.defaultPlaylist,
-      brand: dry.brand,
+    // The screens it would switch, the default and the brand kits their manifests are compiled with: the publish's guards.
+    held: {
+      ifScreens: dry.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : [])).sort(),
+      ifDefault: dry.read.defaultPlaylist,
+      ifBrand: dry.brand,
     },
   };
 }
-
-/** A publish card's record: the publish's input, and what the card showed it would reach. */
-const publishBound = z.object({
-  call: z.looseObject({
-    drafts: z.array(z.object({ kind: z.enum(['spot', 'playlist', 'schedule_entry']), id: z.string(), version: z.number() })),
-    allowSample: z.array(z.object({ spotId: z.string(), version: z.number(), fields: z.array(z.string()) })).optional(),
-  }),
-  bound: z.object({ screens: z.array(z.string()), defaultPlaylistId: z.string().nullable(), brand: z.string() }),
-});
 
 /** Each draft pinned, at the version read now, by its name: what the card shows is what a press publishes. */
 async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[]; names: string[] }> {
@@ -180,9 +171,6 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     description: describedAs('publish'),
     async make(org, called, at) {
       const { pins, names } = await pinsOf(org, called.drafts);
-      const settings = await org.settings.get();
-      // The model's ifDefault as asked, else the default if pinned (#393): refused if it is no longer the default by then.
-      const ifDefault = str(called.ifDefault) || pins.find((p) => p.kind === 'playlist' && p.id === settings?.defaultPlaylistId)?.id;
       // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds
       // back. A spot still holding its template's sample text (#360, #392) is listed on the card, exactly as the publish
       // would refuse it, and acknowledged by the press: the model's own allowSample, which an agent may not give, is never taken.
@@ -199,20 +187,19 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         if (err instanceof ToolError) throw new CardProblem(err.message, { cause: err });
         throw err;
       }
-      const { dry, bound } = seen;
-      const reach = bound.screens.length;
+      const { dry, held } = seen;
+      const reach = held.ifScreens.length;
       const { allowSample: _theirs, ...asked } = called;
       return {
+        // Every constraint the model gave, as it gave them (its ifDefault, #393, else the default now), with the pins at the
+        // versions shown and the samples the card lists; and what the card says it reaches, which the publish holds to its
+        // commit: the screens it switches, the default and the brand kits (#386's guards). Any changed since refuses the press.
         input: {
-          // Every constraint the model gave, as it gave them, with the pins at the versions shown and the samples the card lists.
-          call: {
-            ...asked,
-            drafts: pins,
-            ...(ifDefault ? { ifDefault } : {}),
-            ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })) } : {}),
-          },
-          // What the card says it reaches: a press refuses if a screen, the default or a brand kit has changed it since.
-          bound,
+          ...asked,
+          ...held,
+          ...(called.ifDefault !== undefined ? { ifDefault: called.ifDefault } : {}),
+          drafts: pins,
+          ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })) } : {}),
         },
         card: {
           title: 'Publish to screens',
@@ -231,18 +218,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    async run(caller, input) {
-      const { call, bound } = publishBound.parse(input);
-      // Read again as the press would publish: a pin changed or a check refused is the publish's own refusal, from dispatch.
-      const now = await publishSees(caller.org, call.drafts, call.allowSample ?? [], Date.now()).catch((err: unknown) => {
-        if (err instanceof ToolError) return undefined;
-        throw err;
-      });
-      if (now && now.bound.defaultPlaylistId !== bound.defaultPlaylistId) return changedSince(caller, 'publish', call, 'The default playlist changed');
-      if (now && now.bound.brand !== bound.brand) return changedSince(caller, 'publish', call, 'The brand kits changed');
-      if (now && canonical(now.bound.screens) !== canonical(bound.screens)) return changedSince(caller, 'publish', call, 'The screens it would switch changed');
-      return dispatch(registry, 'publish', call, caller);
-    },
+    run: run('publish'),
   },
   start_takeover: {
     tools: ['publish_takeover'],
