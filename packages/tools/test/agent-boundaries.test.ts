@@ -48,7 +48,8 @@ const REFUSED: Record<string, Record<string, unknown>> = {
   start_connection: { provider: 'fake' },
   // Who publishes, and how long the trail is kept.
   update_org_settings: { auditRetentionDays: 30 },
-  // Members: role changes and removals.
+  // Members: who joins (#321), role changes and removals.
+  invite_member: { email: 'sam@example.com', role: 'viewer' },
   update_member_role: { memberId: 'mem_boundaries', role: 'owner' },
   remove_member: { memberId: 'mem_boundaries' },
   // The model key: who pays, and what data leaves SignForge.

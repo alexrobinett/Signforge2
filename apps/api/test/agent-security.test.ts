@@ -137,7 +137,7 @@ describe('prompt injection through content', () => {
     await scope.dataSources.insert({ id: 'news', name: SAYS, format: 'rss', urlEncrypted: 'sealed', refreshS: 300 });
     await scope.dataSources.savePoll('news', {
       source: { nextPollAt: 0 },
-      snapshot: { version: 1, fetchedAt: 0, checkedAt: 0, dataJson: JSON.stringify({ items: [{ title: SAYS }] }) },
+      snapshot: { version: 'v1', fetchedAt: 0, checkedAt: 0, dataJson: JSON.stringify({ items: [{ title: SAYS }] }) },
     });
     const template = await scope.templates.insert({ key: 'card', name: SAYS });
     await scope.templates.versions.insert({

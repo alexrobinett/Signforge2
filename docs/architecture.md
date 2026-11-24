@@ -219,12 +219,61 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - Every agent action is written to an audit log.
 - A built-in agent in the CMS (#244, `docs/proposals/cms-agent.md`) calls the same tools as the signed-in member (`clientId: 'cms-agent'`), with its own turn quota and no grant: it fills spots from a flyer, photo or link, and later answers and drafts from a drawer. Publish, takeover, revoke and delete stop at a confirmation the person presses. The model is the org's own key or SignForge's demo model.
 
+### Threat model (M4-17, #122)
+
+From the M4 plan's Risks (#105). Each risk names the test that holds its guard, or says why it is accepted. `apps/api/test/agent-security.test.ts` and `packages/tools/test/agent-boundaries.test.ts` hold this pass's own tests.
+
+**Prompt injection through content.** Agents read text that others wrote: feed snapshots from the open web, spot data, members' names, publish-request reasons, template manifests and asset names. Any of it can carry instructions.
+
+| Guard | Test |
+| --- | --- |
+| The `/mcp` instructions and every tool description are ours and static, with no org text in them. | `agent-security.test.ts`, prompt injection: org text planted in every source above never appears in `initialize` or `tools/list`. |
+| An output is data fields, never prose that merges with ours. Over `/mcp`, each result's text is the JSON of its structured content. | The same test, one read for each source. |
+| In the drawer, outputs, refusals and the conversation reach the model fenced (`<data>`, `<history>`), and org text cannot close a fence. A refusal is fenced too, as it can name a playlist or a spot (fixed in this pass). | `agent-chat.test.ts`: the fenced output; the refused drafts, each fenced. |
+| The flyer fill reads its material fenced. | `agent-inline.test.ts` |
+| Agents draft by default. Publishing needs a person, or `content:publish` that someone who may publish turned on at consent. | `agent-grants.test.ts`, a grant's org and scopes; `dispatch.test.ts`, `effectiveScopes` |
+| Approvals show the diff and the real player, not the agent's summary, and its reason as a quote in plain text. | `apps/cms/e2e/approvals.spec.ts` |
+| The write budget (30 a minute, 2,000 a day) bounds the damage. Every change is audited and can be undone. | `agent-limits.test.ts` |
+
+Accepted:
+- A person who grants `content:publish` accepts that the agent can be misled. The consent page says so.
+- A refusal's message over `/mcp` can name org content (a playlist, a spot holding sample text). It is a string field of the JSON result, as an output is.
+- An agent with `org:manage` may change the org's alert rules, `agent_refused` included. That is the owner's default on M4 Q7: agents may change every setting except `editorsPublish` and audit retention. A change is audited.
+
+**Scope escalation.**
+
+| Path | Guard and test |
+| --- | --- |
+| A role or setting that changes after consent | Scopes are capped by the member's role and `editorsPublish` on every call, never only at consent. Tests: `mcp.test.ts` (a downgraded member's publish); `agent-security.test.ts` (editors-publish turned off mid-session: gone on the next call, back when turned on, the grant's own scopes kept). |
+| A change made in the moment between a call's read and its batch | The role is held to the batch for a publish, and for every owner tool, whatever it commits (#414, #417). Tests: `members.test.ts`, `publish-requests.test.ts`, `dispatch.test.ts` (screen notices), each with `racing`. |
+| Another org | The org comes from the grant alone. Tests: `mcp.test.ts` (never reaches another org); `packages/db` `agent-grants.test.ts`. |
+| A token for another resource | Audience binding: the provider issues tokens for `/mcp` alone, and `/mcp` takes only a token issued for it. Tests: `agent-security.test.ts`; `packages/db` `agent-grants.test.ts`. |
+| An expired or revoked token or grant | Checked on every call, in one statement. Tests: `mcp.test.ts` (revoked, and revoked in the CMS); `agent-security.test.ts` (an expired access token; a grant unused past its 90 days). |
+| A removed member | Removal, and leaving, revoke the member's grants and their tokens, and a code given before is refused. Test: `agent-grants.test.ts`, a membership ending. |
+| The wrong route tree | `/mcp` refuses a session cookie and any Origin; `/api` refuses a bearer token. Test: `mcp.test.ts`. |
+| The tools that would widen an agent's own power or hide its trail | Refused to agents, the CMS's own included, even an owner's with every scope. That covers grants, approving, declining and putting back requests, template approval, starting a connection, `editorsPublish`, audit retention, inviting, role changes, removals and the model key. Test: `agent-boundaries.test.ts`, which also holds every `people` tool to the rule. This pass fixed two holes: an agent could change `editorsPublish` and retention, and approve a template version, the one it registered included. |
+
+Residual risks, each tested:
+- **A registered client naming itself "SignForge" or "Claude".** Registration accepts any plain name. The consent page withholds a name that reads as ours and shows the app as unverified, with where its code goes. Tests: `client-names.test.ts`; `agent-grants.test.ts`, the consent page's name.
+- **Consent CSRF.** Consent from another Origin, or none, is refused. Test: `agent-grants.test.ts`, consent from another site.
+- **A partial grant.** Better Auth on D1 has no transactions. A consent the provider gives no code for revokes its grant, and a token without a live grant row is not live. Tests: `agent-grants.test.ts`; `packages/db` `agent-grants.test.ts`.
+- **A registration flood.** Registration is rate-limited per address, and a client nobody consented to is pruned after a day. Tests: `agent-grants.test.ts`; `packages/db` `agent-grants.test.ts`.
+
+Accepted: an agent with `content:draft` may disconnect a connection. That widens nothing: its data sources stop updating until a person reconnects, and it is audited.
+
+**Template code.**
+- An agent with `content:draft` can register an org template version today, through the same lint and per-org runtime check as `sf template push` (#90). Only a person approves one, so no agent's code reaches a screen without a person's review (fixed in this pass). M4-14 builds agent submission proper.
+- Accepted: Chromium runs with `--no-sandbox` inside the check container (PR #90). Screens contain templates with the frame and its policy, WebRTC included (#91, PR #100).
+
+**Cost.** Accepted, and measured rather than tested as a guard: an agent call's D1 and Durable Object budget (the backend plan's cost table), and what an agent can fill within its write budget, which M3-24's quotas bound.
+
 ## Public demo
 
 - Each visitor gets a sandbox org of their own, made from a seed without signing up, and deleted 24 hours later (`docs/proposals/cms-agent.md`, The demo). One visitor never sees another's content.
 - A virtual screen in the browser runs the real player build.
 - The visitor edits a spot, publishes and watches the screen update.
 - Members, keys and integrations are hidden. Agent template submission is disabled.
+- Agents on the demo (owner default on #122): read and draft only. Consent there offers `content:read` and `content:draft`, never `content:publish` or `org:manage`; no template submission; and each reset revokes the sandbox's grants with their tokens, as a membership ending does. The sandbox and its reset are #266, which builds this policy with them.
 
 ## Monorepo
 

@@ -219,12 +219,13 @@ async function dispatchCall<D extends DataScope>(
   if (refused) return refused;
   // The role a change was checked for, held to the commit, checked by the batch as it runs: the right to publish (the
   // member still in a role that may, and an editor only while editors publish; without a member to read, the setting
-  // alone), and an owner's (review of #414: one demoted between the read and the batch is refused). An owner's change
-  // made through Better Auth is not in the batch, and Better Auth checks the role as it makes it.
+  // alone), and an owner's (review of #414: one demoted between the read and the batch is refused), for whatever the
+  // batch commits, an audit row alone included (#417). An owner's change made through Better Auth stages nothing and
+  // commits nothing here, and Better Auth checks the role as it makes it.
   const roleRight = (): Write[] => {
     if (!tool.mutates || !('settings' in caller.org)) return [];
     const publishing = tool.scope === 'content:publish';
-    if (!publishing && (tool.minRole !== 'owner' || !writes.length)) return [];
+    if (!publishing && tool.minRole !== 'owner') return [];
     if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(tool.minRole)), publishing).writes;
     return publishing && caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
   };
@@ -300,10 +301,16 @@ async function dispatchCall<D extends DataScope>(
   /** A commit that failed: a refusal, the tool's own words for it first, then a guard's. */
   const refusedCommit = async (err: unknown): Promise<DispatchResult | undefined> => {
     const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data, actor: caller.actor });
+    // A role guard (`stillMay`, first in its batch): the member lost the right between the read and the batch, whatever
+    // else changed meanwhile (#417). Said in the tool's own words when it has them, else as the role and setting are now.
+    if (err instanceof StaleVersionError && err.id === 'member') {
+      if (refusal?.code === 'forbidden') return fail(refusal.code, refusal.message, refusal.details);
+      const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
+      if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
+      // Back by the time it is read: it changed and changed back meanwhile.
+      return refusedBy(await grantOf({ ...caller, role })) ?? fail('forbidden', `your right to ${tool.name} changed while it ran: read again and retry`);
+    }
     if (refusal) return fail(refusal.code, refusal.message, refusal.details);
-    // A role guard (`stillMay`): the member lost the role between the read and the batch.
-    if (err instanceof StaleVersionError && err.id === 'member')
-      return fail('forbidden', `${tool.name} needs at least the ${tool.minRole} role, which you no longer have`);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);

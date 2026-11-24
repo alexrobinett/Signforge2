@@ -466,6 +466,22 @@ describe('the second re-check of #386', () => {
   const demote = (role: Role, to: string) =>
     env.DB.prepare('UPDATE member SET role = ? WHERE organizationId = ? AND userId = ?').bind(to, o.orgId, `${o.orgId}-${role}`).run();
 
+  it('refuses a decline when editors stop publishing between its read and its batch, saying so (#417)', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 13_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const raced = racing(asMember('editor'), () => call(person('owner'), 'update_org_settings', { editorsPublish: false }));
+    try {
+      expect(await dispatch(registry, 'decline_publish_request', { publishRequestId: request.id }, raced)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'Only owners publish in this organization',
+      });
+    } finally {
+      await call(person('owner'), 'update_org_settings', { editorsPublish: true });
+    }
+    await pendingStill(request.id);
+  });
+
   it('refuses an editor demoted while the approval waits for the lock, and one demoted between its read and its batch', async () => {
     const version = await editSpot(agent(), o.templateSpot, 12_000);
     const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
