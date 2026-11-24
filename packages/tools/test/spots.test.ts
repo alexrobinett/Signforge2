@@ -2,10 +2,13 @@
 // refuse them, and the preview input the editor's stage compiles a draft against.
 import { compileScreen } from '@signforge/compiler';
 import type { TemplateManifest } from '@signforge/contract';
-import { seedOrganization, testScope } from '@signforge/db/testing';
+import { scoped } from '@signforge/db';
+import { seedOrg, seedOrganization, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { type AgentLimiter, type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry } from '../src';
 import { editorCalls, ok } from './calls';
+import { memberOf } from './member';
 import { sha256Hex } from '../src/dispatch';
 
 const sha = (c: string) => c.repeat(64);
@@ -410,5 +413,143 @@ describe('get_spot_preview', () => {
     expect(result.problems).toEqual([]);
     expect(result.manifest?.brand?.id).toBe(kitId);
     expect(result.manifest?.spots.s).toMatchObject({ data: { accent: '#ffcc00' } });
+  });
+});
+
+describe('deleting a spot (#242)', () => {
+  async function seeded(orgId: string) {
+    const o = await seedOrg(env.DB, orgId);
+    const org = testScope(env.DB, orgId);
+    return { o, org, call: editorCalls(org) };
+  }
+
+  it('deletes one no playlist plays, a draft or a published one, and audits it', async () => {
+    const { o, org, call } = await seeded('spot-del');
+    // The seed's playlist plays its two spots: take the image out, and publish the spot so screens could have it.
+    await org.playlists.setItems(o.playlist, [o.templateSpot]);
+    await org.commit(org.spots.stage.publish((await org.spots.get(o.imageSpot))!).writes);
+    expect(await ok(call('delete_spot', { spotId: o.imageSpot }))).toEqual({ deleted: o.imageSpot });
+    expect(await call('get_spot', { spotId: o.imageSpot })).toMatchObject({ ok: false, error: 'not_found' });
+    const [entry] = await org.auditLog.list({ limit: 1 });
+    expect(entry).toMatchObject({ action: 'delete_spot', targetKind: 'spot', targetId: o.imageSpot, actorKind: 'user' });
+
+    const { spot } = await ok(call('create_spot', { name: 'Site', kind: 'url', url: 'https://example.com/board' }));
+    const id = (spot as { id: string }).id;
+    expect(await ok(call('delete_spot', { spotId: id }))).toEqual({ deleted: id });
+    expect(await call('delete_spot', { spotId: id })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('refuses while a playlist plays it, in its draft or only in its published version, naming each, and writes nothing', async () => {
+    const { o, org, call } = await seeded('spot-del-used');
+    const lunch = (await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }))).playlist as { id: string };
+    expect(await call('delete_spot', { spotId: o.imageSpot })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('"Lunch"'),
+      details: {
+        playlists: expect.arrayContaining([
+          { id: lunch.id, name: 'Lunch' },
+          { id: o.playlist, name: expect.any(String) },
+        ]),
+      },
+    });
+
+    // Published with it, then taken out of the drafts: screens may still play it.
+    const row = (await org.playlists.get(o.playlist))!;
+    await org.commit(org.playlists.stage.publish(row, await org.playlists.items(o.playlist)).writes);
+    await org.playlists.setItems(o.playlist, [o.templateSpot]);
+    await ok(call('update_playlist', { playlistId: lunch.id, spotIds: [] }));
+    expect(await call('delete_spot', { spotId: o.imageSpot })).toMatchObject({ ok: false, error: 'conflict', details: { playlists: [{ id: o.playlist }] } });
+    expect(await org.spots.get(o.imageSpot)).toBeDefined();
+
+    // Published without it: gone from screens, so it may go.
+    const now = (await org.playlists.get(o.playlist))!;
+    await org.commit(org.playlists.stage.publish(now, [o.templateSpot]).writes);
+    expect(await ok(call('delete_spot', { spotId: o.imageSpot }))).toEqual({ deleted: o.imageSpot });
+  });
+
+  it('continues its versions when made again with its id, so an edit read before the delete is refused (draft_tombstones)', async () => {
+    const { org, call } = await seeded('spot-del-tomb');
+    const { spot } = await ok(call('create_spot', { name: 'Site', kind: 'url', url: 'https://example.com/a', idempotencyKey: 'spot-del-tomb' }));
+    const read = (await ok(call('update_spot', { spotId: (spot as { id: string }).id, name: 'Site, edited', ifVersion: 1 }))).spot as {
+      id: string;
+      version: number;
+    };
+    await ok(call('delete_spot', { spotId: read.id }));
+    const again = await org.spots.insert({ id: read.id, name: 'Again', kind: 'url', durationMs: 10_000, url: 'https://example.com/b' });
+    expect(again.rowVersion).toBe(read.version + 1);
+    expect(await call('update_spot', { spotId: read.id, name: 'From the old read', ifVersion: read.version })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: read.id, version: read.version + 1 },
+    });
+  });
+
+  it("is a person's: refused to a viewer, a grant's agent and the in-CMS agent alike, before anything is read", async () => {
+    const { o, org } = await seeded('spot-del-who');
+    await org.playlists.setItems(o.playlist, [o.templateSpot]);
+    const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
+    const owner = memberOf(org, 'owner');
+    const callers: [string, Caller][] = [
+      ['viewer', memberOf(org, 'viewer')],
+      ['grant', { ...owner, actor: { kind: 'agent', id: 'agt_x', clientId: 'agent-app' }, scopes: ['content:read', 'content:draft'], agentLimiter: unlimited }],
+      ['in-CMS agent', { ...owner, actor: { kind: 'user', id: 'user-1', clientId: CMS_AGENT_CLIENT_ID } }],
+    ];
+    for (const [who, caller] of callers)
+      expect(await dispatch(registry, 'delete_spot', { spotId: o.imageSpot }, caller), who).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await org.spots.get(o.imageSpot)).toBeDefined();
+    expect(registry.get('delete_spot')?.people).toBe(true);
+  });
+
+  it('refuses with conflict, not a fault, when a playlist takes the spot in between its check and its commit', async () => {
+    const { o, org } = await seeded('spot-del-race');
+    await org.playlists.setItems(o.playlist, [o.templateSpot]);
+    let raced = false;
+    const racing = {
+      ...org,
+      spots: {
+        ...org.spots,
+        usedBy: async (spotId: string) => {
+          const used = await org.spots.usedBy(spotId);
+          if (!raced) {
+            raced = true;
+            await org.playlists.setItems(o.playlist, [o.templateSpot, o.imageSpot]);
+          }
+          return used;
+        },
+      },
+    };
+    expect(await editorCalls(racing)('delete_spot', { spotId: o.imageSpot })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { playlists: [{ id: o.playlist }] },
+    });
+    expect(await scoped(env.DB, 'spot-del-race').spots.get(o.imageSpot)).toBeDefined();
+  });
+  it('refuses a delete at a version someone has saved past, at the read or between the read and the commit, and keeps the spot', async () => {
+    const { org, call } = await seeded('spot-del-version');
+    const { spot } = await ok(call('create_spot', { name: 'Site', kind: 'url', url: 'https://example.com/a', idempotencyKey: 'spot-del-version' }));
+    const id = (spot as { id: string }).id;
+    await ok(call('update_spot', { spotId: id, name: 'Their edit', ifVersion: 1 }));
+    expect(await call('delete_spot', { spotId: id, ifVersion: 1 })).toMatchObject({ ok: false, error: 'conflict', details: { id, version: 2 } });
+
+    // Saved again after the delete read the spot: the batch's guard refuses it.
+    let raced = false;
+    const racing = {
+      ...org,
+      spots: {
+        ...org.spots,
+        usedBy: async (spotId: string) => {
+          if (!raced) {
+            raced = true;
+            await editorCalls(org)('update_spot', { spotId, name: 'Saved meanwhile', ifVersion: 2 });
+          }
+          return org.spots.usedBy(spotId);
+        },
+      },
+    };
+    expect(await editorCalls(racing)('delete_spot', { spotId: id, ifVersion: 2 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await org.spots.get(id)).toMatchObject({ name: 'Saved meanwhile', rowVersion: 3 });
+    expect(await ok(call('delete_spot', { spotId: id, ifVersion: 3 }))).toEqual({ deleted: id });
   });
 });

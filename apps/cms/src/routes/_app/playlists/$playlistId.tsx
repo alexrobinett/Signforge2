@@ -9,10 +9,10 @@
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
-import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
@@ -153,10 +153,7 @@ function PlaylistEditor() {
         {canManage && (
           <>
             <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
-            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => askDelete(true)}>
-              <Trash2Icon aria-hidden />
-              Delete
-            </Button>
+            <DeleteButton onAsk={() => askDelete(true)} />
           </>
         )}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}

@@ -20,6 +20,9 @@
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
  * the draft is compiled without its bindings, so the stage shows the fallback values. While the
  * agent's review of an update is open (src/state/agent.ts), the stage plays the update instead.
+ *
+ * Delete (#242) asks first, as a playlist's does. A spot a playlist plays, in its draft or its
+ * published version, is refused: the dialog names those playlists, to take it out of first.
  */
 import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
@@ -88,6 +91,8 @@ interface SpotEditorState {
   /** The room the stage has on the page, for scaling the screen to fit; null until measured. */
   stageBox: { w: number; h: number } | null;
   newSpot: NewSpotDraft;
+  /** Delete's confirmation: open, deleting, or refused, with the playlists that play the spot when that is why. */
+  deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[] };
 }
 
 export interface SpotEditorSlice {
@@ -111,6 +116,26 @@ export interface SpotEditorSlice {
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft and opens its editor. */
   createSpot: (orgId: string, start?: { durationMs: number; data: Record<string, unknown> }) => Promise<void>;
+  askDeleteSpot: (open: boolean) => void;
+  /**
+   * Deletes the spot, at the version the editor holds (as loaded, or as its own save left it), and goes
+   * to the spot library; refused while a playlist plays it, or once someone else saved it. Says whether it went.
+   */
+  deleteSpot: (orgId: string, spotId: string) => Promise<boolean>;
+}
+
+const closedDelete = (): SpotEditorState['deleting'] => ({ open: false, pending: false, error: null, playlists: [] });
+
+/** The playlists a refused delete names (`details.playlists`), as the API gave them. */
+function blocking(err: unknown): { id: string; name: string }[] {
+  const listed = err instanceof Refusal && typeof err.details === 'object' && err.details !== null && 'playlists' in err.details ? err.details.playlists : [];
+  return Array.isArray(listed)
+    ? listed.flatMap((p: unknown) =>
+        typeof p === 'object' && p !== null && 'id' in p && 'name' in p && typeof p.id === 'string' && typeof p.name === 'string'
+          ? [{ id: p.id, name: p.name }]
+          : [],
+      )
+    : [];
 }
 
 const newSpotDraft = (): NewSpotDraft => ({
@@ -135,6 +160,7 @@ const initial: SpotEditorState = {
   stageError: null,
   stageBox: null,
   newSpot: newSpotDraft(),
+  deleting: closedDelete(),
 };
 
 /** The open stage, and the player window that has said it is listening. Outside state: not rendered. */
@@ -360,6 +386,31 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         editor((e) => ({ ...e, newSpot: newSpotDraft() }));
       } catch (err) {
         editor((e) => ({ ...e, newSpot: { ...e.newSpot, pending: false, error: toolMessage(err) } }));
+      }
+    },
+
+    askDeleteSpot: (open) => editor((e) => ({ ...e, deleting: { ...closedDelete(), open } })),
+
+    async deleteSpot(orgId, spotId) {
+      editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null, playlists: [] } }));
+      try {
+        await callTool('delete_spot', { spotId, ifVersion: savedSpot(orgId, spotId)?.version });
+        // Only once it is gone: a refused delete leaves the waiting save to run.
+        drafts.drop(spotId);
+        await router.navigate({ to: '/spots' });
+        queryClient.removeQueries({ queryKey: spotKeys.one(orgId, spotId), exact: true });
+        await queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+        editor((e) => ({ ...e, deleting: closedDelete() }));
+        return true;
+      } catch (err) {
+        const playlists = blocking(err);
+        const error = playlists.length
+          ? `Playlists play this spot, so it cannot be deleted. Take it out of ${playlists.length === 1 ? 'this one' : 'these'} first, and publish ${playlists.length === 1 ? 'it' : 'them'} if screens play ${playlists.length === 1 ? 'it' : 'them'}:`
+          : err instanceof Refusal && err.code === 'conflict'
+            ? 'Someone saved this spot since you opened it, so it was not deleted. Reload it to see their change.'
+            : toolMessage(err);
+        editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error, playlists } }));
+        return false;
       }
     },
   };

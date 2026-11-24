@@ -312,3 +312,52 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
 });
+
+const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
+
+/** The spot's editor, with Delete pressed: its confirmation. */
+async function askToDelete(spotId: string) {
+  await page.goto(`/spots/${spotId}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  return page.getByRole('alertdialog');
+}
+
+test('a spot no playlist plays is deleted after its confirmation, at desktop and phone width (#242)', async () => {
+  const spotId = await site('Old opening hours');
+  const dialog = await askToDelete(spotId);
+  await expect(dialog).toContainText('Delete Old opening hours?');
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  // Cancel leaves it.
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(page).toHaveURL(/\/spots$/);
+  await hydrated(page);
+  await expect(page.getByRole('link', { name: /Old opening hours/ })).toHaveCount(0);
+  const { entries } = await tool(page, 'list_audit_log', { limit: 5 });
+  expect(entries[0]).toMatchObject({ action: 'delete_spot', target: { kind: 'spot', id: spotId } });
+});
+
+test('a spot a playlist plays is refused, naming the playlist with a link to it, and kept (#242)', async () => {
+  const spotId = await site('Weekend specials');
+  const { playlist } = await tool(page, 'create_playlist', { name: 'Saturday loop', spotIds: [spotId] });
+  const dialog = await askToDelete(spotId);
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Playlists play this spot, so it cannot be deleted');
+  await expect(dialog.getByRole('link', { name: 'Saturday loop' })).toBeVisible();
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  expect((await tool(page, 'get_spot', { spotId })).spot.name).toBe('Weekend specials');
+
+  await dialog.getByRole('link', { name: 'Saturday loop' }).click();
+  await expect(page).toHaveURL(new RegExp(`/playlists/${playlist.id}$`));
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+});

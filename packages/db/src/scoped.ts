@@ -33,7 +33,7 @@ import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
-import { contentJson } from './drafts';
+import { contentJson, published } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
@@ -1100,6 +1100,20 @@ export function scoped(d1: D1Database, orgId: string) {
 
     spots: {
       ...spotRows,
+      /**
+       * The org's playlists that play the spot (#242): in their draft (`playlist_items`) or in their
+       * published version, which screens may have. A spot is deleted only when none does.
+       */
+      usedBy: async (spotId: string) => {
+        const drafted = await db
+          .select({ playlistId: pi.playlistId })
+          .from(pi)
+          .where(and(eq(pi.orgId, orgId), eq(pi.spotId, spotId)))
+          .all();
+        const inDraft = new Set(drafted.map((r) => r.playlistId));
+        const playlists = await db.select().from(s.playlists).where(eq(s.playlists.orgId, orgId)).orderBy(asc(s.playlists.id)).all();
+        return playlists.filter((p) => inDraft.has(p.id) || (published(p)?.items ?? []).includes(spotId));
+      },
       stage: {
         ...spotRows.stage,
         insert: async (values: NewRow<typeof s.spots>) => {

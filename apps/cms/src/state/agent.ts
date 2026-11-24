@@ -111,8 +111,8 @@ export interface AgentSlice {
   finishFill: (spotId: string) => void;
   /** Undo the fill: the spot named after its template, its data back to what a new spot starts with, no photo, and the marks gone. */
   undoFill: (orgId: string, spotId: string, start: { name: string; data: Record<string, unknown> }) => void;
-  /** Try another template: the New spot dialog again, with the same material and a template to pick. */
-  fillWithAnother: (spotId: string) => Promise<void>;
+  /** Try another template: the first try's spot deleted (#242), and the New spot dialog again, with the same material and a template to pick. */
+  fillWithAnother: (orgId: string, spotId: string) => Promise<void>;
   /** Uploads the flyer's photo, as any image is, and puts it in the image field. */
   usePhotoFor: (orgId: string, spotId: string, field: string) => Promise<void>;
   /** Opens or closes the editor's Fill from a flyer dialog for a spot (#264). */
@@ -238,10 +238,18 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
       filled(spotId, () => undefined);
     },
 
-    async fillWithAnother(spotId) {
+    async fillWithAnother(orgId, spotId) {
       const was = get().agent.filled[spotId];
       if (!was) return;
       filled(spotId, () => undefined);
+      // The next try makes a new spot, so the first goes, at the version the fill made or last saved. One someone has saved or put
+      // in a playlist since is refused and kept, which the person is told: the new try goes on.
+      if (!(await get().deleteSpot(orgId, spotId))) {
+        const { error, playlists } = get().spotEditor.deleting;
+        const names = playlists.map((p) => p.name).join(', ');
+        toast.error('The first try was kept', { description: `${error ?? 'It could not be deleted.'}${names ? ` ${names}.` : ''}` });
+      }
+      get().askDeleteSpot(false);
       get().openNewSpot(true);
       agent((a) => ({ ...a, fill: { ...newFill(), photo: was.photo, link: was.link, again: true } }));
       await router.navigate({ to: '/spots' });

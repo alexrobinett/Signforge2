@@ -446,3 +446,145 @@ describe('the Source section of a template with two named sources (#193)', () =>
     expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
   });
 });
+
+describe('deleting a spot (#242)', () => {
+  beforeEach(() => toasts.error.mockClear());
+  /** The spot editor and the agent's slices, with a router that records where it went. */
+  function deletable() {
+    const queryClient = new QueryClient();
+    const went: string[] = [];
+    const at = { ...router, navigate: async ({ to }: { to: string }) => void went.push(to) };
+    const store = createStore<SpotEditorSlice & AgentSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: at, queryClient } as never),
+      ...createAgentSlice(set as never, get as never, { router: at, queryClient } as never),
+    }));
+    return { store, queryClient, went };
+  }
+  /** Answers tool calls with a status, as the tool route does. */
+  const withStatus = () => {
+    const pending: ((r: Response) => void)[] = [];
+    vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      return new Promise<Response>((resolve) => pending.push(resolve));
+    });
+    return (body: unknown, status = 200) => pending.shift()?.(new Response(JSON.stringify(body), { status }));
+  };
+
+  /** Spot A open with an edit waiting to save, and Delete confirmed: the call on its way. */
+  async function deleting() {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    d.store.getState().askDeleteSpot(true);
+    void d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    return { ...d, reply, a };
+  }
+
+  it('deletes it, drops the edit waiting to save, and goes to the spot library', async () => {
+    const { store, queryClient, went, reply, a } = await deleting();
+    // At the version the editor loaded.
+    expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 4 } }]);
+    reply({ deleted: 'spt_a' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(went).toEqual(['/spots']);
+    expect(queryClient.getQueryData(spotKeys.one(ORG, a.id))).toBeUndefined();
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [] });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls.map((c) => c.name)).toEqual(['delete_spot']);
+  });
+
+  it('names the playlists that play it when refused, and keeps the edit waiting to save', async () => {
+    const { store, went, reply } = await deleting();
+    reply(
+      {
+        error: 'conflict',
+        message: 'spot spt_a is in 2 playlists: "Lunch", "Main"; take it out of them first',
+        details: {
+          playlists: [
+            { id: 'pls_lunch', name: 'Lunch' },
+            { id: 'pls_main', name: 'Main' },
+          ],
+        },
+      },
+      409,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().spotEditor.deleting).toEqual({
+      open: true,
+      pending: false,
+      error: expect.stringMatching(/^Playlists play this spot/),
+      playlists: [
+        { id: 'pls_lunch', name: 'Lunch' },
+        { id: 'pls_main', name: 'Main' },
+      ],
+    });
+    expect(went).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { spotId: 'spt_a', name: 'Renamed' } });
+  });
+
+  it('says someone saved it since, when the delete is refused at its version', async () => {
+    const { store, went, reply } = await deleting();
+    reply({ error: 'conflict', message: 'spot spt_a changed since; it is at version 5', details: { id: 'spt_a', version: 5 } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().spotEditor.deleting).toMatchObject({
+      open: true,
+      error: expect.stringMatching(/^Someone saved this spot since you opened it/),
+      playlists: [],
+    });
+    expect(went).toEqual([]);
+  });
+
+  it("deletes a fill's first try on Try another template, then opens New spot with the same material", async () => {
+    const { store, queryClient, went } = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 1);
+    queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    store.setState(
+      (s) =>
+        ({
+          agent: {
+            ...s.agent,
+            filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } },
+          },
+        }) as never,
+    );
+    void store.getState().fillWithAnother(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 1 } }]);
+    reply({ deleted: 'spt_a' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(went).toEqual(['/spots', '/spots']);
+    expect(store.getState().spotEditor.newSpot.open).toBe(true);
+    expect(store.getState().agent.fill).toMatchObject({ link: 'https://example.com/flyer', again: true });
+    expect(store.getState().agent.filled.spt_a).toBeUndefined();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it('says the first try was kept, and why, when Try another template cannot delete it, then opens New spot', async () => {
+    const { store, queryClient, went } = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 1);
+    queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    store.setState(
+      (s) =>
+        ({
+          agent: {
+            ...s.agent,
+            filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } },
+          },
+        }) as never,
+    );
+    void store.getState().fillWithAnother(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    reply({ error: 'conflict', message: 'spot spt_a is in a playlist: "Lunch"', details: { playlists: [{ id: 'pls_lunch', name: 'Lunch' }] } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.error).toHaveBeenCalledWith('The first try was kept', { description: expect.stringMatching(/^Playlists play this spot.* Lunch\.$/) });
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [] });
+    expect(store.getState().spotEditor.newSpot.open).toBe(true);
+    expect(went).toEqual(['/spots']);
+  });
+});

@@ -77,6 +77,7 @@ describe('the registry', () => {
       'delete_group',
       'delete_playlist',
       'delete_schedule_entry',
+      'delete_spot',
       'disconnect',
       'end_takeover',
       'finalize_asset',

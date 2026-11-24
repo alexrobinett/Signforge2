@@ -4,7 +4,7 @@
  * and EditorFields, which the brand kit, screen, settings, audit log and assets pages and the pairing form use too.
  */
 import { Link } from '@tanstack/react-router';
-import { ChevronLeftIcon } from 'lucide-react';
+import { ChevronLeftIcon, Trash2Icon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
@@ -97,6 +97,16 @@ export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<
   return (
     <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={onSave}>
       Save draft
+    </Button>
+  );
+}
+
+/** Asks to delete what the editor has open (a playlist, a spot): its confirmation does the rest. */
+export function DeleteButton({ onAsk }: { onAsk: () => void }) {
+  return (
+    <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={onAsk}>
+      <Trash2Icon aria-hidden />
+      Delete
     </Button>
   );
 }
