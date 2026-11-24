@@ -810,18 +810,25 @@ describe("the sidebar's Publish (#361)", () => {
     expect(store.getState().publishing.all?.defaultWords).toBeNull();
   });
 
-  it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins allowed (#360)', async () => {
+  it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins acknowledging exactly what it showed (#360)', async () => {
     drafts([spot('spt_a', 3)]);
     const store = sidebarStore();
     await store.getState().askPublishAll(ORG);
     vi.mocked(callTool)
       .mockReset()
-      .mockRejectedValueOnce(new Refusal('sample_text', 'sample', { spots: [{ id: 'spt_a', name: 'Pier 9', fields: ['headline'] }] }))
+      .mockRejectedValueOnce(new Refusal('sample_text', 'sample', { spots: [{ id: 'spt_a', name: 'Pier 9', version: 3, fields: ['headline'] }] }))
       .mockImplementation(async () => published(++revision) as never);
     const done = store.getState().confirmPublishAll();
     await vi.waitFor(() => expect(store.getState().publishing.sampleCheck).not.toBeNull());
     store.getState().publishAnyway();
     expect(await done).toBe(true);
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', { drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }], allowSample: true }, ORG);
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith(
+      'publish',
+      {
+        drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }],
+        allowSample: [{ spotId: 'spt_a', version: 3, fields: ['headline'] }],
+      },
+      ORG,
+    );
   });
 });
