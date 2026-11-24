@@ -7,6 +7,7 @@
  * allow (#77), and the cursor, made from each row's time and `rowid` and the org, is what pages.
  */
 import { z } from 'zod';
+import { shownClientName } from './agent-clients';
 import { keysetPage, pageInput } from './paging';
 import { defineTool, ToolError } from './tool';
 import { ACTOR_KINDS, outputs } from './outputs';
@@ -65,6 +66,10 @@ const listAuditLog = defineTool({
     const entries = rows.map((e) => {
       const detail: Record<string, unknown> = e.detailJson ? JSON.parse(e.detailJson) : {};
       if (!owner && INVITATIONS.includes(e.action)) delete detail.email;
+      // A connection's client named itself: only as a page may show it, rows written before that rule too.
+      if (e.action === 'create_agent_grant' && typeof detail.clientId === 'string' && typeof detail.clientName === 'string') {
+        detail.clientName = shownClientName(detail.clientId, detail.clientName);
+      }
       return {
         at: e.at,
         actor: { kind: e.actorKind, id: e.actorId, clientId: e.clientId },

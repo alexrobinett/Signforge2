@@ -39,6 +39,8 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
   publish: (o) => o.publish,
+  // An agent grant (M4-07's tools): `grantId`.
+  grant: (o) => o.agentGrant,
   // Better Auth's rows, as seedTeam names them.
   member: (o) => `${o.orgId}-member`,
   invitation: (o) => `${o.orgId}-invitation`,

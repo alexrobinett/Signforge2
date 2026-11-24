@@ -20,6 +20,7 @@ const ORG_PAGES = [
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/ai', label: 'AI & agents' },
+  { to: '/settings/api', label: 'API & agents' },
 ] as const;
 
 export function SettingsNav() {

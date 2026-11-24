@@ -37,6 +37,7 @@ import {
   AGENT_LIMITS,
   ROLE_SCOPES,
   ROLES,
+  isAgent,
   SERVICE_WORDS,
   ToolError,
   type Actor,
@@ -149,6 +150,7 @@ export async function dispatch<D extends DataScope>(
     if (refused) return refused;
   }
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
+  if (tool.people && isAgent(caller.actor)) return fail('forbidden', `${tool.name} is for people only: a person does it in the CMS`);
   const grant = await grantOf(caller);
   if (!permits(grant, tool)) {
     if (permits({ ...grant, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');

@@ -7,6 +7,7 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { scoped, type NewRow, type RowPatch } from './scoped';
 import * as schema from './schema';
 import { commit, type Staged, type Write } from './writes';
@@ -134,6 +135,9 @@ export interface SeededOrg {
   brandKit: string;
   /** Start of the hour the seeded play count is in. */
   hour: number;
+  /** An agent grant (M4-04) by a user of its own (`grantee`, not a member), for a client the provider registered. */
+  agentGrant: string;
+  grantee: string;
 }
 
 export interface Seeded {
@@ -311,6 +315,35 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.commit((await o.brandKits.assignments.stage.set({ target: 'org' }, kit.id)).writes);
   await o.playCounts.add(screen.id, [{ hour: SEED_HOUR, spotId: templateSpot.id, plays: 3, ms: 30_000 }]);
 
+  // An agent's grant, as consent writes one, and its client as the provider registers it. Its user is no
+  // member here: the repository keeps grants by org, whatever the membership (agentGrantForToken checks it).
+  const grantee = id('grantee');
+  const at = new Date(SEED_HOUR).toISOString();
+  const d = drizzle(db);
+  await d
+    .insert(schema.user)
+    .values({ id: grantee, name: `${orgId} grantee`, email: `${grantee}@signforge.test`, emailVerified: 1, createdAt: at, updatedAt: at })
+    .run();
+  await d
+    .insert(schema.oauthClient)
+    .values({
+      id: id('oauth-client'),
+      clientId: id('client'),
+      name: 'Seeded agent',
+      redirectUris: '["http://127.0.0.1/callback"]',
+      createdAt: at,
+      updatedAt: at,
+    })
+    .run();
+  const agentGrant = o.agentGrants.stage.insert({
+    userId: grantee,
+    clientId: id('client'),
+    clientName: 'Seeded agent',
+    scopesJson: '["content:read","content:draft"]',
+    expiresAt: SEED_HOUR + AGENT_GRANT_IDLE_MS,
+  });
+  await o.commit(agentGrant.writes);
+
   return {
     orgId,
     scope: o,
@@ -328,6 +361,8 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     publish: publish.id,
     dataSource: dataSource.id,
     alertDelivery: delivery.row.id,
+    agentGrant: agentGrant.row.id,
+    grantee,
     connection: connection.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,

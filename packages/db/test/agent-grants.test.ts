@@ -2,7 +2,15 @@
 // token check, and pruning clients nobody consented to. Times come from the tests, never the clock.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { AGENT_GRANT_IDLE_MS, agentGrantForToken, pruneUnconsentedClients, scoped, UNCONSENTED_CLIENT_MS } from '../src/index';
+import {
+  AGENT_GRANT_IDLE_MS,
+  agentGrantForToken,
+  NotInOrgError,
+  pruneUnconsentedClients,
+  scoped,
+  StaleVersionError,
+  UNCONSENTED_CLIENT_MS,
+} from '../src/index';
 import { seedOrganization, seedTeam } from '../src/testing';
 
 const NOW = Date.UTC(2026, 10, 23, 12);
@@ -93,6 +101,28 @@ describe('the scoped repository', () => {
   });
 });
 
+describe('connected grants', () => {
+  it("lists the org's grants not revoked, each with its client's redirect URIs, one member's or one grant, and no other org's", async () => {
+    const mine = await grant('grants-a', a.userId, await client());
+    // Another user's grant here: the repository keeps grants by org and user, whatever the membership.
+    const theirs = await grant('grants-a', b.userId, await client());
+    const revoked = await grant('grants-a', a.userId, await client());
+    const elsewhere = await grant('grants-b', b.userId, await client());
+    const org = scoped(env.DB, 'grants-a');
+    await org.commit(org.agentGrants.stage.revoke(revoked, a.userId, NOW).writes);
+    const ids = async (filter?: { userId?: string; grantId?: string }) => (await org.agentGrants.connected(filter)).map((r) => r.grant.id);
+    const all = await ids();
+    expect(all).toEqual(expect.arrayContaining([mine.id, theirs.id]));
+    expect(all).not.toContain(revoked.id);
+    expect(all).not.toContain(elsewhere.id);
+    expect(await ids({ userId: b.userId })).toEqual([theirs.id]);
+    expect(await org.agentGrants.connected({ grantId: mine.id })).toEqual([
+      { grant: expect.objectContaining({ id: mine.id }), redirectUrisJson: '["http://127.0.0.1/callback"]' },
+    ]);
+    expect(await scoped(env.DB, 'grants-b').agentGrants.connected({ grantId: mine.id })).toEqual([]);
+  });
+});
+
 describe('revoking a grant', () => {
   it("marks it, and deletes the provider's tokens and consent for it, and no other grant's", async () => {
     const org = scoped(env.DB, 'grants-a');
@@ -138,13 +168,24 @@ describe('revoking a grant', () => {
     expect(left).toEqual(['ver-other', 'ver-otp']);
   });
 
+  it('commits only the first of two revokes made from one read', async () => {
+    const g = await grant('grants-a', a.userId, await client());
+    const org = scoped(env.DB, 'grants-a');
+    const first = org.agentGrants.stage.revoke(g, 'first', NOW);
+    const second = org.agentGrants.stage.revoke(g, 'second', NOW + 1);
+    await org.commit(first.writes);
+    await expect(org.commit(second.writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.agentGrants.get(g.id)).toMatchObject({ revokedBy: 'first', revokedAt: NOW, rowVersion: 2 });
+  });
+
   it("from another org's scope, deletes nothing of the grant's", async () => {
     const clientId = await client();
     const g = await grant('grants-a', a.userId, clientId);
     await tokens(g.id, clientId, a.userId, 'h-cross');
     const otherOrg = scoped(env.DB, 'grants-b');
-    // B's scope never finds the row to revoke; given it anyway, its deletes find no grant of B's.
-    await otherOrg.commit(otherOrg.agentGrants.stage.revoke(g, b.userId, NOW).writes);
+    // B's scope never finds the row to revoke; given it anyway, its version guard finds none of B's,
+    // so the batch is refused whole, its deletes with it.
+    await expect(otherOrg.commit(otherOrg.agentGrants.stage.revoke(g, b.userId, NOW).writes)).rejects.toBeInstanceOf(NotInOrgError);
     expect(await scoped(env.DB, 'grants-a').agentGrants.get(g.id)).toMatchObject({ revokedAt: null });
     expect(await count('oauthAccessToken', g.id)).toBe(1);
   });

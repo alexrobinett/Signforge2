@@ -3,7 +3,7 @@
  * scoped repository, each change with its audit row in one batch, the person as the actor.
  */
 import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped } from '@signforge/db';
-import { effectiveScopes, grantOf, ROLES, type Role } from '@signforge/tools';
+import { effectiveScopes, grantOf, ROLES, type Role, shownClient } from '@signforge/tools';
 import type { GrantDeps } from './agent-grants';
 
 /** A grant's changes come from the CMS: consent and membership changes are a person's. */
@@ -29,7 +29,7 @@ const revoking = (org: Org, grant: NonNullable<Awaited<ReturnType<Org['agentGran
 
 export function grantStore(d1: D1Database): GrantDeps {
   return {
-    create: async ({ orgId, userId, clientId, clientName, scopes }) => {
+    create: async ({ orgId, userId, clientId, clientName, redirectUri, scopes }) => {
       const membership = await findMembership(d1, orgId, userId);
       if (!membership || !isRole(membership.role)) return { ok: false, refused: 'not_a_member' };
       const org = scoped(d1, orgId);
@@ -43,6 +43,8 @@ export function grantStore(d1: D1Database): GrantDeps {
         scopesJson: JSON.stringify(granted),
         expiresAt: Date.now() + AGENT_GRANT_IDLE_MS,
       });
+      const client = shownClient(clientId, clientName, redirectUri);
+      const named = client.name === null ? { clientName: null, redirect: client.redirect } : { clientName: client.name };
       const audit = org.auditLog.stage({
         actorKind: 'user',
         actorId: userId,
@@ -50,7 +52,8 @@ export function grantStore(d1: D1Database): GrantDeps {
         action: 'create_agent_grant',
         targetKind: 'agent_grant',
         targetId: made.row.id,
-        detailJson: JSON.stringify({ clientId, clientName, scopes: granted }),
+        // The client's name only as a page may show it (`shownClient`): a withheld one is null, with where its code goes.
+        detailJson: JSON.stringify({ clientId, ...named, scopes: granted }),
       });
       await org.commit([...made.writes, ...audit.writes]);
       return { ok: true, grantId: made.row.id, scopes: granted };
