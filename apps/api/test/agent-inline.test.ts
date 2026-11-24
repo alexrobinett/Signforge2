@@ -906,7 +906,8 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
       expect(fetches).toBeLessThanOrEqual(14);
     });
 
-    it("Keep: an editor's 10 D1 statements, and no fetch", async () => {
+    // Keep saves the agent's update, its proposal (#116): the draft it replaces is kept beside it, with the draft's version guard.
+    it("Keep: an editor's 12 D1 statements, and no fetch", async () => {
       const m = await menu({ role: 'editor' });
       const v = (await m.stored()).version;
       const { res, statements, fetches } = await measured(m, '/api/agent/inline/keep', {
@@ -915,7 +916,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
         data: { ...MENU_DATA, title: 'Lunch' },
       });
       expect(res.status).toBe(200);
-      expect(statements).toBeLessThanOrEqual(10);
+      expect(statements).toBeLessThanOrEqual(12);
       expect(fetches).toBe(0);
     });
   });

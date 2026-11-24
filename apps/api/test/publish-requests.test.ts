@@ -10,6 +10,7 @@ import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { Client } from './client';
+import { as, counted, measure } from './counting';
 import { agentToken, check, mcpTool, team } from './oauth';
 
 type Team = Awaited<ReturnType<typeof team>>;
@@ -110,67 +111,6 @@ describe('who publishes', () => {
   });
 });
 
-/** What `run` costs on bindings that count it (`counted`). */
-async function measure(run: (bindings: Env) => Promise<unknown>) {
-  const { result, bindings } = counted();
-  await run(bindings);
-  return result();
-}
-
-/** `who`, signed in as they are, calling through `bindings`. */
-function as(who: Client, bindings: Env) {
-  const c = new Client(who.t, who.ip, bindings);
-  for (const [k, v] of who.jar) c.jar.set(k, v);
-  return c;
-}
-
-/**
- * The API's bindings, counting D1's work and each Durable Object RPC. `statements` is every statement
- * prepared; `queries` what D1 counts against an invocation's 50: each statement run alone, and each
- * batch once. `rpcs` names each method called on an object's stub (`acquire`, `release`, `write`).
- */
-function counted(beforeBatch?: () => Promise<unknown>) {
-  const seen = { statements: 0, queries: 0, rpcs: [] as string[] };
-  let batched = 0;
-  let batches = 0;
-  const db = new Proxy(env.DB, {
-    get(target, prop) {
-      if (prop === 'prepare') seen.statements++;
-      if (prop === 'batch')
-        return async (statements: D1PreparedStatement[]) => {
-          batched += statements.length;
-          batches++;
-          // A change that lands between a call's reads and its batch, once.
-          const before = beforeBatch;
-          beforeBatch = undefined;
-          await before?.();
-          return target.batch(statements);
-        };
-      const v = Reflect.get(target, prop, target);
-      return typeof v === 'function' ? v.bind(target) : v;
-    },
-  });
-  const objects = (ns: DurableObjectNamespace): DurableObjectNamespace =>
-    new Proxy(ns, {
-      get(target, key) {
-        const v = Reflect.get(target, key);
-        if (key !== 'get') return typeof v === 'function' ? v.bind(target) : v;
-        return (id: DurableObjectId) =>
-          new Proxy(target.get(id), {
-            get(stub, method) {
-              const real = Reflect.get(stub, method);
-              if (typeof method !== 'string' || typeof real !== 'function') return real;
-              return (...args: unknown[]) => (seen.rpcs.push(method), Reflect.apply(real, stub, args));
-            },
-          });
-      },
-    });
-  const bindings: Env = { ...env, DB: db, AGENT_GRANTS: objects(env.AGENT_GRANTS) as Env['AGENT_GRANTS'], ORGS: objects(env.ORGS) as Env['ORGS'] };
-  // Every statement run alone is a query, and every batch one more, however many it holds.
-  const result = () => ({ statements: seen.statements, queries: seen.statements - batched + batches, rpcs: seen.rpcs });
-  return { result, bindings };
-}
-
 /** Members added as Better Auth leaves them: `n` editors, each one who may approve. */
 async function editors(orgId: string, n: number) {
   for (let i = 0; i < n; i++) {
@@ -185,10 +125,12 @@ async function editors(orgId: string, n: number) {
 }
 
 /**
- * The most a refused approval of 40 pins may take: its reads, the failed batch, the guards read 15 to a
- * query, and the retry's reads, which find the pin changed. Measured at 37 or 38 (the session's cache read varies).
+ * What a refused approval of 40 pins takes at most: its reads (each attempt's which drafts have one kept, #116, among
+ * them), the failed batch, the diagnosis reading the guards 15 to a query up to the chunk holding the edited pin, and the
+ * retry's reads, which find the pin changed. The test edits the pin that sorts last, the last chunk, so it is the most;
+ * the chunk a pin falls in depends on its id, which is why a test that picked one by position measured 39 to 41.
  */
-const STALE_PINS_QUERIES = 40;
+const STALE_PINS_QUERIES = 42;
 
 describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', () => {
   it('on its costliest case, 30 approvers, Slack and a webhook, and screens to compile: asking, reading and deciding stay within it', async () => {
@@ -231,7 +173,8 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     expect(listing).toEqual({ statements: 5, queries: 5, rpcs: [] });
     expect(declining).toEqual({ statements: 9, queries: 6, rpcs: [] });
     // A person's approval is a publish, under the org's lock: acquire and release are its two RPCs.
-    expect(approving).toEqual({ statements: 31, queries: 22, rpcs: ['acquire', 'release'] });
+    // A publish reads which drafts have one kept beside them, and clears those it covers (#116).
+    expect(approving).toEqual({ statements: 33, queries: 23, rpcs: ['acquire', 'release'] });
     for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
   });
 
@@ -260,8 +203,9 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     const reopening = await measure((b) => owner(b).ok('/api/tools/reopen_publish_request', { publishRequestId: requestId }));
     // The org read once for the check and both of its dry runs, the second acknowledging the sample text; every
     // playlist's items in that one read, however many are pinned. Reopening reads the request, the asker's waiting
-    // ones and the names, and writes the request and its audit row with their guards in one batch.
-    expect(checking).toEqual({ statements: 18, queries: 18, rpcs: [] });
+    // ones and the names, and writes the request and its audit row with their guards in one batch. The dry run reads which
+    // drafts have one kept beside them (#116), once in each of its two dry runs.
+    expect(checking).toEqual({ statements: 20, queries: 20, rpcs: [] });
     expect(reopening).toEqual({ statements: 9, queries: 7, rpcs: [] });
     for (const path of [checking, reopening]) expect(path.queries).toBeLessThan(50);
   });
@@ -275,16 +219,21 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       drafts: spots.map((s) => ({ kind: 'spot', id: s.id, version: s.rowVersion })),
       reason: 'Forty at once',
     });
-    // The 21st pin edited between the approval's reads and its batch: the batch fails, and the retry finds it.
+    // The pin that sorts last by id edited between the approval's reads and its batch: the batch fails, and the diagnosis reads
+    // every chunk of guards before the one that holds it, the most it ever reads; the retry finds it. Never a random pin.
+    const edited = spots
+      .map((x) => x.id)
+      .sort()
+      .at(-1)!;
     const { result, bindings } = counted(() =>
-      env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(spots[20]!.id).run(),
+      env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(edited).run(),
     );
     const c = new Client(t.owner.t, t.owner.ip, bindings);
     for (const [k, v] of t.owner.jar) c.jar.set(k, v);
     const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
     expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: spots[20]!.id } });
+    expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: edited } });
     expect(result().rpcs).toEqual(['acquire', 'release']);
-    expect(result().queries).toBeLessThanOrEqual(STALE_PINS_QUERIES);
+    expect(result().queries).toBe(STALE_PINS_QUERIES);
   });
 });

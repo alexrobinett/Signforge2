@@ -6,7 +6,8 @@ import { published } from '@signforge/db';
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type AgentLimiter, type Caller, dispatch, registry, type Role, type Scope } from '../src';
+import { type Caller, dispatch, registry, type Role, type Scope } from '../src';
+import { call, unlimited } from './calls';
 import { fakeServices } from './services';
 
 let orgs = 0;
@@ -17,7 +18,6 @@ beforeEach(async () => {
   await seedTeam(env.DB, o.orgId);
 });
 
-const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
 const person = (role: Role = 'owner'): Caller => ({
   org: testScope(env.DB, o.orgId),
   role,
@@ -31,11 +31,6 @@ const agent = (scopes: Scope[]): Caller => ({
   actor: { kind: 'agent', id: o.agentGrant, clientId: 'agent-app' },
   agentLimiter: unlimited,
 });
-const call = async (caller: Caller, name: string, input: unknown) => {
-  const r = await dispatch(registry, name, input, caller);
-  if (!r.ok) throw new Error(`${name}: ${JSON.stringify(r)}`);
-  return r.output as any;
-};
 
 /** A spot New spot would make: started with its template's sample copy. The seeded template's one text has no default: its label stands in. */
 async function sampleSpot() {

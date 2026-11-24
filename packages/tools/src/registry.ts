@@ -18,6 +18,7 @@ import { groupTools } from './groups';
 import { labelTools } from './labels';
 import { memberTools } from './members';
 import { pairingTools } from './pairing';
+import { agentDraftTools } from './agent-drafts';
 import { playlistTools } from './playlists';
 import { publishRequestTools } from './publish-requests';
 import { publishTools } from './publish';
@@ -47,6 +48,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...aiProviderTools,
   ...spotTools,
   ...playlistTools,
+  ...agentDraftTools,
   ...scheduleTools,
   ...auditTools,
   ...memberTools,

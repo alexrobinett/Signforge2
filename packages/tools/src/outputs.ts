@@ -684,6 +684,51 @@ const playlistOutput = z.object({
 export type PlaylistView = z.infer<typeof playlistOutput>;
 const playlistResult = z.object({ playlist: playlistOutput });
 
+/** A Reject or its Undo (#116): the draft as it is now, and whether an agent's draft is set aside beside it. */
+const rejected = z.boolean().describe("true: an agent's draft is set aside, and the same call again puts it back (its Undo); false: it was put back");
+
+const agentDraftOutput = z.object({
+  kind: z.enum(['spot', 'playlist']),
+  id: z.string(),
+  version: version.describe("The draft's version: Reject and Keep take it as ifVersion"),
+  proposed: z.boolean().describe("The draft is an agent's proposal: an agent wrote it over the person's draft, kept beside it"),
+  by: z
+    .object({
+      kind: z.enum(['mcp', 'drawer']).describe("An agent over /mcp, or the CMS's agent drawer"),
+      id: z.string().describe('The agent grant, or for the drawer the member who saved it'),
+      clientId: z.string().nullable(),
+      name: z.string().nullable().describe("The agent's client name as a page shows it, or the member's; null when not to be shown"),
+      gone: z.boolean().describe('The agent is no longer connected'),
+      at: z.number().describe('When it last wrote the draft'),
+    })
+    .nullable()
+    .describe("Who proposed it, from the audit log's newest row of an agent writing it; null when not proposed, or the log no longer has it"),
+  rejected: z.boolean().describe("A Reject set an agent's draft aside: the same revert call puts it back"),
+  agents: z
+    .array(
+      z.object({
+        id: z.string().describe('An agent grant'),
+        name: z.string().nullable().describe("Its client's name as a page shows it; null when the name may not be shown, or it is gone"),
+        gone: z.boolean().describe('No longer connected'),
+      }),
+    )
+    .describe("The agents among the draft's newest audit rows, named for its audit log strip"),
+  publishedVersion: z.number().nullable().describe('The version screens have; null if never published'),
+  changes: z
+    .array(
+      z.object({
+        field: z.string(),
+        in: z
+          .enum(['data', 'assets', 'bindings'])
+          .nullable()
+          .describe("A template spot's field, by where it is; null for the spot's or playlist's own (name, durationMs, url, transition, items…)"),
+        was: z.unknown().describe('As published'),
+        now: z.unknown().describe('As drafted'),
+      }),
+    )
+    .describe('What the draft changes against its published version; empty if never published'),
+});
+
 // ------------------------------------------------------------------ schedule
 
 export const scheduleTarget = z
@@ -973,6 +1018,8 @@ export const outputs = {
   create_spot: spotResult,
   delete_spot: z.object({ deleted: z.string().describe("The deleted spot's id") }),
   update_spot: spotResult,
+  revert_spot_draft: spotResult.extend({ rejected }),
+  keep_spot_draft: spotResult,
   get_spot_preview: z.object({
     preview: z
       .looseObject({
@@ -991,6 +1038,9 @@ export const outputs = {
   get_playlist: playlistResult,
   create_playlist: playlistResult,
   update_playlist: playlistResult,
+  revert_playlist_draft: playlistResult.extend({ rejected }),
+  keep_playlist_draft: playlistResult,
+  get_agent_draft: agentDraftOutput,
   delete_playlist: z.object({ deleted: z.string().describe("The deleted playlist's id") }),
   set_default_playlist: playlistResult,
   list_schedule_entries: z.object({
