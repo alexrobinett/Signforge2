@@ -121,13 +121,6 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     return { text: `${name} does not pass its checks: ${named}.`, action };
   }
 
-  /** What a publish that made a playlist the org's first default says of it (#243): by name, from the cache or a read. */
-  async function defaultWords(orgId: string, playlistId: string) {
-    const playlists = await queryClient.query({ ...playlistsQuery(orgId), staleTime: Number.POSITIVE_INFINITY, retry: false }).catch(() => undefined);
-    const name = playlists?.playlists.find((p) => p.id === playlistId)?.name ?? 'Its playlist';
-    return `${name} is now the default playlist: every screen plays it when nothing is scheduled.`;
-  }
-
   /**
    * The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless
    * `undo` is false. `refused` titles a publish that was held back, as it does a refused one.
@@ -154,7 +147,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const made = r.publish;
     const v = versionName(made);
     const failed = r.screens.filter((s) => s.outcome === 'failed').length;
-    const madeDefault = r.madeDefault && (await defaultWords(orgId, r.madeDefault));
+    // Named by the publish's answer, as published (#243).
+    const madeDefault = r.madeDefault && `${r.madeDefault.name} is now the default playlist: every screen plays it when nothing is scheduled.`;
     const notes = [
       madeDefault,
       made.screens ? 'Each screen switches as it hears of it; the rollout says why any wait.' : reachesNone,

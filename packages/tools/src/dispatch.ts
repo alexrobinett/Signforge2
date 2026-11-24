@@ -273,7 +273,9 @@ export async function dispatch<D extends DataScope>(
     checkOutput(tool, output);
     if (keyed && writes.length) writes.push(...(await keyed.record(output)));
     try {
-      await commit(tool.target?.(parsed.data, output), tool.auditDetail?.(output) ?? {});
+      // Under its own key, redacted: it cannot stand for the input or a refusal, nor carry a secret.
+      const more = tool.auditDetail?.(output);
+      await commit(tool.target?.(parsed.data, output), more ? { detail: redact(more) } : {});
     } catch (err) {
       // A publish that lost a race runs again (`publishAttempts`).
       if (tool.publishes && err instanceof StaleVersionError) throw err;

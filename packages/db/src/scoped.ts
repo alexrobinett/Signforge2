@@ -82,6 +82,8 @@ interface AuditPage {
   actorKind?: (typeof s.auditLog.$inferSelect)['actorKind'];
   actorId?: string;
   action?: string;
+  /** With `action`: also rows of this other action whose detail holds `detailHas` (a publish that made the default, for `set_default_playlist`). */
+  alsoAction?: { action: string; detailHas: string };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -2245,7 +2247,12 @@ export function scoped(d1: D1Database, orgId: string) {
         }
         if (p.actorKind) where.push(eq(a.actorKind, p.actorKind));
         if (p.actorId) where.push(eq(a.actorId, p.actorId));
-        if (p.action) where.push(eq(a.action, p.action));
+        if (p.action) {
+          const also = p.alsoAction;
+          where.push(
+            also ? or(eq(a.action, p.action), and(eq(a.action, also.action), sql`instr(${a.detailJson}, ${also.detailHas}) > 0`))! : eq(a.action, p.action),
+          );
+        }
         if (p.targetKind) where.push(eq(a.targetKind, p.targetKind));
         if (p.targetId) where.push(eq(a.targetId, p.targetId));
         if (p.from != null) where.push(sql`${a.at} >= ${p.from}`);

@@ -76,5 +76,10 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   expect(playlists.find((p: { id: string }) => p.id === opening)).toMatchObject({ isDefault: true });
   // The screen plays it: a manifest was compiled and reached it.
   await expect.poll(async () => (await playing(screen))?.playlist ?? '', { timeout: 30_000 }).toBe(opening);
+
+  // The audit log says it, and the What filter for a default playlist change finds that publish.
+  await page.goto('/audit?what=set_default_playlist');
+  await hydrated(page);
+  await expect(page.getByRole('row', { name: /made Opening week the default playlist/ })).toBeVisible();
   await screen.context().close();
 });

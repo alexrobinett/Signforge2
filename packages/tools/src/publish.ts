@@ -156,7 +156,7 @@ const publish = defineTool({
   example: {},
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
-  auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : {}),
+  auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: (ctx) => runPublish(ctx, ctx.input.drafts),
 });
 

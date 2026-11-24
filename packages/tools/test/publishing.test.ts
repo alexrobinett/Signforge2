@@ -850,17 +850,70 @@ describe('the publish tools (M3-18)', () => {
   it('makes the playlist its schedule entry plays the default when the org has none, so its screens are reached, and audits it (#243)', async () => {
     const { org } = await seedSmallOrg('tool-first-default');
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
-    const out = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: string | null };
+    const out = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
     // The one entry plays Evenings: it becomes what every screen plays when nothing is scheduled.
-    expect(out.madeDefault).toBe(x('evenings'));
+    expect(out.madeDefault).toEqual({ id: x('evenings'), name: 'Evenings' });
     expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
     const row = (await org.auditLog.list({ limit: 100 })).find((e) => e.action === 'publish');
-    expect(JSON.parse(row!.detailJson!)).toMatchObject({ madeDefault: x('evenings') });
+    expect(JSON.parse(row!.detailJson!)).toMatchObject({ input: {}, detail: { madeDefault: { id: x('evenings'), name: 'Evenings' } } });
     // The next publish finds it set, and leaves it.
     await editDeal(org, 'Three for $5');
     expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
+  });
+
+  it('leaves a default someone set while it compiled: its guard fails, and the run again finds it (#243)', async () => {
+    const { org } = await seedSmallOrg('tool-default-race');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    // Main is made the default by hand between the publish's read and its commit (the first manifest's store).
+    const p = publisher(org, {
+      onPut: async (put) => {
+        if (put === 1) await org.commit((await org.settings.stage.set({ defaultPlaylistId: x('main') })).writes);
+      },
+    });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(out.madeDefault).toBeNull();
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  it('makes no default from an entry whose playlist was never published, or from end_takeover', async () => {
+    const { org } = await seedSmallOrg('tool-default-none');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    // The entry alone, its playlist a draft never published: the entry is held, and nothing is made the default.
+    const entry = await org.scheduleEntries.get(x('evening-takeover'));
+    const held = (await ok(
+      publisher(org).call('publish', { drafts: [{ kind: 'schedule_entry', id: entry!.id, version: entry!.rowVersion }] }),
+    )) as unknown as Out & {
+      madeDefault: unknown;
+      held: { id: string }[];
+    };
+    expect(held.held.map((h) => h.id)).toContain(entry!.id);
+    expect(held.madeDefault).toBeNull();
+    expect((await org.settings.get())!.defaultPlaylistId).toBeNull();
+
+    // A takeover ended: no entry made live, so no default either.
+    const { org: two } = await seedSmallOrg('tool-default-end');
+    const now = Date.now();
+    await two.scheduleEntries.insert({ id: x('flash'), playlistId: x('main'), priority: 100, target: 'org', startsAt: now - 60_000, endsAt: now + 3_600_000 });
+    await ok(publisher(two).call('publish', {}));
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    expect(await ok(publisher(two).call('end_takeover', { scheduleEntryId: x('flash') }))).toMatchObject({ madeDefault: null });
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
+  });
+
+  it("finds a publish that made the default under the What filter's set_default_playlist, beside set_default_playlist's own rows", async () => {
+    const { org } = await seedSmallOrg('tool-default-filter');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    await ok(publisher(org).call('publish', {}));
+    await ok(editorCalls(org)('set_default_playlist', { playlistId: x('main') }));
+    await editDeal(org, 'Four for $6');
+    await ok(publisher(org).call('publish', {}));
+    const { entries } = (await ok(editorCalls(org)('list_audit_log', { action: 'set_default_playlist' }))) as unknown as {
+      entries: { action: string; detail: Record<string, unknown> }[];
+    };
+    expect(entries.map((e) => e.action)).toEqual(['set_default_playlist', 'publish']);
+    expect(entries[1]!.detail).toMatchObject({ detail: { madeDefault: { id: x('evenings'), name: 'Evenings' } } });
   });
 
   it('leaves a default the org has alone, and makes none when the entries made live play several playlists', async () => {
@@ -879,7 +932,7 @@ describe('the publish tools (M3-18)', () => {
       toTime: '09:00',
     });
     await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
-    const out = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: string | null };
+    const out = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
     // Which of two would be a guess: nothing is set, and the screens say why.
     expect(out.madeDefault).toBeNull();
     expect(out.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
