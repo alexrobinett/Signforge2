@@ -301,8 +301,20 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     }
   }
 
-  /** What takes focus next, by its `focusWhenReplaced` key: outside state, as nothing renders it. */
-  let focusNext: string | null = null;
+  /**
+   * What takes focus next, by its `focusWhenReplaced` key, in the org and on the page it was named on: outside state, as
+   * nothing renders it. Only that page in that org takes it (review of #421): one left meanwhile, or another org, never does.
+   */
+  let focusNext: { orgId: string; key: string; at: string } | null = null;
+  const aim = (orgId: string, key: string) => {
+    focusNext = { orgId, key, at: router.state.location.href };
+  };
+  /** Drops what was named for `key`, unless something since named another. */
+  const unaim = (orgId: string, key: string) => {
+    if (focusNext?.orgId === orgId && focusNext.key === key) focusNext = null;
+  };
+  /** Still on the page, in the org, focus was named on: else nothing there takes it. */
+  const aimedHere = () => focusNext !== null && router.state.location.href === focusNext.at && orgOnScreen(router) === focusNext.orgId;
   const focusRefs = new Map<string, (el: HTMLElement | null) => void>();
 
   const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
@@ -372,21 +384,28 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         if (kind ? running !== undefined : running === `remove:${s.removingChannel?.kind}`) return s;
         return { ...s, removingChannel: kind && { orgId, kind }, errors: withoutKey(s.errors, `remove:${kind ?? s.removingChannel?.kind}`) };
       });
-      if (get().settings.removingChannel !== was) focusNext = kind ? `confirm:${kind}` : `remove:${was?.kind}`;
+      // Compared by value: asked again for the one already open, nothing moves.
+      const now = get().settings.removingChannel;
+      if (now?.orgId !== was?.orgId || now?.kind !== was?.kind) aim(orgId, kind ? `confirm:${kind}` : `remove:${was?.kind}`);
     },
     async removeAlertChannel(orgId, kind) {
-      // Its card goes back to the form that sets one, which can mount as the removal reads the page again: named first.
-      focusNext = `form:${kind}`;
+      // Another action runs on the page: this press is refused, and touches nothing of the one under way (review of #421).
+      if (runningIn(get().settings, notifications(orgId)) !== undefined) return;
+      const at = `form:${kind}`;
       const removed = await run(
         notifications(orgId),
         `remove:${kind}`,
-        () => callTool('remove_alert_channel', { channel: kind }),
+        // Named once the removal is under way, never by a press refused as another runs (review of #421): its card goes back
+        // to the form that sets one, which can mount as the removal reads the page again.
+        () => {
+          aim(orgId, at);
+          return callTool('remove_alert_channel', { channel: kind });
+        },
         kind === 'slack' ? 'Slack removed' : 'Webhook removed',
       );
-      if (!removed) {
-        if (focusNext === `form:${kind}`) focusNext = null;
-        return;
-      }
+      // Refused, the confirmation stays and keeps focus; done on a page left meanwhile, nothing there takes it.
+      if (!removed || !aimedHere()) unaim(orgId, at);
+      if (!removed) return;
       patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
     },
     testAlertChannel: async (orgId, channel) =>
@@ -453,16 +472,23 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         if (open ? running !== undefined : running === 'remove') return s;
         return { ...s, removingAiKey: open ? orgId : null, errors: withoutKey(s.errors, 'remove') };
       });
-      if (get().settings.removingAiKey !== was) focusNext = open ? 'confirm:key' : 'remove:key';
+      if (get().settings.removingAiKey !== was) aim(orgId, open ? 'confirm:key' : 'remove:key');
     },
     async removeAiKey(orgId) {
-      // The form is read afresh without a key, as the removal reads the page again: its key field takes focus.
-      focusNext = 'form:key';
-      const removed = await run(ai(orgId), 'remove', () => callTool('remove_ai_provider', {}), 'Key removed. The agent uses the demo model.');
-      if (!removed) {
-        if (focusNext === 'form:key') focusNext = null;
-        return;
-      }
+      if (runningIn(get().settings, ai(orgId)) !== undefined) return;
+      // The form is read afresh without a key, as the removal reads the page again: its key field takes focus. Named as
+      // the removal channel's is (review of #421).
+      const removed = await run(
+        ai(orgId),
+        'remove',
+        () => {
+          aim(orgId, 'form:key');
+          return callTool('remove_ai_provider', {});
+        },
+        'Key removed. The agent uses the demo model.',
+      );
+      if (!removed || !aimedHere()) unaim(orgId, 'form:key');
+      if (!removed) return;
       patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
     },
     focusWhenReplaced(key) {
@@ -470,7 +496,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       let ref = focusRefs.get(key);
       if (!ref) {
         ref = (el) => {
-          if (!el || focusNext !== key) return;
+          if (!el || focusNext?.key !== key || !aimedHere()) return;
           focusNext = null;
           el.focus();
         };
@@ -516,6 +542,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     },
     forgetOrgSettings() {
       drafts.forget();
+      focusNext = null;
       patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null, aiModels: null, removingAiKey: null, disconnecting: null }));
     },
 

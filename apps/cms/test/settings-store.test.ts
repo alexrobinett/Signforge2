@@ -525,4 +525,42 @@ describe('focus as Remove gives way to its confirmation, and back (#289)', () =>
     expect(mount(store, 'form:key')).not.toHaveBeenCalled();
     expect(store.getState().settings.removingAiKey).toBe(A);
   });
+
+  it('keeps focus named for the removal under way when a second press is refused as it runs (review of #421)', async () => {
+    const store = settingsStore();
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    mount(store, 'confirm:webhook');
+    const first = held<Reply>();
+    replies.push(first.promise);
+    const removing = store.getState().removeAlertChannel(A, 'webhook');
+    // Pressed again while the first runs: refused, and the first's target stays.
+    await store.getState().removeAlertChannel(A, 'webhook');
+    first.resolve({ status: 200, body: {} });
+    await removing;
+    expect(mount(store, 'form:webhook')).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives no focus to a page left while its removal ran, nor in another org (review of #421)', async () => {
+    const store = settingsStore();
+    router.state.location.href = '/settings/notifications';
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    mount(store, 'confirm:webhook');
+    const away = held<Reply>();
+    replies.push(away.promise);
+    const removing = store.getState().removeAlertChannel(A, 'webhook');
+    // Left for the screens while it ran; back later, the form is not to take focus then.
+    router.state.location.href = '/screens';
+    away.resolve({ status: 200, body: {} });
+    await removing;
+    router.state.location.href = '/settings/notifications';
+    expect(mount(store, 'form:webhook')).not.toHaveBeenCalled();
+
+    // Named in one org, the other org's same control does not take it; and a switch forgets it.
+    store.getState().askToRemoveAiKey(A, true);
+    showOrg(B);
+    expect(mount(store, 'confirm:key')).not.toHaveBeenCalled();
+    showOrg(A);
+    store.getState().forgetOrgSettings();
+    expect(mount(store, 'confirm:key')).not.toHaveBeenCalled();
+  });
 });

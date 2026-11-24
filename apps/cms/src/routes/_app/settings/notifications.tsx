@@ -233,7 +233,8 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
       </Button>
     );
   return (
-    <div className="w-full space-y-2 rounded-lg border border-destructive/40 p-3">
+    // Escape is Keep it (review of #421): focus goes back to Remove.
+    <fieldset aria-label={`Remove ${name}`} className="m-0 min-w-0 w-full space-y-2 rounded-lg border border-destructive/40 p-3" onKeyDown={(e) => e.key === 'Escape' && ask(orgId, null)}>
       {/* Focus comes here as Remove gives way to it (#289): the question first, then Tab to its answers. */}
       <p ref={focus(`confirm:${kind}`)} tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
         Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.
@@ -248,7 +249,7 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
           Keep it
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 

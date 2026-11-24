@@ -19,8 +19,9 @@ async function press(page: Page, start: Locator) {
 /** The confirmation open, by keyboard, at desktop and phone widths, with axe at each and its shots. */
 async function confirmationShown(page: Page, question: Locator, name: string) {
   await expect(question).toBeFocused();
-  await axe(page);
+  // Axe at the width the shots are taken at (review of #421).
   await page.setViewportSize({ width: 1440, height: 900 });
+  await axe(page);
   await shots(page, name);
   await page.setViewportSize({ width: 390, height: 844 });
   await question.scrollIntoViewIfNeeded();
@@ -81,6 +82,12 @@ test('a removal moves focus into its confirmation, Keep it puts it back on Remov
   await expect(removeKey).toBeFocused();
   await axe(page);
   await shots(page, '106-remove-key-kept');
+  // Escape is Keep it: the confirmation goes, and focus is back on Remove key (review of #421).
+  await page.keyboard.press('Enter');
+  await expect(asked).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(asked).toHaveCount(0);
+  await expect(removeKey).toBeFocused();
   // Removed: the form is read afresh without a key, and its key field takes focus.
   await page.keyboard.press('Enter');
   await expect(asked).toBeFocused();
