@@ -72,9 +72,8 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
 
   // On a phone the card fits the sheet, and axe passes there too.
   await page.setViewportSize({ width: 390, height: 844 });
-  // The sheet is drawn anew at this width: measured once it is.
-  await expect(card).toBeVisible();
-  expect((await card.boundingBox())!.width).toBeLessThanOrEqual(390);
+  // The sheet is drawn anew at this width, so the card can be between mounts when first measured: poll until it is back.
+  await expect.poll(async () => (await card.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(390);
   await axe(page);
   await shots(page, '102-confirm-phone');
   await drawer.getByRole('button', { name: 'Close the agent' }).click();
