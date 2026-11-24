@@ -475,6 +475,10 @@ export function scoped(d1: D1Database, orgId: string) {
   const spotRows = drafts(db, orgId, s.spots, 'spt');
   const playlists = drafts(db, orgId, s.playlists, 'pls');
   const scheduleEntries = drafts(db, orgId, s.scheduleEntries, 'sch');
+  const ds = s.draftSnapshots;
+  /** A spot's or a playlist's kept draft (#116), by the draft's kind and id. */
+  const keptFor = (kind: 'spot' | 'playlist', id: string) => and(eq(ds.orgId, orgId), kind === 'spot' ? eq(ds.spotId, id) : eq(ds.playlistId, id));
+  const clearKept = (kind: 'spot' | 'playlist', id: string): Staged => staged(undefined, db.delete(ds).where(keptFor(kind, id)));
   const publishes = entity(db, orgId, s.publishes, 'pub');
   const pr = s.publishRequests;
   const publishRequests = entity(db, orgId, pr, 'prq');
@@ -1183,6 +1187,11 @@ export function scoped(d1: D1Database, orgId: string) {
           await checkSpot(patch);
           return spotRows.stage.update(current, patch, ifVersion);
         },
+        /** Published, as every draft is; its kept draft (#116) goes with it: the draft on screens is no longer an agent's proposal. */
+        publish: (row: typeof s.spots.$inferSelect): Staged<typeof s.spots.$inferSelect> => {
+          const made = spotRows.stage.publish(row);
+          return { row: made.row, writes: [...made.writes, ...clearKept('spot', row.id).writes] };
+        },
       },
     },
 
@@ -1253,6 +1262,47 @@ export function scoped(d1: D1Database, orgId: string) {
           const replace = staged(undefined, db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, current.id))), ...itemRows(current.id, items));
           return { row: row.row, writes: [...row.writes, ...replace.writes] };
         },
+        /** Published, as every draft is; its kept draft (#116) goes with it. */
+        publish: (row: typeof s.playlists.$inferSelect, items?: readonly string[]): Staged<typeof s.playlists.$inferSelect> => {
+          const made = playlists.stage.publish(row, items);
+          return { row: made.row, writes: [...made.writes, ...clearKept('playlist', row.id).writes] };
+        },
+      },
+    },
+
+    /**
+     * The draft kept beside a spot's or playlist's while an agent's draft is on it (#116,
+     * `draft_snapshots`): the person's draft it was written over, or the agent's a Reject set aside.
+     * One per draft. A publish clears it (`stage.publish`), and it goes with its draft (the foreign
+     * keys cascade).
+     */
+    draftSnapshots: {
+      get: (kind: 'spot' | 'playlist', id: string) => db.select().from(ds).where(keptFor(kind, id)).get(),
+      stage: {
+        /** Keep `kept` beside the draft, replacing whatever was kept. */
+        keep: (kind: 'spot' | 'playlist', id: string, kept: { holds: 'person' | 'agent'; contentJson: string; sampleFieldsJson: string | null }): Staged =>
+          staged(
+            undefined,
+            db
+              .insert(ds)
+              .values({ orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null, ...kept, createdAt: Date.now() })
+              .onConflictDoUpdate({ target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId], set: { ...kept, createdAt: Date.now() } }),
+          ),
+        /**
+         * Keep `contentJson` as the person's draft an agent writes over, unless one is kept already: one
+         * statement, with no read first. What a Reject set aside (the agent's) is replaced; a person's stays.
+         */
+        propose: (kind: 'spot' | 'playlist', id: string, kept: { contentJson: string; sampleFieldsJson: string | null }): Staged => {
+          const values = { holds: 'person' as const, ...kept, createdAt: Date.now() };
+          return staged(
+            undefined,
+            db
+              .insert(ds)
+              .values({ orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null, ...values })
+              .onConflictDoUpdate({ target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId], set: values, setWhere: eq(ds.holds, 'agent') }),
+          );
+        },
+        clear: clearKept,
       },
     },
 

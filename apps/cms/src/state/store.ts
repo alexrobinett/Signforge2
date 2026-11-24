@@ -20,6 +20,7 @@ import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
+import { createProposalsSlice, type ProposalsSlice } from './proposals';
 import { createPublishingSlice, type PublishingSlice } from './publishing';
 import { createScheduleSlice, type ScheduleSlice } from './schedule';
 import { createScreensSlice, type ScreensSlice } from './screens';
@@ -48,7 +49,8 @@ export type AppState = UiSlice &
   GroupsSlice &
   ConnectSlice &
   AgentSlice &
-  AgentDrawerSlice;
+  AgentDrawerSlice &
+  ProposalsSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -83,6 +85,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createConnectSlice(set, get, deps),
     ...createAgentSlice(set, get, deps),
     ...createAgentDrawerSlice(set, get, deps),
+    ...createProposalsSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

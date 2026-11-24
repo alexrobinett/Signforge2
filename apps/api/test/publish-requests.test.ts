@@ -225,7 +225,8 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     expect(listing).toEqual({ statements: 3, queries: 3, rpcs: [] });
     expect(declining).toEqual({ statements: 7, queries: 4, rpcs: [] });
     // A person's approval is a publish, under the org's lock: acquire and release are its two RPCs.
-    expect(approving).toEqual({ statements: 29, queries: 20, rpcs: ['acquire', 'release'] });
+    // A publish clears each promoted spot's or playlist's kept draft (#116): one statement in its batch.
+    expect(approving).toEqual({ statements: 30, queries: 20, rpcs: ['acquire', 'release'] });
     for (const path of [asking, reading, listing, declining, approving]) expect(path.queries).toBeLessThan(50);
   });
 

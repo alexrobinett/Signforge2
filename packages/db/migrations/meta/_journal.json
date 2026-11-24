@@ -281,6 +281,13 @@
       "when": 1795541381068,
       "tag": "0039_draft_published_version",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1795548833876,
+      "tag": "0040_draft_snapshots",
+      "breakpoints": true
     }
   ]
 }

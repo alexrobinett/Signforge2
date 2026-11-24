@@ -10,7 +10,7 @@ export { brandStateOf, scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type 
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';
-export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
+export { published, draftChanged, contentJson, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
 export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';

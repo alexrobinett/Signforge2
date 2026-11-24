@@ -3,12 +3,13 @@
 // changed draft makes the approval a conflict, an agent never decides, and a request expires after
 // 7 days. Asking tells the members who may approve and the channels the org's rule names. Times are
 // the test's: Date is faked for the whole file, its setup included, never the clock's.
-import { draftChanged, published, StaleVersionError, type OrgScope, type Write } from '@signforge/db';
+import { draftChanged, type OrgScope, published, StaleVersionError } from '@signforge/db';
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AgentLimiter, type Caller, CMS_AGENT_CLIENT_ID, dispatch, registry, type Role, type Scope } from '../src';
 import { MAX_PENDING, PUBLISH_REQUEST_TTL_MS } from '../src/publish-requests';
+import { call, racing } from './calls';
 import { fakeServices } from './services';
 
 const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
@@ -64,11 +65,6 @@ const agent = (scopes: Scope[] = ['content:read', 'content:draft'], role: Role =
   agentLimiter: unlimited,
 });
 
-const call = async (caller: Caller, name: string, input: unknown) => {
-  const r = await dispatch(registry, name, input, caller);
-  if (!r.ok) throw new Error(`${name}: ${JSON.stringify(r)}`);
-  return r.output as any;
-};
 const spotVersion = async (id: string) => (await testScope(env.DB, o.orgId).spots.get(id))!.rowVersion;
 const editSpot = async (caller: Caller, id: string, durationMs: number) =>
   (await call(caller, 'update_spot', { spotId: id, durationMs, ifVersion: await spotVersion(id) })).spot.version as number;
@@ -266,19 +262,6 @@ describe('asking', () => {
   });
 });
 
-/** `caller`'s org, with `before` run as its batch is committed: a change that lands between the handler's read and the batch. */
-function racing(caller: Caller, before: () => Promise<unknown>): Caller {
-  const org = caller.org as OrgScope;
-  let raced = false;
-  const commit = async (writes: readonly Write[]) => {
-    if (!raced) {
-      raced = true;
-      await before();
-    }
-    return org.commit(writes);
-  };
-  return { ...caller, org: new Proxy(org, { get: (t, k) => (k === 'commit' ? commit : Reflect.get(t, k)) }) };
-}
 const scope = () => testScope(env.DB, o.orgId);
 const pendingStill = async (id: string) => expect((await scope().publishRequests.get(id))!.status).toBe('pending');
 const approve = (caller: Caller, publishRequestId: string) => dispatch(registry, 'approve_publish_request', { publishRequestId }, caller);

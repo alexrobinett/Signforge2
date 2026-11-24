@@ -9,12 +9,13 @@
  * a deleted one's id continues its versions (`draft_tombstones`).
  */
 import type { Transition } from '@signforge/contract';
-import { draftChanged, published, type OrgScope, type PlaylistRow } from '@signforge/db';
+import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type PlaylistRow } from '@signforge/db';
 import { z } from 'zod';
+import { DECIDING, keptFor, playlistContent, shownVersion } from './agent-drafts';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, isAgent, notFound, ToolError } from './tool';
 import { outputs, transition, type PlaylistView } from './outputs';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
@@ -36,6 +37,12 @@ const playlistView = (row: PlaylistRow, items: string[], defaultId: string | nul
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
+
+/** A playlist's view as stored: its items and whether it is the default read now. */
+async function viewOf(org: OrgScope, row: PlaylistRow) {
+  const [items, settings] = await Promise.all([org.playlists.items(row.id), org.settings.get()]);
+  return playlistView(row, items, settings?.defaultPlaylistId);
+}
 
 async function requirePlaylist(org: OrgScope, playlistId: string) {
   const row = await org.playlists.get(playlistId);
@@ -83,8 +90,7 @@ const getPlaylist = defineTool({
   example: { playlistId: 'pls_example' },
   handler: async ({ org, input }) => {
     const row = await requirePlaylist(org, input.playlistId);
-    const [items, settings] = await Promise.all([org.playlists.items(row.id), org.settings.get()]);
-    return { playlist: playlistView(row, items, settings?.defaultPlaylistId) };
+    return { playlist: await viewOf(org, row) };
   },
 });
 
@@ -120,15 +126,72 @@ const updatePlaylist = defineTool({
   output: outputs.update_playlist,
   example: { playlistId: 'pls_example', spotIds: ['spt_example'], ifVersion: 2 },
   target,
-  handler: async ({ org, input, write }) => {
+  handler: async ({ org, actor, input, write }) => {
     const current = await requirePlaylist(org, input.playlistId);
     const patch = { name: input.name, transitionJson: input.transition && JSON.stringify(input.transition) };
-    const row = write(await org.playlists.stage.update(current, patch, input.ifVersion, input.spotIds));
+    // An agent's edit is its proposal (#116): the draft it replaces, items and all, is kept beside it, so it is held to the version read.
+    write(await keptFor(org, actor, 'playlist', current, () => org.playlists.items(current.id)));
+    const guard = input.ifVersion ?? (isAgent(actor) ? current.rowVersion : undefined);
+    const row = write(await org.playlists.stage.update(current, patch, guard, input.spotIds));
     const [items, settings] = await Promise.all([input.spotIds ?? org.playlists.items(row.id), org.settings.get()]);
     return { playlist: playlistView(row, items, settings?.defaultPlaylistId) };
   },
   // The order's rows name the playlist: deleted between the read and the commit, they fail the batch.
   refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+});
+
+/** The playlist at the version shown, or refused as changed since. */
+async function playlistAt(org: OrgScope, playlistId: string, version: number) {
+  const row = await requirePlaylist(org, playlistId);
+  if (row.rowVersion !== version) throw new StaleVersionError(row.id, row.rowVersion);
+  return row;
+}
+
+/** Reject's and Keep's input: the playlist, at the version shown. */
+const decidePlaylistInput = z.object({ playlistId: id('playlist'), ifVersion: shownVersion });
+
+const revertPlaylistDraft = defineTool({
+  name: 'revert_playlist_draft',
+  description:
+    "Reject an agent's draft of a playlist (#116): its name, transition and play order go back to the draft the agent wrote over (the person's, or as published), and the agent's is kept beside it; the same call again puts the agent's back (its Undo). Refused with a conflict if neither is kept, and if the playlist changed since ifVersion. People only. Returns { playlist, rejected }.",
+  ...DECIDING,
+  input: decidePlaylistInput,
+  output: outputs.revert_playlist_draft,
+  example: { playlistId: 'pls_example', ifVersion: 3 },
+  target,
+  handler: async ({ org, input, write }) => {
+    const row = await playlistAt(org, input.playlistId, input.ifVersion);
+    const kept = await org.draftSnapshots.get('playlist', row.id);
+    if (!kept) throw new ToolError('conflict', `playlist ${row.id} has no agent's draft to reject`, { kept: null });
+    const back = playlistContent.parse(JSON.parse(kept.contentJson));
+    const items = await org.playlists.items(row.id);
+    // The two swap: the draft there now is kept beside the one put back.
+    const rejected = kept.holds === 'person';
+    write(org.draftSnapshots.stage.keep('playlist', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row, items), sampleFieldsJson: null }));
+    const playlist = write(await org.playlists.stage.update(row, { name: back.name, transitionJson: back.transitionJson }, input.ifVersion, back.items));
+    return { playlist: playlistView(playlist, back.items, (await org.settings.get())?.defaultPlaylistId), rejected };
+  },
+  // A spot it puts back was deleted since: its item fails the batch.
+  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+});
+
+const keepPlaylistDraft = defineTool({
+  name: 'keep_playlist_draft',
+  description:
+    "Keep an agent's draft of a playlist as the draft (#116): it is no longer a proposal, and the draft it was written over is let go. The draft is not changed and not published. Refused with a conflict if it is not an agent's proposal, or the playlist changed since ifVersion. People only. Returns { playlist }.",
+  ...DECIDING,
+  input: decidePlaylistInput,
+  output: outputs.keep_playlist_draft,
+  example: { playlistId: 'pls_example', ifVersion: 3 },
+  target,
+  handler: async ({ org, input, write }) => {
+    const row = await playlistAt(org, input.playlistId, input.ifVersion);
+    if ((await org.draftSnapshots.get('playlist', row.id))?.holds !== 'person') throw new ToolError('conflict', `playlist ${row.id} is not an agent's proposal`);
+    // Held to the version shown in the batch too: an edit landing first refuses it.
+    write(org.playlists.stage.unchanged(row));
+    write(org.draftSnapshots.stage.clear('playlist', row.id));
+    return { playlist: await viewOf(org, row) };
+  },
 });
 
 /**
@@ -221,4 +284,4 @@ const setDefaultPlaylist = defineTool({
   },
 });
 
-export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist, setDefaultPlaylist];
+export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, revertPlaylistDraft, keepPlaylistDraft, deletePlaylist, setDefaultPlaylist];

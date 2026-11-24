@@ -22,12 +22,13 @@ import {
   type TableFeed,
   type TemplateManifest,
 } from '@signforge/contract';
-import { draftChanged, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
+import { contentJson, draftChanged, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
+import { DECIDING, keptFor, shownVersion, spotContent } from './agent-drafts';
 import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
 import { page, pageInput } from './paging';
 import { loadOrg, previewInput, spotDraft } from './publishing';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, isAgent, notFound, ToolError } from './tool';
 import { outputs, SPOT_FITS, SPOT_KINDS, tableMapping, type SpotView } from './outputs';
 
 /** A new image, video or URL spot's length when none is given. */
@@ -341,7 +342,7 @@ const updateSpot = defineTool({
   output: outputs.update_spot,
   example: { spotId: 'spt_example', name: 'Fresh picked', durationMs: 12_000 },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
-  handler: async ({ org, input, write }) => {
+  handler: async ({ org, actor, input, write }) => {
     const row = await requireSpot(org, input.spotId);
     refuseOtherKinds(row.kind, input);
     const bound = await bindingsOf(org, input.bindings);
@@ -376,7 +377,60 @@ const updateSpot = defineTool({
       url: input.url,
       ...(sample && { sampleFieldsJson: left && JSON.stringify(left) }),
     };
-    return { spot: spotView(write(await org.spots.stage.update(row, patch, input.ifVersion))) };
+    // An agent's edit is its proposal (#116): the draft it replaces is kept beside it, so it is held to the version read.
+    write(await keptFor(org, actor, 'spot', row));
+    return { spot: spotView(write(await org.spots.stage.update(row, patch, input.ifVersion ?? (isAgent(actor) ? row.rowVersion : undefined)))) };
+  },
+});
+
+/** The spot at the version shown, or refused as changed since. */
+async function spotAt(org: OrgScope, spotId: string, version: number) {
+  const row = await requireSpot(org, spotId);
+  if (row.rowVersion !== version) throw new StaleVersionError(row.id, row.rowVersion);
+  return row;
+}
+
+/** Reject's and Keep's input: the spot, at the version shown. */
+const decideSpotInput = z.object({ spotId: id('spot'), ifVersion: shownVersion });
+
+const revertSpotDraft = defineTool({
+  name: 'revert_spot_draft',
+  description:
+    "Reject an agent's draft of a spot (#116): the draft goes back to the one the agent wrote over (the person's, or as published), with its sample-text marks, and the agent's is kept beside it; the same call again puts the agent's back (its Undo). Refused with a conflict if neither is kept (no agent's draft to reject), and if the spot changed since ifVersion. People only. Returns { spot, rejected }.",
+  ...DECIDING,
+  input: decideSpotInput,
+  output: outputs.revert_spot_draft,
+  example: { spotId: 'spt_example', ifVersion: 3 },
+  target: (input) => ({ kind: 'spot', id: input.spotId }),
+  handler: async ({ org, input, write }) => {
+    const row = await spotAt(org, input.spotId, input.ifVersion);
+    const kept = await org.draftSnapshots.get('spot', row.id);
+    if (!kept) throw new ToolError('conflict', `spot ${row.id} has no agent's draft to reject`, { kept: null });
+    const back = spotContent.parse(JSON.parse(kept.contentJson));
+    // The two swap: the draft there now is kept beside the one put back.
+    const rejected = kept.holds === 'person';
+    write(org.draftSnapshots.stage.keep('spot', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row), sampleFieldsJson: row.sampleFieldsJson }));
+    const spot = write(await org.spots.stage.update(row, { ...back, sampleFieldsJson: kept.sampleFieldsJson }, input.ifVersion));
+    return { spot: spotView(spot), rejected };
+  },
+});
+
+const keepSpotDraft = defineTool({
+  name: 'keep_spot_draft',
+  description:
+    "Keep an agent's draft of a spot as the draft (#116): it is no longer a proposal, and the draft it was written over is let go. The draft is not changed and not published. Refused with a conflict if it is not an agent's proposal, or the spot changed since ifVersion. People only. Returns { spot }.",
+  ...DECIDING,
+  input: decideSpotInput,
+  output: outputs.keep_spot_draft,
+  example: { spotId: 'spt_example', ifVersion: 3 },
+  target: (input) => ({ kind: 'spot', id: input.spotId }),
+  handler: async ({ org, input, write }) => {
+    const row = await spotAt(org, input.spotId, input.ifVersion);
+    if ((await org.draftSnapshots.get('spot', row.id))?.holds !== 'person') throw new ToolError('conflict', `spot ${row.id} is not an agent's proposal`);
+    // Held to the version shown in the batch too: an edit landing first refuses it.
+    write(org.spots.stage.unchanged(row));
+    write(org.draftSnapshots.stage.clear('spot', row.id));
+    return { spot: spotView(row) };
   },
 });
 
@@ -439,4 +493,4 @@ const deleteSpot = defineTool({
   refuseFailedCommit: async ({ org, input }) => inUse(org, input.spotId),
 });
 
-export const spotTools = [listSpots, getSpot, createSpot, updateSpot, deleteSpot, getSpotPreview];
+export const spotTools = [listSpots, getSpot, createSpot, updateSpot, revertSpotDraft, keepSpotDraft, deleteSpot, getSpotPreview];
