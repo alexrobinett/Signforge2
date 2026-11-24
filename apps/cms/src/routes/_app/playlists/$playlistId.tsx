@@ -6,6 +6,7 @@
  * (src/state/playlist-editor.ts). The stage's orientation, scale and brand kit are in the URL,
  * as the spot editor's are.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
@@ -298,7 +299,7 @@ function PlaylistEditor() {
             <EditorSection title="Transition">
               <div className="flex flex-col gap-2">
                 {TRANSITIONS.map((o) => (
-                  <label key={o.type} className="flex gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-accent">
+                  <label key={o.type} className={choiceVariants({ className: 'flex gap-3 rounded-lg p-3' })}>
                     <input
                       type="radio"
                       name="playlist-transition"

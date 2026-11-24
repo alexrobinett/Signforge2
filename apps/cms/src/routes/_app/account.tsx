@@ -2,6 +2,7 @@
  * Your account (canvas board Account): profile, sign-in methods, where you are signed in, and the
  * CMS theme. It applies in every organization you belong to.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
@@ -14,7 +15,6 @@ import { Label } from '~/components/ui/label';
 import { ago } from '~/lib/screen-status';
 import { describeAgent } from '~/lib/settings';
 import type { Theme } from '~/lib/theme';
-import { cn } from '~/lib/utils';
 import { backToPage } from '~/server/form-post.server';
 import { getAccount } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
@@ -156,13 +156,7 @@ function AccountPage() {
           <div className="flex flex-wrap gap-2">
             <EditorFields>
               {THEMES.map(({ value, label, icon: Icon }) => (
-                <label
-                  key={value}
-                  className={cn(
-                    'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                    theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                  )}
-                >
+                <label key={value} className={choiceVariants({ className: 'flex h-10 cursor-pointer items-center gap-2 rounded-full px-4 text-sm' })}>
                   <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
                   <Icon className="size-4" aria-hidden /> {label}
                 </label>

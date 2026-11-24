@@ -3,6 +3,7 @@
  * replace a day's windows (closed, or other hours). Checked as the player checks them, with the
  * contract's `displayHoursProblems`, so the CMS refuses what a screen would.
  */
+import { Choice, choiceVariants } from '~/components/ui/choice';
 import { displayHoursProblems } from '@signforge/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { useId } from 'react';
@@ -10,7 +11,6 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { DAYS, dayRange } from '~/lib/days';
 import type { DisplayHours } from '~/lib/screen-types';
-import { cn } from '~/lib/utils';
 
 const DEFAULT_HOURS: DisplayHours = { weekly: [{ days: [1, 2, 3, 4, 5, 6, 0], from: '07:00', to: '22:00' }] };
 
@@ -47,13 +47,7 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
         ).map(([key, label, next]) => {
           const checked = key === 'always' ? !value : !!value;
           return (
-            <label
-              key={key}
-              className={cn(
-                'flex h-9 cursor-pointer items-center rounded-full border px-3.5 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                checked ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-              )}
-            >
+            <label key={key} className={choiceVariants({ className: 'flex h-9 cursor-pointer items-center rounded-full px-3.5 text-sm' })}>
               <input type="radio" name={`${id}-mode`} className="sr-only" checked={checked} onChange={() => onChange(next)} />
               {label}
             </label>
@@ -72,22 +66,18 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
                   {DAYS.map(([d, short, long]) => {
                     const on = w.days.includes(d);
                     return (
-                      <button
+                      <Choice
                         key={d}
-                        type="button"
-                        aria-pressed={on}
+                        selected={on}
                         onClick={() =>
                           setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, days: on ? x.days.filter((y) => y !== d) : [...x.days, d].sort() } : x)))
                         }
-                        className={cn(
-                          'h-8 min-w-11 rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                          on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong bg-card text-foreground hover:bg-accent',
-                        )}
+                        className="h-8 min-w-11 rounded-md px-2 text-xs font-medium"
                       >
                         {/* Named "Monday" by hidden text, not aria-label: axe counts a label that does not contain the "Mon" shown as a mismatch. */}
                         <span aria-hidden>{short}</span>
                         <span className="sr-only">{long}</span>
-                      </button>
+                      </Choice>
                     );
                   })}
                 </fieldset>

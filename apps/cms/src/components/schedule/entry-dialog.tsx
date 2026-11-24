@@ -5,6 +5,7 @@
  * (#181). Aimed at one screen, it says what that screen will play this week, and how to win where
  * it would lose.
  */
+import { Choice } from '~/components/ui/choice';
 import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
@@ -17,7 +18,6 @@ import type { PlaylistView } from '~/lib/playlists';
 import { entryPreview, publishedEntries, type ScheduleEntryView } from '~/lib/schedule';
 import type { SpotView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
-import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, entryProblems, entryWhen, everywhereAlways, firstDefaultOf } from '~/state/schedule';
 import { FirstDefaultChoice, FirstDefaultNote, UnpublishedDefault } from './first-default-note';
@@ -149,19 +149,15 @@ export function EntryDialog({
               {DAYS.map(([day, short, long]) => {
                 const on = d.days.includes(day);
                 return (
-                  <button
+                  <Choice
                     key={day}
-                    type="button"
-                    aria-pressed={on}
+                    selected={on}
                     onClick={() => edit({ days: on ? d.days.filter((x) => x !== day) : [...d.days, day] })}
-                    className={cn(
-                      'h-10 min-w-11 rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                      on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong bg-card text-foreground hover:bg-accent',
-                    )}
+                    className="h-10 min-w-11 rounded-md px-2 text-xs font-medium"
                   >
                     <span aria-hidden>{short}</span>
                     <span className="sr-only">{long}</span>
-                  </button>
+                  </Choice>
                 );
               })}
             </div>

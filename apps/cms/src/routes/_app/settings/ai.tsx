@@ -5,6 +5,7 @@
  * and returns JSON-schema output), chooses the fast and capable models from the provider's own list,
  * and sets a daily ceiling of turns. Everyone else reads it, never the key (docs/proposals/cms-agent.md).
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute } from '@tanstack/react-router';
 import { KeyRoundIcon, LoaderCircleIcon, PlugZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
@@ -150,7 +151,7 @@ function KeyForm({ provider }: { provider: AiProvider | null }) {
           <legend className="text-sm font-medium">Provider</legend>
           <div className="flex flex-wrap gap-2">
             {(['anthropic', 'openai-compatible'] as const).map((p) => (
-              <label key={p} className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-accent">
+              <label key={p} className={choiceVariants({ className: 'flex h-10 items-center gap-2 rounded-lg px-3 text-sm' })}>
                 <input type="radio" name="provider" value={p} defaultChecked={current === p} className="accent-primary" />
                 {p === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible endpoint'}
               </label>

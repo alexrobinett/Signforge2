@@ -4,6 +4,7 @@
  * connectors with what is built and what is planned. Filter and search are in the URL, and so is
  * what the API's connection callback sends back (`?connected=` or `?connectionError=`).
  */
+import { Choice } from '~/components/ui/choice';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { CloudOffIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
@@ -160,18 +161,9 @@ function IntegrationsPage() {
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
             <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md">
               {SHOW.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  aria-pressed={show === s}
-                  onClick={() => set({ show: s === 'all' ? undefined : s })}
-                  className={cn(
-                    'min-h-10 rounded-full border px-3.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                    show === s ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                  )}
-                >
+                <Choice key={s} selected={show === s} onClick={() => set({ show: s === 'all' ? undefined : s })} className="min-h-10 rounded-full px-3.5">
                   {SHOW_WORD[s]} {all.filter((c) => shows(c, s, '', sources)).length}
-                </button>
+                </Choice>
               ))}
             </div>
             <span className="flex-1" />

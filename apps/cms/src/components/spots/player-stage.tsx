@@ -6,6 +6,7 @@
  * Orientation, scale, brand kit and, for a spot bound to data sources, live data or the fallback
  * are in the URL.
  */
+import { Choice } from '~/components/ui/choice';
 import { SCREEN_BOX } from '@signforge/contract';
 import { TriangleAlertIcon } from 'lucide-react';
 import { useCallback } from 'react';
@@ -51,18 +52,9 @@ function Toggle<T extends string>({
     // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the canvas draws it; a fieldset would need a legend shown.
     <div role="group" aria-label={label} className="flex rounded-xl bg-stage-control p-1">
       {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            'h-9 rounded-lg px-3 font-medium outline-none focus-visible:ring-3 focus-visible:ring-stage-ring',
-            value === o.value ? 'bg-stage-foreground text-stage' : 'text-stage-muted-foreground hover:text-stage-foreground',
-          )}
-        >
+        <Choice key={o.value} tone="stage" selected={value === o.value} onClick={() => onChange(o.value)} className="h-9 rounded-lg px-3 font-medium">
           {o.label}
-        </button>
+        </Choice>
       ))}
     </div>
   );

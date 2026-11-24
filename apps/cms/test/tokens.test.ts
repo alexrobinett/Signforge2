@@ -145,3 +145,13 @@ for (const [theme, selector] of [
     }
   });
 }
+
+// The one selected look (#373, ui/choice.tsx): on the stage, a 20% stage-ring tint over the stage's
+// control groove with stage-foreground words, and its edge 3:1 on the groove.
+it('a selected stage choice reads at 4.5:1, its edge at 3:1', () => {
+  const t = tokens(':root');
+  const groove = t['stage-control'] ?? '';
+  const tint = over(t['stage-ring'] ?? '', groove, 0.2);
+  expect(contrastRatio(t['stage-foreground'] ?? '', tint)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(t['stage-ring'] ?? '', groove)).toBeGreaterThanOrEqual(3);
+});

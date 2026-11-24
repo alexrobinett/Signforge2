@@ -4,6 +4,7 @@
  * hex field, the contrast of every pair with its verdict in words and a fix, fonts with samples,
  * the corner shape and the two logos. Each field calls back with the change; the store keeps it.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { BRAND_SHAPES, sessionBlobPath, type BrandColor, type BrandColors, type BrandShape } from '@signforge/contract';
 import { FONTS, fontById, HEX_COLOR } from '@signforge/compiler';
 import { WandSparklesIcon } from 'lucide-react';
@@ -235,10 +236,7 @@ export function ShapeField({ value, disabled, onChange }: { value: BrandShape; d
       <legend className="mb-2 font-medium">Corners</legend>
       <div className="flex flex-wrap gap-2">
         {BRAND_SHAPES.map((s) => (
-          <label
-            key={s}
-            className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-accent has-checked:text-accent-foreground has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
-          >
+          <label key={s} className={choiceVariants({ className: 'flex h-10 items-center gap-2 rounded-lg px-3 text-sm' })}>
             <input type="radio" name="kit-shape" checked={value === s} disabled={disabled} onChange={() => onChange(s)} className="sr-only" />
             <span aria-hidden className="size-4 border-2 border-current" style={{ borderRadius: SHAPE_RADIUS[s] }} />
             {SHAPE_WORD[s]}

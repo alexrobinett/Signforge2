@@ -7,6 +7,7 @@
  * sample copy (`create_spot`'s `sample`, #360), which the server records and the editor marks until it is replaced. While Create is
  * off, the dialog says why.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { PlusIcon } from 'lucide-react';
@@ -108,7 +109,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
             <legend className="text-sm font-medium">What it shows</legend>
             <div className="flex flex-wrap gap-2">
               {KINDS.map((k) => (
-                <label key={k.kind} className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-accent">
+                <label key={k.kind} className={choiceVariants({ className: 'flex h-10 items-center gap-2 rounded-lg px-3 text-sm' })}>
                   <input type="radio" name="new-spot-kind" checked={d.kind === k.kind} onChange={() => edit({ kind: k.kind })} className="accent-primary" />
                   {k.label}
                 </label>
@@ -123,7 +124,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                   {usable.map((u) => (
                     <label
                       key={u.version.id}
-                      className="relative flex cursor-pointer flex-col gap-1.5 rounded-lg border p-1.5 text-sm has-checked:border-primary has-checked:bg-accent has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
+                      className={choiceVariants({ className: 'relative flex cursor-pointer flex-col gap-1.5 rounded-lg p-1.5 text-sm' })}
                     >
                       <input
                         type="radio"

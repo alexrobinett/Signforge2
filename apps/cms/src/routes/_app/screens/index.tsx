@@ -6,6 +6,7 @@
  * is off the list and its counts unless the Retired filter asks for it. The table's rows can be
  * ticked, and the selection added to a group or removed from one.
  */
+import { Choice } from '~/components/ui/choice';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import {
@@ -192,18 +193,14 @@ function ScreensPage() {
                 ['table', 'Table', TableIcon],
               ] as const
             ).map(([v, label, Icon]) => (
-              <button
+              <Choice
                 key={v}
-                type="button"
-                aria-pressed={view === v}
+                selected={view === v}
                 onClick={() => set({ view: v === 'tiles' ? undefined : v })}
-                className={cn(
-                  'flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                  view === v ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
-                )}
+                className="flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium"
               >
                 <Icon className="size-4" aria-hidden /> {label}
-              </button>
+              </Choice>
             ))}
           </fieldset>
         </EditorFields>
