@@ -365,7 +365,9 @@ describe('schedule entries', () => {
     const row = (await org.playlists.get(fresh.id))!;
     const later = { startsAt: '2026-11-17T12:05:00Z', endsAt: '2026-11-17T14:00:00Z' };
     expect(
-      await ok(call('publish_takeover', { playlistId: fresh.id, target: 'org', ...later, with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }] })),
+      await ok(
+        call('publish_takeover', { playlistId: fresh.id, target: 'org', ...later, with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }] }),
+      ),
     ).toMatchObject({ promoted: expect.arrayContaining([{ kind: 'playlist', id: fresh.id }]) });
     expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: fresh.id, hall: fresh.id });
   });

@@ -577,7 +577,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // Done or not, from the action's own result (`signforge.done`), never from the model's answer after it.
       const { done } = got;
       if (done?.ok) press('done');
-      else press('refused', done?.message ?? (got.failure instanceof Refusal ? toolMessage(got.failure) : (got.ended?.message ?? 'It was not done. Ask again.')));
+      else
+        press('refused', done?.message ?? (got.failure instanceof Refusal ? toolMessage(got.failure) : (got.ended?.message ?? 'It was not done. Ask again.')));
       // Every page reads again what the press changed: the Schedule lists a takeover it started.
       const orgId = orgOnScreen(router);
       if (done?.ok && orgId) await queryClient.invalidateQueries({ queryKey: ['org', orgId] });

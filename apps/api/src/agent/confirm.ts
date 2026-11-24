@@ -13,7 +13,20 @@
  * summary (`Caller.confirmed`).
  */
 import type { OrgScope } from '@signforge/db';
-import { type Caller, dispatch, type DispatchResult, type DraftPin, type Grant, OVERRIDE_LIMIT_MS, permits, publishOrg, registry, type SampleAck, sha256Hex, ToolError } from '@signforge/tools';
+import {
+  type Caller,
+  dispatch,
+  type DispatchResult,
+  type DraftPin,
+  type Grant,
+  OVERRIDE_LIMIT_MS,
+  permits,
+  publishOrg,
+  registry,
+  type SampleAck,
+  sha256Hex,
+  ToolError,
+} from '@signforge/tools';
 import { z } from 'zod';
 import type { ConfirmCard } from './chat-shapes';
 
@@ -96,7 +109,8 @@ async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[
   for (const d of drafts) {
     const kind = d?.kind;
     const id = str(d?.id);
-    if (kind !== 'spot' && kind !== 'playlist' && kind !== 'schedule_entry') throw new CardProblem(`no draft kind ${str(kind)}: spot, playlist or schedule_entry`);
+    if (kind !== 'spot' && kind !== 'playlist' && kind !== 'schedule_entry')
+      throw new CardProblem(`no draft kind ${str(kind)}: spot, playlist or schedule_entry`);
     const row =
       kind === 'spot'
         ? await org.spots.get(id)
@@ -165,7 +179,9 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           lines: [
             ...names.map((n) => `${n}, as drafted now`),
             reach ? `Changes what ${screensWord(reach)} play; each switches as it hears of it.` : 'Changes what no screen plays now.',
-            ...(dry.drafts.held.length ? [`${dry.drafts.held.length === 1 ? 'One draft fails' : `${dry.drafts.held.length} drafts fail`} its checks and keeps its published version.`] : []),
+            ...(dry.drafts.held.length
+              ? [`${dry.drafts.held.length === 1 ? 'One draft fails' : `${dry.drafts.held.length} drafts fail`} its checks and keeps its published version.`]
+              : []),
             ...samples.map((x) => `${x.name} still shows its template's sample text (${x.fields.join(', ')}): pressing publishes it anyway.`),
           ],
           address: null,
@@ -220,7 +236,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const start = typeof input.start === 'object' && input.start !== null ? Object.fromEntries(Object.entries(input.start)) : {};
       // The screens it reaches, and what its playlist plays, as the card showed them: else nothing is done.
       if (canonical((await reachOf(caller.org, start)).screens) !== canonical(input.reach)) return changedSince('The screens it would play on changed');
-      if (((await caller.org.playlists.get(str(start.playlistId)))?.publishedJson ?? null) !== input.live) return changedSince('Its playlist was published again');
+      if (((await caller.org.playlists.get(str(start.playlistId)))?.publishedJson ?? null) !== input.live)
+        return changedSince('Its playlist was published again');
       // Made and published in one batch, or not at all (`publish_takeover`).
       return dispatch(registry, 'publish_takeover', { ...start, with: input.with }, caller);
     },

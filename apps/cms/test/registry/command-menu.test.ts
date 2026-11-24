@@ -257,7 +257,12 @@ describe('Ask agent in ⌘K (#270)', () => {
     for (const q of ['screens', 'bayside door', '  rename   ', 'publish now', 'pair a screen', 'take over Bayside now', 'Bayside closes at 2 for the storm'])
       expect(readsAsSentence(q), q).toBe(false);
     for (const q of ['why are screens behind', 'Which screens need me?', 'behind screens?', 'show me what plays now']) expect(readsAsSentence(q), q).toBe(true);
-    expect(askEntry('  why are screens behind ', true)).toMatchObject({ kind: 'ask', id: 'ask:typed', label: 'Ask agent: why are screens behind', question: 'why are screens behind' });
+    expect(askEntry('  why are screens behind ', true)).toMatchObject({
+      kind: 'ask',
+      id: 'ask:typed',
+      label: 'Ask agent: why are screens behind',
+      question: 'why are screens behind',
+    });
     expect(askEntry('screens', false)).toMatchObject({ id: 'ask:typed:last' });
   });
 

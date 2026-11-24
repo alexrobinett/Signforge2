@@ -147,7 +147,12 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
   // Its playlist published first, as it publishes only the takeover beside what it pins.
   publish_takeover: (o) =>
-    dispatch(registry, 'publish', {}, { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-g', clientId: 'test' }, blobs: env.BLOBS, services: fakeServices }),
+    dispatch(
+      registry,
+      'publish',
+      {},
+      { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-g', clientId: 'test' }, blobs: env.BLOBS, services: fakeServices },
+    ),
   // A saved key to test, or to remove.
   test_ai_provider: (o) => savedKey(o),
   remove_ai_provider: (o) => savedKey(o),

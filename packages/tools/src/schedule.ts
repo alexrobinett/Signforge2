@@ -257,9 +257,7 @@ const startTakeover = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z
-    .object({ ...takeoverFields, idempotencyKey })
-    .refine(aimed, AIMED),
+  input: z.object({ ...takeoverFields, idempotencyKey }).refine(aimed, AIMED),
   output: outputs.start_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
   target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),

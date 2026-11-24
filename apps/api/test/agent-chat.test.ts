@@ -598,19 +598,29 @@ describe('confirmation cards (#269)', () => {
           : { text: JSON.stringify({ text: 'Every screen plays Storm closure until 13:00.', groups: [], steps: [] }) },
     });
     const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
-    const called = { playlistId: playlist.id, target: 'org', ...options.aim, endsAt: new Date(NOON + 3_600_000).toISOString(), idempotencyKey: 'storm-key-0001' };
+    const called = {
+      playlistId: playlist.id,
+      target: 'org',
+      ...options.aim,
+      endsAt: new Date(NOON + 3_600_000).toISOString(),
+      idempotencyKey: 'storm-key-0001',
+    };
     ask.called = called;
     return { ...s, playlist, called };
   }
 
-  it('stops the turn at a card that says what would happen, running nothing, and streams none of the model\'s input', async () => {
+  it("stops the turn at a card that says what would happen, running nothing, and streams none of the model's input", async () => {
     const s = await takeover();
     const all = await raw(await s.ask('Bayside closes at 2 for the storm: put the closure up everywhere'));
     const { card } = pressOf(all, 'q');
     expect(card).toMatchObject({
       tool: 'start_takeover',
       title: 'Take over screens',
-      lines: ['Plays Storm closure on every screen (3 screens), over anything scheduled.', 'From now until Mon 23 Nov, 13:00.', 'Publishes Storm closure too: it was never published.'],
+      lines: [
+        'Plays Storm closure on every screen (3 screens), over anything scheduled.',
+        'From now until Mon 23 Nov, 13:00.',
+        'Publishes Storm closure too: it was never published.',
+      ],
       address: null,
       undo: 'End it early with End now on the Schedule.',
       press: 'Take over',
@@ -706,7 +716,8 @@ describe('confirmation cards (#269)', () => {
     const elsewhere = await s.owner.createOrg('Elsewhere');
     await s.owner.setActive(elsewhere.id);
     expect(
-      (await s.owner.tool('save_ai_provider', { provider: 'anthropic', apiKey: 'sk-ant-api03-CHATKEYCHATKEYCHATKEY-0002', capableModel: 'claude-sonnet-5-5' })).status,
+      (await s.owner.tool('save_ai_provider', { provider: 'anthropic', apiKey: 'sk-ant-api03-CHATKEYCHATKEYCHATKEY-0002', capableModel: 'claude-sonnet-5-5' }))
+        .status,
     ).toBe(200);
     await refusedWith(s.owner, theirs.body);
     expect(await s.scope.scheduleEntries.list()).toHaveLength(1);
@@ -729,7 +740,11 @@ describe('confirmation cards (#269)', () => {
       // Asked: seven reads, then the takeover; pressed: one more read, the ninth call of the turn.
       steps: () => {
         n++;
-        return n === 1 ? { calls: reads } : n === 2 ? { calls: [{ name: 'start_takeover', input: ask.called }] } : { calls: [{ name: 'list_screens', input: {} }] };
+        return n === 1
+          ? { calls: reads }
+          : n === 2
+            ? { calls: [{ name: 'start_takeover', input: ask.called }] }
+            : { calls: [{ name: 'list_screens', input: {} }] };
       },
     });
     const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
@@ -750,18 +765,27 @@ describe('confirmation cards (#269)', () => {
   it('pins a publish at the versions shown, keeps every constraint the model gave, says how many screens it changes, and lists the sample text a press publishes (#392)', async () => {
     const ask: { called?: Record<string, unknown> } = {};
     const s = await setup({
-      steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'publish', input: ask.called }] } : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) }),
+      steps: (body) =>
+        body.messages.length === 1
+          ? { calls: [{ name: 'publish', input: ask.called }] }
+          : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) },
     });
     const playlist = await s.scope.playlists.insert({ name: 'All day', transitionJson: JSON.stringify({ type: 'cut' }) });
     const spot = await s.scope.spots.insert({ name: 'Pier 9', kind: 'url', durationMs: 10_000, url: 'https://example.com/pier' });
     await s.scope.playlists.setItems(playlist.id, [spot.id]);
     await s.scope.commit((await s.scope.settings.stage.set({ defaultPlaylistId: playlist.id })).writes);
     // The spot still holds its template's sample text in its headline (#360).
-    await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?').bind(JSON.stringify({ texts: ['headline'], lists: {} }), spot.id).run();
+    await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+      .bind(JSON.stringify({ texts: ['headline'], lists: {} }), spot.id)
+      .run();
     // Only the spot pinned, with the default named by the model (#393): kept, though no playlist is pinned.
     ask.called = { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }], ifDefault: playlist.id };
     const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
-    expect(card.lines).toEqual(['Spot Pier 9, as drafted now', expect.stringMatching(/^Changes what no screen plays now\.|^Changes what \d+ screens? play/), "Pier 9 still shows its template's sample text (headline): pressing publishes it anyway."]);
+    expect(card.lines).toEqual([
+      'Spot Pier 9, as drafted now',
+      expect.stringMatching(/^Changes what no screen plays now\.|^Changes what \d+ screens? play/),
+      "Pier 9 still shows its template's sample text (headline): pressing publishes it anyway.",
+    ]);
     const all = await raw(await s.member.post('/api/agent/chat', body));
     expect(doneOf(all)).toMatchObject({ ok: true });
     const audit = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'publish');
@@ -783,7 +807,10 @@ describe('confirmation cards (#269)', () => {
     // Pressed: a read, refused as its address does not answer, audited all the same, with the card, its run and call.
     await raw(await s.member.post('/api/agent/chat', shown.body));
     const read = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'read_table');
-    expect(JSON.parse(read?.detailJson ?? '{}').confirmed).toMatchObject({ summary: expect.stringMatching(/^Read a table from an address/), callId: expect.any(String) });
+    expect(JSON.parse(read?.detailJson ?? '{}').confirmed).toMatchObject({
+      summary: expect.stringMatching(/^Read a table from an address/),
+      callId: expect.any(String),
+    });
     const [screen] = await s.scope.screens.list();
     steps.splice(0, steps.length, { calls: [{ name: 'restart_screen', input: { screenId: screen?.id } }] });
     s.model.asked.length = 0;
@@ -797,7 +824,9 @@ describe('confirmation cards (#269)', () => {
     const off = pressOf(await raw(await s.ask('q')), 'q').card;
     expect(off).toMatchObject({
       title: 'Turn the display off',
-      lines: [`${screen?.name}'s display turns off now, whatever its display hours say, until its next scheduled display change, or 12 hours at most, then follows its hours again.`],
+      lines: [
+        `${screen?.name}'s display turns off now, whatever its display hours say, until its next scheduled display change, or 12 hours at most, then follows its hours again.`,
+      ],
     });
   });
 });
