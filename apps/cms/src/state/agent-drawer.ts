@@ -1,9 +1,13 @@
 /**
- * The agent's drawer (#267, docs/proposals/cms-agent.md): open or not, the conversation, and the
- * turn on its way, which is asked with the page shown when it is asked. A turn (`POST /api/agent/chat`) streams one JSON object a
- * line: each tool call as it runs, shown as progress, then the answer as a card, or why it ended. The
- * conversation lives only here, so a reload forgets it; each question sends it back, the last
- * `CHAT_HISTORY` messages of it.
+ * The agent's drawer (#267, #350, docs/proposals/cms-agent.md): open or not, the conversation, and
+ * the turn on its way, which is asked with the page shown when it is asked. A turn is TanStack AI's
+ * `ChatClient` (`@tanstack/ai-client`), driven from here rather than by `useChat`, so the drawer keeps
+ * the CMS's state rules: it posts to `POST /api/agent/chat` and reads its server-sent events, the
+ * API's own (`CHAT_EVENTS`): each tool call's card as it runs, the card's text as it is written (read
+ * by the API from the answer alone), then the answer's card, or why it ended. Text shown of a turn
+ * that then fails is dropped: only a whole card is kept. The cards are the drawer's own, kept here, never rebuilt from the client's messages (a pause would turn them back to
+ * raw JSON, #346). The conversation lives only here, so a reload forgets it; each question sends it
+ * back, the last `CHAT_HISTORY` turns of it, each answer its card's text, groups and notes.
  *
  * An answer may hold drafts (#268): changes the agent proposes, written only when the person saves
  * them (`POST /api/agent/apply`). Their summary and reach are worked out here, from the pages' own
@@ -16,12 +20,16 @@
 import {
   type AnswerCard,
   type ApplyAnswer,
+  CHAT_EVENTS,
   CHAT_HISTORY,
-  type ChatEvent,
-  type ChatRequestBody,
+  CHAT_HISTORY_CHARS,
+  CHAT_PROBLEMS,
+  type ChatContext,
+  type ChatTurn,
   type ProposedCall,
-  type TraceItem,
+  type ToolCard,
 } from '@signforge/api/agent-chat';
+import { ChatClient, fetchServerSentEvents } from '@tanstack/ai-client';
 import type { FieldMark } from '@signforge/api/agent-inline';
 import { orgOnScreen } from '~/lib/live';
 import { type DraftSummary, summarize } from '~/lib/draft-summary';
@@ -65,8 +73,10 @@ interface AgentDrawerState {
   messages: DrawerMessage[];
   question: string;
   asking: boolean;
-  /** The turn's tool calls so far, in words. */
-  progress: TraceItem[];
+  /** The turn's tool calls so far, each its card. */
+  progress: ToolCard[];
+  /** The answer's text as far as it has streamed: dropped if the turn fails. */
+  streaming: string;
   /**
    * Which button opened the drawer, where focus goes back when it closes: the sidebar's (which the
    * drawer folds, so its element is another by then) or the top bar's; none from the command menu.
@@ -158,12 +168,45 @@ const idsOf = (params: unknown): Record<string, string> =>
     ? Object.fromEntries(Object.entries(params).filter((e): e is [string, string] => typeof e[1] === 'string'))
     : {};
 
-const closed = (): AgentDrawerState => ({ open: false, messages: [], question: '', asking: false, progress: [], opener: null });
+const closed = (): AgentDrawerState => ({ open: false, messages: [], question: '', asking: false, progress: [], streaming: '', opener: null });
+
+/**
+ * The conversation sent back with a question: the person's words and each answer's card, its text,
+ * groups and notes (never its trace or drafts, which the API does not take back as the tools'), the
+ * last `CHAT_HISTORY` turns within `CHAT_HISTORY_CHARS`, the oldest left out first, starting with the
+ * person's words. A turn that gave no answer is left out.
+ */
+function historyOf(messages: readonly DrawerMessage[]): ChatTurn[] {
+  let turns = messages
+    .flatMap((m): ChatTurn[] =>
+      m.role === 'user'
+        ? [{ role: 'user', text: m.text }]
+        : m.role === 'assistant'
+          ? [{ role: 'assistant', card: { text: m.card.text, groups: m.card.groups, steps: m.card.steps } }]
+          : [],
+    )
+    .slice(-CHAT_HISTORY);
+  while (turns[0] && (turns[0].role === 'assistant' || JSON.stringify(turns).length > CHAT_HISTORY_CHARS)) turns = turns.slice(1);
+  return turns;
+}
+
+/** A fetch that says a refused request in the API's own words (`no_model`, `rate_limited`…), as a `Refusal`. */
+const said: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init).catch((cause: unknown) => {
+    throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
+  });
+  if (!res.ok) throw await refusalOf(res, `Something went wrong (${res.status}).`);
+  return res;
+};
 
 export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get, { router, queryClient }) => {
   const drawer = (change: (d: AgentDrawerState) => AgentDrawerState) => set((s) => ({ agentDrawer: change(s.agentDrawer) }));
   /** The turn on its way: forgetting the drawer stops it, and what it would still say is dropped. */
-  let running: AbortController | null = null;
+  let running: ChatClient | null = null;
+  /** The conversation's thread, for every turn of it; a new one once forgotten. */
+  let thread: string | null = null;
+  /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
+  let conversation = 0;
 
   /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
   const drafts = (index: number, change: (d: Drafts) => Drafts) =>
@@ -185,7 +228,12 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     const orgId = orgOnScreen(router);
     if (!at || !orgId) return;
     const calls = at.card.drafts;
-    drafts(index, (d) => ({ ...d, shown: { state: 'working' } }));
+    // Only this conversation's: a drawer forgotten meanwhile (the org switched) holds another, or none.
+    const asked = conversation;
+    const write = (change: (d: Drafts) => Drafts) => {
+      if (conversation === asked) drafts(index, change);
+    };
+    write((d) => ({ ...d, shown: { state: 'working' } }));
     try {
       const [fleet, schedule, playlists, spots, templates] = await Promise.all([
         queryClient.query(screensQuery(orgId)),
@@ -210,9 +258,9 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const summaries = calls.map((call) => summarize(call, context));
       const problem = summaries.find((s) => 'problem' in s);
       const shown = summaries.filter((s) => 'lines' in s);
-      drafts(index, (d) => ({ ...d, shown: problem ? { state: 'failed', reason: problem.problem } : { state: 'shown', summaries: shown } }));
+      write((d) => ({ ...d, shown: problem ? { state: 'failed', reason: problem.problem } : { state: 'shown', summaries: shown } }));
     } catch {
-      drafts(index, (d) => ({ ...d, shown: { state: 'failed', reason: 'Could not read your screens, schedule and content to show what the changes do.' } }));
+      write((d) => ({ ...d, shown: { state: 'failed', reason: 'Could not read your screens, schedule and content to show what the changes do.' } }));
     }
   }
 
@@ -373,8 +421,11 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     },
 
     forgetAgentDrawer() {
-      running?.abort();
+      // Stopped: its request aborted, so the API stops the turn too (#335).
+      running?.stop();
       running = null;
+      thread = null;
+      conversation++;
       const { open } = get().agentDrawer;
       set({ agentDrawer: closed() });
       if (open) get().setRightPanel(false);
@@ -390,59 +441,70 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     async askAgent(asked) {
       const { question: typed, asking: busy, messages } = get().agentDrawer;
       // The page shown now: the person may have moved since the drawer opened.
-      const page = { path: router.state.location.pathname, ids: idsOf(router.state.matches.at(-1)?.params) };
+      const page: ChatContext['page'] = { path: router.state.location.pathname, ids: idsOf(router.state.matches.at(-1)?.params) };
       const question = (asked ?? typed).trim();
       if (!question || busy) return;
-      type Said = ChatRequestBody['messages'][number];
-      const said = messages.flatMap((m): Said[] =>
-        m.role === 'user' ? [{ role: 'user', text: m.text }] : m.role === 'assistant' ? [{ role: 'assistant', text: m.card.text }] : [],
-      );
-      const asking: Said = { role: 'user', text: question };
-      const history: Said[] = [...said, asking].slice(-CHAT_HISTORY);
-      // The history must start with the person's words.
-      while (history[0]?.role === 'assistant') history.shift();
-      drawer((d) => ({ ...d, messages: [...d.messages, { role: 'user', text: question }], question: asked ? d.question : '', asking: true, progress: [] }));
-      const turn = new AbortController();
+      const context: ChatContext = { history: historyOf(messages), page };
+      drawer((d) => ({
+        ...d,
+        messages: [...d.messages, { role: 'user', text: question }],
+        question: asked ? d.question : '',
+        asking: true,
+        progress: [],
+        streaming: '',
+      }));
+      thread ??= crypto.randomUUID();
+      let card: AnswerCard | undefined;
+      let ended: { code: string | undefined; message: string } | undefined;
+      let failure: Error | undefined;
+      const turn: ChatClient = new ChatClient({
+        threadId: thread,
+        // Its `connect` alone: the API keeps no run to join again or read back, so a stream that breaks off ends the turn.
+        connection: { connect: fetchServerSentEvents('/api/agent/chat', async () => ({ headers: await tabOrgHeaders(), fetchClient: said })).connect },
+        onChunk: (chunk) => {
+          if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.call) {
+            const shown: ToolCard = chunk.value;
+            mine((d) => ({ ...d, progress: [...d.progress, shown] }));
+          } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.text) {
+            // The card's text as far as it is written, which the API reads from the answer alone ('' takes it back).
+            const text: string = chunk.value.text;
+            mine((d) => ({ ...d, streaming: text }));
+          } else if (chunk.type === 'CUSTOM' && chunk.name === CHAT_EVENTS.answer) card = chunk.value;
+          else if (chunk.type === 'RUN_ERROR') ended = { code: chunk.code, message: chunk.message };
+        },
+        onError: (err) => {
+          // Our refusal, as the client wraps a failed read (`StreamReadError`): the API's words, not the client's.
+          let cause: unknown = err;
+          while (cause instanceof Error && !(cause instanceof Refusal)) cause = cause.cause;
+          failure = cause instanceof Refusal ? cause : err;
+        },
+      });
       running = turn;
       // Only this turn's, while it is the drawer's: once forgotten, it changes nothing.
-      const mine = (change: (d: AgentDrawerState) => AgentDrawerState) => {
+      function mine(change: (d: AgentDrawerState) => AgentDrawerState) {
         if (running === turn) drawer(change);
-      };
-      const say = (message: DrawerMessage) => mine((d) => ({ ...d, messages: [...d.messages, message] }));
-      /** The answer's drafts being worked out: the turn ends once they are. */
-      let showing: Promise<void> | undefined;
-      const hear = (event: ChatEvent) => {
-        if (event.type === 'call') mine((d) => ({ ...d, progress: [...d.progress, event.item] }));
-        else if (event.type === 'answer') {
-          const drafts: Drafts | null = event.card.drafts.length
-            ? { status: 'proposed', shown: { state: 'working' }, results: [], undone: [], versions: {}, error: null, confirming: false }
-            : null;
-          say({ role: 'assistant', card: event.card, drafts });
-          if (drafts) showing = summarizeAt(get().agentDrawer.messages.length - 1);
-        } else say({ role: 'error', text: event.message, inSettings: IN_SETTINGS.has(event.error) });
-      };
-      try {
-        const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
-        const body: ChatRequestBody = { messages: history, page };
-        const res = await fetch('/api/agent/chat', { method: 'POST', headers, body: JSON.stringify(body), signal: turn.signal }).catch((cause: unknown) => {
-          throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
-        });
-        if (!res.ok || !res.body) throw await refusalOf(res, `Something went wrong (${res.status}).`);
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let rest = '';
-        for (let read = await reader.read(); !read.done; read = await reader.read()) {
-          const lines = (rest + read.value).split('\n');
-          rest = lines.pop() ?? '';
-          for (const line of lines) if (line.trim()) hear(JSON.parse(line));
-        }
-        if (rest.trim()) hear(JSON.parse(rest));
-        await showing;
-      } catch (err) {
-        say({ role: 'error', text: toolMessage(err), inSettings: err instanceof Refusal && IN_SETTINGS.has(err.code) });
-      } finally {
-        mine((d) => ({ ...d, asking: false, progress: [] }));
-        if (running === turn) running = null;
       }
+      const say = (message: DrawerMessage) => mine((d) => ({ ...d, messages: [...d.messages, message] }));
+      await turn.sendMessage(question, context);
+      if (running !== turn) return turn.dispose();
+      // What streamed goes: the answer is its whole card, or there is none.
+      mine((d) => ({ ...d, streaming: '' }));
+      if (card) {
+        const drafts: Drafts | null = card.drafts.length
+          ? { status: 'proposed', shown: { state: 'working' }, results: [], undone: [], versions: {}, error: null, confirming: false }
+          : null;
+        say({ role: 'assistant', card, drafts });
+        // The turn ends once its drafts are worked out.
+        if (drafts) await summarizeAt(get().agentDrawer.messages.length - 1);
+      } else if (failure instanceof Refusal) say({ role: 'error', text: toolMessage(failure), inSettings: IN_SETTINGS.has(failure.code) });
+      // Why the API ended it, in its words; the client ends a stream that broke off as one too, in its own, which are not said.
+      else if (ended && CHAT_PROBLEMS.some((p) => p === ended?.code))
+        say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
+      else say({ role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false });
+      mine((d) => ({ ...d, asking: false, progress: [] }));
+      // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
+      if (running === turn) running = null;
+      turn.dispose();
     },
   };
 };
