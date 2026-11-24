@@ -238,19 +238,28 @@ describe('requests', () => {
   });
 
   it("to the drawer's turn write nothing of ours, its tools' reads included", async () => {
-    const steps: Block[][] = [
-      [{ type: 'tool_use', id: 'toolu_1', name: 'list_screens', input: {} }],
-      [{ type: 'tool_use', id: 'toolu_2', name: 'answer', input: { text: 'Fine.' } }],
+    // A read, then the answer's card as JSON (#350).
+    const steps: [Block[], string][] = [
+      [[{ type: 'tool_use', id: 'toolu_1', name: 'list_screens', input: {} }], 'tool_use'],
+      [[{ type: 'text', text: JSON.stringify({ text: 'Fine.', groups: [], steps: [] }) }], 'end_turn'],
     ];
     let n = 0;
-    const model: typeof fetch = async () => anthropicStream(`msg_${n}`, 'm', steps[Math.min(n++, 1)]!, 'tool_use');
+    const model: typeof fetch = async () => {
+      const [blocks, stop] = steps[Math.min(n++, 1)]!;
+      return anthropicStream(`msg_${n}`, 'm', blocks, stop);
+    };
     const asking = testApp({ agent: { reach: { fetch: model, guards: { fetch, resolve: async () => ['93.184.215.14'] } } } });
     const member = new Client(asking, owner.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of owner.jar) member.jar.set(k, v);
     expect((await owner.tool('save_ai_provider', { provider: 'anthropic', capableModel: 'claude-sonnet-5-5' })).status).toBe(200);
     writes.length = 0;
-    const res = await member.post('/api/agent/chat', { messages: [{ role: 'user', text: 'How are the screens?' }], page: { path: '/screens', ids: {} } });
-    expect(await res.text()).toContain('"type":"answer"');
+    const res = await member.post('/api/agent/chat', {
+      threadId: 'thread-1',
+      runId: 'run-1',
+      messages: [{ id: 'm1', role: 'user', content: 'How are the screens?' }],
+      forwardedProps: { history: [], page: { path: '/screens', ids: {} } },
+    });
+    expect(await res.text()).toContain('"name":"signforge.answer"');
     expect(ours()).toEqual([]);
 
     // Its drafts, saved (#268): the change and its audit row, and nothing else.

@@ -86,3 +86,45 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await expect(page.getByRole('row', { name: /Made the default/ })).toBeVisible();
   await screen.context().close();
 });
+
+test('a default never published goes live only when the person ticks it: not with an entry for another playlist, with a takeover that ticks it (#393)', async ({
+  page,
+}) => {
+  await signInAs(page, `e2e-unpublished-default-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Larch Lane', ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
+  const made = async (name: string) => {
+    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { greeting: name } });
+    return (await tool(page, 'create_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] })).playlist.id as string;
+  };
+  const allDay = await made('All day');
+  await made('Lunch');
+  // The default, chosen and never published.
+  await tool(page, 'set_default_playlist', { playlistId: allDay });
+  const published = async () => (await tool(page, 'get_playlist', { playlistId: allDay })).playlist.published;
+
+  await page.goto('/schedule');
+  await hydrated(page);
+  // An entry for another playlist: the dialog says the default is not published, and leaves it so unless ticked.
+  await page.getByRole('button', { name: 'Schedule a playlist' }).click();
+  const entry = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await entry.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Lunch' });
+  await expect(entry.getByText('All day is the default playlist but is not published yet')).toBeVisible();
+  const box = entry.getByRole('checkbox', { name: 'Publish All day too, with its unpublished spots' });
+  await expect(box).not.toBeChecked();
+  await axe(page);
+  await entry.getByRole('button', { name: 'Save and publish' }).click();
+  await expect(entry).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Entries' }).getByRole('listitem').first()).toContainText('Published');
+  expect(await published()).toBe(false);
+
+  // A takeover, the box ticked: the default goes live with it.
+  await page.getByRole('button', { name: 'Take over screens' }).click();
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await takeover.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Lunch' });
+  await takeover.getByRole('checkbox', { name: 'Publish All day too, with its unpublished spots' }).check();
+  await takeover.getByRole('button', { name: 'Take over now' }).click();
+  await expect(takeover).toBeHidden();
+  await expect.poll(published).toBe(true);
+});

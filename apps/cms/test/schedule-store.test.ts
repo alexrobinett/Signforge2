@@ -74,7 +74,7 @@ describe('a retried create (#149)', () => {
     expect(calls.map((c) => c.name)).toEqual(['start_takeover', 'start_takeover']);
     expect(calls[1]!.input.idempotencyKey).toBe(calls[0]!.input.idempotencyKey);
     // With the default to make first when there is none: the takeover's playlist, as the dialog prefills it (#243).
-    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], 'pls_flash');
+    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], { choice: 'pls_flash', publishDefault: false });
   });
 
   it('the next new entry is a new creation, with a new key', async () => {
@@ -149,8 +149,8 @@ describe('a dialog closed while it saves, and opened again (review of #153, 2)',
     await Promise.all([starting, again]);
     // Each with its own dialog's default to make first, should there be none (#243).
     expect(publishSchedule.mock.calls).toEqual([
-      [ORG, ['sch_1'], 'pls_flash'],
-      [ORG, ['sch_2'], 'pls_lunch'],
+      [ORG, ['sch_1'], { choice: 'pls_flash', publishDefault: false }],
+      [ORG, ['sch_2'], { choice: 'pls_lunch', publishDefault: false }],
     ]);
   });
 });
@@ -178,7 +178,7 @@ describe('save and publish (#181)', () => {
     await store.getState().saveAndPublishEntry(ORG);
     expect(calls.map((c) => c.name)).toEqual(['create_schedule_entry']);
     expect(calls[0]!.input).toMatchObject({ playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
-    expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1', 'pls_holiday');
+    expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1', { choice: 'pls_holiday', publishDefault: false });
     expect(store.getState().schedule.entries).toEqual({});
   });
 
@@ -198,13 +198,13 @@ describe('the default playlist a publish from the dialogs asks for, with none ye
     store.getState().openNewEntry(ORG, { playlistId: 'pls_breakfast', target: 'screen', screenId: 'scr_1' });
     replies.push(made);
     await store.getState().saveAndPublishEntry(ORG);
-    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', 'pls_breakfast');
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', { choice: 'pls_breakfast', publishDefault: false });
 
     store.getState().openNewEntry(ORG, { playlistId: 'pls_breakfast', target: 'org', from: '06:00', to: '10:30' });
     store.getState().editEntry({ firstDefault: '' });
     replies.push(made);
     await store.getState().saveAndPublishEntry(ORG);
-    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', '');
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', { choice: '', publishDefault: false });
   });
 
   it('passes none for an entry on every screen at all hours: its publish makes the default itself', async () => {
@@ -212,7 +212,7 @@ describe('the default playlist a publish from the dialogs asks for, with none ye
     store.getState().openNewEntry(ORG, { playlistId: 'pls_all_day' });
     replies.push(made);
     await store.getState().saveAndPublishEntry(ORG);
-    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', undefined);
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', { choice: undefined, publishDefault: false });
   });
 
   it("passes a takeover's chosen default, another playlist than its own", async () => {
@@ -221,6 +221,21 @@ describe('the default playlist a publish from the dialogs asks for, with none ye
     store.getState().editTakeover({ firstDefault: 'pls_all_day' });
     replies.push(made);
     await store.getState().startTakeover(ORG);
-    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], 'pls_all_day');
+    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], { choice: 'pls_all_day', publishDefault: false });
+  });
+
+  it('passes the box ticked to publish a default never published, from either dialog, and only then (#393)', async () => {
+    const { store, publishEntry, publishSchedule } = scheduleStore();
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_breakfast', target: 'screen', screenId: 'scr_1' });
+    store.getState().editEntry({ publishDefault: true });
+    replies.push(made);
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(publishEntry).toHaveBeenLastCalledWith(ORG, 'sch_1', { choice: 'pls_breakfast', publishDefault: true });
+
+    store.getState().openTakeover(ORG, { playlistId: 'pls_flash' });
+    store.getState().editTakeover({ publishDefault: true });
+    replies.push(made);
+    await store.getState().startTakeover(ORG);
+    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], { choice: 'pls_flash', publishDefault: true });
   });
 });
