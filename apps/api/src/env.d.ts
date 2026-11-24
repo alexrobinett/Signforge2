@@ -46,7 +46,14 @@ interface AgentSettings {
   /** Dev only: where the Anthropic adapter sends its requests instead of Anthropic's API (src/agent/provider.ts). The CMS e2e points it at a stub. */
   ANTHROPIC_BASE_URL?: string;
 }
-interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings {}
+/** Reading agents' calls back (src/agents/calls.ts): Analytics Engine's SQL API. Unset in dev, which keeps its calls in the process. */
+interface AgentCallSettings {
+  /** The Cloudflare account the AGENT_CALLS dataset is in. */
+  ANALYTICS_ACCOUNT_ID?: string;
+  /** An API token with Account Analytics: Read, for the SQL API. A secret. Without it, a deployed environment shows no call numbers. */
+  ANALYTICS_TOKEN?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings, AgentCallSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings, AgentCallSettings {}
 }

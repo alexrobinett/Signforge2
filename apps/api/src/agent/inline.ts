@@ -130,6 +130,23 @@ const SETTINGS = 'Settings, AI & agents';
 const refuse = (c: Context<ApiEnv>, error: InlineProblem, message: string) => c.json({ error, message }, STATUSES[error]);
 
 /**
+ * An agent route's body, parsed with the route's schema, or the response refusing it. JSON only, as the
+ * tool route: a cross-site form cannot send it without a CORS preflight, which this API never grants.
+ */
+export async function readBody<S extends z.ZodType>(c: Context<ApiEnv>, schema: S): Promise<z.output<S> | Response> {
+  if (!/^application\/json\b/i.test(c.req.header('content-type') ?? ''))
+    return c.json({ error: 'invalid_input', message: 'send the request as application/json' }, 415);
+  let body: unknown;
+  try {
+    body = JSON.parse(await c.req.text());
+  } catch {
+    return refuse(c, 'invalid_input', 'the body is not JSON');
+  }
+  const parsed = schema.safeParse(body);
+  return parsed.success ? parsed.data : refuse(c, 'invalid_input', z.prettifyError(parsed.error));
+}
+
+/**
  * The types a fill writes. A colour or a switch is the look's, chosen by a person; an image is
  * picked or uploaded. A choice (`select`) is too, for now: templates use it for their look (a theme,
  * a crawl's speed), what shows (a ticker on or off) and how loud (an alert's severity) as much as for
@@ -439,18 +456,8 @@ export const dayIn = (timeZone: string, now: number) =>
 
 export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, deps: AgentDeps = {}) {
   api.post('/agent/inline', async (c) => {
-    // JSON only, as the tool route: a cross-site form cannot send it without a CORS preflight, which this API never grants.
-    if (!/^application\/json\b/i.test(c.req.header('content-type') ?? ''))
-      return c.json({ error: 'invalid_input', message: 'send the request as application/json' }, 415);
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return refuse(c, 'invalid_input', 'the body is not JSON');
-    }
-    const parsed = inlineRequest.safeParse(body);
-    if (!parsed.success) return refuse(c, 'invalid_input', z.prettifyError(parsed.error));
-    const request = parsed.data;
+    const request = await readBody(c, inlineRequest);
+    if (request instanceof Response) return request;
     const { source } = request;
     const spotId = 'spotId' in request ? request.spotId : undefined;
     const templateVersionId = 'templateVersionId' in request ? request.templateVersionId : undefined;
@@ -598,17 +605,9 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
 
   // Keep (#264): the review's data, written as the agent's, through update_spot with the version it was made on.
   api.post('/agent/inline/keep', async (c) => {
-    if (!/^application\/json\b/i.test(c.req.header('content-type') ?? ''))
-      return c.json({ error: 'invalid_input', message: 'send the request as application/json' }, 415);
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return refuse(c, 'invalid_input', 'the body is not JSON');
-    }
-    const parsed = keepRequest.safeParse(body);
-    if (!parsed.success) return refuse(c, 'invalid_input', z.prettifyError(parsed.error));
-    const { spotId, ifVersion, data } = parsed.data;
+    const keep = await readBody(c, keepRequest);
+    if (keep instanceof Response) return keep;
+    const { spotId, ifVersion, data } = keep;
     const caller: Caller = { ...cmsCaller(c, connectors), actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID } };
     const spot = await spotToFill(c.var.org, spotId);
     if ('problem' in spot) return refuse(c, spot.problem, spot.message);

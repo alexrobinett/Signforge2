@@ -179,10 +179,15 @@ function summary(event: AlertEvent): string {
         ? `v${publish.revision} reached every screen in ${event.org.name}`
         : `v${publish.revision} finished in ${event.org.name}: playing on ${playing} of ${screens} screens`;
     }
+    case 'agent.refused':
+      return `${agentName(event.data.grant.client)} in ${event.org.name} was refused ${event.data.refusals} times this hour`;
     case 'test':
       return event.data.message;
   }
 }
+
+/** An agent's client as an alert names it: its name when a page may show it (`shownClient`), else not at all. */
+export const agentName = (client: { name: string | null }) => (client.name === null ? 'An unverified agent' : `The agent “${client.name}”`);
 
 /** `&`, `<` and `>` are Slack's control characters: names are escaped, as the docs ask. */
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -222,6 +227,14 @@ function slackMessage(event: AlertEvent) {
       const state = playing === screens ? `:white_check_mark: ${name} reached *every screen*` : `:white_check_mark: ${name} *finished*`;
       const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, reach, at] }];
       if (publish.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${publish.url}|Open the rollout in SignForge>`)] });
+      return { text: esc(summary(event)), blocks };
+    }
+    case 'agent.refused': {
+      const { grant, refusals, tool, needs } = event.data;
+      const state = `:no_entry: ${esc(agentName(grant.client))} was *refused* ${refusals} times this hour`;
+      const latest = mrkdwn(`*Latest*\n${esc(tool)}${needs ? `, which needs ${esc(needs)}` : ''}`);
+      const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, latest] }];
+      if (grant.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${grant.url}|Open the agent in SignForge>`)] });
       return { text: esc(summary(event)), blocks };
     }
   }

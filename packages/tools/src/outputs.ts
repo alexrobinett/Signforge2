@@ -698,6 +698,29 @@ const agentGrantOutput = z.object({
 });
 export type AgentGrantView = z.infer<typeof agentGrantOutput>;
 
+/** One call an agent made over /mcp (M4-08), as recorded: what was called and how it ended, never its input, output or message. */
+export const agentCallOutput = z.object({
+  at: z.number().describe('When, in ms since the epoch'),
+  tool: z.string().describe('The tool called, as the agent named it; tools/list for a listing'),
+  result: z
+    .string()
+    .describe("'ok', a refusal's code (forbidden, invalid_input, not_found, conflict, rate_limited, unavailable, unknown_tool), or 'error' for a fault"),
+  change: z.boolean().describe('Whether the tool changes data (its changes are in the audit log)'),
+  needs: z.string().nullable().describe('The scope the tool needs; null for a name that is no tool, or tools/list'),
+  target: z.object({ kind: z.string(), id: z.string() }).nullable().describe("A change's target: the audit log's rows for it are under this"),
+});
+export type AgentCall = z.infer<typeof agentCallOutput>;
+
+/** A grant's calls over a period (M4-08). */
+export const agentUsageOutput = z.object({
+  grantId: z.string(),
+  calls: z.number().int().describe('Every call, tools/list and refusals included'),
+  changes: z.number().int().describe('Calls that changed data'),
+  drafts: z.number().int().describe('Changes to drafts: calls under content:draft that changed data'),
+  refusals: z.number().int().describe('Calls refused, for any reason'),
+});
+export type AgentUsage = z.infer<typeof agentUsageOutput>;
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
@@ -880,6 +903,12 @@ export const outputs = {
   get_agent_grant: z.object({ grant: agentGrantOutput }),
   update_agent_grant_scopes: z.object({ grant: agentGrantOutput }),
   revoke_agent_grant: z.object({ revoked: z.string().describe("The revoked grant's id") }),
+  get_agent_grant_usage: z.object({
+    since: z.number().describe('The start of the period counted, in ms since the epoch: the last 7 days'),
+    grants: z.array(agentUsageOutput).describe('Each grant asked about, or each the caller may see'),
+    recent: z.array(agentCallOutput).describe('With grantId: its latest calls, newest first, reads and refusals included'),
+    lastRefusal: agentCallOutput.nullable().describe('With grantId: its latest refused call in the period, if any'),
+  }),
   list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
   invite_member: z.object({ invitation: invitationOutput }),
   cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id") }),

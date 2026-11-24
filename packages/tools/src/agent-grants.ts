@@ -28,14 +28,19 @@ const scopesOf = (row: AgentGrantRow): Scope[] => {
   return SCOPES.filter((s) => Array.isArray(granted) && granted.includes(s));
 };
 
-function grantView({ grant, redirectUrisJson }: { grant: AgentGrantRow; redirectUrisJson: string }): AgentGrantView {
+/** A connected grant's client as a page names it (`shownClient`), by the first redirect it registered. */
+export function grantClient({ grant, redirectUrisJson }: { grant: AgentGrantRow; redirectUrisJson: string }) {
   // The provider's own JSON for the client's registered redirects; a client registers at least one.
   const redirects: unknown = JSON.parse(redirectUrisJson);
   const first = Array.isArray(redirects) ? redirects[0] : undefined;
   if (typeof first !== 'string') throw new Error(`client ${grant.clientId} has no redirect URI`);
+  return shownClient(grant.clientId, grant.clientName, first);
+}
+
+function grantView({ grant, redirectUrisJson }: { grant: AgentGrantRow; redirectUrisJson: string }): AgentGrantView {
   return {
     id: grant.id,
-    client: shownClient(grant.clientId, grant.clientName, first),
+    client: grantClient({ grant, redirectUrisJson }),
     scopes: scopesOf(grant),
     grantedBy: grant.userId,
     createdAt: grant.createdAt,
@@ -147,4 +152,38 @@ const revokeAgentGrant = defineTool({
   },
 });
 
-export const agentGrantTools = [listAgentGrants, getAgentGrant, updateAgentGrantScopes, revokeAgentGrant];
+/** The period a grant's numbers count (M4-08): the last 7 days. */
+const WEEK_MS = 7 * 24 * 60 * 60_000;
+/** How many of a grant's latest calls its page lists. */
+const RECENT_CALLS = 20;
+
+const getAgentGrantUsage = defineTool({
+  name: 'get_agent_grant_usage',
+  description:
+    "How connected agents have been used over the last 7 days: each one's calls, changes, draft changes and refusals (refused forbidden or rate_limited), from the call log (never a call's input or output). With grantId, that agent's alone, with its latest calls, reads and refusals included, and its latest refusal. Without, every agent the caller may see: for an owner every member's, for anyone else their own. People only. Returns { since, grants, recent, lastRefusal }.",
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  people: true,
+  needs: ['agentCalls'],
+  input: z.object({ grantId: grantId.optional() }),
+  output: outputs.get_agent_grant_usage,
+  example: { grantId: 'agt_example' },
+  handler: async ({ org, actor, role, input, services: { agentCalls } }) => {
+    const ids = input.grantId
+      ? [(await requireGrant(org, role, actor, input.grantId)).grant.id]
+      : (await org.agentGrants.connected(visibleTo(role, actor))).map((r) => r.grant.id);
+    const since = Date.now() - WEEK_MS;
+    const one = input.grantId;
+    const [counted, recent, lastRefusal] = await Promise.all([
+      ids.length ? agentCalls.usage(ids, since) : [],
+      one ? agentCalls.recent(one, since, RECENT_CALLS) : [],
+      one ? agentCalls.lastRefusal(one, since) : null,
+    ]);
+    // Every grant asked about, once: one with no calls is all zeros.
+    const grants = ids.map((grantId) => counted.find((u) => u.grantId === grantId) ?? { grantId, calls: 0, changes: 0, drafts: 0, refusals: 0 });
+    return { since, grants, recent, lastRefusal };
+  },
+});
+
+export const agentGrantTools = [listAgentGrants, getAgentGrant, updateAgentGrantScopes, revokeAgentGrant, getAgentGrantUsage];

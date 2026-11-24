@@ -139,6 +139,18 @@ describe('the org a new session starts in (#182)', () => {
     return { c, ids };
   }
 
+  /**
+   * A second owner of `orgId`, so the member's own membership can end: an org always keeps an owner
+   * (#292). Returns the statement that ends it, as leaving does.
+   */
+  async function secondOwner(t: ReturnType<typeof testApp>, orgId: string) {
+    const { user } = await new Client(t).signIn(email('next-owner'));
+    await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)")
+      .bind(`mem-${user.id}`, orgId, user.id, new Date().toISOString())
+      .run();
+    return env.DB.prepare('DELETE FROM member WHERE organizationId = ? AND userId <> ?').bind(orgId, user.id);
+  }
+
   it("is a member's only org, from the cookie the sign-in sets", async () => {
     const t = testApp();
     const addr = email('one-org');
@@ -191,7 +203,7 @@ describe('the org a new session starts in (#182)', () => {
     const addr = email('left');
     const { c, ids } = await memberOf(t, addr, ['Stay', 'Also', 'Gone']);
     expect((await c.setActive(ids[2]!)).status).toBe(200);
-    await env.DB.prepare('DELETE FROM member WHERE organizationId = ?').bind(ids[2]).run();
+    await (await secondOwner(t, ids[2]!)).run();
 
     const fresh = new Client(t);
     await fresh.signIn(addr);
@@ -247,12 +259,13 @@ describe('the org a new session starts in (#182)', () => {
     const t = testApp();
     const addr = email('revoked');
     const { ids } = await memberOf(t, addr, ['Only']);
+    const leave = await secondOwner(t, ids[0]!);
     // The membership is deleted right after the hook reads it, before Better Auth inserts the session.
     let revoked = false;
     const revokeAfterRead = (sql: string) => async () => {
       if (revoked || !/lastActiveOrganizationId/.test(sql) || !/"member"/.test(sql)) return;
       revoked = true;
-      await env.DB.prepare('DELETE FROM member WHERE organizationId = ?').bind(ids[0]).run();
+      await leave.run();
     };
     const racing = new Client(t, undefined, { ...env, DB: racingD1(revokeAfterRead) });
     await racing.signIn(addr);

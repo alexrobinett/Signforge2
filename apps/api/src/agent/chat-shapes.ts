@@ -4,6 +4,7 @@
  * it runs and the answer as a card, or why the turn ended. Types and limits only, so the CMS imports
  * it without the API's code or schemas; the route parses a request with its own (./chat.ts).
  */
+import type { ToolErrorCode } from '@signforge/tools/outputs';
 
 /** The most turns of a conversation the drawer sends back: earlier ones are left out, oldest first. */
 export const CHAT_HISTORY = 20;
@@ -36,11 +37,30 @@ export interface TraceItem {
   summary: string;
 }
 
+/**
+ * A change the drawer proposes (#268): the tool and its input as the person would save it (with the
+ * `ifVersion` read, so a save made since refuses it), its target, and the target as it was read, for
+ * the change summary and Undo. Nothing is written until the person saves it (`POST /api/agent/apply`).
+ */
+export interface ProposedCall {
+  tool: string;
+  input: Record<string, unknown>;
+  target: { kind: string; id: string } | null;
+  before: Record<string, unknown> | null;
+}
+
 export interface AnswerCard {
   text: string;
   groups: AnswerGroup[];
   steps: AnswerStep[];
   trace: TraceItem[];
+  /** The changes proposed, in order: none for a question that changes nothing. */
+  drafts: ProposedCall[];
+}
+
+/** What a save of the drafts did: each written in order, the first refused stopping the rest. */
+export interface ApplyAnswer {
+  results: ({ tool: string; ok: true; output: unknown } | { tool: string; ok: false; error: ToolErrorCode; message: string })[];
 }
 
 /** Why a turn did not run, or ended before its answer; `message` says it in a sentence. */

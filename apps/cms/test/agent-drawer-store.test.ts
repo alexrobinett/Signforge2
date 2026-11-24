@@ -7,6 +7,11 @@ import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
+// The pages' reads the drafts' summaries use (#268): none is drafted here.
+vi.mock('~/queries/screens', () => ({ screensQuery: vi.fn() }));
+vi.mock('~/queries/schedule', () => ({ scheduleQuery: vi.fn() }));
+vi.mock('~/queries/playlists', () => ({ playlistsQuery: vi.fn() }));
+vi.mock('~/queries/spots', () => ({ spotsQuery: vi.fn(), templatesQuery: vi.fn() }));
 
 const sent: unknown[] = [];
 let answer: () => Response = () => new Response('');
@@ -33,7 +38,13 @@ const stream = (...chunks: string[]) =>
   );
 
 const line = (e: ChatEvent) => `${JSON.stringify(e)}\n`;
-const CARD = { text: 'Both Bayside screens went quiet at 09:14.', groups: [], steps: [], trace: [{ name: 'list_screens', summary: 'Listed 2 screens' }] };
+const CARD = {
+  text: 'Both Bayside screens went quiet at 09:14.',
+  groups: [],
+  steps: [],
+  trace: [{ name: 'list_screens', summary: 'Listed 2 screens' }],
+  drafts: [],
+};
 
 function drawerStore() {
   const panel: boolean[] = [];

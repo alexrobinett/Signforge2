@@ -150,8 +150,14 @@ describe('schedule entries', () => {
       error: 'invalid_input',
     });
     expect(await call('update_schedule_entry', { scheduleEntryId: made.id, to: '25:00', ifVersion: 2 })).toMatchObject({ ok: false, error: 'invalid_input' });
+    // Not at a version it has moved on from (#268: the drawer's Undo of an entry it made).
+    expect(await call('delete_schedule_entry', { scheduleEntryId: made.id, ifVersion: 1 })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: made.id, version: 2 },
+    });
     // Never published: it goes at once.
-    expect(await ok(call('delete_schedule_entry', { scheduleEntryId: made.id }))).toEqual({ deleted: made.id, version: null });
+    expect(await ok(call('delete_schedule_entry', { scheduleEntryId: made.id, ifVersion: 2 }))).toEqual({ deleted: made.id, version: null });
     expect(await call('delete_schedule_entry', { scheduleEntryId: made.id })).toMatchObject({ ok: false, error: 'not_found' });
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual([]);
   });

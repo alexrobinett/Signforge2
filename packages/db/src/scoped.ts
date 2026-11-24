@@ -1396,6 +1396,11 @@ export function scoped(d1: D1Database, orgId: string) {
       settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
         await settleStatement(db, orgId, id, attempt, now, result).run();
       },
+      /** Queues `alert` for each of its channels now, on its own (an agent's refusals, M4-08); an event already queued for a channel is left as it is. */
+      queue: async (alert: QueuedAlert, now: number): Promise<void> => {
+        const [first, ...rest] = queueAlert(alert, now, sql`1`);
+        if (first) await db.batch([first, ...rest]);
+      },
       stage: {
         insert: alertDeliveries.stage.insert,
         /**
@@ -2177,7 +2182,8 @@ export function scoped(d1: D1Database, orgId: string) {
     /**
      * The org's members (Better Auth's `member` rows), with each one's name and address. Read only:
      * members change through Better Auth's organization endpoints, which keep its rules (one of our
-     * roles each, never without an owner) and write the audit row (`membershipAudit` in apps/api).
+     * roles each) and write the audit row (`membershipAudit` in apps/api). Migration 0036's triggers
+     * refuse a write that would leave the org without an owner (#292).
      */
     members: {
       list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),

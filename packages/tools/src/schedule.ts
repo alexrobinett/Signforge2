@@ -19,7 +19,7 @@
  * with a deleted one's id continues its versions (`draft_tombstones`).
  */
 import { scheduleEntryProblems, type ScheduleEntry } from '@signforge/contract';
-import { draftChanged, published, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
+import { draftChanged, published, StaleVersionError, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion } from './fields';
 import { page, pageInput } from './paging';
@@ -76,7 +76,7 @@ const fieldsView = (row: ScheduleEntryRow): z.infer<typeof fieldsOutput> => ({
   takeover: row.endsAt !== null,
 });
 
-const entryView = (row: ScheduleEntryRow): EntryView => {
+export const entryView = (row: ScheduleEntryRow): EntryView => {
   const live = published(row);
   return {
     id: row.id,
@@ -324,18 +324,19 @@ const updateEntry = defineTool({
 const deleteEntry = defineTool({
   name: 'delete_schedule_entry',
   description:
-    'Delete a schedule entry or takeover. One never published goes at once. A published one needs the right to publish (refused to editors where only owners publish), and waits like an edit: screens keep it until a publish of every change, or one that pins it (kind schedule_entry at the version returned), applies the deletion; until then it is listed with deleted: true. To end a takeover now, use end_takeover. Returns { deleted: scheduleEntryId, version }, version null when it went at once.',
+    'Delete a schedule entry or takeover. Pass the version you read as ifVersion so one changed since is not deleted. One never published goes at once. A published one needs the right to publish (refused to editors where only owners publish), and waits like an edit: screens keep it until a publish of every change, or one that pins it (kind schedule_entry at the version returned), applies the deletion; until then it is listed with deleted: true. To end a takeover now, use end_takeover. Returns { deleted: scheduleEntryId, version }, version null when it went at once.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ scheduleEntryId: id('schedule entry') }),
+  input: z.object({ scheduleEntryId: id('schedule entry'), ifVersion }),
   output: outputs.delete_schedule_entry,
   example: { scheduleEntryId: 'sch_example' },
   target: entryTarget,
   handler: async ({ org, input, write, scopes }) => {
     const row = await requireEntry(org, input.scheduleEntryId);
+    if (input.ifVersion !== undefined && row.rowVersion !== input.ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
     if (!published(row)) {
-      write(org.scheduleEntries.stage.delete(row.id));
+      write(org.scheduleEntries.stage.remove(row));
       return { deleted: row.id, version: null };
     }
     if (!scopes.includes('content:publish')) throw new ToolError('forbidden', 'Screens play this entry: deleting it needs the right to publish');

@@ -1,7 +1,7 @@
 /**
  * Member tools (#61, #108): an org's members and invitations. Reads come from the org's scope; changes
  * go through Better Auth's organization endpoints (`Members`), so its rules hold (one of our roles
- * each, never without an owner) and its after hook writes each change's one audit row, with the
+ * each; D1 keeps an owner, #292) and its after hook writes each change's one audit row, with the
  * same action names as these tools. They stage nothing, so the dispatcher writes no second row.
  *
  * Owner decision (M4 plan, Q6): an agent may list members, list and cancel invitations, and invite

@@ -36,6 +36,9 @@ export const STUB_CARD = {
   groups: [{ title: 'Bayside, quiet since 09:14', screens: ['Bayside door', 'Bayside till'], why: 'They miss revision 12, the new breakfast menu.' }],
   steps: [{ label: 'Copy a note for the store', note: 'Both screens at Bayside went offline at 09:14. Could you check the router by the till?' }],
 };
+/** What the drawer's stub drafts on a spot (#268): a punchier headline and a QR link, and its answer. */
+export const STUB_DRAFT = { headline: 'Hot breakfast, fast', qrUrl: 'https://order.example/menu' };
+export const STUB_DRAFTED = { text: 'I drafted a punchier headline and a QR link to the menu. Check the link before you save.' };
 /** The one key the run's OpenAI-compatible stub accepts at any host's /v1/models (the feed server, global-setup.ts), and its models (#262). */
 export const ENDPOINT_STUB_KEY = 'sk-e2e-endpoint-stub-key-000000000000-Cd34';
 export const ENDPOINT_STUB_MODELS = ['gemini-stub-flash', 'gemini-stub-pro'];

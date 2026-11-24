@@ -69,3 +69,9 @@ export async function memberships(d1: D1Database, userId: string): Promise<{ org
     .orderBy(organization.name, organization.id)
     .all();
 }
+
+/**
+ * Whether D1 refused a write because it would leave an org with no owner: the `member` triggers of
+ * migration 0036 raise this, in the write's own statement, whoever makes it.
+ */
+export const isLastOwnerRefusal = (err: unknown): boolean => err instanceof Error && err.message.includes('org_needs_an_owner');

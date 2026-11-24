@@ -2,7 +2,7 @@
  * Settings, API & agents (M4-07, canvas board SettingsApi): how an agent connects (the MCP server's
  * address and three steps), the agents connected to this org with Manage on each, what each scope
  * allows, and the tool reference. An owner sees every member's agents, anyone else their own
- * (`list_agent_grants`). This week's numbers per agent come with M4-08's call telemetry.
+ * (`list_agent_grants`), with each one's calls and changes over the last 7 days (M4-08).
  */
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { CopyIcon } from 'lucide-react';
@@ -14,7 +14,7 @@ import { SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { type AgentGrant, type AgentTool, grantedOn, lastActive } from '~/lib/agents';
+import { type AgentGrant, type AgentTool, type AgentUsage, grantedOn, lastActive, weekWords } from '~/lib/agents';
 import { CONNECT_SCOPES, SCOPE_WORDS } from '~/lib/connect';
 import { useRole } from '~/lib/live';
 import { getAgents } from '~/server/agents.functions';
@@ -25,10 +25,13 @@ export const Route = createFileRoute('/_app/settings/api/')({
   component: ApiSettings,
 });
 
+/** An agent connected between reading the grants and reading their calls: none yet. */
+const NO_CALLS = { calls: 0, changes: 0 };
+
 const ROLE_WORDS = { viewer: 'Viewer', editor: 'Editor', owner: 'Owner' } as const;
 
 function ApiSettings() {
-  const { grants, tools, names, mcpUrl, at } = Route.useLoaderData();
+  const { grants, tools, names, week, mcpUrl, at } = Route.useLoaderData();
   const isOwner = useRole() === 'owner';
   const id = useId();
 
@@ -48,7 +51,11 @@ function ApiSettings() {
             : 'Each connection works in this organization only. You see the ones you connected; owners see everyone’s.'
         }
       >
-        {grants.length ? <AgentTable grants={grants} names={names} at={at} /> : <p className="text-sm text-muted-foreground">No agents are connected yet.</p>}
+        {grants.length ? (
+          <AgentTable grants={grants} names={names} week={week} at={at} />
+        ) : (
+          <p className="text-sm text-muted-foreground">No agents are connected yet.</p>
+        )}
       </SettingsSection>
       <ScopeWords />
       <ToolReference tools={tools} />
@@ -83,7 +90,18 @@ function ConnectSteps({ mcpUrl }: { mcpUrl: string }) {
   );
 }
 
-function AgentTable({ grants, names, at }: { grants: AgentGrant[]; names: Record<string, string>; at: number }) {
+function AgentTable({
+  grants,
+  names,
+  week,
+  at,
+}: {
+  grants: AgentGrant[];
+  names: Record<string, string>;
+  /** Each agent's last 7 days, by grant id; null when the call log cannot be read. */
+  week: Record<string, AgentUsage> | null;
+  at: number;
+}) {
   return (
     <section
       aria-label="Connected agents"
@@ -91,7 +109,7 @@ function AgentTable({ grants, names, at }: { grants: AgentGrant[]; names: Record
       tabIndex={0}
       className="overflow-x-auto rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
-      <table className="w-full min-w-[40rem] text-sm">
+      <table className="w-full min-w-[48rem] text-sm">
         <thead className="text-left text-muted-foreground">
           <tr>
             <th scope="col" className="py-2 pr-3 font-medium">
@@ -105,6 +123,9 @@ function AgentTable({ grants, names, at }: { grants: AgentGrant[]; names: Record
             </th>
             <th scope="col" className="px-3 py-2 font-medium">
               Last active
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Last 7 days
             </th>
             <th scope="col" className="py-2 pl-3 font-medium">
               <span className="sr-only">Actions</span>
@@ -131,6 +152,7 @@ function AgentTable({ grants, names, at }: { grants: AgentGrant[]; names: Record
                 {names[g.grantedBy] ?? 'A former member'} · {grantedOn(g.createdAt)}
               </td>
               <td className="px-3 py-3">{lastActive(g.lastUsedAt, at)}</td>
+              <td className="px-3 py-3">{week ? weekWords(week[g.id] ?? NO_CALLS) : 'Not available'}</td>
               <td className="py-3 pl-3 text-right">
                 <Button asChild variant="outline" size="sm">
                   <Link to="/settings/api/$grantId" params={{ grantId: g.id }}>
