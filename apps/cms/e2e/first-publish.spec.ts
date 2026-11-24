@@ -1,5 +1,6 @@
-// A new org's first publish from the Schedule (#243): with no default playlist chosen, Play on this
-// screen (and Take over) say the publish makes its playlist the default, and Save and publish reaches the screen,
+// A new org's first publish from the Schedule (#243): with no default playlist chosen, Take over and
+// Play on this screen (narrower than every screen at all hours) ask for one first, prefilled with their
+// playlist (owner decision); Save and publish makes it the default, publishes, and reaches the screen,
 // which plays it, instead of compiling no manifest and leaving it blank. Axe at desktop and phone.
 import { expect, test, type Page } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
@@ -48,18 +49,21 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
 
   await page.goto(`/screens/${paired.id}`);
   await hydrated(page);
-  // A takeover would make it the default too, and says so.
+  // A takeover asks for a default first, prefilled with its playlist (owner decision on #243).
   await page.getByRole('button', { name: 'Take over this screen…' }).click();
   const takeover = page.getByRole('dialog', { name: 'Take over screens' });
-  await takeover.getByLabel('Playlist').selectOption({ label: 'Opening week' });
-  await expect(takeover.getByText('This organization has no default playlist yet. Taking over makes Opening week the default')).toBeVisible();
+  await takeover.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Opening week' });
+  await expect(takeover.getByLabel('Default playlist', { exact: true })).toHaveValue(opening);
+  await expect(takeover.getByText('Taking over makes the one chosen here the default first.')).toBeVisible();
   await takeover.getByRole('button', { name: 'Cancel' }).click();
 
+  // So does Play on this screen: an entry on one screen is narrower than a default.
   await page.getByRole('button', { name: 'Play on this screen…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
-  await dialog.getByLabel('Playlist').selectOption({ label: 'Opening week' });
-  // Said before it happens.
-  await expect(dialog.getByText('This organization has no default playlist yet. Save and publish makes Opening week the default')).toBeVisible();
+  await dialog.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Opening week' });
+  const choice = dialog.getByLabel('Default playlist', { exact: true });
+  await expect(choice).toHaveValue(opening);
+  await expect(choice).toHaveAccessibleDescription(/no default playlist yet.*Save and publish makes the one chosen here the default first/);
   await axe(page);
   await shots(page, '58-first-publish-default');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -67,19 +71,18 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await shots(page, '58-first-publish-default-phone');
   await page.setViewportSize({ width: 1280, height: 900 });
 
+  // Yes, as prefilled: it is made the default, then the entry is published, and reaches the screen.
   await dialog.getByRole('button', { name: 'Save and publish' }).click();
-  const told = page.locator('[data-sonner-toast]').filter({ hasText: /Published v\d+ to 1 screen/ });
-  await expect(told).toBeVisible();
-  await expect(told).toContainText('Opening week is now the default playlist');
+  await expect(page.locator('[data-sonner-toast]').filter({ hasText: /Published v\d+ to 1 screen/ })).toBeVisible();
   await expect(dialog).toBeHidden();
   const { playlists } = await tool(page, 'list_playlists', {});
   expect(playlists.find((p: { id: string }) => p.id === opening)).toMatchObject({ isDefault: true });
   // The screen plays it: a manifest was compiled and reached it.
   await expect.poll(async () => (await playing(screen))?.playlist ?? '', { timeout: 30_000 }).toBe(opening);
 
-  // The audit log says it, and the What filter for a default playlist change finds that publish.
+  // The audit log has the person's choice, under the What filter for a default playlist change.
   await page.goto('/audit?what=set_default_playlist');
   await hydrated(page);
-  await expect(page.getByRole('row', { name: /made Opening week the default playlist/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Made the default/ })).toBeVisible();
   await screen.context().close();
 });

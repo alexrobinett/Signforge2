@@ -142,7 +142,7 @@ const publishResult = z.object({
     .object({ id: z.string(), name: z.string().describe('Its name as published') })
     .nullable()
     .describe(
-      "The playlist this publish made the organization's default, which every screen plays when nothing is scheduled: set when it had none and the schedule entries this publish made live all play this one playlist (#243). null otherwise",
+      "The playlist this publish made the organization's default, which every screen plays when nothing is scheduled: set when it had none and the regular schedule entries this publish made live on every screen at all hours all play this one playlist (#243). A takeover or a narrower entry never sets it. null otherwise",
     ),
   removedDataSources: z
     .array(z.string())

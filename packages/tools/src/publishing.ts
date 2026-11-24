@@ -555,8 +555,8 @@ export async function publishOrg(
   const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end));
   const { writes: promotions, removals, drafts } = promoted;
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
-  // With no default playlist no screen can be compiled, and a new org's first schedule entry or
-  // takeover would reach none (#243): the playlist it plays becomes the default, in the same batch.
+  // With no default playlist no screen can be compiled, and a new org's first schedule entry would
+  // reach none (#243): one on every screen at all hours makes its playlist the default, in the same batch.
   // Guarded by the settings' version as read: a default set by hand since (set_default_playlist moves
   // no publish revision) fails the batch, and the publish runs again from a fresh read, which finds it.
   const madeDefault = read.defaultPlaylist ? null : firstDefault(promoted.graph, drafts);
@@ -588,14 +588,22 @@ export async function publishOrg(
   return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
 }
 
+/** Whether an entry plays on every screen at all hours, always: what a default playlist does. */
+function everywhereAlways(e: ScheduleEntryRow): boolean {
+  const days: unknown = e.daysJson ? JSON.parse(e.daysJson) : null;
+  const everyDay = days === null || (Array.isArray(days) && new Set(days).size === 7);
+  return e.target === 'org' && everyDay && !e.fromTime && !e.toTime && !e.startDate && !e.endDate && e.startsAt === null && e.endsAt === null;
+}
+
 /**
- * The default an org with none gets from a publish: the playlist every schedule entry it made live
- * plays, if they all play one, published. None when they play several (which would be a guess) or
- * the publish made no entry live.
+ * The default an org with none gets from a publish: the playlist of the regular schedule entries it
+ * made live that play on every screen at all hours, if they all play one, published. Owner decision
+ * on #243: a takeover or a narrower entry never sets it (the CMS asks for one instead); nor do
+ * several such playlists, which would be a guess.
  */
 function firstDefault(graph: OrgGraph, drafts: DraftReport): { id: string; name: string } | null {
   const made = new Set(drafts.promoted.filter((d) => d.kind === 'schedule_entry').map((d) => d.id));
-  const playlists = new Set(graph.entries.filter((e) => made.has(e.id)).map((e) => e.playlistId));
+  const playlists = new Set(graph.entries.filter((e) => made.has(e.id) && everywhereAlways(e)).map((e) => e.playlistId));
   const [only] = playlists;
   if (playlists.size !== 1 || only === undefined) return null;
   const row = graph.playlists.find((p) => p.id === only);

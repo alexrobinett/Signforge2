@@ -847,24 +847,52 @@ describe('the publish tools (M3-18)', () => {
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
   });
 
-  it('makes the playlist its schedule entry plays the default when the org has none, so its screens are reached, and audits it (#243)', async () => {
+  /** A regular entry on every screen at all hours: what may make an org's first default (#243). */
+  const everywhere = (org: TestScope, id: string, playlistId: string) => org.scheduleEntries.insert({ id: x(id), playlistId, priority: 1, target: 'org' });
+
+  it('makes the playlist of an entry on every screen at all hours the default when the org has none, so its screens are reached, and audits it (#243)', async () => {
     const { org } = await seedSmallOrg('tool-first-default');
+    await everywhere(org, 'all-day', x('main'));
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     const out = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
-    // The one entry plays Evenings: it becomes what every screen plays when nothing is scheduled.
-    expect(out.madeDefault).toEqual({ id: x('evenings'), name: 'Evenings' });
+    // All day plays Main everywhere: it becomes what every screen plays when nothing is scheduled. The
+    // evening entry, on one group for some hours, has no say.
+    expect(out.madeDefault).toEqual({ id: x('main'), name: 'Main' });
     expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
-    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
     const row = (await org.auditLog.list({ limit: 100 })).find((e) => e.action === 'publish');
-    expect(JSON.parse(row!.detailJson!)).toMatchObject({ input: {}, detail: { madeDefault: { id: x('evenings'), name: 'Evenings' } } });
+    expect(JSON.parse(row!.detailJson!)).toMatchObject({ input: {}, detail: { madeDefault: { id: x('main'), name: 'Main' } } });
     // The next publish finds it set, and leaves it.
     await editDeal(org, 'Three for $5');
     expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
-    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('evenings'));
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  it('never makes a default from a narrower entry or a takeover: the publish goes on, and says which screens got nothing (owner, #243)', async () => {
+    // Evenings on one group, 18:00 to 22:00: narrower than every screen at all hours.
+    const { org } = await seedSmallOrg('tool-default-narrow');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const narrow = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(narrow.madeDefault).toBeNull();
+    expect(narrow.publish).not.toBeNull();
+    expect(narrow.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await org.settings.get())!.defaultPlaylistId).toBeNull();
+
+    // A takeover on every screen: it ends, so it is never what screens fall back to.
+    const { org: two } = await seedSmallOrg('tool-default-takeover');
+    await two.scheduleEntries.delete(x('evening-takeover'));
+    const now = Date.now();
+    await two.scheduleEntries.insert({ id: x('flash'), playlistId: x('main'), priority: 100, target: 'org', startsAt: now - 60_000, endsAt: now + 3_600_000 });
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const takeover = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(takeover.madeDefault).toBeNull();
+    expect(takeover.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
   });
 
   it('leaves a default someone set while it compiled: its guard fails, and the run again finds it (#243)', async () => {
     const { org } = await seedSmallOrg('tool-default-race');
+    await everywhere(org, 'all-day', x('evenings'));
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     // Main is made the default by hand between the publish's read and its commit (the first manifest's store).
     const p = publisher(org, {
@@ -904,6 +932,7 @@ describe('the publish tools (M3-18)', () => {
 
   it("finds a publish that made the default under the What filter's set_default_playlist, beside set_default_playlist's own rows", async () => {
     const { org } = await seedSmallOrg('tool-default-filter');
+    await everywhere(org, 'all-day', x('evenings'));
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     await ok(publisher(org).call('publish', {}));
     await ok(editorCalls(org)('set_default_playlist', { playlistId: x('main') }));
@@ -916,21 +945,14 @@ describe('the publish tools (M3-18)', () => {
     expect(entries[1]!.detail).toMatchObject({ detail: { madeDefault: { id: x('evenings'), name: 'Evenings' } } });
   });
 
-  it('leaves a default the org has alone, and makes none when the entries made live play several playlists', async () => {
+  it('leaves a default the org has alone, and makes none when the entries on every screen made live play several playlists', async () => {
     const { org } = await seedSmallOrg('tool-default-kept');
     expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
 
-    const { org: two, front } = await seedSmallOrg('tool-default-several');
-    await two.scheduleEntries.insert({
-      id: x('mornings'),
-      playlistId: x('main'),
-      priority: 3,
-      target: 'group',
-      groupId: front.id,
-      fromTime: '06:00',
-      toTime: '09:00',
-    });
+    const { org: two } = await seedSmallOrg('tool-default-several');
+    await everywhere(two, 'all-main', x('main'));
+    await everywhere(two, 'all-evenings', x('evenings'));
     await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
     const out = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
     // Which of two would be a guess: nothing is set, and the screens say why.
