@@ -176,7 +176,16 @@ describe('a new spot in the editor (#359)', () => {
     photo: { type: 'image', label: 'Photo' },
     showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
   };
-  const draft = (data: Record<string, unknown>): SpotDraft => ({ name: 'Promo', durationMs: 8000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' });
+  const draft = (data: Record<string, unknown>): SpotDraft => ({
+    name: 'Promo',
+    durationMs: 8000,
+    data,
+    assets: {},
+    bindings: {},
+    assetId: null,
+    fit: 'cover',
+    url: '',
+  });
 
   it("says nothing of an empty field until it is touched or Publish is pressed, then says it in words, by the field's label", () => {
     const fresh = formHtml({ fields: promo, shown: promo, draft: draft({}), assets: [] });
@@ -197,8 +206,13 @@ describe('a new spot in the editor (#359)', () => {
 
   it("shows a choice's options by their labels: a word capitalised, a unit as written, none as None", () => {
     const html = formHtml({ fields: promo, shown: promo, draft: draft({ headline: 'Hi' }), assets: [] });
-    for (const option of ['<option value="pop" selected="">Pop</option>', '<option value="poster">Poster</option>', '<option value="mph" selected="">mph</option>', '<option value="km/h">km/h</option>', '<option value="" selected="">None</option>'])
+    for (const option of [
+      '<option value="pop" selected="">Pop</option>',
+      '<option value="poster">Poster</option>',
+      '<option value="mph" selected="">mph</option>',
+      '<option value="km/h">km/h</option>',
+      '<option value="" selected="">None</option>',
+    ])
       expect(html).toContain(option);
   });
 });
-

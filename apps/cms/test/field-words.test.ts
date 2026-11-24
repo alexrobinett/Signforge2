@@ -34,7 +34,11 @@ describe('problemWords', () => {
   ])('%s', (problem, words) => expect(problemWords(problem, fields)).toBe(words));
 
   it('knows which problems are of an empty value, shown only once a field is touched or Publish is pressed', () => {
-    expect(['image field "photo" has no asset', 'field "headline" is missing', 'field "opens" has no date yet', 'field "facts" row 2 is missing "label"'].every(isEmptyProblem)).toBe(true);
+    expect(
+      ['image field "photo" has no asset', 'field "headline" is missing', 'field "opens" has no date yet', 'field "facts" row 2 is missing "label"'].every(
+        isEmptyProblem,
+      ),
+    ).toBe(true);
     expect(['field "headline" is longer than 80', 'field "price" must be at most 100'].some(isEmptyProblem)).toBe(false);
   });
 });

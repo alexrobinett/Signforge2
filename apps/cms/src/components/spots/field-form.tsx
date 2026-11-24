@@ -406,7 +406,15 @@ export function FieldForm({
                 )}
               </span>
             </span>
-            <ScalarInput id={id} def={def} value={value} invalid={p !== undefined} describedBy={describedBy} onChange={set} onBlur={() => touch(spotId, name)} />
+            <ScalarInput
+              id={id}
+              def={def}
+              value={value}
+              invalid={p !== undefined}
+              describedBy={describedBy}
+              onChange={set}
+              onBlur={() => touch(spotId, name)}
+            />
             {mark && <MarkNote id={markId} mark={mark} />}
             <Problems id={errorId} problems={p} />
           </div>

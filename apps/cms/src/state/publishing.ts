@@ -118,7 +118,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     if (field) {
       const version = spots?.spots.find((s) => s.id === root.id)?.templateVersionId;
       const words = problemWords(problem, (version && versions.get(version)?.manifest.fields) || {});
-      return { text: words.startsWith('No image') ? `${name} has ${words.charAt(0).toLowerCase()}${words.slice(1)}.` : `${name} does not pass its checks: ${words}.`, action };
+      return {
+        text: words.startsWith('No image') ? `${name} has ${words.charAt(0).toLowerCase()}${words.slice(1)}.` : `${name} does not pass its checks: ${words}.`,
+        action,
+      };
     }
     return { text: `${name} does not pass its checks: ${named}.`, action };
   }
