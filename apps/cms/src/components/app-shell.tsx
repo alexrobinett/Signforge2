@@ -9,6 +9,7 @@ import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
 import { ScheduleDialogs } from '~/components/schedule/schedule-dialogs';
 import { SampleCheck } from '~/components/spots/sample-check';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
 import { SidebarMenuButton } from '~/components/ui/sidebar';
@@ -28,7 +29,7 @@ import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 import { isFolded } from '~/state/ui';
 
-interface Badge {
+interface NavCount {
   n: number;
   /** What the number counts, after it: "needs you", "unpublished". */
   word: string;
@@ -55,7 +56,7 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
   // As Overview says it: a read that failed after the last good one leaves the counts as last read.
   const heardAt = read.dataUpdatedAt;
   const now = useNow(heardAt);
-  const badges: Partial<Record<Section['to'], Badge>> = counts
+  const badges: Partial<Record<Section['to'], NavCount>> = counts
     ? {
         ...(needsYou !== null && { '/screens': { n: needsYou, word: needsYou === 1 ? 'needs you' : 'need you', urgent: true } }),
         '/spots': { n: counts.spots, word: 'unpublished', urgent: false },
@@ -124,15 +125,10 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
                     <Icon aria-hidden />
                     <span className="flex-1">{label}</span>
                     {shown && (
-                      <span
-                        className={cn(
-                          'rounded-full px-2 text-xs font-semibold tabular-nums',
-                          shown.urgent ? 'bg-status-needs-you-muted text-status-needs-you-foreground' : 'bg-muted text-muted-foreground',
-                        )}
-                      >
+                      <Badge variant={shown.urgent ? 'needs-you' : 'outline'} className="tabular-nums">
                         {shown.n}
                         <span className="sr-only"> {shown.word}</span>
-                      </span>
+                      </Badge>
                     )}
                     {shown && folded && (
                       <i aria-hidden className={cn('absolute top-1.5 right-1.5 size-2 rounded-full', shown.urgent ? 'bg-status-needs-you' : 'bg-primary')} />
