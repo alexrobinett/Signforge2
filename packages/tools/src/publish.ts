@@ -218,7 +218,7 @@ const publish = defineTool({
       .max(200_000)
       .optional()
       .describe(
-        'Publish only while the brand kits and their assignments are as they were shown: their state as the agent drawer\'s publish card read it. Refused with a conflict, details { brand: true }, otherwise, checked again as it commits',
+        "Publish only while the brand kits and their assignments are as they were shown: their state as the agent drawer's publish card read it. Refused with a conflict, details { brand: true }, otherwise, checked again as it commits",
       ),
     ifScreens: z
       .array(id('screen'))
@@ -297,14 +297,7 @@ const publishTakeover = defineTool({
     const { org, input, write } = ctx;
     // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
     const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())));
-    const out = await runPublish(
-      ctx,
-      [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])],
-      [],
-      {},
-      [],
-      [made],
-    );
+    const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], {}, [], [made]);
     // Held (its playlist not published, a check it fails): nothing is written, not even the draft.
     const held = out.held.find((h) => h.kind === 'schedule_entry' && h.id === made.id);
     if (held || !out.promoted.some((p) => p.kind === 'schedule_entry' && p.id === made.id))

@@ -332,7 +332,7 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     );
   });
 
-  it("holds a publish to the screens, default and brand kits a card showed, to its batch: a change between its read and its batch refuses it, writing nothing (#406)", async () => {
+  it('holds a publish to the screens, default and brand kits a card showed, to its batch: a change between its read and its batch refuses it, writing nothing (#406)', async () => {
     const { o, org } = await setup('pl-publish-held');
     const owner = (scope: OrgScope) => (name: string, input: unknown) => dispatch(registry, name, input, memberOf(scope, 'owner'));
     await chooseDefault(org, o.playlist);
@@ -394,6 +394,8 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     // As shown, with nothing changed: published.
     const shown = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts);
     const switches = shown.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : []));
-    expect(await ok(owner(org)('publish', { ...input, ifBrand: shown.brand, ifScreens: switches }))).toMatchObject({ promoted: expect.arrayContaining([{ kind: 'spot', id: spot.id }]) });
+    expect(await ok(owner(org)('publish', { ...input, ifBrand: shown.brand, ifScreens: switches }))).toMatchObject({
+      promoted: expect.arrayContaining([{ kind: 'spot', id: spot.id }]),
+    });
   });
 });
