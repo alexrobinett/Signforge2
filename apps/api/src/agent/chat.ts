@@ -74,8 +74,9 @@ export const NEVER_OFFERED: ReadonlySet<string> = new Set([
   'read_table',
 ]);
 
-/** The tools the drawer offers a caller with `grant`: its role's reads, less those above. */
-export const drawerTools = (grant: Grant) => describeTools(registry, grant).filter((t) => !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name));
+/** The tools the drawer offers a caller with `grant`: its role's reads, less those above, and less those only people may call (`people`), which refuse it. */
+export const drawerTools = (grant: Grant) =>
+  describeTools(registry, grant).filter((t) => !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people);
 
 const chatRequest = z
   .object({
@@ -195,6 +196,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           : `No model is set up for the agent yet: an owner adds one in ${SETTINGS}.`,
       );
     const model = provider.capableModel;
+    const sealed = provider.keySealed;
 
     // The tools run on a D1 binding that counts what they prepare, through the org's scoped repositories as always.
     const budget = { statements: 0, fetches: 0 };
@@ -273,7 +275,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         return ms;
       };
       for (;;) {
-        const step = await chatWith(c.env, key, provider?.keySealed ?? '', reach, { model, system: SYSTEM, turns: history, tools }, left());
+        const step = await chatWith(c.env, key, sealed, reach, { model, system: SYSTEM, turns: history, tools }, left());
         // A fetch over the budget fails the call it was in: the budget says why, not the failure.
         if (budget.fetches > MODEL_FETCHES) throw new OverBudget('reading');
         if (!step.ok) {

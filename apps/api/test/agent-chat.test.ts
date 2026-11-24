@@ -106,10 +106,22 @@ describe('the tools the drawer offers', () => {
         expect(tool?.mutates, `${role}: ${name}`).toBe(false);
         expect(tool?.scope, `${role}: ${name}`).not.toBe('org:manage');
         expect(NEVER_OFFERED.has(name), `${role}: ${name}`).toBe(false);
+        // A tool only people may call refuses the agent: offering it would be a call that always fails (review of #327).
+        expect(tool?.people, `${role}: ${name}`).not.toBe(true);
       }
       expect(names, role).toContain('find_places');
       expect(names, role).toContain('list_screen_status');
-      for (const name of ['read_table', 'get_alert_channels', 'list_connections', 'claim_screen', 'list_invitations', 'rename_screen', 'publish'])
+      for (const name of [
+        'read_table',
+        'get_alert_channels',
+        'list_connections',
+        'claim_screen',
+        'list_invitations',
+        'rename_screen',
+        'publish',
+        'list_agent_grants',
+        'get_agent_grant',
+      ])
         expect(names, `${role}: ${name}`).not.toContain(name);
     }
   });

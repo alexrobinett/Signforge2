@@ -66,6 +66,8 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
+      // The drawer's conversation, and a turn on its way, are this org's: none of it goes to the next.
+      get().forgetAgentDrawer();
       if (busy(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({

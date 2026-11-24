@@ -18,6 +18,8 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await opener.click();
   const drawer = page.getByRole('dialog', { name: 'Agent' });
   await expect(drawer).toBeVisible();
+  // Beside the page, not over it: the page stays usable, and in the accessibility tree.
+  await expect(page.getByRole('main')).toHaveCount(1);
   expect((await drawer.boundingBox())!.width).toBe(400);
   await axe(page);
   await shots(page, '100-drawer-empty');
@@ -58,6 +60,13 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('banner').getByRole('button', { name: 'Ask the agent' }).click();
   expect((await drawer.boundingBox())!.width).toBe(390);
+  // A sheet over the page, modal: the page it hides leaves the accessibility tree, and Tab goes round the sheet's
+  // own controls, never to that page (review of #327).
+  await expect(page.getByRole('main')).toHaveCount(0);
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('Tab');
+    expect(await drawer.evaluate((el) => el.contains(document.activeElement)), `Tab ${i + 1}`).toBe(true);
+  }
   await axe(page);
   await shots(page, '100-drawer-phone');
   await drawer.getByRole('button', { name: 'Close the agent' }).click();

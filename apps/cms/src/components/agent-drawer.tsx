@@ -1,21 +1,35 @@
 /**
- * The agent's drawer (#267, src/state/agent-drawer.ts): a 400 px panel on the right, a full sheet on
- * a phone, beside the page rather than over it (not modal), so the page stays usable. It reads only.
+ * The agent's drawer (#267, src/state/agent-drawer.ts): a 400 px panel on the right, beside the page
+ * rather than over it (not modal), so the page stays usable; on a phone a full sheet over it, modal. It reads only.
  * Escape and its close button close it, and focus goes back to what opened it. Each answer is a card,
  * its tool calls a one-line trace that expands; the turn's progress and its answer reach a live region.
  */
 import type { AnswerCard as Card } from '@signforge/api/agent-chat';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { CopyIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import type { SubmitEvent } from 'react';
+import { type SubmitEvent, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { Button } from '~/components/ui/button';
 import { Label } from '~/components/ui/label';
 import { useOrgId } from '~/lib/live';
 import { screenStatusQuery } from '~/queries/screens';
 import { useAppStore } from '~/state/provider';
+
+/** A window wider than a phone, where the drawer sits beside the page; on a phone it is a sheet over it, and modal. */
+const WIDE = '(min-width: 640px)';
+const onResize = (change: () => void) => {
+  const media = matchMedia(WIDE);
+  media.addEventListener('change', change);
+  return () => media.removeEventListener('change', change);
+};
+const useWide = () =>
+  useSyncExternalStore(
+    onResize,
+    () => matchMedia(WIDE).matches,
+    () => true,
+  );
 
 /** "Why are N screens behind?" on Screens, when N are: the question the drawer starts with there. */
 function Suggestions({ path, onAsk }: { path: string; onAsk: (q: string) => void }) {
@@ -96,6 +110,8 @@ function AnswerCard({ card }: { card: Card }) {
 
 export function AgentDrawer() {
   const d = useAppStore((s) => s.agentDrawer);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const wide = useWide();
   const close = useAppStore((s) => s.closeAgentDrawer);
   const ask = useAppStore((s) => s.askAgent);
   const edit = useAppStore((s) => s.editQuestion);
@@ -116,7 +132,9 @@ export function AgentDrawer() {
   };
 
   return (
-    <DialogPrimitive.Root open={d.open} modal={false} onOpenChange={(open) => !open && close()}>
+    // Beside the page on a wide screen, not modal, so the page stays usable; a sheet over it on a phone, modal, so Tab
+    // stays in it rather than reaching the page it hides.
+    <DialogPrimitive.Root open={d.open} modal={!wide} onOpenChange={(open) => !open && close()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Content
           aria-describedby="agent-drawer-about"
@@ -145,7 +163,7 @@ export function AgentDrawer() {
             </DialogPrimitive.Close>
           </header>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-            {d.messages.length === 0 && !d.asking && <Suggestions path={d.page.path} onAsk={(q) => void ask(q)} />}
+            {d.messages.length === 0 && !d.asking && <Suggestions path={path} onAsk={(q) => void ask(q)} />}
             <ol aria-label="Conversation" className="flex flex-col gap-3 empty:hidden">
               {d.messages.map((m, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: a conversation only grows; a message's place is who it is.
