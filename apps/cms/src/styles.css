@@ -83,8 +83,9 @@
   --org-saturation: 60%;
   --org-lightness: 29%;
   --org-foreground: #ffffff;
-  /* An editor's height: the viewport under the page's header (#363); its stage column fills it. */
-  --editor-height: calc(100dvh - 8rem);
+  /* An editor's height: the viewport under the page's header and the editor's own (#363), which wraps to two
+     lines from 1024 px; its stage column fills it, its status line inside the window before any scroll. */
+  --editor-height: calc(100dvh - 10rem);
   color-scheme: light;
 }
 

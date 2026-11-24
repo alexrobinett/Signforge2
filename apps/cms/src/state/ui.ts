@@ -45,7 +45,7 @@ const EDITOR = /^\/(?:spots|playlists)\/[^/]+$/;
  * it is an editor the person has not unfolded it in. From the path, so the server draws it as the browser does.
  */
 export const isFolded = (ui: Pick<UiState, 'sidebarFolded' | 'panelFolded' | 'unfoldedIn'>, path: string) =>
-  ui.sidebarFolded || ui.panelFolded || (EDITOR.test(path) && ui.unfoldedIn !== path);
+  ui.panelFolded || (EDITOR.test(path) ? ui.unfoldedIn !== path : ui.sidebarFolded);
 
 export const createUiSlice: SliceCreator<UiSlice> = (set, _get, { router }) => ({
   ui: { drawerOpen: false, sidebarFolded: false, panelFolded: false, unfoldedIn: null, tip: null, theme: 'system' },
@@ -55,12 +55,12 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, _get, { router }) => (
     set((s) => {
       const path = router.state.location.pathname;
       const folding = !isFolded(s.ui, path);
-      // In an editor, folding again is its default, not a choice to keep: the saved choice stays as it was.
-      if (folding && EDITOR.test(path)) return { ui: { ...s.ui, unfoldedIn: null, tip: null } };
+      // In an editor the fold is its own, for this visit: the person's saved choice, for every other page, is never written from one.
+      if (EDITOR.test(path)) return { ui: { ...s.ui, panelFolded: false, unfoldedIn: folding ? null : path, tip: null } };
       try {
         localStorage.setItem(FOLD_KEY, String(folding));
       } catch {}
-      return { ui: { ...s.ui, sidebarFolded: folding, panelFolded: false, unfoldedIn: folding ? null : path, tip: null } };
+      return { ui: { ...s.ui, sidebarFolded: folding, panelFolded: false, tip: null } };
     }),
   setRightPanel: (open) => set((s) => ({ ui: { ...s.ui, panelFolded: open, tip: null } })),
   showTip: (tip) => set((s) => (s.ui.tip === tip ? s : { ui: { ...s.ui, tip } })),

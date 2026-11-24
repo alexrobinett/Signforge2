@@ -96,7 +96,9 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByRole('heading', { name: 'Lobby clock', level: 1 })).toBeVisible();
 
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByRole('status')).toHaveText('The draft, as a screen would show it. Screens play what is published.');
+  await expect(stage.getByText('The draft, as a screen would show it. Screens play what is published.')).toBeVisible();
+  // What the stage is doing, said politely as it changes.
+  await expect(stage.getByRole('status')).toHaveText(/Drawing…|Drawn by the player your screens run\./);
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 
@@ -328,13 +330,27 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   const skipped: string[] = [];
   const listen = (m: { text(): string }) => m.text().includes('[sf] skipped') && skipped.push(m.text());
   page.on('console', listen);
+  // The drafts the player is sent, counted in its frame. In every frame: the player's frame starts as about:blank,
+  // where this runs, and keeps its window when the player loads; only the player is ever sent a draft.
+  await page.addInitScript(() => {
+    addEventListener('message', (e) => {
+      if (e.data?.type === 'draft') Reflect.set(window, 'sfDrafts', Number(Reflect.get(window, 'sfDrafts') ?? 0) + 1);
+    });
+  });
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
   // The form is long: the stage starts below the fold, where a browser runs no animation frames.
   const stage = page.getByRole('region', { name: 'Live preview' });
   expect(await stage.evaluate((el) => el.getBoundingClientRect().top > innerHeight)).toBe(true);
+  const player = () => page.frames().find((f) => f.url().includes('/player/'));
+  const drafts = async () => Number((await player()?.evaluate(() => Reflect.get(window, 'sfDrafts') ?? 0)) ?? 0);
+  // The player is listening, and nothing has been sent it out of view.
+  await expect(stage.getByText('Drawing…').first()).toBeAttached();
+  expect(await drafts()).toBe(0);
   await stage.scrollIntoViewIfNeeded();
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  // One draft in all, sent once the stage was in view: none was sent while it was out of view.
+  expect(await drafts()).toBe(1);
   page.off('console', listen);
   expect(skipped).toEqual([]);
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -385,6 +401,16 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
     return Math.abs(own.height - column.height) < 1 && column.height > innerHeight / 2;
   });
   expect(fills).toBe(true);
+  // Beside the form, in view, at desktop widths, folded and not: the row never wraps there.
+  const beside = () =>
+    stage.evaluate((el) => {
+      const form = document.querySelector('form[aria-label="Spot fields"]')!.getBoundingClientRect();
+      const own = el.getBoundingClientRect();
+      return own.left >= form.right - 1 && own.top < innerHeight && own.bottom <= innerHeight + 1;
+    });
+  expect(await beside()).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 720 });
+  expect(await beside()).toBe(true);
   await axe(page);
   await shots(page, '92-spot-editor-drawing');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -394,9 +420,10 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await page.unroute('**/player/index.html*');
 
-  // Unfolded here, it stays open on this visit; the list beside it keeps the person's own choice.
+  // Unfolded here, it stays open on this visit, and the stage stays beside the form; the list keeps the person's own choice.
   await page.getByRole('button', { name: 'Unfold the sidebar' }).click();
   await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toHaveAttribute('aria-expanded', 'true');
+  expect(await beside()).toBe(true);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
   await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toBeVisible();
 });

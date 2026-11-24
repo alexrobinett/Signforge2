@@ -57,7 +57,7 @@ function Toggle<T extends string>({
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'h-9 rounded-lg px-3 font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-stage-ring',
+            'h-9 rounded-lg px-3 font-medium outline-none focus-visible:ring-3 focus-visible:ring-stage-ring',
             value === o.value ? 'bg-stage-foreground text-stage' : 'text-stage-muted-foreground hover:text-stage-foreground',
           )}
         >
@@ -69,10 +69,13 @@ function Toggle<T extends string>({
 }
 
 /**
- * An editor's column for the stage: beside the form on a wide screen it stays in view as the form
- * scrolls and fills the editor's height (#363); on a phone it follows the form.
+ * An editor's form and stage (#363). On a phone the stage follows the form. From `lg` they sit side
+ * by side, never wrapping: the form a fixed width, the stage the rest, staying in view as the form
+ * scrolls and filling the editor's height, so it is sticky only where it is beside the form.
  */
-export const STAGE_COLUMN = 'flex min-w-0 flex-[999_1_560px] flex-col bg-stage lg:sticky lg:top-0 lg:h-(--editor-height) lg:self-start';
+export const EDITOR_ROW = 'flex flex-1 flex-col lg:flex-row';
+export const EDITOR_FORM = 'flex min-w-0 flex-col border-b bg-card lg:w-sm lg:shrink-0 lg:border-r lg:border-b-0';
+export const STAGE_COLUMN = 'flex min-w-0 flex-1 flex-col bg-stage lg:sticky lg:top-0 lg:h-(--editor-height) lg:self-start';
 
 export function PlayerStage({
   target,
@@ -195,14 +198,14 @@ export function PlayerStage({
           {size.w} × {size.h} · {Math.round(shown * 100)}%
         </span>
       </div>
-      <p role="status" className="inline-flex items-center gap-2 text-sm font-semibold text-stage-foreground">
+      <p className="inline-flex items-center gap-2 text-sm font-semibold text-stage-foreground">
         <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
           <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.2 1.6" />
         </svg>
         The draft, as a screen would show it. Screens play what is published.
       </p>
       {/* The room is sized by the page, never by the frame in it, so Fit can measure it. The frame sits at its top, in the first viewport. */}
-      <div ref={roomRef} className={cn('relative min-h-105 flex-1', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>
+      <div ref={roomRef} className={cn('relative min-h-105 flex-1 lg:min-h-0', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>
         <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
           <div
             className="relative shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-stage-edge"
@@ -221,35 +224,40 @@ export function PlayerStage({
                 style={{ transform: `scale(${shown})`, visibility: box ? 'visible' : 'hidden' }}
               />
             )}
-            {/* Until the player draws: what a spot of this template looks like, dimmed, and that it is drawing (#363). The line below says it to a screen reader. */}
-            {!playing && !stageError && !holding && (
-              <div aria-hidden className="absolute inset-0 grid place-items-center bg-stage">
+            {/* Until the first frame: what a spot of this template looks like, dimmed, and that it is drawing, or why it is not (#363).
+                The status line below says the same to a screen reader. */}
+            {!playing && !stageError && (
+              <div aria-hidden className="absolute inset-0 grid place-items-center bg-stage p-6">
                 {thumbnail && <img src={thumbnail} alt="" className="absolute inset-0 size-full object-cover opacity-40" />}
-                <span className="relative rounded-full bg-stage-control px-4 py-2 text-base font-medium text-stage-foreground">Drawing…</span>
+                <span className="relative max-w-prose rounded-xl bg-stage-control px-4 py-2 text-center text-base font-medium text-stage-foreground">
+                  {holding ? (refusals.length ? refusals.map((r) => `${r}.`).join(' ') : 'Not shown yet: fix the marked field.') : 'Drawing…'}
+                </span>
               </div>
             )}
           </div>
         </div>
       </div>
       <p className="flex flex-wrap justify-between gap-3 text-sm text-stage-muted-foreground">
-        {/* The player's own error first: it is what the screen shows, whatever the draft. */}
-        {stageError ? (
-          <span className="inline-flex items-center gap-2">
-            <TriangleAlertIcon className="size-3.5 text-stage-warning" aria-hidden />
-            The player could not show it: {stageError}
-          </span>
-        ) : holding ? (
-          <span className="inline-flex items-center gap-2">
-            <TriangleAlertIcon className="size-3.5 text-stage-warning" aria-hidden />
-            {playlistId !== undefined
-              ? 'Holding the last frame the player could show.'
-              : refusals.length
-                ? `${playing ? 'Holding the last valid frame' : 'Not shown yet'}. ${refusals.map((r) => `${r}.`).join(' ')}`
-                : 'Holding the last valid frame until the marked field is fixed.'}
-          </span>
-        ) : (
-          <span>{playing ? 'Drawn by the player your screens run.' : 'Drawing…'}</span>
-        )}
+        {/* The player's own error first: it is what the screen shows, whatever the draft. Said politely as it changes. */}
+        <span role="status" aria-live="polite">
+          {stageError ? (
+            <span className="inline-flex items-center gap-2">
+              <TriangleAlertIcon className="size-3.5 text-stage-warning" aria-hidden />
+              The player could not show it: {stageError}
+            </span>
+          ) : holding ? (
+            <span className="inline-flex items-center gap-2">
+              <TriangleAlertIcon className="size-3.5 text-stage-warning" aria-hidden />
+              {playlistId !== undefined
+                ? 'Holding the last frame the player could show.'
+                : refusals.length
+                  ? `${playing ? 'Holding the last valid frame' : 'Not shown yet'}. ${refusals.map((r) => `${r}.`).join(' ')}`
+                  : 'Holding the last valid frame until the marked field is fixed.'}
+            </span>
+          ) : (
+            <span>{playing ? 'Drawn by the player your screens run.' : 'Drawing…'}</span>
+          )}
+        </span>
         <span>{playlistId !== undefined ? 'Plays the loop. Updates as you edit.' : 'Updates as you type.'}</span>
       </p>
     </section>

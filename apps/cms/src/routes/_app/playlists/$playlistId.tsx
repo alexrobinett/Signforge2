@@ -13,7 +13,7 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -170,12 +170,8 @@ function PlaylistEditor() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-1 flex-wrap items-stretch">
-        <form
-          aria-label="Playlist"
-          onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full min-w-0 flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
-        >
+      <div className={EDITOR_ROW}>
+        <form aria-label="Playlist" onSubmit={(e) => e.preventDefault()} className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}>
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="playlist-name" className="font-medium">
@@ -236,7 +232,7 @@ function PlaylistEditor() {
                             {spot ? `${spotWhat(spot, versions)} · ${seconds(spot.durationMs)} s` : ''}
                           </span>
                           {why && (
-                            <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
+                            <span className="flex items-start gap-1.5 text-sm text-status-updating-foreground">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                               <span>
                                 Not in the preview yet. {/* In words, by the field's label (#359). */}
@@ -435,7 +431,7 @@ function WherePlays({ orgId, playlist }: { orgId: string; playlist: PlaylistView
                 <strong className="font-semibold">{aimedAt(e, screens, groups)}</strong>{' '}
                 <span className="text-muted-foreground">· {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}</span>
               </span>
-              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+              <span className="text-sm text-muted-foreground">{stateWord(e)}</span>
             </li>
           ))}
         </ul>

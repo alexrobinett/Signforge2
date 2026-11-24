@@ -94,9 +94,14 @@ describe('the sidebar fold', () => {
     expect(store.getState().ui.tip).toBeNull();
   });
 
-  it("folds in a spot's or a playlist's editor by default, for the stage's room, unfolds there for that visit, and never saves the editor's fold (#363)", () => {
-    const saved = storage();
+  it("folds in a spot's or a playlist's editor by default, for the stage's room, unfolds there for that visit only, and never writes the saved choice from an editor (#363)", () => {
+    // Saved as unfolded for every other page: an editor neither reads nor writes it.
+    const saved = storage({ 'sf-sidebar-folded': 'false' });
+    const writes = vi.spyOn(Map.prototype, 'set');
     const { store, folded } = uiStore();
+    connectUi(store as never, { router } as never);
+    const navigated = router.subscribe.mock.calls.at(-1)?.[1] as (e: { pathChanged: boolean }) => void;
+    writes.mockClear();
     for (const path of ['/spots/spt_1', '/playlists/pls_1']) {
       router.state.location.pathname = path;
       expect(folded(), path).toBe(true);
@@ -107,22 +112,29 @@ describe('the sidebar fold', () => {
     router.state.location.pathname = '/spots/spt_1';
     store.getState().toggleSidebar();
     expect(folded()).toBe(false);
-    expect(saved.get('sf-sidebar-folded')).toBe('false');
     // Another editor starts folded; so does this one on the next visit.
     router.state.location.pathname = '/spots/spt_2';
     expect(folded()).toBe(true);
-    connectUi(store as never, { router } as never);
-    const navigated = router.subscribe.mock.calls.at(-1)?.[1] as (e: { pathChanged: boolean }) => void;
     navigated({ pathChanged: true });
     router.state.location.pathname = '/spots/spt_1';
     expect(folded()).toBe(true);
     store.getState().toggleSidebar();
-    expect(folded()).toBe(false);
-    router.state.location.pathname = '/spots/spt_1';
     store.getState().toggleSidebar();
     expect(folded()).toBe(true);
+    expect(writes).not.toHaveBeenCalled();
     expect(saved.get('sf-sidebar-folded')).toBe('false');
-    router.state.location.pathname = '/screens';
+    writes.mockRestore();
+  });
+
+  it('keeps a saved fold for other pages while an editor is unfolded on its visit (#363)', () => {
+    const saved = storage({ 'sf-sidebar-folded': 'true' });
+    const { store, folded } = uiStore();
+    connectUi(store as never, { router } as never);
+    router.state.location.pathname = '/spots/spt_1';
+    store.getState().toggleSidebar();
     expect(folded()).toBe(false);
+    expect(saved.get('sf-sidebar-folded')).toBe('true');
+    router.state.location.pathname = '/screens';
+    expect(folded()).toBe(true);
   });
 });

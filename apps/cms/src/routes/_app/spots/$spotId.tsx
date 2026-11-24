@@ -20,7 +20,7 @@ import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton,
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
-import { PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import {
   AlertDialog,
@@ -182,9 +182,9 @@ function SpotEditor() {
           onDone={() => finishFill(spotId)}
         />
       )}
-      <div className="flex flex-1 flex-wrap items-stretch">
+      <div className={EDITOR_ROW}>
         {reviewing && version && (
-          <div className="flex max-w-full flex-[1_1_360px] flex-col border-r bg-card px-4 pt-5 sm:px-6">
+          <div className={cn(EDITOR_FORM, 'px-4 pt-5 sm:px-6')}>
             <FillReview spotId={spotId} fields={version.manifest.fields} />
           </div>
         )}
@@ -192,7 +192,7 @@ function SpotEditor() {
           hidden={reviewing && version !== undefined}
           aria-label="Spot fields"
           onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
+          className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}
         >
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
