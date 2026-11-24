@@ -1034,4 +1034,5 @@ In portrait the kit holds `.lk-drift` still but kept its `will-change: transform
 | | B (branch) | 0.28, 0.33, 0.28, 0.28% | 0.00-0.12% | 33-50 ms | 405-425 ms, median 408 |
 
 - **Fewer frames dropped while playing**, in both looks: Pop 0.18-0.29% against 0.35-0.65%, Night 0.00-0.12% against 0.12-0.29%. Pop's overall fell from 0.72-1.11% (three of eight runs over 1%) to 0.56-0.89%.
-- **Prepares:** the same median, but Pop's fell into the slower of its two modes (about 700 ms against about 530) more often with B: 11 of 24 against 5 of 24. The two modes are the kit's (The look kit, above), and A has them too; whether the layer's absence moves the odds is not settled by 24 prepares.
+- **Over budget in both builds.** Pop's prepare medians are 548 ms (A) and 543 ms (B) against the 500 ms budget, and every Pop run's worst frame was 67 ms (one A run 50 ms) against 50 ms. Night's prepares (405 to 440 ms) and worst frames (33 to 50 ms) are within it.
+- **Prepares:** the same median, but Pop's fell into the slower of its two modes (about 700 ms against about 530) more often with B: 11 of 24 against 5 of 24. That difference is not significant (p ≈ 0.12, Fisher's exact test, two-sided). The two modes are the kit's (The look kit, above), and A has them too.
