@@ -58,6 +58,18 @@ describe('sample text on the server', () => {
     });
   });
 
+  it('does not mark a field bound to a source at create: screens show the source', async () => {
+    const templateVersionId = (await testScope(env.DB, o.orgId).spots.get(o.templateSpot))?.templateVersionId;
+    const { spot } = await call(person(), 'create_spot', {
+      name: 'Bound',
+      kind: 'template',
+      templateVersionId,
+      sample: true,
+      bindings: { title: { dataSourceId: o.dataSource, path: 't' } },
+    });
+    expect(spot.sampleFields).toBeNull();
+  });
+
   it('refuses a publish that would put it live, naming the spot and its fields, and writes nothing', async () => {
     const spot = await sampleSpot();
     expect(await dispatch(registry, 'publish', pin(spot), person())).toMatchObject({

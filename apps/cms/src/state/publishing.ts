@@ -408,9 +408,11 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       // Once each: a chosen default may be the entry's own playlist.
       const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
       const allowSample = acks.length ? { allowSample: sampleAcks(acks) } : {};
-      await told(orgId, await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...allowSample }), undo, refused, made);
+      const r = await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...allowSample });
+      await told(orgId, r, undo, refused, made);
       await refresh(orgId);
-      return true;
+      // Held back, or nothing to publish: no publish was made, which the toast says.
+      return r.publish !== null;
     } catch (err) {
       const sample = sampleTextOf(err);
       if (sample?.length) {
@@ -455,10 +457,17 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     askSampleText: (orgId, spots) => ask(orgId, spots, spots.length > 1),
 
     async checkSampleText(orgId, { playlistId, alone, withDefault, refused }) {
-      const drafts = await readDrafts(orgId, refused);
-      if (!drafts) return null;
-      const pins = [...playlistPins(drafts, playlistId, alone), ...defaultPlan(withDefault, drafts).pins];
-      return acknowledge(orgId, sampleIn(drafts.spots, pins), [], manySpots(pins));
+      // Pending from the first click: a second, while this reads or asks, starts nothing.
+      if (get().publishing.pending) return null;
+      pending(true);
+      try {
+        const drafts = await readDrafts(orgId, refused);
+        if (!drafts) return null;
+        const pins = [...playlistPins(drafts, playlistId, alone), ...defaultPlan(withDefault, drafts).pins];
+        return await acknowledge(orgId, sampleIn(drafts.spots, pins), [], manySpots(pins));
+      } finally {
+        pending(false);
+      }
     },
 
     async publishSpot(orgId, spotId) {

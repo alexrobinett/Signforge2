@@ -582,8 +582,8 @@ export async function publishOrg(
     const kept: SampleFields | null = row?.sampleFieldsJson ? JSON.parse(row.sampleFieldsJson) : null;
     if (!row || !kept) return [];
     const fields = [...kept.texts, ...Object.keys(kept.lists)];
-    const ack = allowSample.find((a) => a.spotId === row.id && a.version === row.rowVersion);
-    return ack && fields.every((f) => ack.fields.includes(f)) ? [] : [{ id: row.id, name: row.name, version: row.rowVersion, fields }];
+    const acked = allowSample.some((a) => a.spotId === row.id && a.version === row.rowVersion && fields.every((f) => a.fields.includes(f)));
+    return acked ? [] : [{ id: row.id, name: row.name, version: row.rowVersion, fields }];
   });
   if (sample.length)
     throw new ToolError(

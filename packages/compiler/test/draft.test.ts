@@ -308,6 +308,44 @@ describe('a spot’s sample fields (#360)', () => {
     ]);
   });
 
+  it('keep a sample row’s marks when a row sharing a cell with it is added before it', () => {
+    const where = { label: 'A', value: 'Lobby' };
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [where, ...rows] }, bindings: {} })?.lists.facts).toEqual([
+      [],
+      ['label', 'value'],
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+  });
+
+  it('pair rows sharing a cell by the most cells held, not left to right, when they are reordered', () => {
+    const shared = [
+      { label: 'Where', value: 'Pier' },
+      { label: 'Where', value: 'Dock' },
+    ];
+    const two = {
+      lists: {
+        facts: [
+          ['label', 'value'],
+          ['label', 'value'],
+        ],
+      },
+      texts: [],
+    };
+    const before = { data: { facts: shared } };
+    // The second row edited and moved first: left to right it would take the first row's marks.
+    const after = { data: { facts: [{ label: 'Where', value: 'Lobby' }, shared[0]] }, bindings: {} };
+    expect(sampleAfterEdit(two, fields, before, after)?.lists.facts).toEqual([['label'], ['label', 'value']]);
+  });
+
+  it('keep a list cell left out, which screens show as its item default, sample still', () => {
+    const withItemDefault: Record<string, FieldDef> = {
+      facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label', default: 'Opening hours' } } },
+    };
+    const one = { texts: [], lists: { facts: [['label']] } };
+    expect(sampleAfterEdit(one, withItemDefault, { data: { facts: [{ label: 'Opening hours' }] } }, { data: { facts: [{}] }, bindings: {} })).toEqual(one);
+  });
+
   it('are none once every piece is edited', () => {
     const edited = { headline: 'Closed', greeting: '', facts: rows.map((r) => ({ label: `${r.label}!`, value: `${r.value}!` })) };
     expect(sampleAfterEdit(sample, fields, { data }, { data: edited, bindings: {} })).toBeNull();

@@ -176,13 +176,18 @@ function compactSample(s: SampleFields): SampleFields | null {
   return s.texts.length || Object.keys(lists).length ? { texts: s.texts, lists } : null;
 }
 
+/** A field's value as screens get it: its own, else its default, as the compiler fills it. */
+const withDefault = (value: unknown, def: FieldDef | undefined) => value ?? (def && 'default' in def ? def.default : undefined);
+
 /**
  * What is left of a draft's sample fields after a saved edit from `before` to `after` (#360). Each
- * field is compared as screens get it, its template default standing in for a value left out: a
- * text bound now, or showing other words, is out. A list bound now is out; otherwise each row now
- * is matched with the row before it whose marked cells it still holds the most of, wherever it
- * moved, and keeps the marks on those cells. A row with none of them, new or rewritten, has none.
- * Null for nothing left.
+ * field, and each list cell, is compared as screens get it, its template default standing in for a
+ * value left out: a text bound now, or showing other words, is out. A list bound now is out;
+ * otherwise rows now are paired with the sample rows before, the pairs that still hold the most
+ * marked cells first, then a row whose marked cells all hold, then one that stayed where it was,
+ * wherever the rows moved: a row added beside a sample row, sharing a cell with it, never takes
+ * its marks. A row keeps the marks on the cells it still holds; one with none, new or rewritten,
+ * has none. Null for nothing left.
  */
 export function sampleAfterEdit(
   sample: SampleFields,
@@ -190,23 +195,35 @@ export function sampleAfterEdit(
   before: { data: Record<string, unknown> },
   after: { data: Record<string, unknown>; bindings: Record<string, unknown> },
 ): SampleFields | null {
-  const shown = (data: Record<string, unknown>, f: string) => {
-    const def = fields[f];
-    return data[f] ?? (def && 'default' in def ? def.default : undefined);
-  };
+  const shown = (data: Record<string, unknown>, f: string) => withDefault(data[f], fields[f]);
   const texts = sample.texts.filter((f) => !(f in after.bindings) && same(shown(before.data, f), shown(after.data, f)));
   const lists: Record<string, string[][]> = {};
   for (const [f, rows] of Object.entries(sample.lists)) {
     if (f in after.bindings) continue;
+    const def = fields[f];
+    const item = def?.type === 'list' ? def.item : {};
+    const at = (row: unknown, k: string) => withDefault(cell(row, k), item[k]);
     const was = rowsOf(shown(before.data, f));
-    const left = rows.map((keys, i) => ({ keys, row: was[i] }));
-    lists[f] = rowsOf(shown(after.data, f)).map((now) => {
-      const held = left.map(({ keys, row }) => keys.filter((k) => same(cell(row, k), cell(now, k))));
-      const best = held.reduce((b, keys, i) => (keys.length > (held[b]?.length ?? 0) ? i : b), -1);
-      if (best < 0) return [];
-      left.splice(best, 1);
-      return held[best] ?? [];
-    });
+    const now = rowsOf(shown(after.data, f));
+    const pairs = now
+      .flatMap((row, i) =>
+        rows.map((keys, j) => {
+          const held = keys.filter((k) => same(at(was[j], k), at(row, k)));
+          return { i, j, held, whole: held.length === keys.length, still: i === j };
+        }),
+      )
+      .filter((p) => p.held.length > 0)
+      .sort((a, b) => b.held.length - a.held.length || Number(b.whole) - Number(a.whole) || Number(b.still) - Number(a.still));
+    const marks: string[][] = now.map(() => []);
+    const placed = new Set<number>();
+    const taken = new Set<number>();
+    for (const p of pairs) {
+      if (placed.has(p.i) || taken.has(p.j)) continue;
+      marks[p.i] = p.held;
+      placed.add(p.i);
+      taken.add(p.j);
+    }
+    lists[f] = marks;
   }
   return compactSample({ texts, lists });
 }

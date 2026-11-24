@@ -292,7 +292,8 @@ const createSpot = defineTool({
       const startData = input.sample ? sampleData(t.manifest) : (input.data ?? {});
       const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: startData, assets: input.assets ?? {}, bindings: bound };
       checkTemplateDraft(t, draft);
-      const sample = input.sample ? sampleFieldsOf(t.manifest, startData) : null;
+      // A field bound to a source shows the source, not its sample: it is not marked.
+      const sample = input.sample ? sampleFieldsOf(t.manifest, Object.fromEntries(Object.entries(startData).filter(([f]) => !(f in bound)))) : null;
       const row = write(
         await org.spots.stage.insert({
           name: input.name,

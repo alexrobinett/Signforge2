@@ -640,6 +640,29 @@ describe('sample text the server refuses (#360)', () => {
     expect(vi.mocked(callTool)).not.toHaveBeenCalled();
   });
 
+  it('a check started while one is on its way starts nothing: a second click asks nothing and reads nothing', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    const would = { playlistId: 'pls_none', alone: true, withDefault: {}, refused: 'Not saved' };
+    const first = store.getState().checkSampleText(ORG, would);
+    expect(await store.getState().checkSampleText(ORG, would)).toBeNull();
+    expect(await first).toEqual([]);
+    expect(store.getState().publishing.pending).toBe(false);
+  });
+
+  it('says not published when the publish was held back: no publish was made', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockResolvedValue({ ...published(++revision), publish: null, screens: [] } as never);
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    expect(await store.getState().publishTogether(ORG, [{ kind: 'schedule_entry', id: 'sch_breakfast' }])).toBe(false);
+  });
+
   it('publishes the agent’s drafts together, after one question, or nothing', async () => {
     vi.mocked(getSchedule).mockResolvedValue({ entries: [{ ...entry('sch_new', false), playlistId: 'pls_flash' }] } as never);
     vi.mocked(getPlaylists).mockResolvedValue({
