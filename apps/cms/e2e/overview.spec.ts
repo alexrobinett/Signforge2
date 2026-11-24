@@ -118,6 +118,24 @@ test('a long playlist name wraps on a phone, hiding the checklist keeps it hidde
   const setup = page.getByRole('region', { name: 'Get your first spot on a screen' });
   await expect(setup).toBeVisible();
 
+  // Empty lists say what to do, with the one button that does it (#369): Spots, and Playlists with no spot to put in one.
+  await page.goto('/spots');
+  await hydrated(page);
+  await expect(page.getByRole('heading', { name: 'Make your first spot from a template' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New spot' })).toHaveCount(1);
+  await axe(page);
+  await shots(page, '40-spots-empty');
+  await page.goto('/playlists');
+  await hydrated(page);
+  const empty = page.getByRole('region', { name: 'Make a spot first, then a playlist' });
+  await expect(page.getByRole('button', { name: 'New playlist' })).toHaveCount(0);
+  await axe(page);
+  await shots(page, '40-playlists-no-spots');
+  await empty.getByRole('link', { name: 'New spot' }).click();
+  await expect(page.getByRole('dialog', { name: 'New spot' })).toBeVisible();
+  await page.goto('/');
+  await hydrated(page);
+
   // The default's name is on its step's button: 100 letters, with no space to break at.
   const long = 'W'.repeat(100);
   const { playlist } = await tool(page, 'create_playlist', { name: long, transition: { type: 'cut' } });
