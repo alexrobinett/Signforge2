@@ -118,6 +118,9 @@ function IntegrationsPage() {
   const all = CATALOGUE.flatMap((g) => g.items);
   const groups = CATALOGUE.map((g) => ({ ...g, items: g.items.filter((c) => shows(c, show, q, sources)) })).filter((g) => g.items.length);
   const notice = connectionNotice(search, connections);
+  // One filled button on the page (#364): the first failing source's fix, else the first Connect shown, else none.
+  const fixing = canManage && sources.some((s) => s.failures > 0 && hasAddress(s));
+  const firstConnect = fixing ? undefined : groups.flatMap((g) => g.items).find((c) => actionOf(c, sources, canManage) === 'Connect')?.name;
 
   return (
     <div className="space-y-6">
@@ -196,7 +199,7 @@ function IntegrationsPage() {
                 </div>
                 <ul>
                   {g.items.map((c) => (
-                    <ConnectorRow key={c.name} connector={c} sources={sources} canManage={canManage} />
+                    <ConnectorRow key={c.name} connector={c} sources={sources} canManage={canManage} primary={c.name === firstConnect} />
                   ))}
                 </ul>
               </section>
@@ -220,13 +223,32 @@ function IntegrationsPage() {
   );
 }
 
-function ConnectorRow({ connector: c, sources, canManage }: { connector: Connector; sources: ListedSource[]; canManage: boolean }) {
+/**
+ * What a connector's row offers: Manage (or View) its sources, Connect a feed or a calendar, or nothing.
+ * Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
+ */
+function actionOf(c: Connector, sources: ListedSource[], canManage: boolean) {
+  if (!c.kind) return null;
+  if (sourcesOf(c, sources).length) return canManage ? 'Manage' : 'View';
+  return canManage && (c.kind === 'rss' || c.kind === 'ical') ? 'Connect' : null;
+}
+
+function ConnectorRow({
+  connector: c,
+  sources,
+  canManage,
+  primary,
+}: {
+  connector: Connector;
+  sources: ListedSource[];
+  canManage: boolean;
+  /** The page's one filled button (#364): the first Connect, while no source needs fixing. */
+  primary: boolean;
+}) {
   const openSources = useAppStore((s) => s.openSources);
   const mine = sourcesOf(c, sources);
   const failing = mine.some((s) => s.failures > 0);
-  // Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
-  const addable = c.kind === 'rss' || c.kind === 'ical';
-  const action = !c.kind ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
+  const action = actionOf(c, sources, canManage);
   const kind = c.kind;
 
   return (
@@ -250,7 +272,7 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
           )}
           {kind && action && (
             <Button
-              variant={action === 'Connect' ? 'default' : 'outline'}
+              variant={primary ? 'default' : 'outline'}
               className="min-h-10 px-3.5 text-[15px] font-semibold"
               aria-label={`${action} ${c.name}`}
               onClick={() => openSources(kind, { adding: action === 'Connect' })}
@@ -266,33 +288,39 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
 
 /**
  * A failing source, at the top of the page (#364): what is wrong in words, the spots it feeds, and its
- * fix as the page's one filled button, so the urgent thing is not a link in the margin.
+ * fix as a button, so the urgent thing is not a link in the margin. The first fix is the page's one filled button.
  */
 function FailingSources({ sources, clock, canManage }: { sources: ListedSource[]; clock: Clock; canManage: boolean }) {
   const openSources = useAppStore((s) => s.openSources);
-  return sources
-    .filter((s) => s.failures > 0)
-    .map((s) => (
-      <Alert key={s.id} variant="destructive">
-        <TriangleAlertIcon aria-hidden />
-        <AlertTitle>
-          {KIND_WORD[s.format]} · {s.name}
-        </AlertTitle>
-        <AlertDescription className="text-foreground">
-          <p>
-            {failingWords(s, clock)}
-            {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
-          </p>
-          {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
-          {canManage && hasAddress(s) && (
-            <Button type="button" className="mt-1 justify-self-start" onClick={() => openSources(kindOf(s.format), { editing: s.id })}>
-              {FIX_WORD[s.format]}
-              <span className="sr-only"> for {s.name}</span>
-            </Button>
-          )}
-        </AlertDescription>
-      </Alert>
-    ));
+  const failing = sources.filter((s) => s.failures > 0);
+  // One filled button per view: the first fix; the others are outlined.
+  const first = canManage ? failing.find((s) => hasAddress(s))?.id : undefined;
+  return failing.map((s) => (
+    <Alert key={s.id} variant="destructive" role="alert" aria-labelledby={`failing-${s.id}`}>
+      <TriangleAlertIcon aria-hidden />
+      <AlertTitle id={`failing-${s.id}`}>
+        {KIND_WORD[s.format]} · {s.name}
+      </AlertTitle>
+      <AlertDescription className="text-foreground">
+        <p>
+          {failingWords(s, clock)}
+          {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
+        </p>
+        {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
+        {canManage && hasAddress(s) && (
+          <Button
+            type="button"
+            variant={s.id === first ? 'default' : 'outline'}
+            className="mt-1 justify-self-start"
+            onClick={() => openSources(kindOf(s.format), { editing: s.id })}
+          >
+            {FIX_WORD[s.format]}
+            <span className="sr-only"> for {s.name}</span>
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  ));
 }
 
 /** The board's "Feeding screens now": every source and its last good check; a failing one's fix is at the top of the page. */
@@ -438,10 +466,11 @@ function ConfirmDisconnect({ orgId, sources }: { orgId: string; sources: ListedS
   const error = useAppStore((s) => s.integrations.connectError);
   const ask = useAppStore((s) => s.askToDisconnect);
   const disconnect = useAppStore((s) => s.disconnect);
+  const focusBack = useAppStore((s) => s.focusBack);
   const reading = c ? sources.filter((s) => s.connectionId === c.id).map((s) => s.name) : [];
   return (
     <AlertDialog open={c !== null} onOpenChange={(open) => !open && ask(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={(e) => focusBack('disconnect', e)}>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Disconnect {c?.account}?</AlertDialogTitle>
           <AlertDialogDescription>

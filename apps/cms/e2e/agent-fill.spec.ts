@@ -26,6 +26,10 @@ test('a member fills a new spot from a link and from a photo, checks the marked 
   // One filled button in the dialog, Create spot; filling from a flyer is the other way in (#364).
   await expect(dialog.locator('[data-slot="button"][data-variant="default"]')).toHaveText(['Create spot']);
   await dialog.getByLabel('Or a link').fill(LINK);
+  await expect(dialog.getByRole('button', { name: 'Fill a new spot' })).toBeEnabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
   await dialog.getByRole('button', { name: 'Fill a new spot' }).click();
   await expect(dialog.getByRole('alert')).toContainText('No model is set up for the agent yet');
   await expect(dialog.getByRole('link', { name: 'Open Settings, AI & agents' })).toBeVisible();

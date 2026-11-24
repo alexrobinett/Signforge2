@@ -69,7 +69,14 @@ export interface IntegrationsSlice {
   askToDisconnect: (connection: ConnectionView | null) => void;
   /** Disconnects the connection being confirmed. */
   disconnect: (orgId: string) => Promise<void>;
+  /**
+   * A dialog closed (its `onCloseAutoFocus`): focus goes back to what opened it, or to the page's main
+   * region once that is gone (a fixed source's alert). These dialogs have no trigger for Radix to return to.
+   */
+  focusBack: (dialog: OpenedDialog, e: Event) => void;
 }
+
+type OpenedDialog = 'sources' | 'delete' | 'disconnect';
 
 const initialNewSource: NewSource = { name: '', feedUrl: '', horizonDays: DEFAULT_HORIZON_DAYS };
 
@@ -110,10 +117,25 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     }
   }
 
+  /** What had focus as each dialog opened: outside state, nothing renders it. */
+  const openers = new Map<OpenedDialog, Element | null>();
+  const opened = (dialog: OpenedDialog, open: boolean) => {
+    if (open) openers.set(dialog, document.activeElement);
+  };
+
   return {
     integrations: initial,
 
-    openSources: (dialog, open = {}) => integrations(() => ({ ...initial, dialog, adding: open.adding ?? false, editing: open.editing ?? null })),
+    focusBack(dialog, e) {
+      e.preventDefault();
+      const el = openers.get(dialog);
+      (el instanceof HTMLElement && el.isConnected && el !== document.body ? el : document.getElementById('main'))?.focus();
+    },
+
+    openSources: (dialog, open = {}) => {
+      opened('sources', dialog !== null);
+      integrations(() => ({ ...initial, dialog, adding: open.adding ?? false, editing: open.editing ?? null }));
+    },
 
     openAddSource: (adding) => integrations((s) => ({ ...s, adding, editing: null, newSource: initialNewSource, error: null })),
 
@@ -162,7 +184,10 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       integrations((s) => ({ ...s, settingPhotos: null }));
     },
 
-    askToDeleteSource: (deleting) => integrations((s) => ({ ...s, deleting, error: null })),
+    askToDeleteSource: (deleting) => {
+      opened('delete', deleting !== null);
+      integrations((s) => ({ ...s, deleting, error: null }));
+    },
 
     async deleteSource(orgId) {
       const source = get().integrations.deleting;
@@ -186,7 +211,10 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       }
     },
 
-    askToDisconnect: (disconnecting) => integrations((s) => ({ ...s, disconnecting, connectError: null })),
+    askToDisconnect: (disconnecting) => {
+      opened('disconnect', disconnecting !== null);
+      integrations((s) => ({ ...s, disconnecting, connectError: null }));
+    },
 
     async disconnect(orgId) {
       const connection = get().integrations.disconnecting;

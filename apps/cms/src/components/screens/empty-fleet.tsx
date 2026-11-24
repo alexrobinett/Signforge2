@@ -35,6 +35,8 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
                   // No window handle either way: the test screen shares this origin, and holds only its own credential.
                   rel="noopener noreferrer"
                   onClick={() => named || nameNewScreen('Test screen')}
+                  data-slot="button"
+                  data-variant="default"
                   className="inline-flex h-11 items-center gap-2 self-start rounded-lg bg-primary px-4 text-[15px] font-semibold text-primary-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   Open a test screen <ExternalLinkIcon className="size-4" aria-hidden />
