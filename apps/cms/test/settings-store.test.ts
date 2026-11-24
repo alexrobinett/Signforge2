@@ -45,6 +45,7 @@ const settings: OrgSettings = {
     screen_offline: { who: 'owners', email: true, slack: false, webhook: false },
     publish_finished: { who: 'owners', email: false, slack: false, webhook: false },
     agent_refused: { who: 'owners', email: true, slack: false, webhook: false },
+    publish_requested: { who: 'editors', email: true, slack: false, webhook: false },
   },
   updatedAt: null,
   version: 1,

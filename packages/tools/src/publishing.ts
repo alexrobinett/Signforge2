@@ -28,6 +28,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import {
+  brandStateOf,
   draftChanged,
   published,
   type Asset,
@@ -374,6 +375,7 @@ export async function promoteDrafts(
   opts: CompileOptions,
   pins?: ReadonlyMap<string, number>,
   end: ReadonlySet<string> = new Set(),
+  exact = false,
 ): Promise<{ graph: OrgGraph; writes: Write[]; removals: Write[]; drafts: DraftReport }> {
   const writes: Write[] = [];
   const removals: Write[] = [];
@@ -453,7 +455,8 @@ export async function promoteDrafts(
 
   const entries: ScheduleEntryRow[] = [];
   for (const row of graph.entries) {
-    if (ended(row, opts.now.getTime())) {
+    // An approved request takes away only what it pins (`exact`): an ended takeover it does not pin waits for another publish.
+    if (ended(row, opts.now.getTime()) && (!exact || pins?.has(pinKey('schedule_entry', row.id)))) {
       removals.push(...org.scheduleEntries.stage.remove(row).writes);
       drafts.removed.push({ kind: 'schedule_entry', id: row.id });
       continue;
@@ -518,7 +521,8 @@ const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
  * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
  * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
  * `end` names schedule entries this publish deletes, whatever the pins (`end_takeover`). A takeover
- * that has ended is in no screen's manifest. `revision` is the org's publish revision as read; the
+ * that has ended is in no screen's manifest, and goes with the publish; with `exact` (an approved
+ * request) only if it is pinned, as nothing else is touched. `revision` is the org's publish revision as read; the
  * publish moves it to the next. `read` is the org as read, and `graph` as it will be once the
  * writes commit, its drafts promoted. `removals` delete schedule entries: commit them with the
  * rest, and also when no draft was promoted and no screen changed, which makes no publish.
@@ -528,9 +532,14 @@ export async function publishOrg(
   opts: CompileOptions,
   pins?: readonly DraftPin[],
   end: readonly string[] = [],
+  exact = false,
 ): Promise<{
   writes: Write[];
   removals: Write[];
+  /** A pin's guard that it is still the version pinned, for the ones not promoted: commit them whatever else is, as `removals`. */
+  pinGuards: Write[];
+  /** The org's brand state as this publish read it (`brandStateOf`): what its manifests were compiled with. */
+  brand: string;
   drafts: DraftReport;
   screens: ScreenPublish[];
   revision: number;
@@ -552,9 +561,22 @@ export async function publishOrg(
       }
     }
   }
-  const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end), exact);
   const { writes: promotions, removals, drafts } = promoted;
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
+  // A pin that needs no promotion (live as it is) or is held is still pinned at its version: an edit
+  // of it that lands before the batch fails it, as one of a promoted pin does, even when nothing else is written.
+  const pinGuards: Write[] = [];
+  if (pins) {
+    const acted = new Set([...drafts.promoted, ...drafts.removed].map((d) => pinKey(d.kind, d.id)));
+    for (const p of pins) {
+      if (acted.has(pinKey(p.kind, p.id))) continue;
+      if (p.kind === 'spot') pinGuards.push(...org.spots.stage.unchanged(read.spots.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'playlist') pinGuards.push(...org.playlists.stage.unchanged(read.playlists.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'schedule_entry') pinGuards.push(...org.scheduleEntries.stage.unchanged(read.entries.find((r) => r.id === p.id)!).writes);
+    }
+  }
+  const brand = brandStateOf([...read.brandKits.values()], read.brandAssignments);
   // With no default playlist no screen can be compiled, and a new org's first schedule entry would
   // reach none (#243): one on every screen at all hours makes its playlist the default, in the same batch.
   // Guarded by the settings' version as read: a default set by hand since (set_default_playlist moves
@@ -585,7 +607,7 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+  return { writes, removals, pinGuards, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
 }
 
 /** Whether an entry plays on every screen at all hours, always: what a default playlist does. */

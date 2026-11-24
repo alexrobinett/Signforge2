@@ -152,6 +152,8 @@ export interface SeededOrg {
   /** An agent grant (M4-04) by a user of its own (`grantee`, not a member), for a client the provider registered. */
   agentGrant: string;
   grantee: string;
+  /** A pending request by the agent grant to publish the template spot at its version (M4-09). */
+  publishRequest: string;
 }
 
 export interface Seeded {
@@ -357,6 +359,22 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     expiresAt: SEED_HOUR + AGENT_GRANT_IDLE_MS,
   });
   await o.commit(agentGrant.writes);
+  // The seeded agent's request to publish the template spot as it is (M4-09), pending: it expires
+  // a century after the seeded hour, so it is pending whenever the tests run.
+  const publishRequest = o.publishRequests.stage.insert(
+    {
+      requestedByKind: 'agent',
+      requestedBy: agentGrant.row.id,
+      clientId: agentGrant.row.clientId,
+      draftsJson: JSON.stringify([{ kind: 'spot', id: templateSpot.id, version: templateSpot.rowVersion }]),
+      reason: 'Seeded request',
+      brandState: await o.brandKits.state(),
+      expiresAt: SEED_HOUR + 100 * 365 * 24 * 3_600_000,
+    },
+    SEED_HOUR,
+    10,
+  );
+  await o.commit(publishRequest.writes);
 
   return {
     orgId,
@@ -377,6 +395,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     alertDelivery: delivery.row.id,
     agentGrant: agentGrant.row.id,
     grantee,
+    publishRequest: publishRequest.row.id,
     connection: connection.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,

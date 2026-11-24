@@ -11,15 +11,9 @@
  * `publish_finished` rule names (`finishRollouts`).
  */
 import { findAlertWork, findUnfinishedRollouts, orgMembers, scoped } from '@signforge/db';
-import { ALERT_RETRY_MS, type AlertEvent, grantClient, orgSettings, tally, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
+import { ALERT_RETRY_MS, type AlertEvent, AUDIENCE_ROLES, grantClient, orgSettings, tally, UNREACHABLE_AFTER_MS } from '@signforge/tools';
 import { agentName } from './deliveries';
 import type { EmailMessage, EmailSender } from './email';
-
-const AUDIENCE_ROLES: Record<Audience, readonly string[]> = {
-  owners: ['owner'],
-  editors: ['owner', 'editor'],
-  everyone: ['owner', 'editor', 'viewer'],
-};
 
 interface OrgContext {
   recipients: string[];
@@ -35,7 +29,7 @@ async function orgContext(db: D1Database, orgId: string, kind: CheckedAlert): Pr
   const org = scoped(db, orgId);
   const [settings, members, set] = await Promise.all([orgSettings(org), orgMembers(db, orgId), org.alertChannels.list()]);
   const rule = settings.alerts[kind];
-  const roles = AUDIENCE_ROLES[rule.who];
+  const roles: readonly string[] = AUDIENCE_ROLES[rule.who];
   const format = new Intl.DateTimeFormat(settings.locale ?? 'en-US', {
     timeZone: settings.timezone ?? 'UTC',
     month: 'short',

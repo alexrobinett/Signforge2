@@ -6,7 +6,7 @@
  */
 import type * as s from './schema';
 
-export { scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
+export { brandStateOf, scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';
@@ -21,6 +21,7 @@ export {
   AUDIT_ROWS_PER_RUN,
   DEFAULT_AUDIT_RETENTION_DAYS,
   expireAlertDeliveries,
+  expirePublishRequests,
   expireAuditRows,
   expiredFeedImages,
   expireIdempotencyKeys,
@@ -56,6 +57,7 @@ export type TemplateVersion = typeof s.templateVersions.$inferSelect;
 export type SpotRow = typeof s.spots.$inferSelect;
 export type PlaylistRow = typeof s.playlists.$inferSelect;
 export type AgentGrantRow = typeof s.agentGrants.$inferSelect;
+export type PublishRequestRow = typeof s.publishRequests.$inferSelect;
 export type ScheduleEntryRow = typeof s.scheduleEntries.$inferSelect;
 export type Publish = typeof s.publishes.$inferSelect;
 export type DataSourceRow = typeof s.dataSources.$inferSelect;

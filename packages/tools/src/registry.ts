@@ -19,6 +19,7 @@ import { labelTools } from './labels';
 import { memberTools } from './members';
 import { pairingTools } from './pairing';
 import { playlistTools } from './playlists';
+import { publishRequestTools } from './publish-requests';
 import { publishTools } from './publish';
 import { scheduleTools } from './schedule';
 import { screenTools } from './screens';
@@ -34,6 +35,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...groupTools,
   ...labelTools,
   ...publishTools,
+  ...publishRequestTools,
   ...templateTools,
   ...assetTools,
   ...videoTools,

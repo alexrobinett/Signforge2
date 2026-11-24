@@ -54,8 +54,8 @@ const listAuditLog = defineTool({
           actorKind: actor?.kind,
           actorId: actor?.id,
           action,
-          // A publish that made the org's first default changed it too (#243): the filter finds both.
-          alsoAction: action === 'set_default_playlist' ? { action: 'publish', detailHas: '"madeDefault"' } : undefined,
+          // A publish, or an approval's (M4-09), that made the org's first default changed it too (#243): the filter finds them.
+          alsoAction: action === 'set_default_playlist' ? { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' } : undefined,
           targetKind: target?.kind,
           targetId: target?.id,
           from,

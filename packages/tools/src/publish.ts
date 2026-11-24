@@ -96,11 +96,25 @@ async function switchScreens(
 
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
- * compile every screen, store and switch the changed ones. `publish` and `end_takeover`.
+ * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
+ * approved request (`exact`: nothing removed that it does not pin; `brand`, the brand state it was
+ * asked under, which the manifests must be compiled with, held to the commit).
  */
-async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[] | undefined, end: readonly string[] = []): Promise<ToolOutput<'publish'>> {
+export async function runPublish(
+  ctx: ToolContext<unknown>,
+  drafts: readonly DraftPin[] | undefined,
+  end: readonly string[] = [],
+  approval?: { brand: string },
+): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end);
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined);
+  // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
+  // would pass a second read, and its batch then guards the very rows the manifests were made from.
+  if (approval && result.brand !== approval.brand)
+    throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
+  // The pins' guards, and the brand state's, go with the batch whether or not anything else is written.
+  write({ row: undefined, writes: result.pinGuards });
+  if (approval) write(org.brandKits.stage.unchanged(result.brand));
   const screens = result.screens.map((s) => ({
     screenId: s.screenId,
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
@@ -138,7 +152,7 @@ async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[]
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. With drafts, a pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -172,8 +186,8 @@ const publish = defineTool({
         });
     }
     const out = await runPublish(ctx, input.drafts);
-    // As the batch runs too, when it changes anything: a default switched meanwhile fails it.
-    if (input.ifDefault !== undefined && (out.publish || out.promoted.length)) write(org.settings.stage.defaultIs(input.ifDefault));
+    // As the batch runs too, with the pins' guards: a default switched meanwhile fails it.
+    if (input.ifDefault !== undefined) write(org.settings.stage.defaultIs(input.ifDefault));
     return out;
   },
 });

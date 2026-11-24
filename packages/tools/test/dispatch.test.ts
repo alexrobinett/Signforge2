@@ -61,6 +61,7 @@ describe('the registry', () => {
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
       'add_group_members',
+      'approve_publish_request',
       'assign_brand_kit',
       'cancel_invitation',
       'claim_screen',
@@ -72,6 +73,7 @@ describe('the registry', () => {
       'create_schedule_entry',
       'create_spot',
       'create_video_upload',
+      'decline_publish_request',
       'delete_asset',
       'delete_data_source',
       'delete_group',
@@ -94,6 +96,7 @@ describe('the registry', () => {
       'get_org_settings',
       'get_playlist',
       'get_publish',
+      'get_publish_request',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -113,6 +116,7 @@ describe('the registry', () => {
       'list_label_keys',
       'list_members',
       'list_playlists',
+      'list_publish_requests',
       'list_publishes',
       'list_schedule_entries',
       'list_screen_status',
@@ -130,6 +134,7 @@ describe('the registry', () => {
       'rename_group',
       'rename_screen',
       'renew_asset_upload',
+      'request_publish',
       'restart_screen',
       'retry_alert_delivery',
       'revoke_agent_grant',
@@ -174,6 +179,7 @@ describe('the registry', () => {
       'create_schedule_entry',
       'create_spot',
       'create_video_upload',
+      'request_publish',
       'start_takeover',
     ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
@@ -247,6 +253,7 @@ describe('roles and scopes', () => {
       'get_org_settings',
       'get_playlist',
       'get_publish',
+      'get_publish_request',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -263,6 +270,7 @@ describe('roles and scopes', () => {
       'list_label_keys',
       'list_members',
       'list_playlists',
+      'list_publish_requests',
       'list_publishes',
       'list_schedule_entries',
       'list_screen_status',

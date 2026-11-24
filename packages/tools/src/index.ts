@@ -58,7 +58,8 @@ export { entryView } from './schedule';
 export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
 export { kitColors, type StoredColors } from './brand';
 export type { StoredCheckReport } from './templates';
-export { AI_PROVIDERS } from './outputs';
+export { AI_PROVIDERS, AUDIENCE_ROLES } from './outputs';
+export { approves } from './publish-requests';
 export type {
   AgentCall,
   AgentUsage,

@@ -9,7 +9,7 @@
  *
  * A `Write` is opaque: only this package builds one, always stamped with its scope's org.
  */
-import { getTableColumns, SQL } from 'drizzle-orm';
+import { getTableColumns, SQL, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 
@@ -17,6 +17,8 @@ type Db = DrizzleD1Database<Record<string, never>>;
 type Query = Parameters<Db['batch']>[0][number];
 
 const QUERY = Symbol('write');
+/** Guard conditions read in one query after a failed batch: D1 binds at most 100 values, and a draft's guard binds 5. */
+const GUARDS_PER_READ = 15;
 const GUARD = Symbol('guard');
 
 /** One statement of a staged change. Run only by a scope's `commit`. */
@@ -30,6 +32,8 @@ interface VersionGuard {
   id: string;
   /** The version the change was made from. */
   version: number;
+  /** Its condition, true while the change still holds: read with the others' after a failed batch, to find which failed in a few queries. */
+  holds: SQL;
   /** The row's version now if it is no longer the row the change was made from, else undefined. Throws `NotInOrgError` if the row is gone, except a draft's promotion guard, which reports a vanished draft as version 0. */
   stale: () => Promise<number | undefined>;
 }
@@ -75,10 +79,23 @@ export async function commit(db: Db, writes: readonly Write[]): Promise<number[]
     const results = await db.batch([first!, ...rest]);
     return results.map((r) => (r as { meta?: { changes?: number } }).meta?.changes ?? 0);
   } catch (err) {
-    for (const g of writes.flatMap((w) => w[GUARD] ?? [])) {
-      const now = await g.stale();
-      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
-      if (now !== undefined) throw new StaleVersionError(g.id, now, { cause: err });
+    // Which guard failed: their conditions read together, GUARDS_PER_READ to a query, so a batch of
+    // many (a publish of 40 pins) costs a few reads to say so, not one each; then that one's version.
+    const guards = writes.flatMap((w) => w[GUARD] ?? []);
+    for (let at = 0; at < guards.length; at += GUARDS_PER_READ) {
+      const part = guards.slice(at, at + GUARDS_PER_READ);
+      const held = await db.get<Record<string, number>>(
+        sql`SELECT ${sql.join(
+          part.map((g, i) => sql`(CASE WHEN ${g.holds} THEN 1 ELSE 0 END) AS ${sql.identifier(`g${i}`)}`),
+          sql`, `,
+        )}`,
+      );
+      for (const [i, g] of part.entries()) {
+        if (held?.[`g${i}`] === 1) continue;
+        const now = await g.stale();
+        // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
+        if (now !== undefined) throw new StaleVersionError(g.id, now, { cause: err });
+      }
     }
     throw err;
   }

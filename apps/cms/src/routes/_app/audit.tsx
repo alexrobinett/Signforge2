@@ -210,7 +210,12 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
       <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>
       <td className="px-3 py-2">
         {whatText(e)}
-        {detail && <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">{detail}</span>}
+        {/* In <bdi>: what a tool was given (an agent's reason for its publish request) cannot reorder the row around it. */}
+        {detail && (
+          <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">
+            <bdi>{detail}</bdi>
+          </span>
+        )}
         {/* Phones have no room for the last two columns: they read under what was done. */}
         <span className="mt-0.5 block text-sm break-all text-muted-foreground sm:hidden">
           {e.target && (
