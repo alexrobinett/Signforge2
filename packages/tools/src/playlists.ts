@@ -166,19 +166,32 @@ const deletePlaylist = defineTool({
 const setDefaultPlaylist = defineTool({
   name: 'set_default_playlist',
   description:
-    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Pass the organization settings' version you read (get_org_settings) as ifVersion so a default someone else chose since is not replaced: refused with a conflict if they changed. Returns { playlist }.",
+    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Pass the organization settings' version you read (get_org_settings) as ifVersion so a default someone else chose since is not replaced: refused with a conflict if they changed. Or pass ifDefault, the default you saw (null for none): refused with a conflict, details { defaultPlaylistId }, unless it is still that, checked again as it is saved. Returns { playlist }.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   input: z.object({
     playlistId: id('playlist'),
     ifVersion: ifVersion.optional().describe("The organization settings' version you read (get_org_settings): refused with a conflict if they changed since"),
+    ifDefault: id('playlist')
+      .nullable()
+      .optional()
+      .describe('Set it only if the default is still this playlist; null: only if there is none. Refused with a conflict otherwise'),
   }),
   output: outputs.set_default_playlist,
   example: { playlistId: 'pls_example' },
   target,
   handler: async ({ org, input, write }) => {
     const row = await requirePlaylist(org, input.playlistId);
+    if (input.ifDefault !== undefined) {
+      const now = (await org.settings.get())?.defaultPlaylistId ?? null;
+      if (now !== input.ifDefault)
+        throw new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', {
+          defaultPlaylistId: now,
+        });
+      // As the batch runs too: one chosen between this read and the save fails it.
+      write(org.settings.stage.defaultIs(input.ifDefault));
+    }
     write(await org.settings.stage.set({ defaultPlaylistId: row.id }, input.ifVersion));
     return { playlist: playlistView(row, await org.playlists.items(row.id), row.id) };
   },

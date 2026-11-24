@@ -1227,6 +1227,19 @@ export function scoped(d1: D1Database, orgId: string) {
           });
           return upsertVersioned(os, { id: 'settings', key: { orgId }, absent: 1, fresh }, values, ifVersion);
         },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `default_playlist`) unless, as it
+         * runs, the org's default playlist is `playlistId` (null: it has none). A default chosen or changed
+         * by someone else between a read and the batch fails it.
+         */
+        defaultIs: (playlistId: string | null): Staged => {
+          const holds = sql`COALESCE((SELECT ${os.defaultPlaylistId} FROM ${os} WHERE ${os.orgId} = ${orgId}), '') = ${playlistId ?? ''}`;
+          const stale = async () => {
+            const row = await db.select({ id: os.defaultPlaylistId, version: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get();
+            return (row?.id ?? null) === playlistId ? undefined : (row?.version ?? 1);
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'default_playlist', 0, holds, stale)] };
+        },
       },
     },
 

@@ -128,9 +128,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
   /**
    * The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless
-   * `undo` is false. `refused` titles a publish that was held back, as it does a refused one.
+   * `undo` is false. `refused` titles a publish that was held back, as it does a refused one;
+   * `setDefault` names a default set on the way, which stays set though nothing is published.
    */
-  async function told(orgId: string, r: ToolOutput<'publish'>, undo = true, refused = 'Not published') {
+  async function told(orgId: string, r: ToolOutput<'publish'>, undo = true, refused = 'Not published', setDefault?: string) {
     const held = await heldWords(orgId, r.held);
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
     // Every screen refused it: say the screens' own reason, not a guess.
@@ -144,7 +145,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           ? 'No screen plays it yet: add it to a playlist that screens play.'
           : 'No screen is paired yet.';
     if (!r.publish) {
-      if (held) toast.error(refused, { description: held.text, action: held.action, duration: 10_000 });
+      // A default set on the way stays set, though nothing is published (#336).
+      const stays = setDefault ? `${setDefault} is now the default playlist. ` : '';
+      if (held) toast.error(refused, { description: `${stays}${held.text}`, action: held.action, duration: 10_000 });
       else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: reachesNone });
       else toast('Nothing to publish', { description: 'Every screen already plays this.' });
       return;
@@ -177,19 +180,16 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
   /**
    * The schedule, playlists and spots, read now, not from the cache: a draft edited in another tab,
-   * or an entry just saved, is pinned at its version now. With `settings` (a default may be chosen),
-   * the org settings' version too, read with them, which a default set from what they show is guarded
-   * by. Null when the read fails, said under `refused`.
+   * or an entry just saved, is pinned at its version now. Null when the read fails, said under `refused`.
    */
-  async function readDrafts(orgId: string, refused: string, settings = false) {
+  async function readDrafts(orgId: string, refused: string) {
     try {
-      const [{ entries }, { playlists }, { spots }, read] = await Promise.all([
+      const [{ entries }, { playlists }, { spots }] = await Promise.all([
         queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
         queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
         queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
-        settings ? callTool('get_org_settings', {}) : undefined,
       ]);
-      return { entries, playlists, spots, settingsVersion: read?.settings.version };
+      return { entries, playlists, spots };
     } catch (err) {
       toast.error(refused, { description: toolMessage(err) });
       return null;
@@ -198,30 +198,29 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
   /**
    * Before a publish from the Schedule's dialogs (#243): with no default playlist yet, the one the
-   * person chose made the default first (`set_default_playlist`, guarded by the settings' version read
-   * with the lists, so a default someone chose since is not replaced: refused as changed). Then, whichever is the default, if
-   * it was never published, its pins and its unpublished spots', so the publish publishes it: a retry
-   * after a publish that failed once the default was set publishes it too (#336). `made` names the
-   * default this set, for the toast. null when it was refused, which is said under `refused`.
+   * person chose made the default first (`set_default_playlist` with `ifDefault: null`: only while the
+   * org has none, checked again as it is saved, so a default someone chose meanwhile is never replaced).
+   * Then, whichever is the default, if it was never published, its pins and its unpublished spots', so
+   * the publish publishes it (a retry after a publish that failed once the default was set does too,
+   * #336), with `ifDefault`, which refuses the publish if it is no longer the default by then. `made`
+   * names the default this set, for the toasts. null when it was refused, which is said under `refused`.
    */
   async function defaultPins(
     choice: string | undefined,
-    drafts: { playlists: PlaylistView[]; spots: SpotView[]; settingsVersion: number | undefined },
+    drafts: { playlists: PlaylistView[]; spots: SpotView[] },
     refused: string,
-  ): Promise<{ pins: Pin[]; made?: string } | null> {
+  ): Promise<{ pins: Pin[]; made?: string; ifDefault?: string } | null> {
     let current = drafts.playlists.find((p) => p.isDefault);
     let made: string | undefined;
     const chosen = choice ? drafts.playlists.find((p) => p.id === choice) : undefined;
     if (!current && chosen) {
       try {
-        await callTool('set_default_playlist', { playlistId: chosen.id, ifVersion: drafts.settingsVersion });
+        await callTool('set_default_playlist', { playlistId: chosen.id, ifDefault: null });
         current = chosen;
         made = chosen.name;
       } catch (err) {
         toast.error(refused, {
-          description: isStale(err)
-            ? 'Someone changed the organization settings meanwhile, perhaps the default playlist. Reload and publish again.'
-            : toolMessage(err),
+          description: isConflict(err) ? 'Someone chose a default playlist meanwhile. Reload to see it, then publish again.' : toolMessage(err),
         });
         return null;
       }
@@ -230,6 +229,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const inIt = new Set(current.spotIds);
     return {
       made,
+      ifDefault: current.id,
       pins: [
         { kind: 'playlist', id: current.id, version: current.version },
         ...drafts.spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
@@ -238,15 +238,17 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   }
 
   /**
-   * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. `made` names a
-   * default playlist set on the way, which a refusal says, as it stays set.
+   * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. `byDefault` is
+   * what `defaultPins` gave: the default set on the way, which a refusal or a held publish says, as it
+   * stays set, and the default its pins are published only while it is (`ifDefault`).
    */
-  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published', made?: string) {
+  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published', byDefault: { made?: string; ifDefault?: string } = {}) {
+    const { made, ifDefault } = byDefault;
     pending(true);
     try {
       // Once each: a chosen default may be the entry's own playlist.
       const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
-      await told(orgId, await callTool('publish', { drafts }), undo, refused);
+      await told(orgId, await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}) }), undo, refused, made);
       await refresh(orgId);
     } catch (err) {
       const why = isStale(err) ? 'It changed since you opened it, perhaps in another tab. Reload and publish again.' : toolMessage(err);
@@ -313,9 +315,14 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishSchedule(orgId, entryIds, firstDefault) {
-      const drafts = await readDrafts(orgId, 'Not published', Boolean(firstDefault));
+      const drafts = await readDrafts(orgId, 'Not published');
       if (!drafts) return;
       const { entries, playlists, spots } = drafts;
+      // Before a default is set or anything pinned: an entry asked for that is gone (removed in another tab) publishes nothing.
+      if (entryIds?.some((id) => !entries.some((e) => e.id === id))) {
+        toast.error('Not published', { description: 'An entry is no longer there: someone may have removed it. Reload and look again.' });
+        return;
+      }
       const byDefault = await defaultPins(firstDefault, drafts, 'Not published');
       if (!byDefault) return;
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
@@ -332,19 +339,20 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         ],
         !chosen.some((e) => e.takeover),
         'Not published',
-        byDefault.made,
+        byDefault,
       );
     },
 
     async publishEntry(orgId, entryId, firstDefault) {
       // Called once the entry is saved: every way this ends without a publish says the draft is kept.
       const refused = 'Saved as a draft, not published';
-      const drafts = await readDrafts(orgId, refused, Boolean(firstDefault));
+      const drafts = await readDrafts(orgId, refused);
       if (!drafts) return;
       const { entries, playlists, spots } = drafts;
       const entry = entries.find((e) => e.id === entryId);
       if (!entry) {
-        toast.error(refused, { description: 'The entry is no longer there: someone may have removed it.' });
+        // Gone, so not saved as a draft either.
+        toast.error('Not published', { description: 'The entry is no longer there: someone may have removed it.' });
         return;
       }
       // After the entry is found: a default is set only for a publish that will run.
@@ -363,7 +371,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         ],
         true,
         refused,
-        byDefault.made,
+        byDefault,
       );
     },
 

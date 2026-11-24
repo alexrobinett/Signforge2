@@ -144,6 +144,11 @@ const publish = defineTool({
   mutates: true,
   publishes: true,
   input: z.object({
+    ifDefault: id('playlist')
+      .optional()
+      .describe(
+        "Publish only while this playlist is the organization's default: for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
+      ),
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
       .max(500)
@@ -157,7 +162,20 @@ const publish = defineTool({
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
-  handler: (ctx) => runPublish(ctx, ctx.input.drafts),
+  handler: async (ctx) => {
+    const { org, input, write } = ctx;
+    if (input.ifDefault !== undefined) {
+      const now = (await org.settings.get())?.defaultPlaylistId ?? null;
+      if (now !== input.ifDefault)
+        throw new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', {
+          defaultPlaylistId: now,
+        });
+    }
+    const out = await runPublish(ctx, input.drafts);
+    // As the batch runs too, when it changes anything: a default switched meanwhile fails it.
+    if (input.ifDefault !== undefined && (out.publish || out.promoted.length)) write(org.settings.stage.defaultIs(input.ifDefault));
+    return out;
+  },
 });
 
 const endTakeover = defineTool({

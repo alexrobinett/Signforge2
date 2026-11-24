@@ -1,5 +1,6 @@
 // The playlist tools: drafts made, ordered and deleted through the registry, as the CMS's
 // playlist editor calls them.
+import { published, type OrgScope, type Write } from '@signforge/db';
 import { seedOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -215,5 +216,55 @@ describe('set_default_playlist with ifVersion (#336)', () => {
     // At the version as it is now, it is set.
     const now = (await ok(call('get_org_settings', {}))).settings as { version: number };
     expect(await ok(call('set_default_playlist', { playlistId: mine.id, ifVersion: now.version }))).toMatchObject({ playlist: { id: mine.id } });
+  });
+});
+
+describe('ifDefault on set_default_playlist and publish (#393)', () => {
+  /** `org` with `before` run as its batch is committed: a change made between a call's read and its batch. */
+  const racing = (org: OrgScope, before: () => Promise<unknown>): OrgScope => {
+    let raced = false;
+    const commit = async (writes: readonly Write[]) => {
+      if (!raced) {
+        raced = true;
+        await before();
+      }
+      return org.commit(writes);
+    };
+    return new Proxy(org, { get: (t, k) => (k === 'commit' ? commit : Reflect.get(t, k)) });
+  };
+  const chooseDefault = async (org: OrgScope, playlistId: string) => org.commit((await org.settings.stage.set({ defaultPlaylistId: playlistId })).writes);
+
+  it('sets a default only while there is none: refused when one was chosen before its read, or between its read and its batch', async () => {
+    const { o, org, call } = await setup('pl-if-default');
+    const theirs = await org.playlists.insert({ name: 'Theirs', transitionJson: JSON.stringify({ type: 'cut' }) });
+    // Chosen between the read and the batch.
+    const late = editorCalls(racing(org, () => chooseDefault(org, theirs.id)));
+    expect(await late('set_default_playlist', { playlistId: o.playlist, ifDefault: null })).toMatchObject({ ok: false, error: 'conflict' });
+    expect((await org.settings.get())?.defaultPlaylistId).toBe(theirs.id);
+    // Chosen before it read: refused at once, naming it.
+    expect(await call('set_default_playlist', { playlistId: o.playlist, ifDefault: null })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { defaultPlaylistId: theirs.id },
+    });
+    // Only if it is still theirs: it is, so it is replaced.
+    expect(await ok(call('set_default_playlist', { playlistId: o.playlist, ifDefault: theirs.id }))).toMatchObject({ playlist: { id: o.playlist } });
+  });
+
+  it('publishes a default pinned as the default only while it is: refused when it was switched, before its read or before its batch', async () => {
+    const { o, org } = await setup('pl-publish-default');
+    const owner = (scope: OrgScope) => (name: string, input: unknown) => dispatch(registry, name, input, memberOf(scope, 'owner'));
+    await chooseDefault(org, o.playlist);
+    const other = await org.playlists.insert({ name: 'Other', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const spot = (await org.spots.get(o.templateSpot))!;
+    const pins = { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }], ifDefault: o.playlist };
+    // Switched between its read and its batch: nothing is published.
+    expect(await owner(racing(org, () => chooseDefault(org, other.id)))('publish', pins)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(published((await org.spots.get(spot.id))!)).toBeUndefined();
+    // Switched before it read: refused at once, naming the default now.
+    expect(await owner(org)('publish', pins)).toMatchObject({ ok: false, error: 'conflict', details: { defaultPlaylistId: other.id } });
+    // While it is: published.
+    await chooseDefault(org, o.playlist);
+    expect(await ok(owner(org)('publish', pins))).toMatchObject({ promoted: [{ kind: 'spot', id: spot.id }] });
   });
 });
