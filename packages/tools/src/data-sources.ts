@@ -196,7 +196,8 @@ const createDataSource = defineTool({
     format: 'json',
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=33.75&longitude=-84.39&current=temperature_2m',
   },
-  target: (_input, output) => ({ kind: 'data_source', id: output.dataSource.id }),
+  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then.
+  target: (_input, output: { dataSource: { id: string } } | undefined) => (output ? { kind: 'data_source', id: output.dataSource.id } : undefined),
   handler: async ({ org, input, write, services: { feedUrls } }) => {
     const existing = await org.dataSources.list();
     if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);

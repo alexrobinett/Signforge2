@@ -47,6 +47,7 @@ export { type ClientRedirect, destinationOf, plainName, shownClient, shownClient
 export { grantClient } from './agent-grants';
 export {
   dispatch,
+  refusedPress,
   describeTools,
   effectiveScopes,
   grantOf,

@@ -829,6 +829,179 @@ describe('confirmation cards (#269)', () => {
       ],
     });
   });
+
+  /** A press refused: the drawer told so from the action's own result, and its audit row alone, with the card and why. */
+  async function refusedPress(s: Awaited<ReturnType<typeof setup>>, body: unknown, action: string, why: string | RegExp) {
+    const all = await raw(await s.member.post('/api/agent/chat', body));
+    expect(doneOf(all)).toMatchObject({ ok: false, message: expect.stringMatching(why) });
+    const row = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === action);
+    const detail = JSON.parse(row?.detailJson ?? '{}');
+    expect(detail).toMatchObject({ refused: { message: expect.stringMatching(why) }, confirmed: { callId: expect.any(String) } });
+    return detail;
+  }
+
+  it('names the target of every tool a card runs from its input alone: a refused press has no output', () => {
+    for (const c of Object.values(CONFIRMABLE))
+      for (const name of c.tools) {
+        const tool = registry.get(name);
+        expect(() => tool?.target?.(tool.example, undefined as never), name).not.toThrow();
+      }
+  });
+
+  describe('a refused takeover writes nothing but its audit row, and the drawer says so (review of #406)', () => {
+    /** A spot in the takeover's playlist, never published: the card publishes it with the playlist. */
+    async function withSpot(s: Awaited<ReturnType<typeof takeover>>, url: string) {
+      const spot = await s.scope.spots.insert({ name: 'Closure', kind: 'url', durationMs: 10_000, url });
+      await s.scope.playlists.setItems(s.playlist.id, [spot.id]);
+      return spot;
+    }
+
+    it('a spot still holding sample text', async () => {
+      const s = await takeover();
+      const spot = await withSpot(s, 'https://example.com/closure');
+      await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+        .bind(JSON.stringify({ texts: ['headline'], lists: {} }), spot.id)
+        .run();
+      const { body } = pressOf(await raw(await s.ask('q')), 'q');
+      await refusedPress(s, body, 'publish_takeover', /sample text/);
+      expect(await s.scope.scheduleEntries.list()).toEqual([]);
+      expect((await s.scope.spots.get(spot.id))?.publishedJson).toBeNull();
+    });
+
+    it('a draft that fails its checks', async () => {
+      const s = await takeover();
+      await withSpot(s, 'http://example.com/closure');
+      const { body } = pressOf(await raw(await s.ask('q')), 'q');
+      await refusedPress(s, body, 'publish_takeover', /the takeover cannot be published/);
+      expect(await s.scope.scheduleEntries.list()).toEqual([]);
+      expect((await s.scope.playlists.get(s.playlist.id))?.publishedJson).toBeNull();
+    });
+
+    it('an end already past', async () => {
+      const s = await takeover();
+      s.called.endsAt = new Date(NOON - 3_600_000).toISOString();
+      const { body } = pressOf(await raw(await s.ask('q')), 'q');
+      const all = await raw(await s.member.post('/api/agent/chat', body));
+      expect(doneOf(all)).toMatchObject({ ok: false });
+      expect(await s.scope.scheduleEntries.list()).toEqual([]);
+      expect((await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'publish_takeover')?.detailJson).toContain('"refused"');
+    });
+
+    it('its group deleted since the card', async () => {
+      const s = await takeover({ aim: { target: 'group', groupId: undefined } });
+      const [first] = await s.scope.screens.list();
+      const group = await s.scope.screenGroups.insert({ name: 'Bayside' });
+      await s.scope.screenGroups.setMembers(group.id, [first!.id]);
+      Object.assign(s.called, { groupId: group.id });
+      const { body } = pressOf(await raw(await s.ask('q')), 'q');
+      expect((await s.owner.tool('delete_group', { groupId: group.id })).status).toBe(200);
+      await refusedPress(s, body, 'publish_takeover', /Its group or screen was deleted since the card was made/);
+      expect(await s.scope.scheduleEntries.list()).toEqual([]);
+    });
+
+    it('a spot of its playlist published again since the card', async () => {
+      const s = await takeover();
+      const spot = await withSpot(s, 'https://example.com/closure');
+      expect((await s.owner.tool('publish', {})).status).toBe(200);
+      const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
+      expect(card.lines).not.toContain('Publishes Storm closure too: it was never published.');
+      // The spot's page changes, and is published: the card did not show it.
+      const row = (await s.scope.spots.get(spot.id))!;
+      expect((await s.owner.tool('update_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
+      expect((await s.owner.tool('publish', {})).status).toBe(200);
+      await refusedPress(s, body, 'publish_takeover', /A spot of its playlist was published again since the card was made/);
+      expect(await s.scope.scheduleEntries.list()).toEqual([]);
+    });
+  });
+
+  describe('a publish card holds the press to what it showed (review of #406)', () => {
+    async function publishCard(called: (ids: { playlist: string; spot: string; other: string }) => Record<string, unknown>) {
+      const ask: { called?: Record<string, unknown> } = {};
+      const s = await setup({
+        steps: (body) =>
+          body.messages.length === 1 ? { calls: [{ name: 'publish', input: ask.called }] } : { text: JSON.stringify({ text: 'Published.', groups: [], steps: [] }) },
+      });
+      const playlist = await s.scope.playlists.insert({ name: 'All day', transitionJson: JSON.stringify({ type: 'cut' }) });
+      const other = await s.scope.playlists.insert({ name: 'Night', transitionJson: JSON.stringify({ type: 'cut' }) });
+      const spot = await s.scope.spots.insert({ name: 'Pier 9', kind: 'url', durationMs: 10_000, url: 'https://example.com/pier' });
+      await s.scope.playlists.setItems(playlist.id, [spot.id]);
+      await s.scope.commit((await s.scope.settings.stage.set({ defaultPlaylistId: playlist.id })).writes);
+      const pl = (await s.scope.playlists.get(playlist.id))!;
+      ask.called = {
+        drafts: [
+          { kind: 'spot', id: spot.id, version: spot.rowVersion },
+          { kind: 'playlist', id: playlist.id, version: pl.rowVersion },
+        ],
+        ...called({ playlist: playlist.id, spot: spot.id, other: other.id }),
+      };
+      const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
+      expect(card.lines).toContain('Changes what 3 screens play; each switches as it hears of it.');
+      /** Refused, nothing published. */
+      const refused = async (why: RegExp) => {
+        await refusedPress(s, body, 'publish', why);
+        expect((await s.scope.spots.get(spot.id))?.publishedJson).toBeNull();
+        expect(await s.scope.publishes.history({ limit: 1 })).toEqual([]);
+      };
+      return { ...s, spot, other, refused };
+    }
+
+    it('a screen added since', async () => {
+      const s = await publishCard(() => ({}));
+      await s.scope.screens.insert({ name: 'Bayside annex', timezone: 'UTC', orientation: 'landscape' });
+      await s.refused(/The screens it would switch changed since the card was made/);
+    });
+
+    it('another default since', async () => {
+      const s = await publishCard(() => ({}));
+      await s.scope.commit((await s.scope.settings.stage.set({ defaultPlaylistId: s.other.id })).writes);
+      await s.refused(/The default playlist changed since the card was made/);
+    });
+
+    it('a brand kit made since', async () => {
+      const s = await publishCard(() => ({}));
+      await s.scope.brandKits.insert({
+        name: 'House',
+        colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
+        shape: 'soft',
+      });
+      await s.refused(/The brand kits changed since the card was made/);
+    });
+
+    it('a pinned draft changed since', async () => {
+      const s = await publishCard(() => ({}));
+      await env.DB.prepare('UPDATE spots SET row_version = row_version + 1 WHERE id = ?').bind(s.spot.id).run();
+      await s.refused(/has changed since it was chosen for this publish/);
+    });
+
+    it('an ifDefault that is not the default', async () => {
+      const s = await publishCard((ids) => ({ ifDefault: ids.other }));
+      await s.refused(/default/);
+    });
+  });
+
+  it("keeps a provider's resource out of the audit row, and audits a source refused in its handler, writing nothing", async () => {
+    const steps: Step[] = [];
+    const s = await setup({ steps });
+    await s.scope.dataSources.insert({ id: 'rota', name: 'Rota', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
+    const resource = 'staff-rota-RESOURCE-0001!A1:D20';
+    steps.push(
+      {
+        calls: [
+          {
+            name: 'create_data_source',
+            input: { id: 'rota', name: 'Rota', format: 'provider', connectionId: 'con_rota', resource, idempotencyKey: 'rota-key-0001' },
+          },
+        ],
+      },
+      ANSWER,
+    );
+    const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
+    expect(card.lines).toContain(`Reads this at the provider, through its connection: ${resource}`);
+    await refusedPress(s, body, 'create_data_source', /data source rota exists/);
+    const rows = await s.scope.auditLog.list({ limit: 10 });
+    expect(JSON.stringify(rows)).not.toContain('RESOURCE-0001');
+    expect(await s.scope.dataSources.list()).toHaveLength(1);
+  });
 });
 
 // ------------------------------------------------------------------ drafting (#268)

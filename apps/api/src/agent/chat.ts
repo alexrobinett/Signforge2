@@ -621,7 +621,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         const input = Object.fromEntries(Object.entries(called));
         let made: Awaited<ReturnType<typeof confirmable.make>>;
         try {
-          made = await confirmable.make(caller.org, input, { now: now(), timeZone });
+          // On the org's scoped repositories, not the turn's counted reading: a publish card's dry run reads the whole org.
+          made = await confirmable.make(scoped(c.env.DB, org.orgId), input, { now: now(), timeZone });
         } catch (err) {
           if (!(err instanceof CardProblem)) throw err;
           yield ended('unreadable', `The agent asked for something it cannot show on a card: ${err.message}. Ask again.`);
@@ -631,7 +632,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         const expiresAt = now() + CONFIRM_MS;
         const token = why ? null : crypto.randomUUID();
         if (token) {
-          const summary = `${made.card.title}: ${made.card.lines.join(' ')}`;
+          // For the audit row: never a line naming what dispatch redacts there (a provider's resource).
+          const summary = `${made.card.title}: ${made.card.lines.filter((l) => !made.withheld?.includes(l)).join(' ')}`;
           const record: Confirmation = {
             member,
             name,

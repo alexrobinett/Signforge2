@@ -298,7 +298,12 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     // Why the API ended it, in its words; the client ends a stream that broke off as one too, in its own, which are not said.
     else if (ended && CHAT_PROBLEMS.some((p) => p === ended.code)) say({ role: 'error', text: ended.message, inSettings: IN_SETTINGS.has(ended.code ?? '') });
     else say({ role: 'error', text: 'The answer was cut off. Check your connection and ask again.', inSettings: false });
-    ours(turn, (d) => ({ ...d, asking: false, progress: [] }));
+    finish(turn);
+  }
+
+  /** The turn over: the drawer free to ask again. */
+  function finish(turn: ChatClient) {
+    ours(turn, (d) => ({ ...d, asking: false, progress: [], streaming: '' }));
     // Only while it is still the drawer's turn: one forgotten while its drafts were worked out leaves the next turn be (review of #402).
     if (running === turn) running = null;
     turn.dispose();
@@ -582,6 +587,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // Every page reads again what the press changed: the Schedule lists a takeover it started.
       const orgId = orgOnScreen(router);
       if (done?.ok && orgId) await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+      // Refused before any turn ran (a spent card, 409 stale_card): the card says why, once.
+      if (got.failure instanceof Refusal) return finish(turn);
       await told(turn, got, held.question, held.context);
     },
 

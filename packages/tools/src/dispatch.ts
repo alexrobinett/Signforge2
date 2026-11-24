@@ -155,6 +155,51 @@ export async function dispatch<D extends DataScope>(
   rawInput: unknown,
   caller: Caller<D>,
 ): Promise<DispatchResult> {
+  const audited = { row: false };
+  const result = await dispatchCall(registry, name, rawInput, caller, audited);
+  // A person's press of a card (#269) is recorded however it is refused: by role, scope, a check, a lost race.
+  return caller.confirmed && !result.ok && !audited.row ? refusedPress(registry, name, rawInput, caller, result) : result;
+}
+
+/**
+ * A person's press of a confirmation card (`Caller.confirmed`), refused: its audit row alone, with the
+ * input it would have run and why not. Nothing the call staged is written, and no screen is told.
+ * The row's target is named from the input only, as a refused call has no output.
+ */
+export async function refusedPress<D extends DataScope>(
+  registry: ReadonlyMap<string, AnyTool<D>>,
+  name: string,
+  rawInput: unknown,
+  caller: Caller<D>,
+  refusal: Extract<DispatchResult, { ok: false }>,
+): Promise<DispatchResult> {
+  const tool = registry.get(name);
+  const parsed = tool?.input.safeParse(rawInput ?? {});
+  const target = tool?.target && parsed?.success ? tool.target(parsed.data, undefined as never) : undefined;
+  const audit = caller.org.auditLog.stage({
+    actorKind: caller.actor.kind,
+    actorId: caller.actor.id,
+    clientId: caller.actor.clientId ?? null,
+    action: name,
+    targetKind: target?.kind ?? null,
+    targetId: target?.id ?? null,
+    detailJson: JSON.stringify({
+      input: redact(parsed?.success ? parsed.data : rawInput),
+      refused: { error: refusal.error, message: refusal.message },
+      confirmed: caller.confirmed,
+    }),
+  });
+  await caller.org.commit(audit.writes);
+  return refusal;
+}
+
+async function dispatchCall<D extends DataScope>(
+  registry: ReadonlyMap<string, AnyTool<D>>,
+  name: string,
+  rawInput: unknown,
+  caller: Caller<D>,
+  audited: { row: boolean },
+): Promise<DispatchResult> {
   const tool = registry.get(name);
   // Before the name is checked: a call to no tool still counts, as a call.
   if (caller.actor.kind === 'agent') {
@@ -240,6 +285,7 @@ export async function dispatch<D extends DataScope>(
       detailJson: JSON.stringify({ input: redact(parsed.data), ...detail, ...(caller.confirmed !== undefined && { confirmed: caller.confirmed }) }),
     });
     await caller.org.commit([...publishRight(), ...writes, ...audit.writes]);
+    audited.row = true;
   };
 
   /** What the handler asked to undo if the call does not succeed (`onDiscard`). Best effort: a failure is logged. */
@@ -276,8 +322,9 @@ export async function dispatch<D extends DataScope>(
       });
     } catch (err) {
       if (err instanceof ToolError) {
-        // A refusal that changed something is recorded too, with what was refused; so is a person's press of a card (#269), done or not.
-        if (err.changed || caller.confirmed) {
+        // A refusal that changed something is recorded too, with what was refused. One that changed nothing writes nothing it
+        // staged: a person's press of a card (#269) refused so gets its row alone (`refusedPress`).
+        if (err.changed) {
           try {
             await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
           } catch (commitErr) {

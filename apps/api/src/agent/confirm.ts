@@ -12,7 +12,7 @@
  * the member, so their role and scopes are checked as they press, and the audit row carries the card's
  * summary (`Caller.confirmed`).
  */
-import type { OrgScope } from '@signforge/db';
+import { type OrgScope, type PlaylistRow, published } from '@signforge/db';
 import {
   type Caller,
   dispatch,
@@ -22,6 +22,7 @@ import {
   OVERRIDE_LIMIT_MS,
   permits,
   publishOrg,
+  refusedPress,
   registry,
   type SampleAck,
   sha256Hex,
@@ -39,6 +40,8 @@ export const CONFIRM_MS = 10 * 60_000;
 interface Made {
   card: Omit<ConfirmCard, 'tool' | 'token' | 'why' | 'expiresAt'>;
   input: Row;
+  /** Lines naming what the audit log redacts (a provider's resource): shown to the person, kept out of the audit row's summary. */
+  withheld?: readonly string[];
 }
 
 interface Confirmable {
@@ -81,6 +84,7 @@ async function screenNamed(org: OrgScope, id: unknown) {
 }
 
 const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
+const screensPlay = (n: number) => (n === 1 ? '1 screen plays' : `${n} screens play`);
 
 /** Where an entry plays, in words, and the screens it reaches now, by id, sorted: what a takeover's card binds. */
 async function reachOf(org: OrgScope, v: Row): Promise<{ words: string; screens: string[] }> {
@@ -98,8 +102,39 @@ async function reachOf(org: OrgScope, v: Row): Promise<{ words: string; screens:
   return { words: `on every screen (${screensWord(screens.length)})`, screens };
 }
 
-/** A press refused before it runs anything: the org is not as the card showed it. */
-const changedSince = (what: string): DispatchResult => ({ ok: false, error: 'conflict', message: `${what} since the card was made: ask again for a new one` });
+/** A press refused before it runs anything, as the org is not as the card showed it: audited as a refused press of `tool`. */
+const changedSince = (caller: Caller, tool: string, input: Row, what: string): Promise<DispatchResult> =>
+  refusedPress(registry, tool, input, caller, { ok: false, error: 'conflict', message: `${what} since the card was made: ask again for a new one` });
+
+/** A playlist's spots, each at the version screens have of it (null: never published): published items, or its draft's if never published. */
+async function spotsLive(org: OrgScope, playlist: PlaylistRow): Promise<Record<string, number | null>> {
+  const items = published(playlist)?.items ?? (await org.playlists.items(playlist.id));
+  const rows = await Promise.all(items.map((id) => org.spots.get(id)));
+  return Object.fromEntries(rows.flatMap((s) => (s ? [[s.id, s.publishedVersion]] : [])));
+}
+
+/** What a publish would do, worked out as it would, writing nothing: what a publish card shows and a press holds it to. */
+async function publishSees(org: OrgScope, pins: DraftPin[], allow: SampleAck[], now: number) {
+  const dry = await publishOrg(org, { hash: sha256Hex, now: new Date(now) }, pins, [], false, allow);
+  return {
+    dry,
+    bound: {
+      // The screens it would switch, the default and the brand kits their manifests are compiled with.
+      screens: dry.screens.flatMap((x) => (x.manifest && x.manifest.id !== x.current ? [x.screenId] : [])).sort(),
+      defaultPlaylistId: dry.read.defaultPlaylist,
+      brand: dry.brand,
+    },
+  };
+}
+
+/** A publish card's record: the publish's input, and what the card showed it would reach. */
+const publishBound = z.object({
+  call: z.looseObject({
+    drafts: z.array(z.object({ kind: z.enum(['spot', 'playlist', 'schedule_entry']), id: z.string(), version: z.number() })),
+    allowSample: z.array(z.object({ spotId: z.string(), version: z.number(), fields: z.array(z.string()) })).optional(),
+  }),
+  bound: z.object({ screens: z.array(z.string()), defaultPlaylistId: z.string().nullable(), brand: z.string() }),
+});
 
 /** Each draft pinned, at the version read now, by its name: what the card shows is what a press publishes. */
 async function pinsOf(org: OrgScope, drafts: unknown): Promise<{ pins: DraftPin[]; names: string[] }> {
@@ -151,11 +186,11 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       // What it would change, worked out as the publish would, writing nothing: the screens it reaches, and what it holds
       // back. A spot still holding its template's sample text (#360, #392) is listed on the card, exactly as the publish
       // would refuse it, and acknowledged by the press: the model's own allowSample, which an agent may not give, is never taken.
-      const dryRun = (allow: SampleAck[]) => publishOrg(org, { hash: sha256Hex, now: new Date(at.now) }, pins, [], false, allow);
+      const dryRun = (allow: SampleAck[]) => publishSees(org, pins, allow, at.now);
       let samples: z.output<typeof sampleRefusal>['spots'] = [];
-      let dry: Awaited<ReturnType<typeof publishOrg>>;
+      let seen: Awaited<ReturnType<typeof publishSees>>;
       try {
-        dry = await dryRun([]).catch(async (err: unknown) => {
+        seen = await dryRun([]).catch(async (err: unknown) => {
           if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
           samples = sampleRefusal.parse(err.details).spots;
           return dryRun(samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })));
@@ -164,21 +199,26 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         if (err instanceof ToolError) throw new CardProblem(err.message, { cause: err });
         throw err;
       }
-      const reach = dry.screens.filter((x) => x.manifest && x.manifest.id !== x.current).length;
+      const { dry, bound } = seen;
+      const reach = bound.screens.length;
       const { allowSample: _theirs, ...asked } = called;
       return {
-        // Every constraint the model gave, as it gave them, with the pins at the versions shown and the samples the card lists.
         input: {
-          ...asked,
-          drafts: pins,
-          ...(ifDefault ? { ifDefault } : {}),
-          ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })) } : {}),
+          // Every constraint the model gave, as it gave them, with the pins at the versions shown and the samples the card lists.
+          call: {
+            ...asked,
+            drafts: pins,
+            ...(ifDefault ? { ifDefault } : {}),
+            ...(samples.length ? { allowSample: samples.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields })) } : {}),
+          },
+          // What the card says it reaches: a press refuses if a screen, the default or a brand kit has changed it since.
+          bound,
         },
         card: {
           title: 'Publish to screens',
           lines: [
             ...names.map((n) => `${n}, as drafted now`),
-            reach ? `Changes what ${screensWord(reach)} play; each switches as it hears of it.` : 'Changes what no screen plays now.',
+            reach ? `Changes what ${screensPlay(reach)}; each switches as it hears of it.` : 'Changes what no screen plays now.',
             ...(dry.drafts.held.length
               ? [`${dry.drafts.held.length === 1 ? 'One draft fails' : `${dry.drafts.held.length} drafts fail`} its checks and keeps its published version.`]
               : []),
@@ -191,7 +231,18 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('publish'),
+    async run(caller, input) {
+      const { call, bound } = publishBound.parse(input);
+      // Read again as the press would publish: a pin changed or a check refused is the publish's own refusal, from dispatch.
+      const now = await publishSees(caller.org, call.drafts, call.allowSample ?? [], Date.now()).catch((err: unknown) => {
+        if (err instanceof ToolError) return undefined;
+        throw err;
+      });
+      if (now && now.bound.defaultPlaylistId !== bound.defaultPlaylistId) return changedSince(caller, 'publish', call, 'The default playlist changed');
+      if (now && now.bound.brand !== bound.brand) return changedSince(caller, 'publish', call, 'The brand kits changed');
+      if (now && canonical(now.bound.screens) !== canonical(bound.screens)) return changedSince(caller, 'publish', call, 'The screens it would switch changed');
+      return dispatch(registry, 'publish', call, caller);
+    },
   },
   start_takeover: {
     tools: ['publish_takeover'],
@@ -205,8 +256,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const starts = called.startsAt ? Date.parse(str(called.startsAt)) : at.now;
       // Its playlist, and that playlist's spots, published with it if never published: it cannot play without them.
       const fresh = playlist.publishedJson === null;
-      const spots = fresh ? await org.playlists.items(playlist.id) : [];
-      const unpublished = (await Promise.all(spots.map((id) => org.spots.get(id)))).filter((s) => s && s.publishedJson === null);
+      const spots = await spotsLive(org, playlist);
+      const unpublished = fresh ? (await Promise.all(Object.keys(spots).map((id) => org.spots.get(id)))).filter((s) => s && s.publishedJson === null) : [];
       const also = fresh
         ? [
             { kind: 'playlist', id: playlist.id, version: playlist.rowVersion },
@@ -216,8 +267,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const { idempotencyKey: _key, ...start } = called;
       const reach = await reachOf(org, called);
       return {
-        // What it plays, on which screens: a press refuses if either changed since (the group's screens, the playlist published again).
-        input: { start, with: also, reach: reach.screens, live: playlist.publishedJson },
+        // What it plays, on which screens: a press refuses if any changed since (the group's screens, the playlist or a spot of it published again).
+        input: { start, with: also, reach: reach.screens, live: playlist.publishedJson, spots },
         card: {
           title: 'Take over screens',
           lines: [
@@ -234,12 +285,20 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     async run(caller, input) {
       const start = typeof input.start === 'object' && input.start !== null ? Object.fromEntries(Object.entries(input.start)) : {};
-      // The screens it reaches, and what its playlist plays, as the card showed them: else nothing is done.
-      if (canonical((await reachOf(caller.org, start)).screens) !== canonical(input.reach)) return changedSince('The screens it would play on changed');
-      if (((await caller.org.playlists.get(str(start.playlistId)))?.publishedJson ?? null) !== input.live)
-        return changedSince('Its playlist was published again');
+      const call = { ...start, with: input.with };
+      // The screens it reaches, and what its playlist and spots play, as the card showed them: else nothing is done.
+      const reach = await reachOf(caller.org, start).catch((err: unknown) => {
+        if (err instanceof CardProblem) return undefined;
+        throw err;
+      });
+      if (!reach) return changedSince(caller, 'publish_takeover', call, 'Its group or screen was deleted');
+      if (canonical(reach.screens) !== canonical(input.reach)) return changedSince(caller, 'publish_takeover', call, 'The screens it would play on changed');
+      const playlist = await caller.org.playlists.get(str(start.playlistId));
+      if (!playlist || playlist.publishedJson !== input.live) return changedSince(caller, 'publish_takeover', call, 'Its playlist was published again');
+      if (canonical(await spotsLive(caller.org, playlist)) !== canonical(input.spots))
+        return changedSince(caller, 'publish_takeover', call, 'A spot of its playlist was published again');
       // Made and published in one batch, or not at all (`publish_takeover`).
-      return dispatch(registry, 'publish_takeover', { ...start, with: input.with }, caller);
+      return dispatch(registry, 'publish_takeover', call, caller);
     },
   },
   end_takeover: {
@@ -251,7 +310,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       if (!entry || entry.endsAt === null) throw new CardProblem(`no takeover ${str(called.scheduleEntryId)}`);
       const playlist = await org.playlists.get(entry.playlistId);
       return {
-        input: { scheduleEntryId: entry.id },
+        input: { scheduleEntryId: entry.id, version: entry.rowVersion },
         card: {
           title: 'End the takeover',
           lines: [`Stops ${playlist?.name ?? 'the takeover'} ${(await reachOf(org, entry)).words}: they go back to what is scheduled.`],
@@ -262,7 +321,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('end_takeover'),
+    async run(caller, input) {
+      const call = { scheduleEntryId: str(input.scheduleEntryId) };
+      if ((await caller.org.scheduleEntries.get(call.scheduleEntryId))?.rowVersion !== input.version)
+        return changedSince(caller, 'end_takeover', call, 'The takeover changed');
+      return dispatch(registry, 'end_takeover', call, caller);
+    },
   },
   delete_playlist: {
     tools: ['delete_playlist'],
@@ -272,7 +336,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const playlist = await org.playlists.get(str(called.playlistId));
       if (!playlist) throw new CardProblem(`no playlist ${str(called.playlistId)}`);
       return {
-        input: { playlistId: playlist.id },
+        input: { playlistId: playlist.id, version: playlist.rowVersion },
         card: {
           title: 'Delete a playlist',
           lines: [`Deletes ${playlist.name}, its draft and its published version. Its spots stay.`],
@@ -283,7 +347,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('delete_playlist'),
+    async run(caller, input) {
+      const call = { playlistId: str(input.playlistId) };
+      if ((await caller.org.playlists.get(call.playlistId))?.rowVersion !== input.version)
+        return changedSince(caller, 'delete_playlist', call, 'The playlist changed');
+      return dispatch(registry, 'delete_playlist', call, caller);
+    },
   },
   delete_schedule_entry: {
     tools: ['delete_schedule_entry'],
@@ -419,6 +488,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
       return {
         input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
+        withheld: resourceLines(called),
         card: {
           title: 'Add a data source',
           lines: [
@@ -443,6 +513,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       if (!source) throw new CardProblem(`no data source ${str(called.dataSourceId)}`);
       return {
         input: { ...called, ifVersion: source.rowVersion },
+        withheld: resourceLines(called),
         card: {
           title: 'Change a data source',
           lines: [

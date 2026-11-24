@@ -212,7 +212,8 @@ const publish = defineTool({
   }),
   output: outputs.publish,
   example: {},
-  target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
+  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then.
+  target: (_input, output: { publish: { id: string } | null } | undefined) => (output?.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: async (ctx) => {
@@ -260,7 +261,8 @@ const publishTakeover = defineTool({
     .refine(aimed, AIMED),
   output: outputs.publish_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
-  target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
+  // A refused press has no output (`refusedPress`): no target then.
+  target: (_input, output: { entry: { id: string } } | undefined) => (output ? { kind: 'schedule_entry', id: output.entry.id } : undefined),
   handler: async (ctx) => {
     const { org, input, write } = ctx;
     // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.

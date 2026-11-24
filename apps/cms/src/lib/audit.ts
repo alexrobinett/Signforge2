@@ -136,6 +136,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   create_data_source: { group: 'Data sources', words: 'Created' },
   update_data_source: { group: 'Data sources', words: 'Changed' },
   delete_data_source: { group: 'Data sources', words: 'Deleted' },
+  read_table: { group: 'Data sources', words: 'Table read from an address' },
   start_connection: { group: 'Connections', words: 'Connection started' },
   finish_connection: { group: 'Connections', words: 'Connected' },
   disconnect: { group: 'Connections', words: 'Disconnected' },

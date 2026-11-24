@@ -349,6 +349,8 @@ describe('the agent drawer, in the store', () => {
         press: 'refused',
         error: 'This card has run out. Ask again for a new one.',
       });
+      // Said once, on the card: no error message after it (review of #406).
+      expect(store.getState().agentDrawer.messages).toHaveLength(4);
       expect(store.getState().agentDrawer.asking).toBe(false);
     });
 
