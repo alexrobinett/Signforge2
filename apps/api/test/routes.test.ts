@@ -30,6 +30,9 @@ const WRITERS: Record<string, string> = {
   'POST /v1/device/pair/start': 'an unpaired screen asking for a code: a pairing_codes row, which belongs to no org (not audited: no actor yet)',
   'POST /v1/device/pair/poll':
     "an unpaired screen collecting its credential: once a member's audited claim_screen bound the code, its first screen_credentials row (packages/db/src/pairing.ts)",
+  'POST /mcp':
+    "agents (M4-06): each tool call through the dispatcher as the grant's member, the agent as the actor (mcp.test.ts checks the audit row); and the grant's last use, at most once an hour, not audited (bookkeeping, as M4-04 has it)",
+  'DELETE /mcp': 'answers 405: no sessions to end',
   'POST /v1/device/sync':
     'a screen reporting about itself: its heartbeat, last-seen time and play counts, on its own screen row (not audited: the screen is the actor, every few minutes)',
 };

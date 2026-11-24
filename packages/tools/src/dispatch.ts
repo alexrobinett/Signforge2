@@ -325,8 +325,9 @@ const OVER: Record<AgentLimit, string> = {
 /**
  * An agent's call counted against its grant's limits, before anything else is read or run. A
  * refused call writes nothing, except the audit row of the first one refused in each window.
+ * `dispatch` counts every tool call through it; `/mcp` counts its `tools/list` too (M4-06).
  */
-async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
+export async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
   if (!caller.agentLimiter) throw new Error(`an agent called ${JSON.stringify(name)} without a limiter for its grant`);
   const allowance = await caller.agentLimiter.take(caller.actor.id, write);
   if (allowance.ok) return undefined;
