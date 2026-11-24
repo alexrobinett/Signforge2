@@ -167,7 +167,9 @@ const revertPlaylistDraft = defineTool({
     const items = await org.playlists.items(row.id);
     // The two swap: the draft there now is kept beside the one put back.
     const rejected = kept.holds === 'person';
-    write(org.draftSnapshots.stage.keep('playlist', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row, items), sampleFieldsJson: null }));
+    write(
+      org.draftSnapshots.stage.keep('playlist', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row, items), sampleFieldsJson: null }),
+    );
     const playlist = write(await org.playlists.stage.update(row, { name: back.name, transitionJson: back.transitionJson }, input.ifVersion, back.items));
     return { playlist: playlistView(playlist, back.items, (await org.settings.get())?.defaultPlaylistId), rejected };
   },
@@ -186,7 +188,8 @@ const keepPlaylistDraft = defineTool({
   target,
   handler: async ({ org, input, write }) => {
     const row = await playlistAt(org, input.playlistId, input.ifVersion);
-    if ((await org.draftSnapshots.get('playlist', row.id))?.holds !== 'person') throw new ToolError('conflict', `playlist ${row.id} is not an agent's proposal`);
+    if ((await org.draftSnapshots.get('playlist', row.id))?.holds !== 'person')
+      throw new ToolError('conflict', `playlist ${row.id} is not an agent's proposal`);
     // Held to the version shown in the batch too: an edit landing first refuses it.
     write(org.playlists.stage.unchanged(row));
     write(org.draftSnapshots.stage.clear('playlist', row.id));
@@ -284,4 +287,13 @@ const setDefaultPlaylist = defineTool({
   },
 });
 
-export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, revertPlaylistDraft, keepPlaylistDraft, deletePlaylist, setDefaultPlaylist];
+export const playlistTools = [
+  listPlaylists,
+  getPlaylist,
+  createPlaylist,
+  updatePlaylist,
+  revertPlaylistDraft,
+  keepPlaylistDraft,
+  deletePlaylist,
+  setDefaultPlaylist,
+];

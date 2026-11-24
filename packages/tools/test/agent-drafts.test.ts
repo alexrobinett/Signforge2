@@ -39,8 +39,8 @@ const drawer = (): Caller => person('editor', CMS_AGENT_CLIENT_ID);
 const spot = async () => (await scope().spots.get(o.templateSpot))!;
 const edit = async (caller: Caller, durationMs: number, ifVersion?: number) =>
   (await call(caller, 'update_spot', { spotId: o.templateSpot, durationMs, ...(ifVersion ? { ifVersion } : {}) })).spot.version as number;
-const draftOf = (kind: 'spot' | 'playlist' = 'spot', id = o.templateSpot) => call(person('viewer'), 'get_agent_draft', kind === 'spot' ? { spotId: id } : { playlistId: id });
-
+const draftOf = (kind: 'spot' | 'playlist' = 'spot', id = o.templateSpot) =>
+  call(person('viewer'), 'get_agent_draft', kind === 'spot' ? { spotId: id } : { playlistId: id });
 
 describe("an agent's draft of a spot", () => {
   it("is its proposal, by name, with what it changes against the published version; Reject puts the person's edit back, and its Undo the agent's", async () => {
@@ -158,8 +158,8 @@ describe("an agent's draft of a playlist", () => {
   it("puts the person's order back on Reject, and the agent's on its Undo; it changes the items, by spot id", async () => {
     await call(person('owner'), 'publish', {});
     const start = (await scope().playlists.get(o.playlist))!;
-    const mine = (await call(person(), 'update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot, o.templateSpot], ifVersion: start.rowVersion })).playlist
-      .version as number;
+    const mine = (await call(person(), 'update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot, o.templateSpot], ifVersion: start.rowVersion }))
+      .playlist.version as number;
     const theirs = (await call(agent(), 'update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot], name: 'Agent order', ifVersion: mine })).playlist
       .version as number;
     const proposal = await draftOf('playlist', o.playlist);

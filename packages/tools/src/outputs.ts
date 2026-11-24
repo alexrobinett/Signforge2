@@ -663,7 +663,10 @@ const agentDraftOutput = z.object({
     .array(
       z.object({
         field: z.string(),
-        in: z.enum(['data', 'assets', 'bindings']).nullable().describe("A template spot's field, by where it is; null for the spot's or playlist's own (name, durationMs, url, transition, items…)"),
+        in: z
+          .enum(['data', 'assets', 'bindings'])
+          .nullable()
+          .describe("A template spot's field, by where it is; null for the spot's or playlist's own (name, durationMs, url, transition, items…)"),
         was: z.unknown().describe('As published'),
         now: z.unknown().describe('As drafted'),
       }),

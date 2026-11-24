@@ -14,16 +14,13 @@ const STRIP = 5;
 export const getProposal = createServerFn({ method: 'GET', strict: { output: false } })
   .validator((p: { kind: 'spot' | 'playlist'; id: string }) => ({ kind: p.kind === 'playlist' ? ('playlist' as const) : ('spot' as const), id: String(p.id) }))
   .handler(({ data: { kind, id } }) =>
-    inOrg(
-      async () => {
-        const [draft, { entries }, people, { settings }] = await Promise.all([
-          tool('get_agent_draft', kind === 'spot' ? { spotId: id } : { playlistId: id }),
-          tool('list_audit_log', { target: { kind, id }, limit: STRIP }),
-          names(),
-          tool('get_org_settings', {}),
-        ]);
-        return { draft, entries, names: people, timezone: settings.timezone ?? 'UTC', at: Date.now() };
-      },
-      null,
-    ),
+    inOrg(async () => {
+      const [draft, { entries }, people, { settings }] = await Promise.all([
+        tool('get_agent_draft', kind === 'spot' ? { spotId: id } : { playlistId: id }),
+        tool('list_audit_log', { target: { kind, id }, limit: STRIP }),
+        names(),
+        tool('get_org_settings', {}),
+      ]);
+      return { draft, entries, names: people, timezone: settings.timezone ?? 'UTC', at: Date.now() };
+    }, null),
   );

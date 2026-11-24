@@ -1299,7 +1299,11 @@ export function scoped(d1: D1Database, orgId: string) {
             db
               .insert(ds)
               .values({ orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null, ...values })
-              .onConflictDoUpdate({ target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId], set: values, setWhere: eq(ds.holds, 'agent') }),
+              .onConflictDoUpdate({
+                target: kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId],
+                set: values,
+                setWhere: eq(ds.holds, 'agent'),
+              }),
           );
         },
         clear: clearKept,

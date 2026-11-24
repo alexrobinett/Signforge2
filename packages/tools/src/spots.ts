@@ -409,7 +409,13 @@ const revertSpotDraft = defineTool({
     const back = spotContent.parse(JSON.parse(kept.contentJson));
     // The two swap: the draft there now is kept beside the one put back.
     const rejected = kept.holds === 'person';
-    write(org.draftSnapshots.stage.keep('spot', row.id, { holds: rejected ? 'agent' : 'person', contentJson: contentJson(row), sampleFieldsJson: row.sampleFieldsJson }));
+    write(
+      org.draftSnapshots.stage.keep('spot', row.id, {
+        holds: rejected ? 'agent' : 'person',
+        contentJson: contentJson(row),
+        sampleFieldsJson: row.sampleFieldsJson,
+      }),
+    );
     const spot = write(await org.spots.stage.update(row, { ...back, sampleFieldsJson: kept.sampleFieldsJson }, input.ifVersion));
     return { spot: spotView(spot), rejected };
   },

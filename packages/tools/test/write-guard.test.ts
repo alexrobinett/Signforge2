@@ -130,7 +130,9 @@ const savedKey = async (o: SeededOrg) =>
 /** An agent's proposal on the seeded spot or playlist (#116), at version 3, as their examples name it. */
 async function proposed(o: SeededOrg, kind: 'spot' | 'playlist') {
   const id = kind === 'spot' ? o.templateSpot : o.playlist;
-  await env.DB.prepare(`UPDATE ${kind === 'spot' ? 'spots' : 'playlists'} SET row_version = 3 WHERE org_id = ? AND id = ?`).bind(o.orgId, id).run();
+  await env.DB.prepare(`UPDATE ${kind === 'spot' ? 'spots' : 'playlists'} SET row_version = 3 WHERE org_id = ? AND id = ?`)
+    .bind(o.orgId, id)
+    .run();
   const row = kind === 'spot' ? await o.scope.spots.get(id) : await o.scope.playlists.get(id);
   const items = kind === 'playlist' ? await o.scope.playlists.items(id) : undefined;
   await o.scope.commit(o.scope.draftSnapshots.stage.keep(kind, id, { holds: 'person', contentJson: contentJson(row!, items), sampleFieldsJson: null }).writes);

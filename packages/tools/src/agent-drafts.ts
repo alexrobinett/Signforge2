@@ -103,7 +103,10 @@ const getAgentDraft = defineTool({
     const draftId = input.spotId ?? input.playlistId ?? '';
     const row = kind === 'spot' ? await org.spots.get(draftId) : await org.playlists.get(draftId);
     if (!row) throw notFound(kind, draftId);
-    const [kept, items] = await Promise.all([org.draftSnapshots.get(kind, row.id), kind === 'playlist' ? org.playlists.items(row.id) : Promise.resolve(undefined)]);
+    const [kept, items] = await Promise.all([
+      org.draftSnapshots.get(kind, row.id),
+      kind === 'playlist' ? org.playlists.items(row.id) : Promise.resolve(undefined),
+    ]);
     const proposed = kept?.holds === 'person';
     // Both as `published_json` holds content: the draft's now, and the published one's.
     const now: Record<string, unknown> = JSON.parse(contentJson(row, items));

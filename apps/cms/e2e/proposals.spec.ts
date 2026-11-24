@@ -10,16 +10,20 @@ import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
 /** This spec's own client addresses, so its sign-in and registration have their own rate limits. */
 const ADDRESS = { owner: '192.0.2.231', stub: '192.0.2.232' };
 
-test("an agent's edit over /mcp shows as its proposal; Reject puts the person's edit back, Undo the agent's, and Keep makes it the draft", async ({
-  page,
-}) => {
+test("an agent's edit over /mcp shows as its proposal; Reject puts the person's edit back, Undo the agent's, and Keep makes it the draft", async ({ page }) => {
   await signInAs(page, `e2e-proposals-${Date.now()}@example.com`, ADDRESS.owner);
   await createOrg(page, 'Pickle Row', ADDRESS.owner);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock'));
   const version = clock.versions.at(-1);
   const label: string = version.manifest.fields.greeting.label;
-  const { spot } = await tool(page, 'create_spot', { name: 'Soup board', kind: 'template', templateVersionId: version.id, durationMs: 10_000, data: { greeting: 'Soup of the day' } });
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'Soup board',
+    kind: 'template',
+    templateVersionId: version.id,
+    durationMs: 10_000,
+    data: { greeting: 'Soup of the day' },
+  });
   await tool(page, 'publish', {});
   // The person edits it after the publish: their draft, not on screens yet.
   const mine = (await tool(page, 'update_spot', { spotId: spot.id, data: { greeting: 'Opening soon' }, ifVersion: spot.version })).spot.version as number;
@@ -30,7 +34,10 @@ test("an agent's edit over /mcp shows as its proposal; Reject puts the person's 
   await hydrated(page);
   const back = await callbackOf(page, () => page.getByRole('button', { name: 'Allow' }).click());
   const token = (await stub.exchange(back.searchParams.get('code')!)).body.access_token!;
-  const edited = await stub.mcp(token, 'tools/call', { name: 'update_spot', arguments: { spotId: spot.id, data: { greeting: 'Tomato basil soup' }, ifVersion: mine } });
+  const edited = await stub.mcp(token, 'tools/call', {
+    name: 'update_spot',
+    arguments: { spotId: spot.id, data: { greeting: 'Tomato basil soup' }, ifVersion: mine },
+  });
   expect(edited.result.isError).toBeUndefined();
   const theirs = edited.result.structuredContent.spot.version as number;
 
