@@ -1,6 +1,16 @@
 import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { compileProbe, draftCheck, spotFromDraft, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
+import {
+  compileProbe,
+  draftCheck,
+  sampleAfterEdit,
+  sampleFieldsOf,
+  spotFromDraft,
+  type DraftAsset,
+  type DraftReads,
+  type Probe,
+  type SpotDraft,
+} from '../src/draft';
 import { opts, promo } from './fixtures';
 
 const sha = (c: string) => c.repeat(64);
@@ -228,5 +238,63 @@ describe('compileProbe', () => {
     expect(manifest).toBeUndefined();
     expect(problems).toEqual(['spot deal: field "title" is longer than 40']);
     expect(refused).toBe(false);
+  });
+});
+
+describe('a spot’s sample fields (#360)', () => {
+  const fields: Record<string, FieldDef> = {
+    headline: { type: 'text', label: 'Headline', default: 'Doors open' },
+    greeting: { type: 'text', label: 'Greeting', default: '' },
+    facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label' }, value: { type: 'text', label: 'Value' } } },
+  };
+  const rows = [
+    { label: 'A', value: '1' },
+    { label: 'B', value: '2' },
+    { label: 'C', value: '3' },
+  ];
+  const data = { headline: 'Doors open', greeting: '', facts: rows };
+  const sample = sampleFieldsOf({ fields }, data) ?? { texts: [], lists: {} };
+
+  it('are the texts holding words and every cell of every list row', () => {
+    expect(sample).toEqual({
+      texts: ['headline'],
+      lists: {
+        facts: [
+          ['label', 'value'],
+          ['label', 'value'],
+          ['label', 'value'],
+        ],
+      },
+    });
+    expect(sampleFieldsOf({ fields }, { headline: '', facts: [] })).toBeNull();
+  });
+
+  it('lose a text whose saved value changed, or that is bound, and keep one saved unchanged', () => {
+    expect(sampleAfterEdit(sample, { data }, { data, bindings: {} })).toEqual(sample);
+    expect(sampleAfterEdit(sample, { data }, { data: { ...data, headline: 'Closed' }, bindings: {} })?.texts).toEqual([]);
+    expect(sampleAfterEdit(sample, { data }, { data, bindings: { headline: {} } })?.texts).toEqual([]);
+  });
+
+  it('lose a list cell by cell, a row once every cell is edited, and a bound list whole', () => {
+    const one = sampleAfterEdit(sample, { data }, { data: { ...data, facts: [{ label: 'X', value: '1' }, rows[1], rows[2]] }, bindings: {} });
+    expect(one?.lists.facts).toEqual([['value'], ['label', 'value'], ['label', 'value']]);
+    expect(sampleAfterEdit(sample, { data }, { data, bindings: { facts: {} } })).toEqual({ texts: ['headline'], lists: {} });
+  });
+
+  it('drop a removed row, the rows after it moving up, and mark nothing on an added one', () => {
+    expect(sampleAfterEdit(sample, { data }, { data: { ...data, facts: [rows[0], rows[2]] }, bindings: {} })?.lists.facts).toEqual([
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+    expect(sampleAfterEdit(sample, { data }, { data: { ...data, facts: [...rows, { label: 'D', value: '4' }] }, bindings: {} })?.lists.facts).toEqual([
+      ['label', 'value'],
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+  });
+
+  it('are none once every piece is edited', () => {
+    const edited = { headline: 'Closed', greeting: '', facts: rows.map((r) => ({ label: `${r.label}!`, value: `${r.value}!` })) };
+    expect(sampleAfterEdit(sample, { data }, { data: edited, bindings: {} })).toBeNull();
   });
 });

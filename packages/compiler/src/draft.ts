@@ -9,6 +9,7 @@
  */
 import {
   liveSources,
+  type SampleFields,
   type Binding,
   type DataSource,
   type FieldDef,
@@ -149,6 +150,61 @@ export function sampleData(m: Pick<TemplateManifest, 'fields' | 'live'>): Record
       Object.entries(m.fields).flatMap(([name, def]) => ((def.type === 'text' || def.type === 'list') && !live.has(name) ? [[name, sampleValue(def)]] : [])),
     ),
   };
+}
+
+/**
+ * The fields `sampleData` filled with sample copy (#360), as the contract's `SampleFields`: each text
+ * holding words, and each list's rows, every cell. A live field starts empty, so none is. Null for none.
+ */
+export function sampleFieldsOf(m: Pick<TemplateManifest, 'fields'>, data: Record<string, unknown>): SampleFields | null {
+  const sample: SampleFields = { texts: [], lists: {} };
+  for (const [name, def] of Object.entries(m.fields)) {
+    const v = data[name];
+    if (def.type === 'text' && typeof v === 'string' && v !== '') sample.texts.push(name);
+    if (def.type === 'list' && Array.isArray(v) && v.length) sample.lists[name] = v.map(() => Object.keys(def.item));
+  }
+  return compactSample(sample);
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const rowsOf = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const cell = (row: unknown, key: string): unknown => (row && typeof row === 'object' ? Object.entries(row).find(([k]) => k === key)?.[1] : undefined);
+
+/** Null for nothing left: a list's rows with no cell left, a list with no row left, no field left. */
+function compactSample(s: SampleFields): SampleFields | null {
+  const lists = Object.fromEntries(Object.entries(s.lists).filter(([, rows]) => rows.some((r) => r.length > 0)));
+  return s.texts.length || Object.keys(lists).length ? { texts: s.texts, lists } : null;
+}
+
+/**
+ * What is left of a draft's sample fields after a saved edit from `before` to `after` (#360): a
+ * text whose value changed, or that is bound now, is out; a list bound now is out, and otherwise
+ * loses each cell that changed, row by row. One row removed takes its marks with it, the rows after
+ * it moving up; any other change of length marks off the rows that no longer line up. Null for none.
+ */
+export function sampleAfterEdit(
+  sample: SampleFields,
+  before: { data: Record<string, unknown> },
+  after: { data: Record<string, unknown>; bindings: Record<string, unknown> },
+): SampleFields | null {
+  const texts = sample.texts.filter((f) => !(f in after.bindings) && same(before.data[f], after.data[f]));
+  const lists: Record<string, string[][]> = {};
+  for (const [f, rows] of Object.entries(sample.lists)) {
+    if (f in after.bindings) continue;
+    const was = rowsOf(before.data[f]);
+    const now = rowsOf(after.data[f]);
+    let kept = rows;
+    let old = was;
+    if (now.length === was.length - 1) {
+      const at = was.findIndex((r, i) => !same(r, now[i]));
+      if (at >= 0 && same(was.slice(at + 1), now.slice(at))) {
+        kept = rows.filter((_, i) => i !== at);
+        old = was.filter((_, i) => i !== at);
+      }
+    }
+    lists[f] = kept.map((keys, i) => (i < now.length && i < old.length ? keys.filter((k) => same(cell(old[i], k), cell(now[i], k))) : []));
+  }
+  return compactSample({ texts, lists });
 }
 
 /** A spot's draft (or published version), as `get_spot` gives it. */

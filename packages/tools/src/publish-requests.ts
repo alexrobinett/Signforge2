@@ -25,7 +25,7 @@ import { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 import { id, idempotencyKey } from './fields';
 import { AUDIENCE_ROLES, draftPin, outputs, type PublishRequestView } from './outputs';
 import { keysetPage, pageInput } from './paging';
-import { runPublish } from './publish';
+import { peopleAllowSample, runPublish } from './publish';
 import type { DraftPin } from './publishing';
 import { orgSettings } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
@@ -245,13 +245,16 @@ async function pending(org: OrgScope, requestId: string, now: number): Promise<P
 const approvePublishRequest = defineTool({
   name: 'approve_publish_request',
   description:
-    'Approve a publish request: publish all the drafts it pins, at the versions it pins, as you, or nothing. Refused with a conflict, publishing nothing: details { id, version } if one has changed since it was asked for; { held } if one fails its checks (with why); { brand: true } if the brand kits, which go live with any publish, have changed since; { status } if the request is no longer pending. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
+    'Approve a publish request: publish all the drafts it pins, at the versions it pins, as you, or nothing. Refused with a conflict, publishing nothing: details { id, version } if one has changed since it was asked for; { held } if one fails its checks (with why); { brand: true } if the brand kits, which go live with any publish, have changed since; { status } if the request is no longer pending; sample_text, details { spots }, if a spot it would promote still holds the sample text of its template, unless allowSample. Other drafts are not published. People only. Returns { request, published }, published as publish returns it.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   publishes: true,
   people: true,
-  input: z.object({ publishRequestId: id('publish request') }),
+  input: z.object({
+    publishRequestId: id('publish request'),
+    allowSample: z.boolean().optional().describe("Publish spots still holding their template's sample text anyway, once you have seen them named"),
+  }),
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },
   target: (input) => ({ kind: 'publish_request', id: input.publishRequestId }),
@@ -265,7 +268,7 @@ const approvePublishRequest = defineTool({
     const { org, actor, input, write } = ctx;
     const row = await pending(org, input.publishRequestId, Date.now());
     const pins = pinsOf(row);
-    const published = await runPublish(ctx, pins, [], { brand: row.brandState });
+    const published = await runPublish(ctx, pins, [], { brand: row.brandState }, peopleAllowSample(ctx));
     // All or nothing: a pin held by its checks publishes none of them (the batch is not committed).
     const pinned = new Set(pins.map((p) => `${p.kind}:${p.id}`));
     const held = published.held.filter((h) => pinned.has(`${h.kind}:${h.id}`));

@@ -14,6 +14,7 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
+import type { SampleFields } from '@signforge/contract';
 import { published, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { madeBySpotEditor } from './data-sources';
@@ -27,7 +28,7 @@ import { outcomeOf, tally } from './rollout';
 import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
-import { defineTool, notFound, ToolError, type ToolContext } from './tool';
+import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
 import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -105,9 +106,23 @@ export async function runPublish(
   drafts: readonly DraftPin[] | undefined,
   end: readonly string[] = [],
   approval?: { brand: string },
+  allowSample = false,
 ): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
   const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, approval !== undefined);
+  // A spot this publish would put live with its template's sample copy untouched (#360): refused,
+  // nothing written, unless a person allowed it (`allowSample`, refused to agents by the tools).
+  const sample = result.drafts.promoted.flatMap((p) => {
+    const row = p.kind === 'spot' ? result.read.spots.find((r) => r.id === p.id) : undefined;
+    const fields: SampleFields | null = row?.sampleFieldsJson ? JSON.parse(row.sampleFieldsJson) : null;
+    return row && fields ? [{ id: row.id, name: row.name, fields: [...fields.texts, ...Object.keys(fields.lists)] }] : [];
+  });
+  if (sample.length && !allowSample)
+    throw new ToolError(
+      'sample_text',
+      `still holding the template's sample text: ${sample.map((s) => `spot ${s.name} (${s.id}): ${s.fields.join(', ')}`).join('; ')}. Replace it, or have a person publish it anyway`,
+      { spots: sample },
+    );
   // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
   // would pass a second read, and its batch then guards the very rows the manifests were made from.
   if (approval && result.brand !== approval.brand)
@@ -149,10 +164,16 @@ export async function runPublish(
   return { publish: made, ...report, removedDataSources };
 }
 
+/** `allowSample` (#360), which only a person may pass: an agent passing it is refused, never quietly ignored. */
+export function peopleAllowSample(ctx: { actor: Actor; input: { allowSample?: boolean } }): boolean {
+  if (ctx.input.allowSample && isAgent(ctx.actor)) throw new ToolError('forbidden', 'only a person may publish sample text anyway (allowSample)');
+  return ctx.input.allowSample === true;
+}
+
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. With drafts, a pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist: when it has none and the regular schedule entries this publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing. Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. With drafts, a pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. A spot it would promote that still holds the sample text of its template (its sampleFields) refuses the whole publish with sample_text, details { spots: [{ id, name, fields }] }: replace the text, or a person publishes with allowSample. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -165,13 +186,19 @@ const publish = defineTool({
       .describe(
         'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
       ),
+    allowSample: z
+      .boolean()
+      .optional()
+      .describe(
+        "People only: publish spots still holding their template's sample text (sampleFields) anyway, once a person has seen them named. Refused to an agent",
+      ),
   }),
   output: outputs.publish,
   example: {},
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
-  handler: (ctx) => runPublish(ctx, ctx.input.drafts),
+  handler: (ctx) => runPublish(ctx, ctx.input.drafts, [], undefined, peopleAllowSample(ctx)),
 });
 
 const endTakeover = defineTool({

@@ -637,6 +637,11 @@ export const spots = sqliteTable(
     fit: text('fit', { enum: ['cover', 'contain'] }),
     /** URL spots: an https page on another origin. */
     url: text('url'),
+    /**
+     * Template spots: the contract's `SampleFields`, the fields of the draft still holding the
+     * template's sample copy New spot started it with (#360); null for none. Draft only: never published.
+     */
+    sampleFieldsJson: text('sample_fields_json'),
     /** Moves on with every edit of the draft; publishing does not move it. */
     rowVersion: rowVersion(),
     incarnation: incarnation(),

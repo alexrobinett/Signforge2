@@ -267,6 +267,13 @@
       "when": 1795501476183,
       "tag": "0037_publish_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1795534060153,
+      "tag": "0038_spot_sample_fields",
+      "breakpoints": true
     }
   ]
 }

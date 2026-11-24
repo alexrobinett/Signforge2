@@ -19,7 +19,7 @@ import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
 export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] as const;
 
 /** Why a tool refused: the `error` of its answer, next to `message` and, for some, `details`. */
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
+export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable' | 'sample_text';
 
 /** The output field a list tool adds (./paging.ts). */
 const nextOutput = z.string().nullable().describe('Pass as cursor to get the next page; null on the last page');
@@ -605,6 +605,12 @@ const spotOutput = z.object({
   assetId: z.string().nullable().describe('Image and video spots'),
   fit: z.enum(SPOT_FITS).nullable().describe('Image and video spots'),
   url: z.string().nullable().describe('URL spots'),
+  sampleFields: z
+    .object({ texts: z.array(z.string()), lists: z.record(z.string(), z.array(z.array(z.string()))) })
+    .nullable()
+    .describe(
+      "Template spots: the draft's fields still holding the template's sample copy that create_spot's sample started it with: texts by name, and each list's rows, the cells not edited yet. A saved edit of a field, or binding it, takes it out. publish refuses a spot with any (sample_text) unless a person allows it. null for none",
+    ),
   version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
   ...draftOutput,
 });
