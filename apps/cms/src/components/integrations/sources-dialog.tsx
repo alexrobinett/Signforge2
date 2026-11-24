@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { type Clock, failingWords, hasAddress, kindOf, type ListedSource, type SourceKind, sourceState, weatherFixWords } from '~/lib/integrations';
+import { SOURCES_DIALOG } from '~/state/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
@@ -46,12 +47,13 @@ const isAddable = (k: SourceKind): k is keyof typeof ADD => k in ADD;
 export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: string; sources: ListedSource[]; clock: Clock; canManage: boolean }) {
   const s = useAppStore((st) => st.integrations);
   const openSources = useAppStore((st) => st.openSources);
+  const focusBack = useAppStore((st) => st.focusBack);
   const format = s.dialog;
   const mine = format ? sources.filter((x) => kindOf(x.format) === format) : [];
 
   return (
     <Dialog open={format !== null} onOpenChange={(open) => !open && openSources(null)}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+      <DialogContent id={SOURCES_DIALOG} className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={(e) => focusBack('sources', e)}>
         {format && (
           <>
             <DialogHeader>
@@ -249,9 +251,10 @@ function ConfirmDelete({ orgId }: { orgId: string }) {
   const error = useAppStore((st) => st.integrations.error);
   const ask = useAppStore((st) => st.askToDeleteSource);
   const deleteSource = useAppStore((st) => st.deleteSource);
+  const focusBack = useAppStore((st) => st.focusBack);
   return (
     <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && ask(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={(e) => focusBack('delete', e)}>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {deleting?.name}?</AlertDialogTitle>
           <AlertDialogDescription>

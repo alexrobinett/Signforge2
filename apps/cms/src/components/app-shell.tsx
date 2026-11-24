@@ -113,13 +113,41 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
   const agentOpen = useAppStore((s) => s.agentDrawer.open);
   const openAgent = useAppStore((s) => s.openAgentDrawer);
   const hues = orgHues(shell.organizations.map((o) => o.id));
+  const skip = (
+    <a href="#main" className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
+      Skip to content
+    </a>
+  );
+
+  // No org yet (#379): nothing to go to, search or ask about, so only the logo and the account menu,
+  // whose Create organization… and Sign out still apply.
+  if (!shell.organization)
+    return (
+      <TooltipProvider delayDuration={0}>
+        <div className="flex min-h-dvh flex-col">
+          {skip}
+          <header className="flex h-14 items-center gap-2 border-b px-4 sm:px-8">
+            <Logo />
+            <div className="ml-auto">
+              <UserMenu user={shell.user} compact />
+            </div>
+          </header>
+          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 outline-none sm:px-8 lg:py-10">
+            {children}
+          </main>
+          <CreateOrgDialog />
+          <p role="status" className="sr-only">
+            {status}
+          </p>
+          <Toaster />
+        </div>
+      </TooltipProvider>
+    );
 
   return (
     <TooltipProvider delayDuration={0}>
       <div className={cn('min-h-dvh lg:grid', folded ? 'lg:grid-cols-[4.5rem_minmax(0,1fr)]' : 'lg:grid-cols-[17rem_minmax(0,1fr)]')}>
-        <a href="#main" className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
-          Skip to content
-        </a>
+        {skip}
         <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
           <Sidebar shell={shell} hues={hues} folded={folded} />
         </aside>

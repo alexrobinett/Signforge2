@@ -28,7 +28,7 @@ Tenant branding does not re-theme the CMS in v1 (decided in `brand-and-editor.md
 | Component | Change |
 | --- | --- |
 | `badge` | variants `online`, `updating`, `asleep`, `offline`, `draft`, `published`, each with a leading dot |
-| `button` | keep the six variants; add `size: "xs"` for table row actions |
+| `button` | keep the six variants; add `size: "xs"` for table row actions. One filled (`default`) button per view, its one primary action; the rest are outline or ghost (#364). A button says its variant (`data-variant`, set after its props so a caller cannot change it, and kept in production builds), which the e2e checks; a link or label drawn as the filled button (Upload images, the empty fleet's Open a test screen) says `data-slot="button" data-variant="default"` too, so it counts. Alert dialogs' actions are destructive or outline and do not count |
 | `table` | `density: compact | comfortable`; sticky header; numeric columns right-aligned with tabular figures |
 | `input`, `select`, `textarea` | an `invalid` state wired to the contract's problem messages |
 | `sidebar` | the app nav (Screens, Spots, Playlists, Schedules, Brand kits, Audit log) and the settings nav, collapsible to icons; folded to icons by default in a spot's or a playlist's editor, for the stage's room, until the person unfolds it on that visit (#363) |

@@ -84,6 +84,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           help="The agent reads it and fills a template for you to check. A photo is not kept unless you use it."
           label={pinned ? `Fill ${pinned.template.name}` : 'Fill a new spot'}
           blocked={fill.again && pinned === undefined}
+          secondary
           note={
             fill.again && <span className="text-sm text-foreground">{pinned ? `Fills ${pinned.template.name}, picked below.` : 'Pick a template below.'}</span>
           }
