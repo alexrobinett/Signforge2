@@ -10,9 +10,10 @@
  *   `process.env` (`ANTHROPIC_CUSTOM_HEADERS`, `OPENAI_CUSTOM_HEADERS`, `OPENAI_ORG_ID`) is dropped.
  * - One deadline per model call (`AbortSignal.timeout`), with the caller's signal.
  *
- * apps/api keeps its address checks private to src/data/fetch.ts and has no guarded fetch that hands
- * back a streaming Response, so `isPrivate` below is a copy of its checks. #349 should export one
- * (`guardedStream`) from there instead of copying.
+ * apps/api keeps its address checks and its DNS resolver private to src/data/fetch.ts, and has no
+ * guarded fetch that hands back a streaming Response; a spike may not import another package's
+ * source (`turbo boundaries`). So `isPrivate` below is a copy of its checks and `dohResolver` a small
+ * one of its own. #349 should export one primitive (`guardedStream`) from there instead of copying.
  */
 import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import type { FetchWrapper } from '@tanstack/ai';
@@ -67,6 +68,26 @@ export function guardedModelFetch(origin: string, auth: { header: 'x-api-key' | 
       if (deadline.aborted) throw new GuardError(`no answer in ${guards.timeoutMs / 1000} seconds`, { code: 'timeout', cause: err });
       throw err;
     }
+  };
+}
+
+/**
+ * `resolve` for a live model call: Cloudflare's DNS over HTTPS, A and AAAA at once. The spike's own,
+ * as apps/api's `dohResolver` is private to that package (see above); it is not used with the stub.
+ */
+export function dohResolver(fetcher: typeof fetch): FetchGuards['resolve'] {
+  return async (host, signal) => {
+    const ask = async (type: 'A' | 'AAAA') => {
+      const res = await fetcher(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, {
+        headers: { accept: 'application/dns-json' },
+        signal,
+      });
+      if (!res.ok) throw new GuardError(`DNS lookup failed (${res.status})`, { code: 'blocked' });
+      const body: { Answer?: { type: number; data: string }[] } = await res.json();
+      // 1 is A and 28 is AAAA.
+      return (body.Answer ?? []).filter((r) => r.type === 1 || r.type === 28).map((r) => r.data);
+    };
+    return (await Promise.all([ask('A'), ask('AAAA')])).flat();
   };
 }
 

@@ -86,7 +86,7 @@ CPU per turn was not measured; #349's "Done when" asks for it.
 
 Tests cover the guards: another origin, a private address, a redirect, a missed deadline, and `http:` are all refused.
 
-**Not as hoped:** `apps/api` has no guarded fetch that returns a streaming `Response`. `guardedKeyedJson` reads the whole JSON, and `checkedUrl` and `isPrivate` are private. The spike carries a marked copy of the address checks. #349 should export one primitive (say, `guardedStream`) from `data/fetch.ts` and use it.
+**Not as hoped:** `apps/api` has no guarded fetch that returns a streaming `Response`. `guardedKeyedJson` reads the whole JSON, and `checkedUrl`, `isPrivate` and `dohResolver` are private to `apps/api`, which a spike may not import from (`turbo boundaries`). The spike carries a marked copy of the address checks and a small DNS-over-HTTPS resolver of its own; the stub model never uses that resolver. #349 must export one primitive (say, `guardedStream`) from `data/fetch.ts` and use it: condition 1 above.
 
 **The key:** it is opened per call (from a Worker secret here; from the vault in `apps/api`) and passed to the adapter explicitly. The guarded fetch then sets it on the request again. The adapters still read `process.env`, which `nodejs_compat` fills with the Worker's vars and secrets:
 

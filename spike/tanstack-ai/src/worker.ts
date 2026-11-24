@@ -21,9 +21,8 @@ import { type AnyTextAdapter, chat, chatParamsFromRequest, type FetchWrapper, ma
 import { ANTHROPIC_MODELS, createAnthropicChat } from '@tanstack/ai-anthropic';
 import { openaiCompatible } from '@tanstack/ai-openai/compatible';
 import { z } from 'zod';
-import { dohResolver } from '../../../apps/api/src/data/fetch';
 import { answerCard } from './card';
-import { type FetchGuards, guardedModelFetch } from './guarded-fetch';
+import { dohResolver, type FetchGuards, guardedModelFetch } from './guarded-fetch';
 import { stubModel } from './stub-model';
 import { registryTools, restartScreens } from './tools';
 
