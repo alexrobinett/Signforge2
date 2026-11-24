@@ -118,7 +118,7 @@ function ScreenPage() {
           <span aria-hidden className="text-muted-foreground">
             /
           </span>
-          <span aria-current="page" className="text-muted-foreground">
+          <span aria-current="page" className="min-w-0 text-muted-foreground wrap-anywhere">
             {screen.name}
           </span>
         </nav>

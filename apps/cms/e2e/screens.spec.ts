@@ -241,7 +241,8 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await expect(page.getByRole('heading', { name: 'Front lobby', level: 1 })).toBeVisible();
 
   // A long one-word name wraps at phone width instead of widening the page (#372).
-  const long = 'Frontlobbybytherevolvingdoorsnexttothecafe';
+  // Wide letters, so the breadcrumb's copy of the name is wider than the screen too.
+  const long = `Frontlobby${'W'.repeat(30)}`;
   await tool('rename_screen', { screenId: lobby, name: long });
   await page.reload();
   await hydrated(page);
