@@ -217,12 +217,16 @@ async function dispatchCall<D extends DataScope>(
   };
   const refused = refusedBy(grant);
   if (refused) return refused;
-  // The right to publish, held to the commit: the member still in a role that may (and an editor only while
-  // editors publish), checked by the batch as it runs; without a member to read, the setting alone.
-  const publishRight = (): Write[] => {
-    if (!tool.mutates || tool.scope !== 'content:publish' || !('settings' in caller.org)) return [];
-    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(tool.minRole)), true).writes;
-    return caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
+  // The role a change was checked for, held to the commit, checked by the batch as it runs: the right to publish (the
+  // member still in a role that may, and an editor only while editors publish; without a member to read, the setting
+  // alone), and an owner's (review of #414: one demoted between the read and the batch is refused). An owner's change
+  // made through Better Auth is not in the batch, and Better Auth checks the role as it makes it.
+  const roleRight = (): Write[] => {
+    if (!tool.mutates || !('settings' in caller.org)) return [];
+    const publishing = tool.scope === 'content:publish';
+    if (!publishing && (tool.minRole !== 'owner' || !writes.length)) return [];
+    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(tool.minRole)), publishing).writes;
+    return publishing && caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
   };
 
   const parsed = tool.input.safeParse(rawInput ?? {});
@@ -284,7 +288,7 @@ async function dispatchCall<D extends DataScope>(
       targetId: target?.id ?? null,
       detailJson: JSON.stringify({ input: redact(parsed.data), ...detail, ...(caller.confirmed !== undefined && { confirmed: caller.confirmed }) }),
     });
-    await caller.org.commit([...publishRight(), ...writes, ...audit.writes]);
+    await caller.org.commit([...roleRight(), ...writes, ...audit.writes]);
     audited.row = true;
   };
 
@@ -297,6 +301,9 @@ async function dispatchCall<D extends DataScope>(
   const refusedCommit = async (err: unknown): Promise<DispatchResult | undefined> => {
     const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data, actor: caller.actor });
     if (refusal) return fail(refusal.code, refusal.message, refusal.details);
+    // A role guard (`stillMay`): the member lost the role between the read and the batch.
+    if (err instanceof StaleVersionError && err.id === 'member')
+      return fail('forbidden', `${tool.name} needs at least the ${tool.minRole} role, which you no longer have`);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);

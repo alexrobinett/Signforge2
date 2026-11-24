@@ -9,6 +9,7 @@ import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mcp } from '../src/mcp';
 import { Client, clockLimits, ORIGIN } from './client';
+import { measure } from './counting';
 import { agentToken, check, team } from './oauth';
 
 afterEach(() => {
@@ -205,8 +206,11 @@ describe('tools', () => {
     expect(names).toEqual(expect.arrayContaining(['list_playlists', 'create_playlist', 'delete_playlist', 'list_members']));
     expect(names).not.toContain('publish');
     expect(names).not.toContain('invite_member');
+    expect(names).toContain('cancel_invitation');
     expect(tools.find((tool) => tool.name === 'create_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(tools.find((tool) => tool.name === 'delete_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    // Its link stops working for good: only a person invites again (review of #414).
+    expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
   });
 
   it('runs a read and a write through the dispatcher, audited as the agent with its client', async () => {
@@ -220,6 +224,47 @@ describe('tools', () => {
     expect(read?.structuredContent.playlist).toMatchObject({ id: playlistId, name: 'Agent made' });
     const audit = (await scoped(env.DB, org.id).auditLog.list({ limit: 100 })).filter((e) => e.action === 'create_playlist');
     expect(audit).toEqual([expect.objectContaining({ actorKind: 'agent', actorId: grantId, clientId, targetId: playlistId })]);
+  });
+
+  it("lets an owner's agent cancel a pending invitation as its member, never invite, and no longer once its member is not an owner (#321)", async () => {
+    const { t, owner, org, editor, editorMemberId } = await team();
+    const { access_token, clientId } = await agentToken(t, owner, org.id, ['content:read', 'org:manage']);
+    const { grantId } = (await check(access_token))!;
+    const invited = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'pending-321@signforge.test', role: 'viewer' });
+    // Inviting is a person's: refused at the dispatcher, as /mcp lists it to no agent.
+    expect(await call(access_token, 'invite_member', { email: 'sam-321@signforge.test', role: 'viewer' })).toMatchObject({
+      isError: true,
+      structuredContent: { error: 'forbidden' },
+    });
+    expect(await call(access_token, 'cancel_invitation', { invitationId: invited.id })).toMatchObject({ structuredContent: { canceled: invited.id } });
+    const org_ = scoped(env.DB, org.id);
+    expect(await org_.invitations.get(invited.id)).toMatchObject({ status: 'canceled' });
+    expect((await org_.auditLog.list({ limit: 20 })).filter((e) => e.action === 'cancel_invitation')).toEqual([
+      expect.objectContaining({ actorKind: 'agent', actorId: grantId, clientId, targetKind: 'invitation', targetId: invited.id }),
+    ]);
+    // A member made an owner grants an agent; demoted, their agent cancels nothing.
+    await owner.ok('/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'owner' });
+    const theirs = (await agentToken(t, editor, org.id, ['content:read', 'org:manage'])).access_token;
+    const next = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'next-321@signforge.test', role: 'viewer' });
+    await owner.ok('/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'editor' });
+    expect(await call(theirs, 'cancel_invitation', { invitationId: next.id })).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
+    expect(await org_.invitations.get(next.id)).toMatchObject({ status: 'pending' });
+  });
+
+  it('cancels an invitation over /mcp within the budget (the Free plan: 50 D1 queries an invocation, #321)', async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'org:manage']);
+    const invited = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'budget-321@signforge.test', role: 'viewer' });
+    let out: unknown;
+    const cost = await measure(async (b) => {
+      out = await call(access_token, 'cancel_invitation', { invitationId: invited.id }, b);
+    });
+    expect(out).toMatchObject({ structuredContent: { canceled: invited.id } });
+    // Measured, as the most it may take: the token with its grant and member, the invitation, then the guard that it is still
+    // pending, the guard that its member is still an owner (review of #414), the cancel and the audit row in one batch; and
+    // the grant's write limit, its one RPC (#107). A new statement fails this on purpose: look at the budget, then raise it.
+    expect(cost).toEqual({ statements: 7, queries: 4, rpcs: ['write'] });
+    expect(cost.queries).toBeLessThan(50);
   });
 
   it('answers a refusal as a result with isError, its code and its message', async () => {

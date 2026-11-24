@@ -1069,7 +1069,7 @@ export const outputs = {
   }),
   list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
   invite_member: z.object({ invitation: invitationOutput }),
-  cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id") }),
+  cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id"), email: z.string().describe('Who it was for') }),
   update_member_role: z.object({ member: memberOutput }),
   remove_member: z.object({ removed: z.string().describe("The removed membership's id") }),
 };
