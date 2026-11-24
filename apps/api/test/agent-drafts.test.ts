@@ -17,8 +17,9 @@ describe('the cost of an agent proposal', () => {
     let version = spot.version;
     // Its audit rows: the person's and the agent's edits, as the strip reads the newest of them.
     for (let i = 0; i < 3; i++) {
-      version = (await t.owner.ok<{ spot: { version: number } }>('/api/tools/update_spot', { spotId: spot.id, durationMs: 10_000 + i * 1000, ifVersion: version }))
-        .spot.version;
+      version = (
+        await t.owner.ok<{ spot: { version: number } }>('/api/tools/update_spot', { spotId: spot.id, durationMs: 10_000 + i * 1000, ifVersion: version })
+      ).spot.version;
       const edited = await mcpTool(access_token, 'update_spot', { spotId: spot.id, url: `https://example.com/soup-${i}`, ifVersion: version });
       expect(edited.isError, JSON.stringify(edited)).toBeUndefined();
       version = edited.structuredContent.spot.version;

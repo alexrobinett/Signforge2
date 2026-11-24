@@ -489,9 +489,21 @@ describe('kept drafts (#116, draft_snapshots)', () => {
     expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
     // Handed another org's id and keys among its content, org B's own draft is still the one written: its org and keys come last.
     const spotB = (await b.spots.get(s.b.templateSpot))!;
-    const sneaky = { contentJson: '{"name":"B"}', sampleFieldsJson: null, orgId: s.a.orgId, spotId: s.a.templateSpot, playlistId: s.a.playlist, holds: 'agent' };
+    const sneaky = {
+      contentJson: '{"name":"B"}',
+      sampleFieldsJson: null,
+      orgId: s.a.orgId,
+      spotId: s.a.templateSpot,
+      playlistId: s.a.playlist,
+      holds: 'agent',
+    };
     await b.commit(b.draftSnapshots.stage.propose('spot', spotB, sneaky).writes);
-    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({ orgId: s.b.orgId, spotId: s.b.templateSpot, playlistId: null, holds: 'person' });
+    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({
+      orgId: s.b.orgId,
+      spotId: s.b.templateSpot,
+      playlistId: null,
+      holds: 'person',
+    });
     expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
     await b.commit(b.draftSnapshots.stage.keep('spot', spotB, 'person', sneaky).writes);
     expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({ orgId: s.b.orgId, holds: 'person', contentJson: '{"name":"B"}' });
@@ -500,7 +512,9 @@ describe('kept drafts (#116, draft_snapshots)', () => {
   });
 
   it('cannot point into another org, even written around the repository', async () => {
-    const insert = env.DB.prepare("INSERT INTO draft_snapshots (org_id, spot_id, playlist_id, holds, content_json, created_at) VALUES (?, ?, ?, 'person', '{}', 0)");
+    const insert = env.DB.prepare(
+      "INSERT INTO draft_snapshots (org_id, spot_id, playlist_id, holds, content_json, created_at) VALUES (?, ?, ?, 'person', '{}', 0)",
+    );
     await expect(insert.bind(s.b.orgId, s.a.templateSpot, null).run()).rejects.toThrow(/FOREIGN KEY/);
     await expect(insert.bind(s.b.orgId, null, s.a.playlist).run()).rejects.toThrow(/FOREIGN KEY/);
   });

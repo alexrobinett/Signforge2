@@ -63,4 +63,3 @@ export function counted(beforeBatch?: () => Promise<unknown>) {
   const result = () => ({ statements: seen.statements, queries: seen.statements - batched + batches, rpcs: seen.rpcs });
   return { result, bindings };
 }
-
