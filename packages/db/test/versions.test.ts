@@ -102,3 +102,35 @@ describe('row versions', () => {
     expect(await org.settings.get()).toMatchObject({ locale: 'en-GB', rowVersion: 3 });
   });
 });
+
+describe('a batch a guard failed, though every guard holds again by the time it is diagnosed (round 3 of #393)', () => {
+  it('is still a refusal, StaleVersionError, never the raw database error', async () => {
+    const o = await seedOrg(env.DB, 'ver-reverted');
+    const setDefault = async (playlistId: string | null) => {
+      const org = testScope(env.DB, o.orgId);
+      await org.commit((await org.settings.stage.set({ defaultPlaylistId: playlistId })).writes);
+    };
+    await setDefault(o.playlist);
+    // A switch to none lands as the batch runs, and is taken back before the failure is diagnosed.
+    const racing = new Proxy(env.DB, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target);
+        if (prop !== 'batch') return typeof v === 'function' ? v.bind(target) : v;
+        return async (statements: D1PreparedStatement[]) => {
+          await setDefault(null);
+          try {
+            return await target.batch(statements);
+          } finally {
+            await setDefault(o.playlist);
+          }
+        };
+      },
+    });
+    const org = testScope(racing, o.orgId);
+    const renamed = org.screens.stage.update((await org.screens.get(o.screen))!, { name: 'Renamed' });
+    const err = await org.commit([...org.settings.stage.defaultIs(o.playlist).writes, ...renamed.writes]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: 'batch', version: 0 });
+    expect((await testScope(env.DB, o.orgId).screens.get(o.screen))!.name).not.toBe('Renamed');
+  });
+});

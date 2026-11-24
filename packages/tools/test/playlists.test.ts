@@ -287,13 +287,40 @@ describe('ifDefault on set_default_playlist and publish (#393)', () => {
     // While it is: published.
     await chooseDefault(org, o.playlist);
     expect(await ok(owner(org)('publish', pins))).toMatchObject({ promoted: [{ kind: 'spot', id: spot.id }] });
+    // Switched to another as it compiled and back before its batch (A, B, A): the guard alone would pass, so it
+    // holds to the default the compiler read, and refuses, publishing nothing compiled against the other.
+    await chooseDefault(org, o.playlist);
+    const spotNow = (await org.spots.get(spot.id))!;
+    const settings = org.settings;
+    const aba = racing(
+      new Proxy(org, {
+        get: (t, k) =>
+          k === 'settings'
+            ? new Proxy(settings, {
+                get: (st, sk) =>
+                  sk === 'get'
+                    ? async () => {
+                        await chooseDefault(org, other.id);
+                        return settings.get();
+                      }
+                    : Reflect.get(st, sk),
+              })
+            : Reflect.get(t, k),
+      }),
+      () => chooseDefault(org, o.playlist),
+    );
+    /** `input` published through `scope`: refused, naming the other default, with no publish made. */
+    const refusedFor = async (scope: OrgScope, input: unknown) => {
+      const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+      expect(await owner(scope)('publish', input)).toMatchObject({ ok: false, error: 'conflict', details: { defaultPlaylistId: other.id } });
+      expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+    };
+    await refusedFor(aba, { drafts: [{ kind: 'spot', id: spotNow.id, version: spotNow.rowVersion }], ifDefault: o.playlist });
+    await chooseDefault(org, o.playlist);
     // A publish that changes no screen (removals only, or nothing) is held to it as well.
-    const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
-    expect(await owner(racing(org, () => chooseDefault(org, other.id)))('publish', { drafts: [], ifDefault: o.playlist })).toMatchObject({
-      ok: false,
-      error: 'conflict',
-      details: { defaultPlaylistId: other.id },
-    });
-    expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+    await refusedFor(
+      racing(org, () => chooseDefault(org, other.id)),
+      { drafts: [], ifDefault: o.playlist },
+    );
   });
 });

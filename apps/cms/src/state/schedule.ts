@@ -253,7 +253,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const d = get().schedule.entries[DIALOG]?.edit;
       const firstDefault = d && !everywhereAlways(d) ? firstDefaultOf(d) : undefined;
       const record = await saveDialogEntry(orgId);
-      if (record) await get().publishEntry(orgId, record, firstDefault);
+      if (record) await get().publishEntry(orgId, record, { choice: firstDefault });
     },
 
     async reloadEntry(orgId) {
@@ -295,7 +295,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
       if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
-      await get().publishSchedule(orgId, [made.record], firstDefault);
+      await get().publishSchedule(orgId, [made.record], { choice: firstDefault });
     },
 
     closeScheduleDialog: close,

@@ -132,22 +132,23 @@ const updatePlaylist = defineTool({
 });
 
 /**
- * `ifDefault` (`set_default_playlist`, `publish`): refused as a conflict naming the default now unless
- * it is `playlistId` (null: none); else the guard that holds it so as the batch runs, so a default
- * chosen between this read and the commit fails it.
+ * `set_default_playlist`'s `ifDefault`: refused as a conflict naming the default now unless it is
+ * `playlistId` (null: none); else the guard that holds it so as the batch runs, so a default chosen
+ * between this read and the commit fails it.
  */
-export async function stillDefault(org: OrgScope, playlistId: string | null) {
+async function stillDefault(org: OrgScope, playlistId: string | null) {
   const moved = await defaultMoved(org, playlistId);
   if (moved) throw moved;
   return org.settings.stage.defaultIs(playlistId);
 }
 
-/** The conflict when the org's default is not `playlistId` (null: none), naming the default now. */
-async function defaultMoved(org: OrgScope, playlistId: string | null): Promise<ToolError | undefined> {
-  const now = (await org.settings.get())?.defaultPlaylistId ?? null;
-  if (now === playlistId) return undefined;
-  return new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', { defaultPlaylistId: now });
-}
+/** `ifDefault` refused when the default is `now`, not `playlistId` (null: none): a conflict naming the default now. */
+export const defaultConflict = (now: string | null, playlistId: string | null) =>
+  now === playlistId
+    ? undefined
+    : new ToolError('conflict', now ? `the default playlist is now ${now}` : 'the organization has no default playlist now', { defaultPlaylistId: now });
+
+const defaultMoved = async (org: OrgScope, playlistId: string | null) => defaultConflict((await org.settings.get())?.defaultPlaylistId ?? null, playlistId);
 
 /** The playlist's takeovers that have ended for good: they play nowhere again, and go with it. */
 const endedWith = async (org: OrgScope, playlistId: string, now: number) =>
