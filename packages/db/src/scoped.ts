@@ -28,6 +28,7 @@ import {
   or,
   sql,
   type SQL,
+  type SQLWrapper,
 } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
@@ -476,6 +477,19 @@ interface KeptContent {
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
   const db: Db = drizzle(d1);
+  /**
+   * Deletes, for the grants `ours` selects, the provider's access and refresh tokens, consents and unexchanged
+   * authorization codes: verification rows whose JSON value names one (the provider's `{ type: 'authorization_code',
+   * referenceId, ... }`). Other rows (sign-in codes) hold no JSON, so the value is read only where it is valid.
+   */
+  const grantTokenDeletes = (ours: SQLWrapper): Staged =>
+    staged(
+      undefined,
+      db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
+      db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
+      db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
+      db.delete(s.verification).where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+    );
 
   const screens = entity(db, orgId, s.screens, 'scr');
   const screenGroups = entity(db, orgId, s.screenGroups, 'grp');
@@ -2167,19 +2181,44 @@ export function scoped(d1: D1Database, orgId: string) {
             .select({ id: ag.id })
             .from(ag)
             .where(and(eq(ag.orgId, orgId), eq(ag.id, grant.id)));
-          const tokens = staged(
-            undefined,
-            db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
-            db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
-            db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
-            // Its authorization codes not yet exchanged: verification rows whose JSON value names it
-            // (the provider's `{ type: 'authorization_code', referenceId, ... }`). Other rows (sign-in
-            // codes) hold no JSON, so the value is read only where it is valid.
+          return { row: revoked.row, writes: [...revoked.writes, ...grantTokenDeletes(ours).writes] };
+        },
+        /**
+         * Every grant `userId` holds here still connected, revoked by `by` at `now` as their membership ends (#328): one
+         * audit row each (`detailJson`, as `clientId`), their tokens, consents and codes deleted, and each marked, in six
+         * statements however many grants. No version is held: a scope change meanwhile does not keep a grant connected
+         * once its member has gone, and one revoked meanwhile is left as it is, with no second audit row (review of #422).
+         */
+        revokeAllOf: (userId: string, by: string, clientId: string, now: number, detailJson: string): Staged => {
+          const theirs = and(eq(ag.orgId, orgId), eq(ag.userId, userId));
+          const live = and(theirs, isNull(ag.revokedAt));
+          const a = s.auditLog;
+          // Before the grants are marked, so it names exactly those still connected. Its id is the grant's: a grant is revoked once.
+          const audit = db.insert(a).select(
             db
-              .delete(s.verification)
-              .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+              .select({
+                id: sql<string>`'aud_end_' || ${ag.id}`.as('id'),
+                orgId: ag.orgId,
+                at: sql<number>`${now}`.as('at'),
+                actorKind: sql<'user'>`'user'`.as('actor_kind'),
+                actorId: sql<string>`${by}`.as('actor_id'),
+                clientId: sql<string>`${clientId}`.as('client_id'),
+                action: sql<string>`'revoke_agent_grant'`.as('action'),
+                targetKind: sql<string>`'agent_grant'`.as('target_kind'),
+                targetId: ag.id,
+                detailJson: sql<string>`${detailJson}`.as('detail_json'),
+              })
+              .from(ag)
+              .where(live),
           );
-          return { row: revoked.row, writes: [...revoked.writes, ...tokens.writes] };
+          const mark = db
+            .update(ag)
+            .set({ revokedAt: now, revokedBy: by, rowVersion: sql`${ag.rowVersion} + 1` })
+            .where(live);
+          return {
+            row: undefined,
+            writes: [...staged(undefined, audit).writes, ...grantTokenDeletes(db.select({ id: ag.id }).from(ag).where(theirs)).writes, ...staged(undefined, mark).writes],
+          };
         },
       },
     },
