@@ -114,8 +114,11 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
+  // The save's own answer, not the "Saved" toast: Screens & groups' may still show, and a reload before this
+  // save is written reads the old rules (#310).
+  const rulesSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_org_settings'));
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  expect((await rulesSaved).status()).toBe(200);
   await page.reload();
   await expect(page.getByLabel('Who hears: A screen goes offline, and when it is back')).toHaveValue('everyone');
   await expect(page.getByLabel('Email for: An agent is refused')).not.toBeChecked();
