@@ -92,7 +92,7 @@ export const Route = createFileRoute('/_app/integrations')({
 });
 
 const SHOW_WORD: Record<Show, string> = { all: 'All', connected: 'Connected', built: 'Built', planned: 'Planned', later: 'Later' };
-const STATE_WORD: Record<Connector['state'], string> = { built: 'Built', planned: 'Planned', later: 'Later · enterprise' };
+const STATE_WORD: Record<Exclude<Connector['state'], 'built'>, string> = { planned: 'Planned', later: 'Later · enterprise' };
 const TILE: Record<Connector['state'], string> = {
   built: 'bg-primary text-primary-foreground',
   planned: 'bg-accent text-accent-foreground',
@@ -248,9 +248,8 @@ function ConnectorRow({
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <strong className="text-base font-semibold">{c.name}</strong>
-          <span className={cn('text-meta font-semibold', c.state === 'built' ? 'text-status-online-foreground' : 'text-muted-foreground')}>
-            {STATE_WORD[c.state]}
-          </span>
+          {/* Built is most rows and needs no word (#374): only what is not built yet says so. */}
+          {c.state !== 'built' && <span className="text-meta font-semibold text-muted-foreground">{STATE_WORD[c.state]}</span>}
         </span>
         <span className="text-md text-muted-foreground">{c.does}</span>
       </span>

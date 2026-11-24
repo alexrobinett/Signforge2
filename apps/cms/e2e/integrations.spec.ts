@@ -77,6 +77,9 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await expect(show.getByRole('button', { name: 'Connected 0' })).toBeFocused();
   expect(await show.getByRole('button', { name: 'Connected 0' }).evaluate((b) => getComputedStyle(b).outlineStyle)).not.toBe('none');
   await owner.emulateMedia({ forcedColors: 'none' });
+  // Built connectors do not say Built; only what is not built yet says so (#374).
+  await expect(owner.getByRole('main').getByRole('listitem').getByText('Built', { exact: true })).toHaveCount(0);
+  await expect(owner.getByRole('main').getByRole('listitem').getByText('Planned', { exact: true }).first()).toBeVisible();
   // A new org: the first Connect is the page's one filled button.
   await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
 

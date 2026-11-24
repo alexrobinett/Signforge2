@@ -40,6 +40,8 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   const row = page.getByRole('row', { name: /Kestrel agent/ });
   await expect(row).toContainText('“Kestrel agent”');
   await expect(row).toContainText('screens:manage');
+  // content:read is every agent's, so the row does not say it (#374).
+  await expect(row).not.toContainText('content:read');
   await expect(row).toContainText('This hour');
   await expect(row).toContainText('2 calls · 1 change');
   await axe(page);

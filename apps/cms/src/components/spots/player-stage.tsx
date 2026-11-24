@@ -255,7 +255,8 @@ export function PlayerStage({
                   : 'Holding the last valid frame until the marked field is fixed.'}
             </span>
           ) : (
-            <span>{playing ? 'Drawn by the player your screens run.' : 'Drawing…'}</span>
+            // Drawn, it says nothing: the caption above already says what the stage is (#374).
+            !playing && <span>Drawing…</span>
           )}
         </span>
         <span>{playlistId !== undefined ? 'Plays the loop. Updates as you edit.' : 'Updates as you type.'}</span>

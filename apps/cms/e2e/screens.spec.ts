@@ -80,7 +80,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await page.reload();
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
-  await expect(page.getByText('Nothing published to it yet', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
 
   // Sleep now: stored, and carried by the next sync to the screen.
@@ -151,6 +151,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByRole('status').filter({ hasText: '1 screen' })).toBeVisible();
   await axe(page);
   await shots(page, '14-screens-tiles');
+  // A landscape tile does not say 16:9: only a portrait one says its ratio (#374).
+  await expect(page.getByRole('main').getByText('16:9', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Table' }).click();
   await expect(page).toHaveURL(/view=table/);
   await expect(page.getByRole('rowheader', { name: /Lobby/ })).toBeVisible();

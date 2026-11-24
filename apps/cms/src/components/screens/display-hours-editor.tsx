@@ -37,7 +37,8 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
 
   return (
     <fieldset className="space-y-4">
-      <legend className="text-sm font-medium">Display hours</legend>
+      {/* Named for assistive tech only: its section's heading already says Display hours (#374). */}
+      <legend className="sr-only">Display hours</legend>
       <div className="flex flex-wrap gap-2">
         {(
           [

@@ -243,9 +243,7 @@ function ScreenPage() {
                   </>
                 ) : screen.showing?.asleep ? (
                   <>Should be asleep{screen.showing.wakesAt && ` until ${localClock(screen.showing.wakesAt, screen.timezone, now)}`}</>
-                ) : (
-                  'Nothing published to it yet'
-                )}
+                ) : null}
               </span>
               {screen.showing?.playlist && (
                 <span className="text-muted-foreground">
