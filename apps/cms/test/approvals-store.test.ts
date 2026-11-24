@@ -13,7 +13,6 @@ import { ORG, toastTitled, watchedQueries } from './store-kit';
 vi.mock('~/queries/spots', () => ({ assetsQuery: vi.fn(), spotPreviewQuery: vi.fn(), templatesQuery: vi.fn() }));
 vi.mock('~/lib/tools', async (original) => ({ ...(await original<typeof import('../src/lib/tools')>()), callTool: vi.fn() }));
 
-
 const request = {
   id: 'prq_1',
   status: 'pending' as const,
@@ -54,7 +53,6 @@ function setup() {
   }));
   return { s: store, invalidated };
 }
-
 
 beforeEach(() => {
   toast.dismiss();
