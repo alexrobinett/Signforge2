@@ -37,6 +37,8 @@ import { Route as AppSettingsScreensRouteImport } from './routes/_app/settings/s
 import { Route as AppSpotsIndexRouteImport } from './routes/_app/spots/index'
 import { Route as AppSpotsSpotIdRouteImport } from './routes/_app/spots/$spotId'
 import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
+import { Route as AppSettingsApiIndexRouteImport } from './routes/_app/settings/api/index'
+import { Route as AppSettingsApiGrantIdRouteImport } from './routes/_app/settings/api/$grantId'
 import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings/brand-kits/index'
 import { Route as AppSettingsBrandKitsKitIdRouteImport } from './routes/_app/settings_/brand-kits/$kitId'
 
@@ -181,6 +183,16 @@ const V1DeviceSplatRoute = V1DeviceSplatRouteImport.update({
   path: '/v1/device/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSettingsApiIndexRoute = AppSettingsApiIndexRouteImport.update({
+  id: '/api/',
+  path: '/api/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsApiGrantIdRoute = AppSettingsApiGrantIdRouteImport.update({
+  id: '/api/$grantId',
+  path: '/api/$grantId',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsBrandKitsIndexRoute =
   AppSettingsBrandKitsIndexRouteImport.update({
     id: '/brand-kits/',
@@ -222,7 +234,9 @@ export interface FileRoutesByFullPath {
   '/screens/': typeof AppScreensIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/spots/': typeof AppSpotsIndexRoute
+  '/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/api/': typeof AppSettingsApiIndexRoute
   '/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -252,7 +266,9 @@ export interface FileRoutesByTo {
   '/screens': typeof AppScreensIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/spots': typeof AppSpotsIndexRoute
+  '/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/api': typeof AppSettingsApiIndexRoute
   '/settings/brand-kits': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesById {
@@ -285,7 +301,9 @@ export interface FileRoutesById {
   '/_app/screens/': typeof AppScreensIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/spots/': typeof AppSpotsIndexRoute
+  '/_app/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/_app/settings_/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/_app/settings/api/': typeof AppSettingsApiIndexRoute
   '/_app/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRouteTypes {
@@ -318,7 +336,9 @@ export interface FileRouteTypes {
     | '/screens/'
     | '/settings/'
     | '/spots/'
+    | '/settings/api/$grantId'
     | '/settings/brand-kits/$kitId'
+    | '/settings/api/'
     | '/settings/brand-kits/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -348,7 +368,9 @@ export interface FileRouteTypes {
     | '/screens'
     | '/settings'
     | '/spots'
+    | '/settings/api/$grantId'
     | '/settings/brand-kits/$kitId'
+    | '/settings/api'
     | '/settings/brand-kits'
   id:
     | '__root__'
@@ -380,7 +402,9 @@ export interface FileRouteTypes {
     | '/_app/screens/'
     | '/_app/settings/'
     | '/_app/spots/'
+    | '/_app/settings/api/$grantId'
     | '/_app/settings_/brand-kits/$kitId'
+    | '/_app/settings/api/'
     | '/_app/settings/brand-kits/'
   fileRoutesById: FileRoutesById
 }
@@ -593,6 +617,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1DeviceSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/settings/api/': {
+      id: '/_app/settings/api/'
+      path: '/api'
+      fullPath: '/settings/api/'
+      preLoaderRoute: typeof AppSettingsApiIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/api/$grantId': {
+      id: '/_app/settings/api/$grantId'
+      path: '/api/$grantId'
+      fullPath: '/settings/api/$grantId'
+      preLoaderRoute: typeof AppSettingsApiGrantIdRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/brand-kits/': {
       id: '/_app/settings/brand-kits/'
       path: '/brand-kits'
@@ -617,6 +655,8 @@ interface AppSettingsRouteChildren {
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppSettingsScreensRoute: typeof AppSettingsScreensRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+  AppSettingsApiGrantIdRoute: typeof AppSettingsApiGrantIdRoute
+  AppSettingsApiIndexRoute: typeof AppSettingsApiIndexRoute
   AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
 }
 
@@ -627,6 +667,8 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppSettingsScreensRoute: AppSettingsScreensRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
+  AppSettingsApiGrantIdRoute: AppSettingsApiGrantIdRoute,
+  AppSettingsApiIndexRoute: AppSettingsApiIndexRoute,
   AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
 }
 

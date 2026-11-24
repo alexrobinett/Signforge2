@@ -24,6 +24,7 @@ import {
   type Member,
   type OrgSettings,
 } from '~/lib/settings';
+import type { ConnectScope } from '~/lib/connect';
 import type { DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
@@ -31,7 +32,7 @@ import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
-type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'ai' | 'account' | 'invitation';
+type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'ai' | 'agents' | 'account' | 'invitation';
 /** Where an action runs: its page, in the org it was started in (null for Account and the invitation page). */
 export interface SettingsScope {
   page: SettingsPage;
@@ -86,6 +87,10 @@ interface SettingsState {
   aiModels: { orgId: string; models: string[] } | null;
   /** The org whose model key's Remove is waiting for its confirmation. */
   removingAiKey: string | null;
+  /** The scopes an agent's running change gives it, so its toggles show where they are going. */
+  agentScopes: { grantId: string; scopes: ConnectScope[] } | null;
+  /** The agent whose Disconnect is waiting for its confirmation. */
+  disconnecting: { orgId: string; grantId: string } | null;
 }
 
 /**
@@ -143,6 +148,12 @@ export interface SettingsSlice {
   /** Opens or closes the key's removal confirmation, as `askToRemoveAlertChannel` does. */
   askToRemoveAiKey: (orgId: string, open: boolean) => void;
   removeAiKey: (orgId: string) => Promise<void>;
+  /** Sets an agent's scopes from its next call (`update_agent_grant_scopes`), with the version the page read. */
+  setAgentScopes: (orgId: string, grantId: string, scopes: ConnectScope[], ifVersion: number) => Promise<void>;
+  /** Opens or closes an agent's Disconnect confirmation, as `askToRemoveAlertChannel` does. */
+  askToDisconnectAgent: (orgId: string, grantId: string | null) => void;
+  /** Disconnects an agent (`revoke_agent_grant`): its next call is refused. Then back to the list. */
+  disconnectAgent: (orgId: string, grantId: string) => Promise<void>;
   /** After a stale save of `at`: reads the settings again, dropping that form's edits and error. */
   reloadSettings: (orgId: string | null, at: string) => Promise<void>;
   /** After a switch: the old org's edits and confirmations go. Its running actions finish, and change nothing here. */
@@ -287,6 +298,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
   const notifications = (orgId: string) => org('notifications', orgId);
   const ai = (orgId: string) => org('ai', orgId);
+  const agents = (orgId: string) => org('agents', orgId);
   const members = (orgId: string) => org('members', orgId);
   const account: SettingsScope = { page: 'account', orgId: null };
   const invitation: SettingsScope = { page: 'invitation', orgId: null };
@@ -302,6 +314,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       signingSecret: null,
       aiModels: null,
       removingAiKey: null,
+      agentScopes: null,
+      disconnecting: null,
     },
 
     editSettings: (orgId, form, version, change) => drafts.edit(form, { orgId, record: 'settings', version, edit: {} }, (e) => ({ ...e, ...change })),
@@ -424,6 +438,27 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (removed) patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
     },
 
+    async setAgentScopes(orgId, grantId, scopes, ifVersion) {
+      if (runningIn(get().settings, agents(orgId)) !== undefined) return;
+      const change = { grantId, scopes };
+      patch((s) => ({ ...s, agentScopes: change }));
+      await run(agents(orgId), `scopes:${grantId}`, () => callTool('update_agent_grant_scopes', { grantId, scopes, ifVersion }), 'Applies from its next call');
+      // Another change may have started once this one let go.
+      patch((s) => (s.agentScopes === change ? { ...s, agentScopes: null } : s));
+    },
+    askToDisconnectAgent: (orgId, grantId) =>
+      patch((s) => {
+        const running = runningIn(s, agents(orgId));
+        if (grantId ? running !== undefined : running?.startsWith('disconnect:')) return s;
+        return { ...s, disconnecting: grantId ? { orgId, grantId } : null, errors: grantId ? withoutKey(s.errors, `disconnect:${grantId}`) : s.errors };
+      }),
+    async disconnectAgent(orgId, grantId) {
+      const done = await run(agents(orgId), `disconnect:${grantId}`, () => callTool('revoke_agent_grant', { grantId }), 'Disconnected');
+      if (!done) return;
+      patch((s) => (s.disconnecting?.grantId === grantId ? { ...s, disconnecting: null } : s));
+      if (orgOnScreen(router) === orgId) await router.navigate({ to: '/settings/api' });
+    },
+
     async reloadSettings(orgId, at) {
       await router.invalidate({ sync: true });
       // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
@@ -433,7 +468,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     },
     forgetOrgSettings() {
       drafts.forget();
-      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null, aiModels: null, removingAiKey: null }));
+      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null, aiModels: null, removingAiKey: null, disconnecting: null }));
     },
 
     inviteMembers(orgId, emails, role) {

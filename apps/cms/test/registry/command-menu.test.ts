@@ -47,8 +47,9 @@ describe('command menu entries', () => {
     expect(toolNames('editor')).not.toContain('revoke_screen_credential');
   });
 
-  it('lists only the read tools for a viewer', () => {
-    const reads = TOOLS.filter((t) => !t.mutates && t.minRole === 'viewer').map((t) => t.name);
+  it('lists only the read tools for a viewer, and the people-only ones for their own agents', () => {
+    // A viewer changes nothing in the org, but may change or disconnect the agents they connected (M4-07).
+    const reads = TOOLS.filter((t) => (!t.mutates || t.people) && t.minRole === 'viewer').map((t) => t.name);
     expect(toolNames('viewer').sort()).toEqual(reads.sort());
     expect(toolNames('viewer')).toEqual(expect.arrayContaining(['list_screens', 'get_screen']));
     expect(toolNames('viewer')).not.toContain('rename_screen');

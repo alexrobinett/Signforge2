@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/index';
 import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
+import { agentToken, check } from './oauth';
 
 /**
  * Every route that is not a GET, and why it may change data. `/api` allows exactly Better Auth,
@@ -99,6 +100,7 @@ describe('requests', () => {
   let playlistId: string;
   let baseTemplate: string;
   let baseVersion: string;
+  let grantId: string;
 
   beforeAll(async () => {
     ({ template: baseTemplate, templateVersion: baseVersion } = await seedBaseTemplate(env.DB));
@@ -121,6 +123,8 @@ describe('requests', () => {
     playlistId = (await testScope(env.DB, org.id).playlists.insert({ name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) })).id;
     // get_data_source's example names `weather`.
     await testScope(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
+    // get_agent_grant's: an agent connected to this org by its owner.
+    grantId = (await check((await agentToken(t, setup, org.id, ['content:read'])).access_token))!.grantId;
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -157,7 +161,16 @@ describe('requests', () => {
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
       // Each id the example names, as one of this org's (or a base template's).
-      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId, playlistId };
+      const orgIds: Record<string, string> = {
+        screenId,
+        templateId: baseTemplate,
+        templateVersionId: baseVersion,
+        assetId,
+        brandKitId,
+        spotId,
+        playlistId,
+        grantId,
+      };
       const input = Object.fromEntries(Object.entries(example).map(([k, v]) => [k, orgIds[k] ?? v]));
       const res = await owner.tool(tool.name, input);
       // find_places and read_table ask a third party, here a closed port (vitest.config.ts): only that they write nothing counts.
