@@ -21,7 +21,7 @@ import { openaiCompatibleText } from '@tanstack/ai-openai/compatible';
 import { z } from 'zod';
 import { workerFetch } from '../connectors';
 import { openAiKey, sealAiKey } from '../connectors/vault';
-import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedStream, type ModelCall } from '../data/fetch';
+import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedStream, mediaType, type ModelCall } from '../data/fetch';
 
 /** What the agent's routes ask of a provider. */
 interface ModelProvider {
@@ -100,6 +100,17 @@ const ANTHROPIC_API = 'https://api.anthropic.com';
 const ANTHROPIC_HEADERS = { accept: 'application/json', 'content-type': 'application/json', 'anthropic-version': '2023-06-01' };
 const ENDPOINT_HEADERS = { accept: 'application/json', 'content-type': 'application/json' };
 
+/** A chat completion chunk that says why the model stopped: an endpoint's last but `[DONE]`. */
+const finishReason = z.object({ choices: z.array(z.object({ finish_reason: z.string() })).nonempty() });
+/** `text` as JSON, or undefined if it is not. */
+const parsedJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
 /** A model list, as Anthropic's Models API and an OpenAI-compatible endpoint both answer it. */
 const modelList = z.object({ data: z.array(z.object({ id: z.string() })) });
 
@@ -132,7 +143,7 @@ function anthropic(apiKey: string, base: string, reach: ModelReach): Opened {
     call: (timeoutMs) => ({
       origin: new URL(base).origin,
       headers: ANTHROPIC_HEADERS,
-      finished: /event:\s*message_stop/,
+      finished: (e) => e.event === 'message_stop',
       key: ['authorization', `Bearer ${apiKey}`],
       typed: false,
       guards: { fetch: reach.fetch, resolve: () => Promise.reject(new Error('Anthropic is not resolved')), timeoutMs, deadline: reach.guards.deadline },
@@ -163,7 +174,7 @@ function endpoint(apiKey: string, baseUrl: string, guards: FetchGuards): Opened 
       origin: URL.canParse(baseUrl) ? new URL(baseUrl).origin : baseUrl,
       headers: ENDPOINT_HEADERS,
       // Its last chunk says why it stopped, and `[DONE]` follows; an endpoint may send either alone.
-      finished: /data:\s*\[DONE\]|"finish_reason"\s*:\s*"[a-z_]+"/,
+      finished: (e) => e.data.trim() === '[DONE]' || finishReason.safeParse(parsedJson(e.data)).success,
       key: ['authorization', `Bearer ${apiKey}`],
       typed: true,
       guards: { ...guards, timeoutMs },
@@ -210,16 +221,24 @@ function problemOf(failure: FetchError | undefined): Problem {
 }
 
 /** Sees each chunk of a call as `chat()` passes it on: whether the model refused (both adapters say `content_filter`). */
-function refusals(): { middleware: ChatMiddleware; refused: () => boolean } {
+function refusals(): { middleware: ChatMiddleware; refused: () => boolean; text: () => string | undefined } {
   let refused = false;
+  // The answer's text as it streamed, once the model finished it (any reason, its token limit included):
+  // what a fill cut short hands back, as master did. Undefined when it never finished (an error event).
+  let text = '';
+  let finished = false;
   return {
     middleware: {
       name: 'refusal',
       onChunk: (_ctx, chunk: StreamChunk) => {
+        // A stop at its token limit is an answer too, cut short: the adapter says it as an error (`max_tokens`).
+        if (chunk.type === 'RUN_FINISHED' || (chunk.type === 'RUN_ERROR' && chunk.code === 'max_tokens')) finished = true;
         if (chunk.type === 'RUN_FINISHED' && chunk.finishReason === 'content_filter') refused = true;
+        if (chunk.type === 'TEXT_MESSAGE_CONTENT') text += chunk.delta;
       },
     },
     refused: () => refused,
+    text: () => (finished ? text : undefined),
   };
 }
 
@@ -286,7 +305,7 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
   const fetch: typeof globalThis.fetch = async (input, init) => {
     asked = true;
     const res = await guarded.fetch(input, init);
-    if (res.headers.get('content-type')?.includes('application/json')) {
+    if (mediaType(res) === 'application/json') {
       const answer = wholeAnswer.safeParse(
         await res
           .clone()
@@ -339,11 +358,12 @@ function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvide
             return seen.refused() || whole?.refused ? null : JSON.stringify(answer);
           } catch (err) {
             if (seen.refused() || whole?.refused) return null;
-            // Not JSON: as the model wrote it, for the inline route to refuse and ask again, as it does any answer it cannot read.
-            if (unparsed(err)) return err.rawText;
-            // A forced tool's answer that called no tool: its text, as master's message was read.
-            if (whole && !guarded.failure()) return whole.text;
-            throw err;
+            // What the model wrote, if it answered whole, as master read a message: not JSON, or JSON cut
+            // short by its token limit, is handed back for the inline route to refuse and ask again; no
+            // text at all is no answer (null: unreadable, with no second try). Either path, the same.
+            const wrote = guarded.failure() ? undefined : unparsed(err) ? err.rawText : (whole?.text ?? seen.text());
+            if (wrote === undefined) throw err;
+            return wrote || null;
           }
         }),
       chat: ({ model, system, turns, tools }) =>

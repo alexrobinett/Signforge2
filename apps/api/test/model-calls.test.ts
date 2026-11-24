@@ -198,15 +198,20 @@ describe('failures, each one word', () => {
   });
 
   it('cuts off an answer still streaming at its deadline, which covers the whole call: unreachable', async () => {
-    // Headers at once, then the first event, then the deadline: injected, so no real time passes.
+    // Headers and the first event at once; then the deadline fires while the next read waits: injected, so no real time passes.
     const deadline = new AbortController();
+    let reads = 0;
     const stalled = anthropic(
       () =>
         new Response(
           new ReadableStream({
             start(controller) {
               controller.enqueue(new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: START })}\n\n`));
-              deadline.abort(new DOMException('the deadline', 'TimeoutError'));
+            },
+            pull() {
+              // Asked for more once the first event is read: that read is pending when the deadline passes, and nothing more ever comes.
+              if (++reads === 1) deadline.abort(new DOMException('the deadline', 'TimeoutError'));
+              return new Promise(() => {});
             },
           }),
           { headers: { 'content-type': 'text/event-stream' } },
@@ -214,6 +219,7 @@ describe('failures, each one word', () => {
     );
     const reach = { ...stalled.reach, guards: { ...stalled.reach.guards, deadline: () => deadline.signal } };
     expect(await chatWith(DEV, ANTHROPIC, await sealed(ANTHROPIC), reach, step, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
+    expect(deadline.signal.aborted).toBe(true);
     expect(stalled.asked).toHaveLength(1);
   });
 
@@ -242,7 +248,7 @@ describe('failures, each one word', () => {
       const g = guardedStream({
         origin: 'https://api.anthropic.com',
         headers: {},
-        finished: /event:\s*message_stop/,
+        finished: (e) => e.event === 'message_stop',
         key: ['authorization', 'Bearer k'],
         typed: false,
         guards: { fetch: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }), resolve: async () => [] },
@@ -381,3 +387,44 @@ describe("a tool call's input (review of #391)", () => {
     });
   });
 });
+
+describe('the final re-check of #391', () => {
+  /** An Anthropic stream of `blocks` stopping for `stop`, cut before its message_stop, with `type` as its content type. */
+  const cutStream = async (blocks: Parameters<typeof anthropicStream>[2], type: string) =>
+    new Response((await anthropicStream('m', 'claude-sonnet-5-5', blocks, 'end_turn').text()).replace(/event: message_stop[\s\S]*$/, ''), {
+      headers: { 'content-type': type },
+    });
+
+  it('refuses a cut stream whose text only mentions its last event, and one whose media type is in capitals', async () => {
+    const key = await sealed(ANTHROPIC);
+    const mentions = anthropic(() => cutStream([{ type: 'text', text: '{"headline":"event: message_stop"}' }], 'text/event-stream'));
+    expect(await fillWith(DEV, ANTHROPIC, key, mentions.reach, fill())).toEqual({ ok: false, problem: 'unreachable' });
+    const capitals = anthropic(() => cutStream([{ type: 'tool_use', id: 't1', name: 'list_screens', input: {} }], 'Text/Event-Stream; charset=utf-8'));
+    expect(await chatWith(DEV, ANTHROPIC, key, capitals.reach, step, 25_000)).toEqual({ ok: false, problem: 'unreachable' });
+  });
+
+  it("hands back a known id's fill cut short by its token limit, for the inline route to ask again, as the dated path does", async () => {
+    const partial = '{"headline":"Bake sa';
+    const key = await sealed(ANTHROPIC);
+    const a = anthropic((b) =>
+      b.stream
+        ? anthropicStream('m', b.model, [{ type: 'text', text: partial }], 'max_tokens')
+        : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text: partial }], stop_reason: 'max_tokens', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+    );
+    for (const model of ['claude-haiku-5-5', 'claude-haiku-5-5-20261201']) expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: true, text: partial });
+  });
+
+  it('says an empty answer is unreadable, with no second try, on both paths', async () => {
+    const key = await sealed(ANTHROPIC);
+    for (const model of ['claude-haiku-5-5', 'claude-haiku-5-5-20261201']) {
+      const a = anthropic((b) =>
+        b.stream
+          ? anthropicStream('m', b.model, [], 'end_turn')
+          : Response.json({ id: 'm', type: 'message', role: 'assistant', model: b.model, content: [], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+      );
+      expect(await fillWith(DEV, ANTHROPIC, key, a.reach, fill(model)), model).toEqual({ ok: false, problem: 'unreadable' });
+      expect(a.asked, model).toHaveLength(1);
+    }
+  });
+});
+

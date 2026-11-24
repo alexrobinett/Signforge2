@@ -116,8 +116,17 @@ async function guardedGet<Body>(
   }
 }
 
-/** The most a model's answer may be, streamed or not: far over a fill's or a drawer step's, and over it the call is refused. */
-const MODEL_MAX_BYTES = 2_000_000;
+/** The most a model's answer may be, streamed or not, as an endpoint's was before (1 MB): far over a fill's or a drawer step's 4,096 tokens. */
+const MODEL_MAX_BYTES = LIMITS.maxBytes;
+
+/** One server-sent event: its `event` field, if any, and its data lines joined. */
+export interface SseEvent {
+  event?: string;
+  data: string;
+}
+
+/** The media type of `res`, lower case, without its parameters. */
+export const mediaType = (res: Response) => res.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
 
 /** One model call (#349): where it may go, what it may carry, and how far each hop is checked. */
 export interface ModelCall {
@@ -128,8 +137,8 @@ export interface ModelCall {
    * never read, as an SDK adds and overrides them from `process.env`. `content-type` goes only with a body.
    */
   headers: Readonly<Record<string, string>>;
-  /** What a streamed (SSE) answer must hold before it closes: the provider's last event. Without it, it broke off. */
-  finished: RegExp;
+  /** Whether a streamed (SSE) answer's event is the provider's last: one must come before it closes, or it broke off. */
+  finished: (event: SseEvent) => boolean;
   /** The key, in the header it goes in: set on every hop, whatever the request carried. */
   key: readonly [name: string, value: string];
   /**
@@ -205,7 +214,7 @@ export function guardedStream(call: ModelCall): GuardedStream {
             throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
           throw new FetchError(`it answered ${res.status}`, { code: 'http-status', status: res.status });
         }
-        const sse = res.headers.get('content-type')?.includes('text/event-stream') ?? false;
+        const sse = mediaType(res) === 'text/event-stream';
         return new Response(
           streamed(res, signal, sse ? call.finished : undefined, (e) => failed(lost(e, 'the answer broke off'))),
           { status: res.status, headers: res.headers },
@@ -220,17 +229,36 @@ export function guardedStream(call: ModelCall): GuardedStream {
 
 /**
  * `res`'s body as it arrives, cut off with `fail`'s error when `signal` aborts, when it breaks off, past
- * `MODEL_MAX_BYTES`, or, for a stream that must end with `finished`, when it closes without it.
+ * `MODEL_MAX_BYTES`, or, for a stream that must end with an event `finished` says is the last, when it
+ * closes without one. The stream's events are parsed as they come (an event ends at a blank line), so
+ * only a real event counts: text that mentions one inside an event's data does not.
  */
-function streamed(res: Response, signal: AbortSignal, finished: RegExp | undefined, fail: (e: unknown) => FetchError): ReadableStream<Uint8Array> | null {
+function streamed(res: Response, signal: AbortSignal, finished: ((e: SseEvent) => boolean) | undefined, fail: (e: unknown) => FetchError): ReadableStream<Uint8Array> | null {
   if (!res.body) return null;
   const reader = res.body.getReader();
   let size = 0;
   let open = true;
-  // The last event may arrive split over two chunks: each is read with the tail of the one before.
   const text = new TextDecoder();
-  let tail = '';
+  // What has come of the event not yet ended by a blank line.
+  let pending = '';
   let ended = finished === undefined;
+  const read = (chunk: string) => {
+    pending += chunk;
+    const events = pending.split(/\r?\n\r?\n/);
+    pending = events.pop() ?? '';
+    for (const block of events) {
+      const event: SseEvent = { data: '' };
+      const data: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        const at = line.indexOf(':');
+        const [field, value] = at < 0 ? [line, ''] : [line.slice(0, at), line.slice(at + 1).replace(/^ /, '')];
+        if (field === 'event') event.event = value;
+        if (field === 'data') data.push(value);
+      }
+      event.data = data.join('\n');
+      if (finished?.(event)) ended = true;
+    }
+  };
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const stop = () => {
@@ -254,11 +282,7 @@ function streamed(res: Response, signal: AbortSignal, finished: RegExp | undefin
         }
         size += value.byteLength;
         if (size > MODEL_MAX_BYTES) throw new FetchError(`the answer is over ${MODEL_MAX_BYTES} bytes`, { code: 'too-large' });
-        if (!ended && finished) {
-          const read = tail + text.decode(value, { stream: true });
-          ended = finished.test(read);
-          tail = read.slice(-200);
-        }
+        if (!ended) read(text.decode(value, { stream: true }));
         controller.enqueue(value);
       } catch (e) {
         if (!open) return;
