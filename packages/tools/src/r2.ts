@@ -2,7 +2,7 @@
  * R2 keys, from docs/backend-plan.md#publishing:
  *
  *   o/<org>/b/<sha256>                    assets, template bundles and `/admin` manifest files
- *   o/<org>/f/<sha256>                    feed photos (owned and collected by `feed_images`, #195)
+ *   o/<org>/f/<sha256>                    feed photos (owned by `apps/api/src/data/feed-photos.ts`, #195, #329)
  *   sys/b/<sha256>                        base templates
  *   o/<org>/m/<screen>/<manifestId>.json  manifests
  *   up/<org>/<asset>/<sha256>             asset uploads waiting for `finalize_asset`
@@ -16,7 +16,6 @@
  * to share the same content hash.
  */
 export const orgBlobKey = (orgId: string, sha256: string) => `o/${orgId}/b/${sha256}`;
-export const feedBlobKey = (orgId: string, sha256: string) => `o/${orgId}/f/${sha256}`;
 export const baseBlobKey = (sha256: string) => `sys/b/${sha256}`;
 export const manifestKey = (orgId: string, screenId: string, manifestId: string) => `o/${orgId}/m/${screenId}/${manifestId}.json`;
 export const uploadKey = (orgId: string, assetId: string, sha256: string) => `up/${orgId}/${assetId}/${sha256}`;

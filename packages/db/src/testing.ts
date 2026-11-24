@@ -5,6 +5,7 @@
  * one line. `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus
  * one base template, so an isolation test can call org B's scope with org A's ids and expect nothing.
  */
+import { asc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
@@ -92,6 +93,19 @@ export function testScope(db: D1Database, orgId: string) {
       authorizations: { ...o.connections.authorizations, insert: insert<typeof schema.connectionAuthorizations>(o.connections.authorizations.stage.insert) },
     },
     brandKits: { ...o.brandKits, ...direct<typeof schema.brandKits>(o.brandKits) },
+    feedPhotos: {
+      ...o.feedPhotos,
+      /** A `feed_images` row as given, made at `createdAt` (default 0) and stamped with this org: a photo set up in one line. */
+      put: async (row: Omit<typeof schema.feedImages.$inferInsert, 'orgId' | 'updatedAt' | 'createdAt'> & { createdAt?: number }) => {
+        await drizzle(db)
+          .insert(schema.feedImages)
+          .values({ createdAt: 0, ...row, orgId })
+          .run();
+      },
+      /** The org's queued blob deletes, by hash. */
+      deletes: () =>
+        drizzle(db).select().from(schema.feedImageDeletes).where(eq(schema.feedImageDeletes.orgId, orgId)).orderBy(asc(schema.feedImageDeletes.sha256)).all(),
+    },
   };
 }
 

@@ -1072,7 +1072,7 @@ export const dataSources = sqliteTable(
     horizonDays: integer('horizon_days'),
     /** `json-table`: the dot path to the list of objects. Null: the document is the list. */
     rowsPath: text('rows_path'),
-    /** `rss`: whether the poller fetches and stores its stories' photos (apps/api src/data/images.ts). On unless a person turns it off. */
+    /** `rss`: whether the poller fetches and stores its stories' photos (./feed-photos.ts, apps/api src/data/feed-photos.ts). On unless a person turns it off. */
     photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
     /** `rss`: { stories: (URL | null)[] } in snapshot order. Older rows held a flat list of URLs. Null until polled with photos active. */
     photoUrlsJson: text('photo_urls_json'),
@@ -1112,7 +1112,7 @@ export const dataSnapshots = sqliteTable(
 );
 
 /**
- * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
+ * The photos the org's news sources name, by the URL a feed gives (./feed-photos.ts, apps/api src/data/feed-photos.ts):
  * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
  * to look at the URL again. One row per URL however many of the org's sources name it. A failed
  * fetch keeps the last good hashes. The files live in the feed-owned R2 prefix `o/<org>/f/<sha256>`.

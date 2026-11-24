@@ -250,12 +250,12 @@ const updateDataSource = defineTool({
     if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
     if ((row.format === 'provider' && input.feedUrl) || (row.format !== 'provider' && input.resource)) throw new ToolError('invalid_input', PROVIDER_FIELDS);
     // A new feed, or new rows in it, starts clean: the old one's validators and failures say nothing about it.
-    // Photos switched on or off are read afresh too: the feed may answer 304 to a poll that would now add or drop them.
+    // Feed photos' own read-afresh rule (packages/db `feed-photos.ts`) resets the rest when `photos` or the URL changes.
     const locator = input.feedUrl ?? input.resource;
-    const clean = { etag: null, lastModified: null, photoUrlsJson: null, failures: 0, lastError: null, nextPollAt: 0 };
+    const clean = { etag: null, lastModified: null, failures: 0, lastError: null, nextPollAt: 0 };
     const fresh = {
       ...(locator ? { urlEncrypted: await feedUrls.seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
-      ...(input.rowsPath !== undefined || (input.photos !== undefined && input.photos !== row.photos) ? clean : {}),
+      ...(input.rowsPath !== undefined ? clean : {}),
     };
     const updated = write(
       await org.dataSources.stage.update(

@@ -54,7 +54,7 @@
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
       // A publish tells its screens through this queue, 50 a message (src/publish.ts). The poller queues the
-      // stories' photos it has not fetched to the other (src/data/images.ts): one a batch, so an invocation's
+      // stories' photos it has not fetched to the other (src/data/feed-photos.ts): one a batch, so an invocation's
       // memory, CPU and subrequests (up to 12 fetches, at most two Images calls, R2) are one photo's, within the Free plan's.
       "queues": {
         "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices" }, { "binding": "FEED_IMAGES", "queue": "signforge-feed-images" }],
@@ -63,7 +63,7 @@
           { "queue": "signforge-feed-images", "max_batch_size": 1, "max_retries": 2 }
         ]
       },
-      // Decodes and scales the stories' photos off the Worker's CPU (src/data/images.ts).
+      // Decodes and scales the stories' photos off the Worker's CPU (src/data/feed-photos.ts).
       "images": { "binding": "IMAGES" },
       // The data-source poller every minute (feed-photo cleanup takes its 01:00 UTC invocation) and the offline alert check every 5;
       // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
