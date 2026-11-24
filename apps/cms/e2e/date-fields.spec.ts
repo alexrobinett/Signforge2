@@ -62,10 +62,13 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   // Said where a screen reader hears it as it appears: a live region the field had all along (review of #387).
   await expect(page.locator('#field-target-error')).toHaveAttribute('aria-live', 'polite');
   await expect(target).toHaveAttribute('aria-describedby', 'field-target-error');
-  // Its text starts empty too, not with the template's sample copy (#253).
-  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '', title: '' });
+  // Its text starts with the template's sample copy, marked as sample (#360; before, empty, #253).
+  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '', title: 'Doors open' });
+  await expect(page.getByLabel('Title')).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
 
   await target.fill('2026-12-24T18:00');
   await expect(page.locator('#field-target-error')).toBeEmpty();
-  await expect.poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 }).toEqual({ target: '2026-12-24T18:00', title: '' });
+  await expect
+    .poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 })
+    .toEqual({ target: '2026-12-24T18:00', title: 'Doors open' });
 });

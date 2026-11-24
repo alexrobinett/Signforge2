@@ -254,10 +254,15 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
 
     async saveAndPublishEntry(orgId) {
       // Read before the save, which drops the dialog's draft. On every screen at all hours, the publish makes the default itself.
-      const d = get().schedule.entries[DIALOG]?.edit;
-      const firstDefault = d && !everywhereAlways(d) ? firstDefaultOf(d) : undefined;
+      const draft = get().schedule.entries[DIALOG];
+      if (draft?.orgId !== orgId) return;
+      const d = draft.edit;
+      const withDefault = { choice: everywhereAlways(d) ? undefined : firstDefaultOf(d), publishDefault: d.publishDefault === true };
+      // Asked about sample text before the entry is saved (#360), in its playlist and any default it would publish: Edit first leaves no draft.
+      const acks = await get().checkSampleText(orgId, { playlistId: d.playlistId, alone: true, withDefault, refused: 'Not saved' });
+      if (!acks) return;
       const record = await saveDialogEntry(orgId);
-      if (record) await get().publishEntry(orgId, record, { choice: firstDefault, publishDefault: d?.publishDefault === true });
+      if (record) await get().publishEntry(orgId, record, withDefault, acks);
     },
 
     async reloadEntry(orgId) {
@@ -294,13 +299,16 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const draft = get().schedule.takeovers[DIALOG];
       if (draft?.orgId !== orgId) return;
       // A takeover never makes the default itself: the person's choice does, when there is none (#243).
-      const firstDefault = firstDefaultOf(draft.edit);
-      const publishDefault = draft.edit.publishDefault === true;
+      const withDefault = { choice: firstDefaultOf(draft.edit), publishDefault: draft.edit.publishDefault === true };
+      // Asked about sample text before anything is saved (#360), in its playlist and any default it
+      // would publish, in one question: Edit first leaves no takeover behind.
+      const acks = await get().checkSampleText(orgId, { playlistId: draft.edit.playlistId, alone: false, withDefault, refused: 'Not started' });
+      if (!acks) return;
       // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
       const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
       if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
-      await get().publishSchedule(orgId, [made.record], { choice: firstDefault, publishDefault });
+      await get().publishSchedule(orgId, [made.record], withDefault, acks);
     },
 
     closeScheduleDialog: close,

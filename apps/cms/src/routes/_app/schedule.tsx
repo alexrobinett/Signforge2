@@ -72,7 +72,12 @@ function SchedulePage() {
               </Button>
             )}
             {canPublish && (
-              <Button onClick={() => void publishSchedule(orgId)} disabled={publishing}>
+              // Never disabled while it runs (README): focus stays on it, so the sample-text question gives it back.
+              <Button
+                onClick={() => !publishing && void publishSchedule(orgId)}
+                aria-disabled={publishing || undefined}
+                className={publishing ? 'opacity-60' : undefined}
+              >
                 {publishing && <LoaderCircleIcon className="animate-spin" aria-hidden />} Publish
               </Button>
             )}

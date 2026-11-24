@@ -676,6 +676,19 @@ export interface Binding {
   table?: TableMapping;
 }
 
+/**
+ * A spot draft's fields that still hold its template's sample copy, untouched (#360): what New spot
+ * started it with (a text's default, a list's default rows), never worked out from values later.
+ * `texts` names the text fields; `lists` gives each list field, row by row, the cells not edited yet
+ * (a row is sample while any are). A saved edit of a field, or binding it to a source, takes it
+ * out; a spot made any other way, or before #360, has none. It never reaches a screen: a publish
+ * that would put a spot with any live is refused (`sample_text`) unless a person allows it.
+ */
+export interface SampleFields {
+  texts: string[];
+  lists: Record<string, string[][]>;
+}
+
 // ------------------------------------------------------------ screen manifest
 
 /**

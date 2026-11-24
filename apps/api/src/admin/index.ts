@@ -178,7 +178,16 @@ const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Call
   };
 };
 
-const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, rate_limited: 429, unavailable: 503, forbidden: 500, unknown_tool: 500 } as const;
+const STATUS = {
+  invalid_input: 400,
+  not_found: 404,
+  conflict: 409,
+  sample_text: 409,
+  rate_limited: 429,
+  unavailable: 503,
+  forbidden: 500,
+  unknown_tool: 500,
+} as const;
 const refused = (c: Context, r: Extract<DispatchResult, { ok: false }>) => {
   const problems = Array.isArray(r.details)
     ? r.details.map((d: { path?: string; message?: string }) => (d.path ? `${d.path}: ${d.message}` : String(d.message)))

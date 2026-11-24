@@ -203,6 +203,33 @@ const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
 export const spotWhat = (s: Pick<SpotView, 'kind' | 'templateVersionId'>, versions: Map<string, TemplateVersionView>) =>
   s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
+/** A spot's name, as `create_spot` takes it: at most this many characters. */
+const NAME_MAX = 100;
+
+/**
+ * A new spot's name from its template's (#360): the name itself while no spot has it, else the
+ * first free "Name 2", "Name 3", …; trimmed, and cut so the number still fits in a name's length.
+ */
+export function nextName(template: string, spots: readonly { name: string }[]): string {
+  const base = template.trim();
+  const taken = new Set(spots.map((s) => s.name));
+  const named = (suffix: string) => `${base.slice(0, NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+  if (!taken.has(named(''))) return named('');
+  let n = 2;
+  while (taken.has(named(` ${n}`))) n += 1;
+  return named(` ${n}`);
+}
+
+const and = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
+
+/**
+ * What Publish asks before sample copy reaches screens (#360): "Headline and Body still have sample
+ * text." for one spot, each spot named when the publish carries more than one.
+ */
+export function sampleWords(spots: readonly { name: string; labels: string[] }[], named: boolean): string {
+  return spots.map(({ name, labels }) => `${named ? `In ${name}, ` : ''}${and(labels)} still ${labels.length === 1 ? 'has' : 'have'} sample text.`).join(' ');
+}
+
 /** Whether screens have it, in words. */
 export const publishWord = (s: Pick<SpotView, 'published' | 'draftChanged'>) =>
   !s.published ? 'Draft, never published' : s.draftChanged ? 'Published, with unpublished changes' : 'Published';

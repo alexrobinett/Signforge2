@@ -17,7 +17,9 @@ export type DraftRow = SpotRow | PlaylistRow | ScheduleEntryRow;
 export type PublishedPlaylist = PlaylistRow & { items: string[] };
 
 /** Columns that are not content: who it is, when and how often it changed, and the published copy itself. */
-const NOT_CONTENT = new Set(['id', 'orgId', 'createdAt', 'updatedAt', 'rowVersion', 'incarnation', 'publishedJson', 'publishedAt']);
+// A spot's sample fields (#360) are the draft's bookkeeping, never published: they would make every
+// spot published before them read as changed, and a publish allowed with them would carry them live.
+const NOT_CONTENT = new Set(['id', 'orgId', 'createdAt', 'updatedAt', 'rowVersion', 'incarnation', 'publishedJson', 'publishedAt', 'sampleFieldsJson']);
 
 /** The draft's content as stored in `published_json`. Keys sorted, so equal content is equal text. */
 export function contentJson(row: DraftRow, items?: readonly string[]): string {

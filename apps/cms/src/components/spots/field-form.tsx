@@ -6,14 +6,17 @@
  * under it in words (src/lib/field-words.ts); an empty field's only once it is touched or Publish
  * was pressed (#359), so a spot just made is not a page of errors. A choice shows its option's label.
  * Values a spot leaves out show the template's default. A spot the agent just filled (#263) shows
- * its marks (./fill-marks.tsx) until each field is edited.
+ * its marks (./fill-marks.tsx) until each field is edited. A text or list still holding its
+ * template's sample (#360: the server's `sampleFields`, from New spot until a saved edit) says so,
+ * a list row by row; a sample text is selected when focused, so typing replaces it.
  */
 import type { FieldMark } from '@signforge/api/agent-inline';
-import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
+import { BRAND_COLORS, type FieldDef, type SampleFields, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
 import { startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { MarkNote, MarkPill } from '~/components/spots/fill-marks';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
@@ -46,6 +49,15 @@ const BRAND_WORD: Record<string, string> = {
 
 const fieldClass = 'flex flex-col gap-1.5';
 
+/** The mark on a field that still holds sample copy. */
+function SampleNote({ id, rows }: { id: string; rows?: boolean }) {
+  return (
+    <p id={id} className="text-sm text-muted-foreground">
+      {rows ? 'Sample rows. Replace them before you publish.' : 'Sample text. Replace it before you publish.'}
+    </p>
+  );
+}
+
 /**
  * A field's problems, in a live region that is always in the accessibility tree, so one that appears
  * (on leaving the field, #359) is announced: empty, it is only visually hidden, never removed.
@@ -65,6 +77,7 @@ function ScalarInput({
   value,
   invalid,
   describedBy,
+  sample = false,
   onChange,
   onBlur,
 }: {
@@ -73,6 +86,8 @@ function ScalarInput({
   value: unknown;
   invalid: boolean;
   describedBy?: string;
+  /** A text holding its sample: focusing it selects it all. */
+  sample?: boolean;
   onChange: (v: unknown) => void;
   /** Left: the field is touched. */
   onBlur?: () => void;
@@ -80,7 +95,15 @@ function ScalarInput({
   const aria = { 'aria-invalid': invalid || undefined, 'aria-describedby': describedBy, onBlur };
   switch (def.type) {
     case 'text':
-      return <Input id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} {...aria} />;
+      return (
+        <Input
+          id={id}
+          value={typeof value === 'string' ? value : ''}
+          onFocus={sample ? (e) => e.currentTarget.select() : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          {...aria}
+        />
+      );
     case 'url':
       return (
         <Input
@@ -254,6 +277,7 @@ function ListField({
   problems,
   cells,
   mark,
+  sampleRows,
   onChange,
 }: {
   name: string;
@@ -263,11 +287,15 @@ function ListField({
   /** The cells a problem is about, as `rowNumber.column`: each is marked and points at the list's message. */
   cells: Set<string>;
   mark: FieldMark | undefined;
+  /** By row, the cells still holding sample copy (`SampleFields`); a row is sample while any are. */
+  sampleRows: string[][] | undefined;
   onChange: Edit;
 }) {
   const setRows = (next: Record<string, unknown>[]) => onChange((d) => ({ ...d, data: { ...d.data, [name]: next } }));
   const full = def.maxItems !== undefined && rows.length >= def.maxItems;
   const blank = Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, startValue(d)]));
+  const sampleId = `field-${name}-sample`;
+  const isSampleRow = (i: number) => (sampleRows?.[i]?.length ?? 0) > 0;
   return (
     <fieldset className="flex flex-col gap-3">
       <legend className="mb-1.5 font-medium">
@@ -284,12 +312,16 @@ function ListField({
         )}
       </legend>
       {mark && <MarkNote id={`field-${name}-mark`} mark={mark} />}
+      {rows.some((_, i) => isSampleRow(i)) && <SampleNote id={sampleId} rows />}
       {rows.map((row, i) => (
         // Rows have no ids of their own; their place is who they are.
         // biome-ignore lint/suspicious/noArrayIndexKey: a row is its position in the list.
         <div key={i} className="flex flex-col gap-2 rounded-lg border p-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Row {i + 1}</span>
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              Row {i + 1}
+              {isSampleRow(i) && <Badge>Sample</Badge>}
+            </span>
             <Button
               type="button"
               variant="ghost"
@@ -302,6 +334,9 @@ function ListField({
           </div>
           {Object.entries(def.item).map(([k, d]) => {
             const id = `field-${name}-${i}-${k}`;
+            const sampleCell = sampleRows?.[i]?.includes(k) === true;
+            // Every cell of a sample row points at the list's note, the problem's message first.
+            const describedBy = [cells.has(`${i + 1}.${k}`) && `field-${name}-error`, isSampleRow(i) && sampleId].filter(Boolean).join(' ') || undefined;
             return (
               <div key={k} className={d.type === 'boolean' ? 'flex items-center gap-2' : fieldClass}>
                 <label htmlFor={id} className="text-sm">
@@ -312,7 +347,8 @@ function ListField({
                   def={d}
                   value={row[k] ?? d.default}
                   invalid={cells.has(`${i + 1}.${k}`)}
-                  describedBy={cells.has(`${i + 1}.${k}`) ? `field-${name}-error` : undefined}
+                  describedBy={describedBy}
+                  sample={sampleCell}
                   onChange={(v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))}
                 />
               </div>
@@ -337,6 +373,7 @@ export function FieldForm({
   draft,
   assets,
   marks = {},
+  sampleFields = null,
   flyer,
   onChange,
   onEdited,
@@ -349,6 +386,8 @@ export function FieldForm({
   assets: AssetView[];
   /** The agent's marks, by field, on a spot it just filled. */
   marks?: Record<string, FieldMark>;
+  /** The saved spot's fields still holding its template's sample text, as the server records them (#360). */
+  sampleFields?: SampleFields | null;
   flyer?: Flyer;
   onChange: Edit;
   /** Told which field changed, to take its mark away. */
@@ -394,12 +433,26 @@ export function FieldForm({
         if (def.type === 'list') {
           const rows = Array.isArray(value) ? value.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null) : [];
           const cells = new Set((raw.get(name) ?? []).flatMap((r) => problemCell(r) ?? []));
-          return <ListField key={name} name={name} def={def} rows={rows} problems={p} cells={cells} mark={mark} onChange={edit} />;
+          return (
+            <ListField
+              key={name}
+              name={name}
+              def={def}
+              rows={rows}
+              problems={p}
+              cells={cells}
+              mark={mark}
+              sampleRows={sampleFields?.lists[name]}
+              onChange={edit}
+            />
+          );
         }
         const id = `field-${name}`;
         const errorId = `${id}-error`;
         const markId = `${id}-mark`;
-        const describedBy = [p && errorId, mark && markId].filter(Boolean).join(' ') || undefined;
+        const sampleId = `${id}-sample`;
+        const sample = sampleFields?.texts.includes(name) === true;
+        const describedBy = [p && errorId, mark && markId, sample && sampleId].filter(Boolean).join(' ') || undefined;
         const set = (v: unknown) => edit((d) => ({ ...d, data: { ...d.data, [name]: v } }));
         return (
           <div key={name} className={def.type === 'boolean' ? 'flex flex-wrap items-center gap-x-3 gap-y-1.5' : fieldClass}>
@@ -422,10 +475,12 @@ export function FieldForm({
               value={value}
               invalid={p !== undefined}
               describedBy={describedBy}
+              sample={sample}
               onChange={set}
               onBlur={() => touch(spotId, name)}
             />
             {mark && <MarkNote id={markId} mark={mark} />}
+            {sample && <SampleNote id={sampleId} />}
             <Problems id={errorId} problems={p} />
           </div>
         );

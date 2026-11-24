@@ -5,8 +5,8 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { LoaderCircleIcon } from 'lucide-react';
-import { useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
+import { useOpenerFocus } from '~/lib/opener-focus';
 import { useNow, useOrgId } from '~/lib/live';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
@@ -31,14 +31,8 @@ function OpenDialog({ orgId }: { orgId: string }) {
   const spots = useQuery(spotsQuery(orgId)).data?.spots;
   const close = useAppStore((s) => s.closeScheduleDialog);
   const now = useNow(fleet?.at ?? 0);
-  // What had focus as the dialog opened, read once (it renders only in the browser, opened by a click or a key): focus goes
-  // back there when it closes. Opened from ⌘K, which closed first, nothing on the page had it: the page's main region.
-  const opener = useRef(document.activeElement);
-  const returnFocus = (e: Event) => {
-    e.preventDefault();
-    const el = opener.current;
-    (el instanceof HTMLElement && el.isConnected && el !== document.body ? el : document.getElementById('main'))?.focus();
-  };
+  // Focus goes back to what opened it when it closes (it renders only in the browser, opened by a click, a key or ⌘K).
+  const returnFocus = useOpenerFocus();
   if (!playlists || !fleet || !entries || !spots)
     return (
       <Dialog open onOpenChange={(o) => !o && close()}>

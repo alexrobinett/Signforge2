@@ -1,0 +1,1 @@
+ALTER TABLE `spots` ADD `sample_fields_json` text;

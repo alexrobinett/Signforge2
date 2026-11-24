@@ -7,6 +7,7 @@ import { CreateOrgDialog } from '~/components/create-org-form';
 import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
 import { ScheduleDialogs } from '~/components/schedule/schedule-dialogs';
+import { SampleCheck } from '~/components/spots/sample-check';
 import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
 import { SidebarMenuButton } from '~/components/ui/sidebar';
@@ -184,6 +185,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         <AgentDrawer />
         <CreateOrgDialog />
         <ScheduleDialogs />
+        <SampleCheck />
         <p role="status" className="sr-only">
           {status}
         </p>

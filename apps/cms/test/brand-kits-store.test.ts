@@ -49,6 +49,7 @@ const spot: SpotView = {
   assetId: null,
   fit: null,
   url: null,
+  sampleFields: null,
   version: 1,
   published: false,
   draftChanged: true,

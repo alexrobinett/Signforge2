@@ -174,3 +174,80 @@ describe('⌘K on a found screen or group', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('a tool refused for sample text (#360)', () => {
+  /** ⌘K on a page of org_1, with the question about sample text answering `yes`. */
+  function sampleStore(yes: boolean) {
+    const router = {
+      navigate: vi.fn(async () => {}),
+      invalidate: vi.fn(async () => {}),
+      state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }] },
+    };
+    const askSampleText = vi.fn(async (_orgId: string, _spots: unknown) => yes);
+    const store = createStore<CommandMenuSlice & { ui: object; askSampleText: typeof askSampleText }>()((set, get) => ({
+      ui: {},
+      askSampleText,
+      ...createCommandMenuSlice(set as never, get as never, { router } as never),
+    }));
+    return { store, askSampleText };
+  }
+  const spots = [{ id: 'spt_pier', name: 'Pier 9', version: 3, fields: ['headline'] }];
+  const later = [{ id: 'spt_dock', name: 'Dock', version: 1, fields: ['title'] }];
+  /** The first calls refused for sample text, naming `named` in turn, the next answered. */
+  const refusedOnce = (...named: (typeof spots)[]) => {
+    const refusals = named.length ? named : [spots];
+    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      const refused = refusals[calls.length - 1];
+      return refused
+        ? new Response(JSON.stringify({ error: 'sample_text', message: 'still holding sample text', details: { spots: refused } }), { status: 409 })
+        : new Response('{}', { status: 200 });
+    });
+  };
+  const entry = (name: string): CommandEntry => ({
+    kind: 'tool',
+    id: `tool:${name}`,
+    label: name,
+    tool: { name, description: '', mutates: true, fields: [] },
+    keywords: [],
+  });
+
+  for (const name of ['publish', 'approve_publish_request'])
+    it(`${name}: closes the menu to ask, and Publish anyway runs it again acknowledging exactly what it showed`, async () => {
+      const { store, askSampleText } = sampleStore(true);
+      refusedOnce();
+      store.getState().openCommandMenu();
+      await store.getState().chooseCommand(entry(name));
+      expect(askSampleText).toHaveBeenCalledWith('org_1', spots);
+      expect(calls).toEqual([
+        { name, input: {} },
+        { name, input: { allowSample: [{ spotId: 'spt_pier', version: 3, fields: ['headline'] }] } },
+      ]);
+      expect(store.getState().commandMenu.open).toBe(false);
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+  it('a draft with sample text that came after the question is asked about in turn, not published unseen', async () => {
+    const { store, askSampleText } = sampleStore(true);
+    refusedOnce(spots, later);
+    store.getState().openCommandMenu();
+    await store.getState().chooseCommand(entry('publish'));
+    expect(askSampleText.mock.calls.map((c) => c[1])).toEqual([spots, later]);
+    expect(calls.at(-1)?.input).toEqual({
+      allowSample: [
+        { spotId: 'spt_pier', version: 3, fields: ['headline'] },
+        { spotId: 'spt_dock', version: 1, fields: ['title'] },
+      ],
+    });
+  });
+
+  it('Edit first runs nothing more, and says nothing went wrong', async () => {
+    const { store } = sampleStore(false);
+    refusedOnce();
+    store.getState().openCommandMenu();
+    await store.getState().chooseCommand(entry('publish'));
+    expect(calls.map((c) => c.name)).toEqual(['publish']);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(store.getState().commandMenu.running).toBe(false);
+  });
+});

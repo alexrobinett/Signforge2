@@ -68,6 +68,7 @@ const RESULT_WORDS: Record<string, string> = {
   not_found: 'Not found',
   invalid_input: 'Input not valid',
   conflict: 'Changed since it read it',
+  sample_text: 'Refused · Sample text left',
   unknown_tool: 'No such tool',
   unavailable: 'Failed',
   error: 'Failed',
