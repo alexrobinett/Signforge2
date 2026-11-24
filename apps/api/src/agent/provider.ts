@@ -1,20 +1,27 @@
 /**
  * The model providers behind the built-in agent (docs/proposals/cms-agent.md, Providers): one
- * interface, so the inline and chat routes (#263, #267) do not know which provider answers.
- * Anthropic, through its SDK; and an OpenAI-compatible endpoint (#262) at an address its owner
- * gave, through the fetch guards on every hop with plain fetch: no SDK, so nothing in process.env
- * can change where its requests go or what they carry. Model ids are never in code: an org chooses
- * exact ids from its provider's list, and the API's configuration names the demo model (#265).
+ * interface, so the inline and chat routes (#263, #267) do not know which provider answers. Both are
+ * TanStack AI adapters (#349): Anthropic's, and `openaiCompatibleText` for an OpenAI-compatible
+ * endpoint (#262) at the address its owner gave. Model ids are never in code: an org chooses exact
+ * ids from its provider's list, and the API's configuration names the demo model (#265).
  *
- * An org's key is opened only here, from the vault, to call its provider. A failure is reported in
- * a word (`problem`): never the provider's body, never the key.
+ * Every request of a model call goes through the guards (`guardedStream`, src/data/fetch.ts), as the
+ * call's `wrapFetch`: only to the provider's origin (an endpoint's, every hop checked as a typed URL
+ * is), its headers rebuilt from a short list and the key set there, so nothing an adapter or its SDK
+ * reads from `process.env` changes where a request goes or what it carries; a redirect only within
+ * that origin; one deadline over the call, its streamed answer included. No retries.
+ *
+ * An org's key is opened only here, from the vault, for one call. A failure is reported in a word
+ * (`problem`): never the provider's body, never the key.
  */
-import Anthropic from '@anthropic-ai/sdk';
 import type { AiKey, AiProviders, AiProviderTest } from '@signforge/tools';
+import { type AnyTextAdapter, chat, type ChatMiddleware, maxIterations, type ModelMessage, type StreamChunk } from '@tanstack/ai';
+import { type AnthropicChatModel, createAnthropicChat } from '@tanstack/ai-anthropic';
+import { openaiCompatibleText } from '@tanstack/ai-openai/compatible';
 import { z } from 'zod';
 import { workerFetch } from '../connectors';
 import { openAiKey, sealAiKey } from '../connectors/vault';
-import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedKeyedJson } from '../data/fetch';
+import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedStream, type ModelCall } from '../data/fetch';
 
 /** What the agent's routes ask of a provider. */
 interface ModelProvider {
@@ -85,160 +92,80 @@ const TEST_TIMEOUT_MS = 10_000;
 /** Where a deployed API sends an org's key: Anthropic's API and nowhere else. */
 const ANTHROPIC_API = 'https://api.anthropic.com';
 
-function anthropicProvider(apiKey: string, options: { baseURL: string; fetch: typeof fetch; timeout: number }): ModelProvider {
-  // No retries (the person presses Test again), and no SDK logging: nothing it could log reaches the Worker's logs.
-  // The SDK reads what it is not given from process.env, where Workers puts the deployment's vars and secrets: the
-  // address is always given (ANTHROPIC_BASE_URL), and so is the Authorization header, which ANTHROPIC_CUSTOM_HEADERS
-  // could otherwise replace with another key; an X-Api-Key it names is removed (null), so no second key rides along.
-  // Other headers that variable names are still added to each request.
-  const client = new Anthropic({
-    apiKey,
-    baseURL: options.baseURL,
-    defaultHeaders: { Authorization: `Bearer ${apiKey}`, 'X-Api-Key': null },
-    fetch: options.fetch,
-    maxRetries: 0,
-    timeout: options.timeout,
-    logLevel: 'off',
-  });
+/** The headers a model call keeps from what its adapter built (`ModelCall.headers`); the key is set by the guards. */
+const ANTHROPIC_HEADERS = ['accept', 'content-type', 'anthropic-version', 'anthropic-beta'];
+const ENDPOINT_HEADERS = ['accept', 'content-type'];
+
+/** A model list, as Anthropic's Models API and an OpenAI-compatible endpoint both answer it. */
+const modelList = z.object({ data: z.array(z.object({ id: z.string() })) });
+
+/** One model call's adapter for `model`, given to `use`: each provider's adapter is its own type, which `chat()` needs whole. */
+type WithAdapter = <T>(model: string, use: <A extends AnyTextAdapter>(adapter: A) => Promise<T>) => Promise<T>;
+
+/** An org's provider, opened with its key: where its calls go, and how its adapter is made. */
+interface Opened {
+  /** The base its paths are under: Anthropic's API (or dev's stub), or the endpoint's address. */
+  base: string;
+  /** Where the model list is, under `base`. */
+  modelsPath: string;
+  /** A call's limits, for a call given `timeoutMs`. */
+  call: (timeoutMs: number) => ModelCall;
+  adapter: WithAdapter;
+}
+
+function anthropic(apiKey: string, base: string, fetcher: typeof fetch): Opened {
   return {
-    listModels: async () => (await client.models.list({ limit: 100 })).data.map((m) => m.id),
-    fill: async ({ model, system, text, image, schema }) => {
-      const message = await client.messages.create({
-        model,
-        max_tokens: FILL_MAX_TOKENS,
-        system,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              ...(image ? [{ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.data } }] : []),
-              { type: 'text', text },
-            ],
-          },
-        ],
-        output_config: { format: { type: 'json_schema', schema } },
-      });
-      if (message.stop_reason === 'refusal') return null;
-      return message.content.find((b) => b.type === 'text')?.text ?? null;
-    },
-    chat: async ({ model, system, turns, tools }) => {
-      const messages = turns.map((t): Anthropic.MessageParam => {
-        if (t.role === 'user') return { role: 'user', content: t.text };
-        if (t.role === 'assistant')
-          return {
-            role: 'assistant',
-            content: [
-              ...(t.text ? [{ type: 'text' as const, text: t.text }] : []),
-              ...t.calls.map((c) => ({ type: 'tool_use' as const, id: c.id, name: c.name, input: c.input })),
-            ],
-          };
-        return {
-          role: 'user',
-          content: t.results.map((r) => ({ type: 'tool_result' as const, tool_use_id: r.id, content: r.content, is_error: r.error })),
-        };
-      });
-      const message = await client.messages.create({
-        model,
-        max_tokens: CHAT_MAX_TOKENS,
-        system,
-        messages,
-        tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: { ...t.schema, type: 'object' as const } })),
-      });
-      return {
-        text: message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'),
-        calls: message.content.flatMap((b) => (b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : [])),
-        refused: message.stop_reason === 'refusal',
-      };
-    },
+    base,
+    modelsPath: '/v1/models?limit=100',
+    // Anthropic's own fixed address (in dev, the e2e's stub): only its origin, as it is not an address a person typed.
+    call: (timeoutMs) => ({
+      origin: new URL(base).origin,
+      headers: ANTHROPIC_HEADERS,
+      key: ['authorization', `Bearer ${apiKey}`],
+      typed: false,
+      guards: { fetch: fetcher, resolve: () => Promise.reject(new Error('Anthropic is not resolved')), timeoutMs },
+    }),
+    adapter: (model, use) =>
+      use(
+        // The adapter's types take only the ids its release knows (#346, condition 3); an org may choose a dated or
+        // newer one from Anthropic's list, which the API takes as well. Owner decision on #349: one cast, not a narrower picker.
+        // biome-ignore lint/nursery/noUnsafeTypeAssertion: the one model-id cast #349 allows; Anthropic's API checks the id.
+        createAnthropicChat(model as AnthropicChatModel, apiKey, {
+          baseURL: base,
+          // As a Bearer token, never `x-api-key`, and never the OAuth identity a key's text could otherwise switch on.
+          auth: 'bearer',
+          maxRetries: 0,
+          logLevel: 'off',
+          openTelemetry: false,
+        }),
+      ),
   };
 }
 
-/** An OpenAI-compatible endpoint's model list (GET <base>/models), as the OpenAI API answers it. */
-const modelList = z.object({ data: z.array(z.object({ id: z.string() })) });
-
-/** An endpoint's chat completion, as the OpenAI API answers it: the first choice's text and tool calls. */
-const completion = z.object({
-  choices: z.array(
-    z.object({
-      message: z.object({
-        content: z.string().nullable().optional(),
-        tool_calls: z
-          .array(z.object({ id: z.string(), function: z.object({ name: z.string(), arguments: z.string() }) }))
-          .nullable()
-          .optional(),
-      }),
-      finish_reason: z.string().nullable().optional(),
-    }),
-  ),
-});
-
-/** A tool call's arguments, which the endpoint gives as JSON text: as written, if it is not JSON, for the tool to refuse. */
-function argumentsOf(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    if (err instanceof SyntaxError) return text;
-    throw err;
-  }
-}
-
-function endpointProvider(apiKey: string, baseUrl: string, guards: FetchGuards): ModelProvider {
+function endpoint(apiKey: string, baseUrl: string, guards: FetchGuards): Opened {
   return {
-    listModels: async () => {
-      const answer = modelList.safeParse(await guardedKeyedJson(`${baseUrl}/models`, apiKey, guards));
-      if (!answer.success) throw new FetchError('its model list is not an OpenAI-style list', { code: 'http-status' });
-      return answer.data.data.map((m) => m.id);
-    },
-    fill: async ({ model, system, text, image, schema }) => {
-      const body = {
-        model,
-        max_tokens: FILL_MAX_TOKENS,
-        messages: [
-          { role: 'system', content: system },
-          {
-            role: 'user',
-            content: [{ type: 'text', text }, ...(image ? [{ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } }] : [])],
-          },
-        ],
-        response_format: { type: 'json_schema', json_schema: { name: 'spot_fill', strict: true, schema } },
-      };
-      const answer = completion.safeParse(await guardedKeyedJson(`${baseUrl}/chat/completions`, apiKey, { ...guards, timeoutMs: FILL_TIMEOUT_MS }, body));
-      if (!answer.success) throw new FetchError('its answer is not an OpenAI-style completion', { code: 'http-status' });
-      return answer.data.choices[0]?.message.content ?? null;
-    },
-    chat: async ({ model, system, turns, tools }) => {
-      const messages = [
-        { role: 'system', content: system },
-        ...turns.flatMap((t) => {
-          if (t.role === 'user') return [{ role: 'user', content: t.text }];
-          if (t.role === 'assistant')
-            return [
-              {
-                role: 'assistant',
-                content: t.text || null,
-                ...(t.calls.length && {
-                  tool_calls: t.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.input) } })),
-                }),
-              },
-            ];
-          return t.results.map((r) => ({ role: 'tool', tool_call_id: r.id, content: r.content }));
+    base: baseUrl,
+    modelsPath: '/models',
+    call: (timeoutMs) => ({
+      origin: URL.canParse(baseUrl) ? new URL(baseUrl).origin : baseUrl,
+      headers: ENDPOINT_HEADERS,
+      key: ['authorization', `Bearer ${apiKey}`],
+      typed: true,
+      guards: { ...guards, timeoutMs },
+    }),
+    adapter: (model, use) =>
+      use(
+        openaiCompatibleText(model, {
+          baseURL: baseUrl,
+          apiKey,
+          api: 'chat-completions',
+          // Given, so the SDK reads no OPENAI_ORG_ID or OPENAI_PROJECT_ID from process.env.
+          organization: null,
+          project: null,
+          maxRetries: 0,
+          logLevel: 'off',
         }),
-      ];
-      const body = {
-        model,
-        max_tokens: CHAT_MAX_TOKENS,
-        messages,
-        tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.schema } })),
-      };
-      const answer = completion.safeParse(await guardedKeyedJson(`${baseUrl}/chat/completions`, apiKey, guards, body));
-      if (!answer.success) throw new FetchError('its answer is not an OpenAI-style completion', { code: 'http-status' });
-      const choice = answer.data.choices[0];
-      return {
-        text: choice?.message.content ?? '',
-        calls: (choice?.message.tool_calls ?? []).map((c) => ({ id: c.id, name: c.function.name, input: argumentsOf(c.function.arguments) })),
-        refused: choice?.finish_reason === 'content_filter',
-      };
-    },
+      ),
   };
 }
 
@@ -254,21 +181,149 @@ const BLOCKED: readonly FetchErrorCode[] = [
   'too-many-redirects',
 ];
 
-/** An endpoint's failure in a word, as `problemOf` says Anthropic's. */
-function endpointProblemOf(err: unknown): Problem {
-  if (!(err instanceof FetchError)) throw err;
-  if (BLOCKED.includes(err.code)) return 'blocked';
-  if (err.code === 'http-status' && (err.status === 401 || err.status === 403)) return 'refused';
-  if (err.code === 'http-status' && err.status !== undefined && (err.status === 429 || err.status >= 500)) return 'busy';
+/**
+ * A call's failure in a word: blocked (an address SignForge may not reach), its key refused (401,
+ * 403), busy (429, 5xx), or not reached. Anything the guards did not refuse is an answer the adapter
+ * could not read (not its protocol, cut short): the provider did not answer usably.
+ */
+function problemOf(failure: FetchError | undefined): Problem {
+  if (!failure) return 'unreachable';
+  if (BLOCKED.includes(failure.code)) return 'blocked';
+  if (failure.code === 'http-status' && (failure.status === 401 || failure.status === 403)) return 'refused';
+  if (failure.code === 'http-status' && failure.status !== undefined && (failure.status === 429 || failure.status >= 500)) return 'busy';
   return 'unreachable';
 }
 
-/** A provider's refusal in a word: its key refused, busy (429, 5xx, overloaded), or not reached. Anything else is a bug and propagates. */
-function problemOf(err: unknown): Problem {
-  if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return 'refused';
-  if (err instanceof Anthropic.RateLimitError || err instanceof Anthropic.InternalServerError) return 'busy';
-  if (err instanceof Anthropic.APIError) return 'unreachable';
-  throw err;
+/** Sees each chunk of a call as `chat()` passes it on: whether the model refused (both adapters say `content_filter`). */
+function refusals(): { middleware: ChatMiddleware; refused: () => boolean } {
+  let refused = false;
+  return {
+    middleware: {
+      name: 'refusal',
+      onChunk: (_ctx, chunk: StreamChunk) => {
+        if (chunk.type === 'RUN_FINISHED' && chunk.finishReason === 'content_filter') refused = true;
+      },
+    },
+    refused: () => refused,
+  };
+}
+
+/** The conversation as TanStack AI's messages: a tool's results one message each, an error marked as one. */
+const messagesOf = (turns: ChatTurn[]): ModelMessage[] =>
+  turns.flatMap((t): ModelMessage[] => {
+    if (t.role === 'user') return [{ role: 'user', content: t.text }];
+    if (t.role === 'assistant')
+      return [
+        {
+          role: 'assistant',
+          content: t.text || null,
+          toolCalls: t.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.input) } })),
+        },
+      ];
+    return t.results.map((r) => ({ role: 'tool', toolCallId: r.id, content: r.content, ...(r.error && { error: r.content }) }));
+  });
+
+/** A tool call's arguments, as the model streamed them: parsed if JSON, else as written, for the tool to refuse. */
+function argumentsOf(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (err) {
+    if (err instanceof SyntaxError) return text;
+    throw err;
+  }
+}
+
+/** The tool calls a step's chunks hold, in the order the model made them. */
+function callsOf(chunks: StreamChunk[]): ToolCall[] {
+  const calls = new Map<string, { name: string; args: string }>();
+  for (const chunk of chunks) {
+    if (chunk.type === 'TOOL_CALL_START') calls.set(chunk.toolCallId, { name: chunk.toolCallName, args: '' });
+    else if (chunk.type === 'TOOL_CALL_ARGS') {
+      const call = calls.get(chunk.toolCallId);
+      if (call) call.args += chunk.delta;
+    }
+  }
+  return [...calls].map(([id, c]) => ({ id, name: c.name, input: argumentsOf(c.args) }));
+}
+
+/** Whether `err` is `chat()`'s refusal of an answer that is not JSON, with the text the model gave. */
+const unparsed = (err: unknown): err is Error & { rawText: string } =>
+  err instanceof Error && 'code' in err && err.code === 'structured-output-parse-failed' && 'rawText' in err && typeof err.rawText === 'string';
+
+/**
+ * An org's provider on one of its calls, given `timeoutMs`: each method one call, through the guards.
+ * `problem` says its failure in a word, once it has asked the provider: before that, a failure is a
+ * bug of ours, not the provider's answer, and `undefined`.
+ */
+function providerOf(opened: Opened, timeoutMs: number): { provider: ModelProvider; problem: () => Problem | undefined } {
+  const guarded = guardedStream(opened.call(timeoutMs));
+  let asked = false;
+  // The adapters' own fetch is never called: every request goes through the guards.
+  const fetch: typeof globalThis.fetch = (input, init) => {
+    asked = true;
+    return guarded.fetch(input, init);
+  };
+  const wrapFetch = () => fetch;
+  return {
+    problem: () => (asked ? problemOf(guarded.failure()) : undefined),
+    provider: {
+      listModels: async () => {
+        const res = await fetch(`${opened.base}${opened.modelsPath}`, { headers: { accept: 'application/json' } });
+        const list = modelList.safeParse(await res.json().catch(() => undefined));
+        if (!list.success) throw new FetchError('its model list is not one', { code: 'http-status' });
+        return list.data.data.map((m) => m.id);
+      },
+      fill: ({ model, system, text, image, schema }) =>
+        opened.adapter(model, async (adapter) => {
+          const seen = refusals();
+          try {
+            const answer = await chat({
+              adapter,
+              wrapFetch,
+              threadId: crypto.randomUUID(),
+              systemPrompts: [system],
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    ...(image ? [{ type: 'image' as const, source: { type: 'data' as const, value: image.data, mimeType: image.mediaType } }] : []),
+                    { type: 'text', content: text },
+                  ],
+                },
+              ],
+              outputSchema: schema,
+              stream: false,
+              modelOptions: { max_tokens: FILL_MAX_TOKENS },
+              middleware: [seen.middleware],
+            });
+            return seen.refused() ? null : JSON.stringify(answer);
+          } catch (err) {
+            if (seen.refused()) return null;
+            // Not JSON: as the model wrote it, for the inline route to refuse and ask again, as it does any answer it cannot read.
+            if (unparsed(err)) return err.rawText;
+            throw err;
+          }
+        }),
+      chat: ({ model, system, turns, tools }) =>
+        opened.adapter(model, async (adapter) => {
+          const seen = refusals();
+          // One step: the tools have no `execute`, so the model's calls come back to the drawer's loop, which runs them.
+          const { text, chunks } = await chat({
+            adapter,
+            wrapFetch,
+            threadId: crypto.randomUUID(),
+            systemPrompts: [system],
+            messages: messagesOf(turns),
+            tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.schema })),
+            stream: false,
+            agentLoopStrategy: maxIterations(1),
+            modelOptions: { max_tokens: CHAT_MAX_TOKENS },
+            middleware: [seen.middleware],
+          });
+          return { text, calls: callsOf(chunks), refused: seen.refused() };
+        }),
+    },
+  };
 }
 
 /** Where a provider is reached from: the Worker's fetch, and the fetch guards for an endpoint. */
@@ -277,23 +332,38 @@ export interface ModelReach {
   guards: FetchGuards;
 }
 
-/** An org's provider, opened with its key, and how its failures read; undefined when the key does not open. */
+/** An org's provider, opened with its key; undefined when the key does not open. */
 async function openModel(
   env: Pick<Env, 'CONNECTION_KEY' | 'ENVIRONMENT' | 'ANTHROPIC_BASE_URL'>,
   key: AiKey,
   sealed: string,
   reach: ModelReach,
-  timeout: number,
-): Promise<{ provider: ModelProvider; problemOf: (err: unknown) => Problem } | undefined> {
+): Promise<Opened | undefined> {
   const apiKey = await openAiKey(env, key, sealed);
   if (apiKey === undefined) return undefined;
   if (key.provider === 'openai-compatible') {
     // The tool never saves an endpoint without its address; a row without one is a bug.
     if (key.baseUrl === null) throw new Error('an OpenAI-compatible endpoint with no address');
-    return { provider: endpointProvider(apiKey, key.baseUrl, reach.guards), problemOf: endpointProblemOf };
+    return endpoint(apiKey, key.baseUrl, reach.guards);
   }
-  const baseURL = env.ENVIRONMENT === 'dev' && env.ANTHROPIC_BASE_URL ? env.ANTHROPIC_BASE_URL : ANTHROPIC_API;
-  return { provider: anthropicProvider(apiKey, { baseURL, fetch: reach.fetch, timeout }), problemOf };
+  const base = env.ENVIRONMENT === 'dev' && env.ANTHROPIC_BASE_URL ? env.ANTHROPIC_BASE_URL : ANTHROPIC_API;
+  return anthropic(apiKey, base, reach.fetch);
+}
+
+/** `run` on an opened provider given `timeoutMs`: its result, or its failure in a word. */
+async function attempt<T>(
+  opened: Opened,
+  timeoutMs: number,
+  run: (provider: ModelProvider) => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; problem: Problem }> {
+  const { provider, problem } = providerOf(opened, timeoutMs);
+  try {
+    return { ok: true, value: await run(provider) };
+  } catch (err) {
+    const word = problem();
+    if (word === undefined) throw err;
+    return { ok: false, problem: word };
+  }
 }
 
 /**
@@ -308,14 +378,11 @@ export async function fillWith(
   reach: ModelReach,
   request: FillRequest,
 ): Promise<{ ok: true; text: string } | { ok: false; problem: Problem | 'unreadable' }> {
-  const model = await openModel(env, key, sealed, reach, FILL_TIMEOUT_MS);
-  if (!model) return { ok: false, problem: 'refused' };
-  try {
-    const text = await model.provider.fill(request);
-    return text === null ? { ok: false, problem: 'unreadable' } : { ok: true, text };
-  } catch (err) {
-    return { ok: false, problem: model.problemOf(err) };
-  }
+  const opened = await openModel(env, key, sealed, reach);
+  if (!opened) return { ok: false, problem: 'refused' };
+  const answered = await attempt(opened, FILL_TIMEOUT_MS, (p) => p.fill(request));
+  if (!answered.ok) return answered;
+  return answered.value === null ? { ok: false, problem: 'unreadable' } : { ok: true, text: answered.value };
 }
 
 /**
@@ -330,13 +397,10 @@ export async function chatWith(
   request: ChatRequest,
   timeout: number,
 ): Promise<{ ok: true; step: ChatStep } | { ok: false; problem: Problem }> {
-  const model = await openModel(env, key, sealed, { ...reach, guards: { ...reach.guards, timeoutMs: timeout } }, timeout);
-  if (!model) return { ok: false, problem: 'refused' };
-  try {
-    return { ok: true, step: await model.provider.chat(request) };
-  } catch (err) {
-    return { ok: false, problem: model.problemOf(err) };
-  }
+  const opened = await openModel(env, key, sealed, reach);
+  if (!opened) return { ok: false, problem: 'refused' };
+  const answered = await attempt(opened, timeout, (p) => p.chat(request));
+  return answered.ok ? { ok: true, step: answered.value } : answered;
 }
 
 /**
@@ -351,14 +415,11 @@ export function aiProviders(
   return {
     seal: (key, apiKey) => sealAiKey(env, key, apiKey),
     test: async (key, sealed) => {
-      const model = await openModel(env, key, sealed, { fetch: fetcher, guards }, TEST_TIMEOUT_MS);
+      const opened = await openModel(env, key, sealed, { fetch: fetcher, guards });
       // Sealed under a CONNECTION_KEY since rotated: as good as refused, and saving the key again mends it.
-      if (!model) return { ok: false, problem: 'refused' };
-      try {
-        return { ok: true, models: await model.provider.listModels() };
-      } catch (err) {
-        return { ok: false, problem: model.problemOf(err) };
-      }
+      if (!opened) return { ok: false, problem: 'refused' };
+      const listed = await attempt(opened, TEST_TIMEOUT_MS, (p) => p.listModels());
+      return listed.ok ? { ok: true, models: listed.value } : listed;
     },
   };
 }

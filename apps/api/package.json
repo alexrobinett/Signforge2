@@ -17,7 +17,6 @@
     "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "1.6.0",
     "@better-auth/oauth-provider": "1.7.25",
     "@modelcontextprotocol/server": "2.4.0",
     "@signforge/compiler": "workspace:*",
@@ -27,6 +26,9 @@
     "@signforge/media": "workspace:*",
     "@signforge/player-core": "workspace:*",
     "@signforge/tools": "workspace:*",
+    "@tanstack/ai": "1.8.0",
+    "@tanstack/ai-anthropic": "1.2.1",
+    "@tanstack/ai-openai": "1.2.0",
     "better-auth": "^1.7.25",
     "hono": "^4.13.19",
     "zod": "^4.6.7"
