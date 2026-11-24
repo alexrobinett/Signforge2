@@ -16,6 +16,8 @@ const badgeVariants = cva('inline-flex items-center gap-1.5 rounded-full whitesp
       'needs-you': 'bg-status-needs-you-muted text-status-needs-you-foreground',
       agent: 'bg-actor-agent-muted text-actor-agent',
       outline: 'border text-muted-foreground',
+      // A mark on a screen's dark frame, such as its ratio.
+      stage: 'bg-stage/85 text-stage-foreground',
     },
     size: {
       default: 'px-2 py-0.5 text-xs font-medium',

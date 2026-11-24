@@ -17,7 +17,7 @@ const showing = (spot: string, over: Partial<NonNullable<ScreenView['showing']>>
   wakesAt: null,
   playlist: { id: 'p1', name: 'Main loop' },
   takeover: false,
-  spot: { id: spot, name: `Spot ${spot}`, kind: 'template', template: 'base/clock@1.2.4', image: null },
+  spot: { id: spot, name: `Spot ${spot}`, kind: 'template', template: 'base/clock@1.2.4', templateName: 'Clock', image: null },
   spots: 1,
   ...over,
 });

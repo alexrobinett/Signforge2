@@ -21,6 +21,32 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
+test('with no spots, the empty state has New spot and the template gallery under it; a template opens New spot with it picked (#362, #369)', async () => {
+  await page.goto('/spots');
+  await hydrated(page);
+  await expect(page.getByRole('region', { name: 'Make your first spot from a template' })).toBeVisible();
+  // One filled button on the page, New spot; the gallery's templates are outlined tiles.
+  await expect(page.getByRole('main').locator('[data-slot="button"][data-variant="default"]')).toHaveAccessibleName('New spot');
+  const gallery = page.getByRole('region', { name: 'Templates' });
+  const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
+  await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  await axe(page);
+  await shots(page, '28-spots-gallery');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '28-spots-gallery-phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // By keyboard: the card opens New spot with Clock picked, and Escape gives focus back to the card.
+  await clock.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'New spot' });
+  await expect(dialog.getByRole('group', { name: 'Template' }).getByRole('radio', { name: 'Clock', exact: true })).toBeChecked();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(clock).toBeFocused();
+});
+
 test('choose a template by its thumbnail, by keyboard alone, in two columns on a phone (#259)', async () => {
   await page.goto('/spots');
   await hydrated(page);
@@ -145,6 +171,25 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByLabel('Greeting (empty for good morning/afternoon/evening)')).toHaveValue('Good to see you');
   await page.getByRole('link', { name: 'Spots' }).first().click();
   await expect(page.getByRole('link', { name: /Lobby clock/ })).toContainText('Clock · Draft, never published');
+  await expect(page.getByRole('link', { name: /Lobby clock/ }).locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  // A template the player drew no thumbnail for: its name, clamped, in a frame that stays 16:9 in the row's 64 px slot.
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const fixture = templates.find((t: { name: string }) => t.name === 'Weather and headlines (test)').versions.at(-1).id;
+  const { spot: undrawn } = await tool(page, 'create_spot', { name: 'Undrawn', kind: 'template', templateVersionId: fixture });
+  await page.reload();
+  await hydrated(page);
+  const frame = page
+    .getByRole('link', { name: /Undrawn/ })
+    .locator('span[aria-hidden]')
+    .first();
+  await expect(frame).toContainText('Weather and headlines (test)');
+  expect(
+    await frame.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { ratio: Math.round((r.width / r.height) * 100) / 100, fits: el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1 };
+    }),
+  ).toEqual({ ratio: 1.78, fits: true });
+  await tool(page, 'delete_spot', { spotId: undrawn.id });
 });
 
 test('a change someone else made while the editor was open is not overwritten', async () => {

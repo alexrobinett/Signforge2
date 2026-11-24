@@ -11,12 +11,12 @@ import { PlusIcon } from 'lucide-react';
 import type { KeyboardEvent, SubmitEvent } from 'react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { FillSource } from '~/components/spots/fill-source';
+import { TemplateThumb } from '~/components/spots/template-thumb';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { usableVersions, type TemplateView } from '~/lib/spots';
-import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -30,6 +30,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const d = useAppStore((s) => s.spotEditor.newSpot);
   const picking = useAppStore((s) => s.spotEditor.picking === 'new');
   const open = useAppStore((s) => s.openNewSpot);
+  const focusBack = useAppStore((s) => s.newSpotFocusBack);
   const edit = useAppStore((s) => s.editNewSpot);
   const pick = useAppStore((s) => s.pickImageFor);
   const create = useAppStore((s) => s.createSpot);
@@ -74,7 +75,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           New spot
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={focusBack}>
         <DialogHeader>
           <DialogTitle>New spot</DialogTitle>
           <DialogDescription>It starts as a draft. No screen shows it until you publish.</DialogDescription>
@@ -120,8 +121,8 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                         onChange={() => edit({ templateVersionId: u.version.id })}
                         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
                       />
-                      <Thumbnail template={u.template} />
-                      <span className="line-clamp-2 px-0.5">{u.template.name}</span>
+                      <TemplateThumb version={u.version} />
+                      <span className="line-clamp-2 px-0.5">{u.version.manifest.name}</span>
                     </label>
                   ))}
                 </div>
@@ -160,19 +161,5 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-const THUMBNAILS: Record<string, string> = thumbnails;
-
-/** A base template's thumbnail, drawn by the player; an org's template, or one not drawn yet, is its name on a tile. */
-function Thumbnail({ template }: { template: TemplateView }) {
-  const drawn = template.owner === 'base' && template.key in THUMBNAILS;
-  return drawn ? (
-    <img src={`/template-thumbnails/${template.key}.webp`} alt="" width={480} height={270} className="aspect-video w-full rounded-md bg-muted object-cover" />
-  ) : (
-    <span aria-hidden className="grid aspect-video w-full place-items-center rounded-md bg-muted px-2 text-center text-xs font-medium text-muted-foreground">
-      {template.name}
-    </span>
   );
 }

@@ -5,7 +5,7 @@
  * member hides it. What screens are doing stays current while it is open, from the Screens page's
  * own poll, and says when it is not.
  */
-import { isBaseTemplateKey, sessionBlobPath } from '@signforge/contract';
+import { sessionBlobPath } from '@signforge/contract';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { CircleCheckIcon, XIcon } from 'lucide-react';
@@ -237,14 +237,12 @@ function PlayingNow({ rows, anyScreen }: { rows: Playing[]; anyScreen: boolean }
 }
 
 /**
- * The spot's own image, else its template's thumbnail, else a plain tile: the name is beside it. A
+ * The spot's own image, else its template version's thumbnail, else a plain tile: the name is beside it. A
  * manifest names its template by key (`base/clock@1.2.4`): its owner, then its id.
  */
 function SpotThumb({ spot }: { spot: Playing['spot'] }) {
   const t = spot.template;
-  const src = spot.image
-    ? sessionBlobPath(spot.image)
-    : t && templateThumbnail({ owner: isBaseTemplateKey(t) ? 'base' : 'org', key: t.slice(t.indexOf('/') + 1, t.lastIndexOf('@')) });
+  const src = spot.image ? sessionBlobPath(spot.image) : t && templateThumbnail(t);
   return src ? (
     <img src={src} alt="" width={480} height={270} loading="lazy" className="aspect-video w-full bg-muted object-cover" />
   ) : (

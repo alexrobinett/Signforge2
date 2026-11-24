@@ -239,7 +239,7 @@ function ScreenPage() {
                 {screen.showing?.spot ? (
                   <>
                     Should be showing <strong className="font-semibold">{screen.showing.spot.name}</strong>
-                    {screen.showing.spot.template && <span className="font-mono text-meta text-muted-foreground"> · {screen.showing.spot.template}</span>}
+                    {screen.showing.spot.templateName && <span className="text-meta text-muted-foreground"> · {screen.showing.spot.templateName}</span>}
                   </>
                 ) : screen.showing?.asleep ? (
                   <>Should be asleep{screen.showing.wakesAt && ` until ${localClock(screen.showing.wakesAt, screen.timezone, now)}`}</>
