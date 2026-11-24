@@ -88,6 +88,22 @@ export const isStale = (err: unknown) => err instanceof Refusal && err.code === 
 /** Whether a refusal is a conflict of any kind, such as a publish made since an Undo's. */
 export const isConflict = (err: unknown) => err instanceof Refusal && err.code === 'conflict';
 
+/** A spot a publish was refused for: still holding its template's sample text, in these fields (#360). */
+export interface SampleSpot {
+  id: string;
+  name: string;
+  fields: string[];
+}
+
+const isSampleSpot = (v: unknown): v is SampleSpot =>
+  isRecord(v) && typeof v.id === 'string' && typeof v.name === 'string' && Array.isArray(v.fields) && v.fields.every((f) => typeof f === 'string');
+
+/** The spots a `sample_text` refusal names (#360), or undefined for any other error. */
+export function sampleTextOf(err: unknown): SampleSpot[] | undefined {
+  if (!(err instanceof Refusal) || err.code !== 'sample_text' || !isRecord(err.details) || !Array.isArray(err.details.spots)) return undefined;
+  return err.details.spots.filter(isSampleSpot);
+}
+
 /** Whether a refusal says the row is gone: deleted, by someone else or in another tab. */
 export const isGone = (err: unknown) => err instanceof Refusal && err.code === 'not_found';
 

@@ -17,7 +17,7 @@ import {
   type ToolListing,
 } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
-import { callTool, callToolByName, toolMessage } from '~/lib/tools';
+import { callTool, callToolByName, sampleTextOf, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
@@ -107,6 +107,14 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) await router.invalidate();
     } catch (err) {
+      // Refused for sample text (#360): the menu closes for the question, and Publish anyway runs it again, allowed.
+      const [first, ...more] = sampleTextOf(err) ?? [];
+      const orgId = orgOnScreen(router);
+      if (first && orgId && read.allowSample !== true) {
+        finish(from, true, pending);
+        if (await get().askSampleText(orgId, [first, ...more])) await run(label, tool, { ...read, allowSample: true });
+        return;
+      }
       finish(from, false, pending);
       toast.error(label, { description: toolMessage(err) });
     }

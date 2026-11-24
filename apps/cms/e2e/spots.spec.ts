@@ -303,6 +303,10 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   const headline = page.getByLabel('Headline');
   await expect(headline).toHaveValue('Pier 9 opens on Monday');
   await expect(headline).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
+  // The server records it, so a reload (or another tab) marks it too.
+  await page.reload();
+  await hydrated(page);
+  await expect(headline).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
   await headline.focus();
   expect(await headline.evaluate((i) => i instanceof HTMLInputElement && i.selectionStart === 0 && i.selectionEnd === i.value.length)).toBe(true);
   await axe(page);
@@ -340,9 +344,11 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
 
-  // Its other sample copy is still there: Publish asks first, naming it, and Edit first sends nothing (#360).
+  // Its other sample copy is still there: the server refuses the publish, and the page asks, naming it;
+  // Edit first sends nothing (#360). Escape lets it go too, and gives focus back to Publish.
   const publishes = (await tool(page, 'list_publishes', {})).publishes.length;
-  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  const publish = page.getByRole('button', { name: 'Publish', exact: true });
+  await publish.click();
   const ask = page.getByRole('alertdialog', { name: 'Publish sample text?' });
   await expect(ask).toContainText('Eyebrow, Body, Posted by and QR code label still have sample text. Publish anyway?');
   await axe(page);
@@ -350,6 +356,19 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await ask.getByRole('button', { name: 'Edit first' }).click();
   await expect(ask).toBeHidden();
   expect((await tool(page, 'list_publishes', {})).publishes).toHaveLength(publishes);
+  await publish.click();
+  await expect(ask).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeHidden();
+  await expect(publish).toBeFocused();
+  // At phone width the question's buttons stay in view; its words scroll within it.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await publish.click();
+  await expect(ask.getByRole('button', { name: 'Publish anyway' })).toBeInViewport();
+  await axe(page);
+  await shots(page, '35-publish-sample-text-phone');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 720 });
   // Publish anyway sends it, as it was asked for.
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await ask.getByRole('button', { name: 'Publish anyway' }).click();

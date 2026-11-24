@@ -174,3 +174,63 @@ describe('⌘K on a found screen or group', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('a tool refused for sample text (#360)', () => {
+  /** ⌘K on a page of org_1, with the question about sample text answering `yes`. */
+  function sampleStore(yes: boolean) {
+    const router = {
+      navigate: vi.fn(async () => {}),
+      invalidate: vi.fn(async () => {}),
+      state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }] },
+    };
+    const askSampleText = vi.fn(async () => yes);
+    const store = createStore<CommandMenuSlice & { ui: object; askSampleText: typeof askSampleText }>()((set, get) => ({
+      ui: {},
+      askSampleText,
+      ...createCommandMenuSlice(set as never, get as never, { router } as never),
+    }));
+    return { store, askSampleText };
+  }
+  const spots = [{ id: 'spt_pier', name: 'Pier 9', fields: ['headline'] }];
+  /** The first call refused for sample text, the next answered. */
+  const refusedOnce = () => {
+    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: 'sample_text', message: 'still holding sample text', details: { spots } }), { status: 409 })
+        : new Response('{}', { status: 200 });
+    });
+  };
+  const entry = (name: string): CommandEntry => ({
+    kind: 'tool',
+    id: `tool:${name}`,
+    label: name,
+    tool: { name, description: '', mutates: true, fields: [] },
+    keywords: [],
+  });
+
+  for (const name of ['publish', 'approve_publish_request'])
+    it(`${name}: closes the menu to ask, and Publish anyway runs it again with allowSample`, async () => {
+      const { store, askSampleText } = sampleStore(true);
+      refusedOnce();
+      store.getState().openCommandMenu();
+      await store.getState().chooseCommand(entry(name));
+      expect(askSampleText).toHaveBeenCalledWith('org_1', spots);
+      expect(calls).toEqual([
+        { name, input: {} },
+        { name, input: { allowSample: true } },
+      ]);
+      expect(store.getState().commandMenu.open).toBe(false);
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+  it('Edit first runs nothing more, and says nothing went wrong', async () => {
+    const { store } = sampleStore(false);
+    refusedOnce();
+    store.getState().openCommandMenu();
+    await store.getState().chooseCommand(entry('publish'));
+    expect(calls.map((c) => c.name)).toEqual(['publish']);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(store.getState().commandMenu.running).toBe(false);
+  });
+});

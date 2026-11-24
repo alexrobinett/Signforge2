@@ -1,14 +1,14 @@
 // A template's fields as a new spot starts them and as the editor checks and draws them, for url
 // (#191), date and datetime fields (#192).
-import { type FieldDef, type TemplateManifest, validateSpotData } from '@signforge/contract';
+import { type FieldDef, type SampleFields, type TemplateManifest, validateSpotData } from '@signforge/contract';
 import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
-import { sampleData, startData } from '@signforge/compiler/draft';
+import { sampleData, sampleFieldsOf, startData } from '@signforge/compiler/draft';
 import { typedFields } from '../src/lib/live-data';
-import { fieldProblems, sampleMarksOf, type SampleMarks, type SpotDraft } from '../src/lib/spots';
+import { fieldProblems, type SpotDraft } from '../src/lib/spots';
 import { StoreProvider } from '../src/state/provider';
 
 // The image field's picker asks the page's router for the member's role, which a static render has none of.
@@ -18,16 +18,13 @@ vi.mock('~/lib/live', async (real) => ({ ...(await real<typeof import('../src/li
  * The form's markup, as the spot editor draws it for spot `s1`: inside a store with only what the
  * form reads, `checks` saying which fields were touched and whether Publish was pressed.
  */
-function formHtml(props: Omit<ComponentProps<typeof FieldForm>, 'spotId' | 'onChange'>, checks?: { touched: string[]; all: boolean }, marks?: SampleMarks) {
-  const samples = marks ? { s1: marks } : {};
+function formHtml(props: Omit<ComponentProps<typeof FieldForm>, 'spotId' | 'onChange'>, checks?: { touched: string[]; all: boolean }) {
   const store = createStore(() => ({
-    spotEditor: { picking: null, checks: checks ? { s1: checks } : {}, samples },
+    spotEditor: { picking: null, checks: checks ? { s1: checks } : {} },
     assets: { pickerQuery: '' },
     pickImageFor: () => {},
     searchPicker: () => {},
     touchField: () => {},
-    editedSample: () => {},
-    removedSampleRow: () => {},
   }));
   const form = createElement(FieldForm, { ...props, spotId: 's1', onChange: () => {} });
   // StoreProvider's props name its children; built apart, as createElement's arguments cannot satisfy them.
@@ -238,7 +235,7 @@ describe('a new spot in the editor (#359)', () => {
   });
 });
 
-describe('a new spot’s sample in the editor (#360)', () => {
+describe('a spot’s sample text in the editor (#360)', () => {
   const fields: Record<string, FieldDef> = {
     headline: { type: 'text', label: 'Headline', default: 'Pier 9 opens on Monday' },
     items: {
@@ -249,14 +246,15 @@ describe('a new spot’s sample in the editor (#360)', () => {
     },
   };
   const data = sampleData({ fields });
-  const html = (marks?: SampleMarks) => {
+  /** The editor's form over the saved spot's `sampleFields`, as the server answers them: on a reload, or in another tab, as here. */
+  const html = (sampleFields: SampleFields | null) => {
     const draft: SpotDraft = { name: 'Pier', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
-    return formHtml({ fields, shown: fields, draft, assets: [] }, undefined, marks);
+    return formHtml({ fields, shown: fields, draft, assets: [], sampleFields });
   };
   const input = (markup: string, id: string) => new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(markup)?.[0] ?? '';
 
-  it('marks what New spot recorded as sample, and ties every cell of a sample row to the note', () => {
-    const marked = html(sampleMarksOf(fields, data));
+  it('marks what the server says still holds sample text, and ties every cell of a sample row to the note', () => {
+    const marked = html(sampleFieldsOf({ fields }, data));
     expect(marked).toContain('Sample text. Replace it before you publish.');
     expect(marked).toContain('Sample rows. Replace them before you publish.');
     expect(marked).toContain('Row 1 · sample');
@@ -265,16 +263,15 @@ describe('a new spot’s sample in the editor (#360)', () => {
     expect(input(marked, 'field-items-0-price')).toContain('aria-describedby="field-items-sample"');
   });
 
-  it('marks nothing on a spot without a record, though its values equal the sample: they may be the person’s choice', () => {
-    const plain = html();
+  it('marks nothing on a spot without any, though its values equal the sample: they may be the person’s choice', () => {
+    const plain = html(null);
     expect(plain).not.toContain('Sample');
     expect(input(plain, 'field-headline')).not.toContain('aria-describedby');
   });
 
   it('keeps a row marked until every cell in it is edited', () => {
-    const half = html({ texts: {}, lists: { items: { label: 'Items', rows: [['price']] } } });
-    expect(half).toContain('Row 1 · sample');
-    const done = html({ texts: {}, lists: { items: { label: 'Items', rows: [[]] } } });
+    expect(html({ texts: [], lists: { items: [['price']] } })).toContain('Row 1 · sample');
+    const done = html({ texts: [], lists: { items: [[]] } });
     expect(done).not.toContain('Sample rows');
     expect(input(done, 'field-items-0-name')).not.toContain('aria-describedby');
   });

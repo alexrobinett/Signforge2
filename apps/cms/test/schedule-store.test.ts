@@ -22,16 +22,21 @@ type Reply = { status: number; body: unknown };
 let replies: (Reply | null | Promise<Reply | null>)[] = [];
 const router = { state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
 
-function scheduleStore() {
+/** `sample`: what the question about sample text answers before a takeover is made (#360). */
+function scheduleStore(sample: 'none' | 'allowed' | 'cancelled' = 'none') {
   const queryClient = new QueryClient();
-  const publishSchedule = vi.fn(async () => {});
-  const publishEntry = vi.fn(async () => {});
-  const store = createStore<ScheduleSlice & { publishSchedule: typeof publishSchedule; publishEntry: typeof publishEntry }>()((set, get) => ({
+  const publishSchedule = vi.fn(async () => true);
+  const publishEntry = vi.fn(async () => true);
+  const checkSampleText = vi.fn(async () => sample);
+  const store = createStore<
+    ScheduleSlice & { publishSchedule: typeof publishSchedule; publishEntry: typeof publishEntry; checkSampleText: typeof checkSampleText }
+  >()((set, get) => ({
     ...createScheduleSlice(set as never, get as never, { router, queryClient } as never),
     publishSchedule,
     publishEntry,
+    checkSampleText,
   }));
-  return { store, queryClient, publishSchedule, publishEntry };
+  return { store, queryClient, publishSchedule, publishEntry, checkSampleText };
 }
 
 beforeEach(() => {
@@ -74,7 +79,23 @@ describe('a retried create (#149)', () => {
     expect(calls.map((c) => c.name)).toEqual(['start_takeover', 'start_takeover']);
     expect(calls[1]!.input.idempotencyKey).toBe(calls[0]!.input.idempotencyKey);
     // With the default to make first when there is none: the takeover's playlist, as the dialog prefills it (#243).
-    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], 'pls_flash');
+    expect(publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], 'pls_flash', false);
+  });
+
+  it('a takeover whose playlist still has sample text: Edit first makes nothing; Publish anyway starts it and publishes it allowed (#360)', async () => {
+    const cancelled = scheduleStore('cancelled');
+    cancelled.store.getState().openTakeover(ORG, { playlistId: 'pls_flash' });
+    await cancelled.store.getState().startTakeover(ORG);
+    expect(calls).toEqual([]);
+    expect(cancelled.publishSchedule).not.toHaveBeenCalled();
+    expect(cancelled.checkSampleText).toHaveBeenCalledWith(ORG, 'pls_flash');
+
+    const allowed = scheduleStore('allowed');
+    allowed.store.getState().openTakeover(ORG, { playlistId: 'pls_flash' });
+    replies.push(made);
+    await allowed.store.getState().startTakeover(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['start_takeover']);
+    expect(allowed.publishSchedule).toHaveBeenCalledExactlyOnceWith(ORG, ['sch_1'], 'pls_flash', true);
   });
 
   it('the next new entry is a new creation, with a new key', async () => {
@@ -149,8 +170,8 @@ describe('a dialog closed while it saves, and opened again (review of #153, 2)',
     await Promise.all([starting, again]);
     // Each with its own dialog's default to make first, should there be none (#243).
     expect(publishSchedule.mock.calls).toEqual([
-      [ORG, ['sch_1'], 'pls_flash'],
-      [ORG, ['sch_2'], 'pls_lunch'],
+      [ORG, ['sch_1'], 'pls_flash', false],
+      [ORG, ['sch_2'], 'pls_lunch', false],
     ]);
   });
 });
@@ -221,6 +242,6 @@ describe('the default playlist a publish from the dialogs asks for, with none ye
     store.getState().editTakeover({ firstDefault: 'pls_all_day' });
     replies.push(made);
     await store.getState().startTakeover(ORG);
-    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], 'pls_all_day');
+    expect(publishSchedule).toHaveBeenLastCalledWith(ORG, ['sch_1'], 'pls_all_day', false);
   });
 });

@@ -322,7 +322,6 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(r.orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(r.orgId) });
         const changed = fillChanges(fields, r.before, r.data).map((c) => c.field);
-        get().clearSamples(spotId, changed);
         agent((a) => {
           const { [spotId]: _kept, ...rest } = a.reviews;
           const before = Object.fromEntries(changed.map((f) => [f, r.before[f]]));

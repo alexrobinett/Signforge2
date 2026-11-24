@@ -4,10 +4,9 @@
  * a web page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
  * A template spot is named after its template until the person types a name, and starts with its
- * sample copy (`sampleData`, #360), which the editor marks until it is replaced. While Create is
+ * sample copy (`create_spot`'s `sample`, #360), which the server records and the editor marks until it is replaced. While Create is
  * off, the dialog says why.
  */
-import { sampleData } from '@signforge/compiler/draft';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { PlusIcon } from 'lucide-react';
@@ -18,7 +17,7 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { nextName, sampleMarksOf, usableVersions, type TemplateView } from '~/lib/spots';
+import { nextName, usableVersions, type TemplateView } from '~/lib/spots';
 import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery, spotsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -62,13 +61,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (d.kind === 'template' && chosen && d.templateVersionId !== chosen.version.id) edit({ templateVersionId: chosen.version.id });
-    const m = chosen?.version.manifest;
-    const data = m && sampleData(m);
-    void create(
-      orgId,
-      name,
-      d.kind === 'template' && m && data ? { durationMs: m.duration.defaultMs, data, samples: sampleMarksOf(m.fields, data) } : undefined,
-    );
+    void create(orgId, name, d.kind === 'template' || undefined);
   };
 
   /** Enter on a template creates the spot, or goes to its name while it has none. */

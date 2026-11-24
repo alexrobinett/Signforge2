@@ -17,8 +17,8 @@ import type { ToolOutput } from '@signforge/tools/outputs';
 import { problemWords } from '~/lib/field-words';
 import type { PlaylistView } from '~/lib/playlists';
 import { versionName } from '~/lib/publishes';
-import { sampleLabels, sampleWords, type SpotView, versionsById } from '~/lib/spots';
-import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
+import { sampleWords, type SpotView, versionsById } from '~/lib/spots';
+import { callTool, isConflict, isStale, sampleTextOf, toolMessage, type SampleSpot } from '~/lib/tools';
 import { overviewKey } from '~/lib/overview';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
@@ -35,18 +35,19 @@ interface PublishingState {
   /** A publish, roll back or default change is on its way. */
   pending: boolean;
   /**
-   * A publish held to ask first (#360): spots in it still have the sample copy New spot gave them
-   * (`spotEditor.samples`). Publish anyway sends it as it was asked for; Edit first opens the first such spot.
+   * A publish held to ask first (#360): spots in it still hold their template's sample text, as the
+   * server records it (`sampleFields`). `answer` resolves the publish waiting on it: true for Publish
+   * anyway, which sends it again with `allowSample`; false for Edit first or Escape, which change nothing.
    */
-  sampleCheck: { orgId: string; pins: Pin[]; undo: boolean; refused: string; words: string; spotId: string } | null;
+  sampleCheck: { words: string; spotId: string; answer: (publish: boolean) => void } | null;
 }
 
 export interface PublishingSlice {
   publishing: PublishingState;
-  /** Saves the open spot's draft and publishes it. */
-  publishSpot: (orgId: string, spotId: string) => Promise<void>;
-  /** Saves the open playlist's draft and publishes it with its changed spots. */
-  publishPlaylist: (orgId: string, playlistId: string) => Promise<void>;
+  /** Saves the open spot's draft and publishes it; whether it was published. */
+  publishSpot: (orgId: string, spotId: string) => Promise<boolean>;
+  /** Saves the open playlist's draft and publishes it with its changed spots; whether it was published. */
+  publishPlaylist: (orgId: string, playlistId: string) => Promise<boolean>;
   /** Points screens back at what `revision` gave them (`roll_back_publish`); an Undo names the publish it undoes, refused if a later one was made. */
   rollBackTo: (orgId: string, publish: { id: string; revision: number }, undoing?: string) => Promise<void>;
   /** Makes the playlist the one every screen plays when no schedule says otherwise. */
@@ -55,22 +56,33 @@ export interface PublishingSlice {
    * Publishes schedule entries (`entryIds`, else every one with a changed draft, removals too) with
    * their changed playlists and those playlists' changed spots.
    */
-  /** `firstDefault`: with no default playlist yet, the one the person chose to make the default first (#243). */
-  publishSchedule: (orgId: string, entryIds?: string[], firstDefault?: string) => Promise<void>;
+  /**
+   * `firstDefault`: with no default playlist yet, the one the person chose to make the default first
+   * (#243); asked about sample text before it is set, so Edit first changes nothing. `allowSample`:
+   * the person already said Publish anyway. Whether it was published.
+   */
+  publishSchedule: (orgId: string, entryIds?: string[], firstDefault?: string, allowSample?: boolean) => Promise<boolean>;
   /**
    * Publishes one schedule entry alone, pinned (#181): nobody else's drafts go with it. Its playlist
    * and that playlist's spots go too only when they have never been published, as the entry cannot
    * play without them; a published playlist's unpublished edits stay drafts.
    */
-  publishEntry: (orgId: string, entryId: string, firstDefault?: string) => Promise<void>;
+  publishEntry: (orgId: string, entryId: string, firstDefault?: string) => Promise<boolean>;
   /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
   endTakeover: (orgId: string, entryId: string) => Promise<void>;
-  /** The held publish, sent with its sample copy. */
-  publishAnyway: () => Promise<void>;
-  /** The held publish let go, and the first spot with sample copy opened to edit. */
+  /** The held publish, sent with its sample text. */
+  publishAnyway: () => void;
+  /** The held publish let go, nothing changed, and the first spot with sample text opened to edit. */
   editFirst: () => Promise<void>;
-  /** The held publish let go (Escape). */
+  /** The held publish let go (Escape), nothing changed. */
   dropSampleCheck: () => void;
+  /**
+   * Before a takeover is started (#360): asks if the playlist's spots still hold sample text, so Edit
+   * first leaves nothing made. `none` when none does; `allowed` for Publish anyway; `cancelled` otherwise.
+   */
+  checkSampleText: (orgId: string, playlistId: string) => Promise<'none' | 'allowed' | 'cancelled'>;
+  /** Asks about the spots a `sample_text` refusal named, as ⌘K's tools are refused: true for Publish anyway. */
+  askSampleText: (orgId: string, spots: [SampleSpot, ...SampleSpot[]]) => Promise<boolean>;
 }
 
 const TOAST_ID = 'publish';
@@ -206,82 +218,151 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   }
 
   /**
-   * Before a publish from the Schedule's dialogs with no default playlist yet (owner, #243): the one the
-   * person chose made the default first (`set_default_playlist`), and its pins, so the publish
-   * publishes it and its spots if they never were. [] when there is nothing to do (one chosen
-   * already, or none chosen); null when it was refused, which is said under `refused`.
+   * With no default playlist yet (owner, #243), the one the person chose in the Schedule's dialogs, and
+   * the pins it needs: itself and its spots, if never published. Null when there is nothing to do
+   * (one is the default already, or none was chosen). Set with `setDefault`, after any question.
    */
-  async function madeDefault(choice: string | undefined, drafts: { playlists: PlaylistView[]; spots: SpotView[] }, refused: string): Promise<Pin[] | null> {
+  function defaultOf(choice: string | undefined, drafts: { playlists: PlaylistView[]; spots: SpotView[] }) {
     const chosen = choice ? drafts.playlists.find((p) => p.id === choice) : undefined;
-    if (!chosen || drafts.playlists.some((p) => p.isDefault)) return [];
+    if (!chosen || drafts.playlists.some((p) => p.isDefault)) return null;
+    const inIt = new Set(chosen.spotIds);
+    const pins: Pin[] = chosen.published
+      ? []
+      : [
+          { kind: 'playlist', id: chosen.id, version: chosen.version },
+          ...drafts.spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+        ];
+    return { id: chosen.id, pins };
+  }
+
+  /** Makes the chosen playlist the default (`set_default_playlist`); false when refused, which is said under `refused`. */
+  async function setDefault(playlistId: string, refused: string) {
     try {
-      await callTool('set_default_playlist', { playlistId: chosen.id });
+      await callTool('set_default_playlist', { playlistId });
+      return true;
     } catch (err) {
       toast.error(refused, { description: toolMessage(err) });
-      return null;
+      return false;
     }
-    if (chosen.published) return [];
-    const inIt = new Set(chosen.spotIds);
-    return [
-      { kind: 'playlist', id: chosen.id, version: chosen.version },
-      ...drafts.spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
-    ];
+  }
+
+  /** The pinned spots that still hold sample text, as read now (`sampleFields`). */
+  const sampleIn = (spots: readonly SpotView[], pins: readonly Pin[]): SampleSpot[] =>
+    spots.flatMap((s) =>
+      s.sampleFields && pins.some((p) => p.kind === 'spot' && p.id === s.id)
+        ? [{ id: s.id, name: s.name, fields: [...s.sampleFields.texts, ...Object.keys(s.sampleFields.lists)] }]
+        : [],
+    );
+
+  /**
+   * Asks about the spots' sample text (#360), naming each field by its label, and resolves with the
+   * answer: true for Publish anyway. Labels come from the templates as the pages read them; a field
+   * whose template cannot be read is named as it is.
+   */
+  async function ask(orgId: string, spots: [SampleSpot, ...SampleSpot[]], named: boolean) {
+    const once = { staleTime: Number.POSITIVE_INFINITY, retry: false } as const;
+    const none = () => undefined;
+    const [templates, list] = await Promise.all([
+      queryClient.query({ ...templatesQuery(orgId), ...once }).catch(none),
+      queryClient.query({ ...spotsQuery(orgId), ...once }).catch(none),
+    ]);
+    const versions = versionsById(templates?.templates ?? []);
+    const words = sampleWords(
+      spots.map((s) => {
+        const v = list?.spots.find((x) => x.id === s.id)?.templateVersionId;
+        const fields = (v && versions.get(v)?.manifest.fields) || {};
+        return { name: s.name, labels: s.fields.map((f) => fields[f]?.label ?? f) };
+      }),
+      named,
+    );
+    return new Promise<boolean>((answer) => set((s) => ({ publishing: { ...s.publishing, sampleCheck: { words, spotId: spots[0].id, answer } } })));
+  }
+
+  /** The question let go with `publish`: the publish waiting on it goes on, or stops. */
+  function answer(publish: boolean) {
+    const check = get().publishing.sampleCheck;
+    if (!check) return undefined;
+    set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } }));
+    check.answer(publish);
+    return check;
   }
 
   /**
-   * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. A publish that
-   * carries a spot still holding sample copy asks first (`sampleCheck`), unless `asked`.
+   * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. Refused for
+   * sample text (#360), it asks, and with Publish anyway sends it again with `allowSample`. Whether
+   * it was published.
    */
-  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published', asked = false) {
-    const spotIds = [...new Set(pins.filter((p) => p.kind === 'spot').map((p) => p.id))];
-    const withSamples = spotIds.flatMap((id) => {
-      const marks = get().spotEditor.samples[id];
-      const labels = marks ? sampleLabels(marks) : [];
-      // Its name as the pages last read it: the editor's spot, or the list a playlist or schedule publish read.
-      const name =
-        queryClient.getQueryData(spotQuery(orgId, id).queryKey)?.name ??
-        queryClient.getQueryData(spotsQuery(orgId).queryKey)?.spots.find((x) => x.id === id)?.name ??
-        'a spot';
-      return labels.length ? [{ id, name, labels }] : [];
-    });
-    const first = withSamples[0];
-    if (!asked && first) {
-      const words = sampleWords(withSamples, spotIds.length > 1);
-      set((s) => ({ publishing: { ...s.publishing, sampleCheck: { orgId, pins, undo, refused, words, spotId: first.id } } }));
-      return;
-    }
+  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published', allowSample = false): Promise<boolean> {
     pending(true);
     try {
       // Once each: a chosen default may be the entry's own playlist.
       const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
-      await told(orgId, await callTool('publish', { drafts }), undo, refused);
+      await told(orgId, await callTool('publish', { drafts, ...(allowSample && { allowSample }) }), undo, refused);
       await refresh(orgId);
+      return true;
     } catch (err) {
+      const sample = sampleTextOf(err);
+      const [first, ...more] = sample ?? [];
+      if (first && !allowSample) {
+        pending(false);
+        return (await ask(orgId, [first, ...more], pins.filter((p) => p.kind === 'spot').length > 1)) && publish(orgId, pins, undo, refused, true);
+      }
       toast.error(refused, {
         description: isStale(err) ? 'It changed since you opened it, perhaps in another tab. Reload and publish again.' : toolMessage(err),
       });
+      return false;
     } finally {
       pending(false);
     }
   }
 
+  /**
+   * Publishes `pins` with the default the person chose, when there is none yet (#243). Before the
+   * default is set, it asks about sample text in what would go live (#360): Edit first then leaves
+   * everything as it was. Without a default to set, the server's refusal asks (`publish`).
+   */
+  async function withDefault(
+    orgId: string,
+    drafts: { playlists: PlaylistView[]; spots: SpotView[] },
+    firstDefault: string | undefined,
+    pins: Pin[],
+    refused: string,
+    allowSample: boolean,
+    send: (pins: Pin[], allowSample: boolean) => Promise<boolean>,
+  ) {
+    const made = defaultOf(firstDefault, drafts);
+    if (!made) return send(pins, allowSample);
+    const all = [...pins, ...made.pins];
+    const [first, ...more] = sampleIn(drafts.spots, all);
+    const allow = allowSample || (first !== undefined && (await ask(orgId, [first, ...more], more.length > 0)));
+    if (first && !allow) return false;
+    return (await setDefault(made.id, refused)) && send(all, allow);
+  }
+
   return {
     publishing: { pending: false, sampleCheck: null },
 
-    async publishAnyway() {
-      const check = get().publishing.sampleCheck;
-      if (!check) return;
-      set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } }));
-      await publish(check.orgId, check.pins, check.undo, check.refused, true);
-    },
+    publishAnyway: () => void answer(true),
 
-    dropSampleCheck: () => set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } })),
+    dropSampleCheck: () => void answer(false),
 
     async editFirst() {
-      const check = get().publishing.sampleCheck;
-      if (!check) return;
-      set((s) => ({ publishing: { ...s.publishing, sampleCheck: null } }));
-      await router.navigate({ to: '/spots/$spotId', params: { spotId: check.spotId } });
+      const check = answer(false);
+      if (check) await router.navigate({ to: '/spots/$spotId', params: { spotId: check.spotId } });
+    },
+
+    askSampleText: (orgId, spots) => ask(orgId, spots, spots.length > 1),
+
+    async checkSampleText(orgId, playlistId) {
+      const drafts = await readDrafts(orgId, 'Not started');
+      const playlist = drafts?.playlists.find((p) => p.id === playlistId);
+      if (!drafts || !playlist) return 'none';
+      const [first, ...more] = sampleIn(
+        drafts.spots,
+        playlist.spotIds.map((id): Pin => ({ kind: 'spot', id, version: 0 })),
+      );
+      if (!first) return 'none';
+      return (await ask(orgId, [first, ...more], more.length > 0)) ? 'allowed' : 'cancelled';
     },
 
     async publishSpot(orgId, spotId) {
@@ -290,9 +371,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       const spot = queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
       if (!spot || (d?.orgId === orgId && d.status !== 'saved')) {
         toast.error('Not published', { description: 'Save the draft first: fix what is marked, then publish.' });
-        return;
+        return false;
       }
-      await publish(orgId, [{ kind: 'spot', id: spot.id, version: spot.version }]);
+      return publish(orgId, [{ kind: 'spot', id: spot.id, version: spot.version }]);
     },
 
     async publishPlaylist(orgId, playlistId) {
@@ -301,13 +382,13 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       const playlist = queryClient.getQueryData(playlistQuery(orgId, playlistId).queryKey);
       if (!playlist || (d?.orgId === orgId && d.status !== 'saved')) {
         toast.error('Not published', { description: 'Save the draft first: fix what is marked, then publish.' });
-        return;
+        return false;
       }
       // Read now, not from the cache: a spot edited in another tab is pinned at its version now.
       const spots = (await queryClient.query({ ...spotsQuery(orgId), staleTime: 0 })).spots;
       const inIt = new Set(playlist.spotIds);
       const changed = spots.filter((s) => inIt.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version }));
-      await publish(orgId, [{ kind: 'playlist', id: playlist.id, version: playlist.version }, ...changed]);
+      return publish(orgId, [{ kind: 'playlist', id: playlist.id, version: playlist.version }, ...changed]);
     },
 
     async rollBackTo(orgId, target, undoing) {
@@ -337,25 +418,21 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       }
     },
 
-    async publishSchedule(orgId, entryIds, firstDefault) {
+    async publishSchedule(orgId, entryIds, firstDefault, allowSample = false) {
       const drafts = await readDrafts(orgId, 'Not published');
-      if (!drafts) return;
+      if (!drafts) return false;
       const { entries, playlists, spots } = drafts;
-      const defaultPins = await madeDefault(firstDefault, drafts, 'Not published');
-      if (!defaultPins) return;
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
       const needed = new Set(chosen.filter((e) => !e.deleted).map((e) => e.playlistId));
       const lists = playlists.filter((p) => needed.has(p.id));
       const inThem = new Set(lists.flatMap((p) => p.spotIds));
-      await publish(
-        orgId,
-        [
-          ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
-          ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
-          ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
-          ...defaultPins,
-        ],
-        !chosen.some((e) => e.takeover),
+      const pins = [
+        ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
+        ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
+        ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+      ];
+      return withDefault(orgId, drafts, firstDefault, pins, 'Not published', allowSample, (all, allow) =>
+        publish(orgId, all, !chosen.some((e) => e.takeover), 'Not published', allow),
       );
     },
 
@@ -363,29 +440,22 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       // Called once the entry is saved: every way this ends without a publish says the draft is kept.
       const refused = 'Saved as a draft, not published';
       const drafts = await readDrafts(orgId, refused);
-      if (!drafts) return;
+      if (!drafts) return false;
       const { entries, playlists, spots } = drafts;
-      const defaultPins = await madeDefault(firstDefault, drafts, refused);
-      if (!defaultPins) return;
       const entry = entries.find((e) => e.id === entryId);
       if (!entry) {
         toast.error(refused, { description: 'The entry is no longer there: someone may have removed it.' });
-        return;
+        return false;
       }
       const playlist = playlists.find((p) => p.id === entry.playlistId);
       const first = playlist && !playlist.published ? playlist : null;
       const inIt = new Set(first?.spotIds ?? []);
-      await publish(
-        orgId,
-        [
-          { kind: 'schedule_entry', id: entry.id, version: entry.version },
-          ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
-          ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
-          ...defaultPins,
-        ],
-        true,
-        refused,
-      );
+      const pins = [
+        { kind: 'schedule_entry', id: entry.id, version: entry.version } satisfies Pin,
+        ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
+        ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+      ];
+      return withDefault(orgId, drafts, firstDefault, pins, refused, false, (all, allow) => publish(orgId, all, true, refused, allow));
     },
 
     async endTakeover(orgId, entryId) {

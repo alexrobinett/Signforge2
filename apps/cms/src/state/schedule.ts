@@ -291,11 +291,14 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       if (draft?.orgId !== orgId) return;
       // A takeover never makes the default itself: the person's choice does, when there is none (#243).
       const firstDefault = firstDefaultOf(draft.edit);
+      // Asked about sample text before anything is made (#360): Edit first leaves no takeover behind.
+      const sample = await get().checkSampleText(orgId, draft.edit.playlistId);
+      if (sample === 'cancelled') return;
       // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
       const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
       if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
-      await get().publishSchedule(orgId, [made.record], firstDefault);
+      await get().publishSchedule(orgId, [made.record], firstDefault, sample === 'allowed');
     },
 
     closeScheduleDialog: close,

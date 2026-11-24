@@ -135,10 +135,10 @@ export function sampleValue(def: FieldDef): unknown {
 }
 
 /**
- * A new spot's data from the New spot dialog (#360): `startData`, with each text and list holding
- * its sample, so the stage plays at once and the person edits rather than writes. This reverses
- * #253's empty text for the dialog only; the editor marks each sample instead, so none is
- * published by accident. A live field keeps `startData`'s value: it is the fallback screens show
+ * A new spot's data as `create_spot`'s `sample` starts it for New spot (#360): `startData`, with
+ * each text and list holding its sample, so the stage plays at once and the person edits rather
+ * than writes. This reverses #253's empty text for the dialog only; the server records the fields
+ * (`sampleFieldsOf`), the editor marks them, and a publish refuses them unless a person allows it. A live field keeps `startData`'s value: it is the fallback screens show
  * when its source is down, which the form does not draw while bound, so a sample there would reach
  * screens unseen (#253's headlines). The agent's fill keeps `startData`: it writes the copy itself.
  */

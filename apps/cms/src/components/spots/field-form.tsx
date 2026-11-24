@@ -7,11 +7,11 @@
  * was pressed (#359), so a spot just made is not a page of errors. A choice shows its option's label.
  * Values a spot leaves out show the template's default. A spot the agent just filled (#263) shows
  * its marks (./fill-marks.tsx) until each field is edited. A text or list still holding its
- * template's sample (#360: New spot recorded it, `spotEditor.samples`) says so, until it is edited, a
- * list row by row; a sample text is selected when focused, so typing replaces it.
+ * template's sample (#360: the server's `sampleFields`, from New spot until a saved edit) says so,
+ * a list row by row; a sample text is selected when focused, so typing replaces it.
  */
 import type { FieldMark } from '@signforge/api/agent-inline';
-import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
+import { BRAND_COLORS, type FieldDef, type SampleFields, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
 import { startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
@@ -278,8 +278,6 @@ function ListField({
   mark,
   sampleRows,
   onChange,
-  onCellEdited,
-  onRowRemoved,
 }: {
   name: string;
   def: Extract<FieldDef, { type: 'list' }>;
@@ -288,11 +286,9 @@ function ListField({
   /** The cells a problem is about, as `rowNumber.column`: each is marked and points at the list's message. */
   cells: Set<string>;
   mark: FieldMark | undefined;
-  /** By row, the cells still holding sample copy (`SampleMarks`); a row is sample while any are. */
+  /** By row, the cells still holding sample copy (`SampleFields`); a row is sample while any are. */
   sampleRows: string[][] | undefined;
   onChange: Edit;
-  onCellEdited: (row: number, key: string) => void;
-  onRowRemoved: (row: number) => void;
 }) {
   const setRows = (next: Record<string, unknown>[]) => onChange((d) => ({ ...d, data: { ...d.data, [name]: next } }));
   const full = def.maxItems !== undefined && rows.length >= def.maxItems;
@@ -330,10 +326,7 @@ function ListField({
               variant="ghost"
               size="icon"
               aria-label={`Remove row ${i + 1} of ${def.label}`}
-              onClick={() => {
-                setRows(rows.filter((_, j) => j !== i));
-                onRowRemoved(i);
-              }}
+              onClick={() => setRows(rows.filter((_, j) => j !== i))}
             >
               <Trash2Icon aria-hidden />
             </Button>
@@ -355,10 +348,7 @@ function ListField({
                   invalid={cells.has(`${i + 1}.${k}`)}
                   describedBy={describedBy}
                   sample={sampleCell}
-                  onChange={(v) => {
-                    setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-                    onCellEdited(i, k);
-                  }}
+                  onChange={(v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))}
                 />
               </div>
             );
@@ -382,6 +372,7 @@ export function FieldForm({
   draft,
   assets,
   marks = {},
+  sampleFields = null,
   flyer,
   onChange,
   onEdited,
@@ -394,6 +385,8 @@ export function FieldForm({
   assets: AssetView[];
   /** The agent's marks, by field, on a spot it just filled. */
   marks?: Record<string, FieldMark>;
+  /** The saved spot's fields still holding its template's sample text, as the server records them (#360). */
+  sampleFields?: SampleFields | null;
   flyer?: Flyer;
   onChange: Edit;
   /** Told which field changed, to take its mark away. */
@@ -401,9 +394,6 @@ export function FieldForm({
 }) {
   const checks = useAppStore((s) => s.spotEditor.checks[spotId]);
   const touch = useAppStore((s) => s.touchField);
-  const samples = useAppStore((s) => s.spotEditor.samples[spotId]);
-  const editedSample = useAppStore((s) => s.editedSample);
-  const removedSample = useAppStore((s) => s.removedSampleRow);
   // In words; an empty field's problem only once touched or Publish was pressed.
   const raw = new Map(
     [...fieldProblems(fields, draft, Object.keys(shown))].flatMap(([name, list]) => {
@@ -423,7 +413,6 @@ export function FieldForm({
           onEdited?.(name);
           touch(spotId, name);
         };
-        const sampleList = samples?.lists[name];
         if (def.type === 'image')
           return (
             <ImageField
@@ -452,10 +441,8 @@ export function FieldForm({
               problems={p}
               cells={cells}
               mark={mark}
-              sampleRows={sampleList?.rows}
+              sampleRows={sampleFields?.lists[name]}
               onChange={edit}
-              onCellEdited={(row, key) => editedSample(spotId, name, { row, key })}
-              onRowRemoved={(row) => removedSample(spotId, name, row)}
             />
           );
         }
@@ -463,12 +450,9 @@ export function FieldForm({
         const errorId = `${id}-error`;
         const markId = `${id}-mark`;
         const sampleId = `${id}-sample`;
-        const sample = samples?.texts[name] !== undefined;
+        const sample = sampleFields?.texts.includes(name) === true;
         const describedBy = [p && errorId, mark && markId, sample && sampleId].filter(Boolean).join(' ') || undefined;
-        const set = (v: unknown) => {
-          edit((d) => ({ ...d, data: { ...d.data, [name]: v } }));
-          editedSample(spotId, name);
-        };
+        const set = (v: unknown) => edit((d) => ({ ...d, data: { ...d.data, [name]: v } }));
         return (
           <div key={name} className={def.type === 'boolean' ? 'flex flex-wrap items-center gap-x-3 gap-y-1.5' : fieldClass}>
             <span className="flex justify-between gap-2">

@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ScheduleEntryView } from '../src/lib/schedule';
-import type { SampleMarks } from '../src/lib/spots';
 import { callTool, Refusal } from '../src/lib/tools';
 import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
@@ -25,12 +24,9 @@ vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 
 const ORG = 'org_1';
 
-/** The publishing slice, with the sample copy New spot recorded (#360): none unless a test says. */
-function publishingStore(deps: object, samples: Record<string, SampleMarks> = {}) {
-  return createStore<PublishingSlice & { spotEditor: { samples: Record<string, SampleMarks> } }>()((set, get) => ({
-    ...createPublishingSlice(set as never, get as never, deps as never),
-    spotEditor: { samples },
-  }));
+/** The publishing slice alone. */
+function publishingStore(deps: object) {
+  return createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, deps as never));
 }
 const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
   id,
@@ -356,51 +352,98 @@ describe('a held publish (#253)', () => {
   });
 });
 
-describe('publishing a spot that still has its sample copy (#360)', () => {
-  /** A schedule publish that carries spot Pier 9, whose Headline and Body New spot recorded as sample. */
-  function withSample(marks: SampleMarks) {
+describe('sample text the server refuses (#360)', () => {
+  const refusal = () => new Refusal('sample_text', 'still holding sample text', { spots: [{ id: 'spt_pier', name: 'Pier 9', fields: ['headline', 'body'] }] });
+  /** A schedule publish the server refuses once for sample text, then publishes. */
+  function refusedOnce() {
     vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
-    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [{ id: 'pls_main', version: 2, spotIds: ['spt_pier'], draftChanged: true }] } as never);
-    vi.mocked(getSpots).mockResolvedValue({ spots: [{ id: 'spt_pier', name: 'Pier 9', version: 3, draftChanged: true }] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(refusal())
+      .mockImplementation(async () => published(++revision));
     const navigate = vi.fn();
-    const store = publishingStore({ router: { navigate }, queryClient: new QueryClient() }, { spt_pier: marks });
-    vi.mocked(callTool).mockClear();
-    return { store, navigate };
+    return { store: publishingStore({ router: { navigate }, queryClient: new QueryClient() }), navigate };
   }
-  const sample: SampleMarks = { texts: { headline: 'Headline', body: 'Body' }, lists: {} };
+  const asked = (store: ReturnType<typeof publishingStore>) => vi.waitFor(() => expect(store.getState().publishing.sampleCheck).not.toBeNull());
 
-  it('asks first, naming the fields, and sends nothing until Publish anyway', async () => {
-    const { store } = withSample(sample);
-    await store.getState().publishSchedule(ORG);
-    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
-    expect(store.getState().publishing.sampleCheck?.words).toBe('Headline and Body still have sample text.');
-    await store.getState().publishAnyway();
-    expect(vi.mocked(callTool)).toHaveBeenCalledWith('publish', {
-      drafts: [
-        { kind: 'schedule_entry', id: 'sch_breakfast', version: 1 },
-        { kind: 'playlist', id: 'pls_main', version: 2 },
-        { kind: 'spot', id: 'spt_pier', version: 3 },
-      ],
+  it('asks, naming the fields, and Publish anyway sends it again with allowSample', async () => {
+    const { store } = refusedOnce();
+    const done = store.getState().publishSchedule(ORG);
+    await asked(store);
+    // The templates could not be read here: the fields are named as they are.
+    expect(store.getState().publishing.sampleCheck?.words).toBe('headline and body still have sample text.');
+    store.getState().publishAnyway();
+    expect(await done).toBe(true);
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
+      drafts: [{ kind: 'schedule_entry', id: 'sch_breakfast', version: 1 }],
+      allowSample: true,
     });
     expect(store.getState().publishing.sampleCheck).toBeNull();
   });
 
-  it('Edit first sends nothing and opens the spot; Escape only lets it go', async () => {
-    const { store, navigate } = withSample(sample);
-    await store.getState().publishSchedule(ORG);
+  it('Edit first sends nothing more, says not published, and opens the spot; Escape only lets it go', async () => {
+    const { store, navigate } = refusedOnce();
+    const done = store.getState().publishSchedule(ORG);
+    await asked(store);
     await store.getState().editFirst();
-    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(await done).toBe(false);
+    expect(vi.mocked(callTool)).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith({ to: '/spots/$spotId', params: { spotId: 'spt_pier' } });
-    await store.getState().publishSchedule(ORG);
+
+    vi.mocked(callTool).mockReset().mockRejectedValueOnce(refusal());
+    const again = store.getState().publishSchedule(ORG);
+    await asked(store);
     store.getState().dropSampleCheck();
-    expect(store.getState().publishing.sampleCheck).toBeNull();
+    expect(await again).toBe(false);
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
-  it('publishes at once when every sample has been replaced, a list row by every cell', async () => {
-    const { store } = withSample({ texts: {}, lists: { facts: { label: 'Facts', rows: [[]] } } });
-    await store.getState().publishSchedule(ORG);
-    expect(store.getState().publishing.sampleCheck).toBeNull();
-    expect(vi.mocked(callTool)).toHaveBeenCalledWith('publish', expect.anything());
+  it('with a default to set first, asks before anything is written: Edit first changes nothing (finding 4)', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({
+      playlists: [{ id: 'pls_main', name: 'Main', version: 2, spotIds: ['spt_pier'], isDefault: false, published: false, draftChanged: true }],
+    } as never);
+    vi.mocked(getSpots).mockResolvedValue({
+      spots: [{ id: 'spt_pier', name: 'Pier 9', version: 3, published: false, draftChanged: true, sampleFields: { texts: ['headline'], lists: {} } }],
+    } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockImplementation(async () => published(++revision));
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    const done = store.getState().publishSchedule(ORG, ['sch_breakfast'], 'pls_main');
+    await asked(store);
+    await store.getState().editFirst();
+    expect(await done).toBe(false);
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+
+    // Publish anyway: the default is set, then the publish goes, allowed.
+    const yes = store.getState().publishSchedule(ORG, ['sch_breakfast'], 'pls_main');
+    await asked(store);
+    store.getState().publishAnyway();
+    expect(await yes).toBe(true);
+    expect(vi.mocked(callTool).mock.calls.map((c) => c[0])).toEqual(['set_default_playlist', 'publish']);
+    expect(vi.mocked(callTool).mock.calls[1]?.[1]).toMatchObject({ allowSample: true });
+  });
+
+  it('before a takeover is started, asks about its playlist’s spots: cancelled, allowed, or none to ask about', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({
+      playlists: [
+        { id: 'pls_flash', spotIds: ['spt_pier'] },
+        { id: 'pls_clean', spotIds: [] },
+      ],
+    } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [{ id: 'spt_pier', name: 'Pier 9', sampleFields: { texts: ['headline'], lists: {} } }] } as never);
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    expect(await store.getState().checkSampleText(ORG, 'pls_clean')).toBe('none');
+    const cancelled = store.getState().checkSampleText(ORG, 'pls_flash');
+    await asked(store);
+    store.getState().dropSampleCheck();
+    expect(await cancelled).toBe('cancelled');
+    const allowed = store.getState().checkSampleText(ORG, 'pls_flash');
+    await asked(store);
+    store.getState().publishAnyway();
+    expect(await allowed).toBe('allowed');
   });
 });

@@ -82,25 +82,59 @@ const CARD: AnswerCard = {
 const turn = (card: AnswerCard = CARD) =>
   new Response(`${JSON.stringify({ type: 'answer', card } satisfies ChatEvent)}\n`, { headers: { 'content-type': 'application/x-ndjson' } });
 
-function draftsStore() {
+/** `published`: what each publish the drawer asks for answers; with it, the page shows an org, so Publish now runs. */
+function draftsStore(published?: boolean) {
   const reloaded: string[] = [];
+  const matches = published === undefined ? [] : [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }];
   const store = createStore<any>()((set, get) => ({
     ...createAgentDrawerSlice(set, get, {
-      router: { state: { location: { pathname: '/spots/spt_1' }, matches: [] } },
+      router: { state: { location: { pathname: '/spots/spt_1' }, matches } },
       queryClient: new QueryClient(),
     } as never),
     agent: { filled: {} },
     setRightPanel: () => {},
     reloadSpot: async (_o: string, id: string) => void reloaded.push(id),
-    publishSpot: vi.fn(async () => {}),
-    publishEntry: vi.fn(async () => {}),
-    publishPlaylist: vi.fn(async () => {}),
+    publishSpot: vi.fn(async () => published ?? true),
+    publishEntry: vi.fn(async () => published ?? true),
+    publishPlaylist: vi.fn(async () => published ?? true),
   }));
   const at = () => store.getState().agentDrawer.messages[1];
   return { store: store as unknown as { getState: () => AgentDrawerSlice & Record<string, any> }, reloaded, at };
 }
 
 describe("the drawer's drafts, in the store", () => {
+  /** The save's answer: both drafts written. */
+  const savedBoth = () =>
+    Response.json({
+      results: [
+        { tool: 'update_spot', ok: true, output: { spot: { ...BEFORE, data: { headline: 'Hot breakfast, fast' }, version: 4 } } },
+        { tool: 'create_schedule_entry', ok: true, output: { entry: { id: 'sch_new', version: 1 } } },
+      ],
+    });
+  /** The drafts proposed, saved and Publish now pressed, each publish answering `published`. */
+  async function publishedNow(published: boolean) {
+    const made = draftsStore(published);
+    answers.push(turn());
+    await made.store.getState().askAgent('Make the headline punchier');
+    answers.push(savedBoth());
+    await made.store.getState().saveDrafts(1);
+    await made.store.getState().publishDrafts(1);
+    return made;
+  }
+
+  it('says Publish now was not published when a publish was let go, such as Edit first on sample text (#360), and stops there', async () => {
+    const { store, at } = await publishedNow(false);
+    expect(store.getState().publishSpot).toHaveBeenCalledWith('org_1', 'spt_1');
+    expect(store.getState().publishEntry).not.toHaveBeenCalled();
+    expect(at().drafts).toMatchObject({ status: 'saved', error: 'Not published: the changes are saved as drafts.' });
+  });
+
+  it('says published once every publish went through', async () => {
+    const { store, at } = await publishedNow(true);
+    expect(store.getState().publishEntry).toHaveBeenCalledWith('org_1', 'sch_new');
+    expect(at().drafts).toMatchObject({ status: 'published', error: null });
+  });
+
   it('writes nothing until saved; a save marks the spot in its editor and reloads it; Undo puts each back, the last first', async () => {
     const { store, reloaded, at } = draftsStore();
     answers.push(turn());
@@ -109,14 +143,7 @@ describe("the drawer's drafts, in the store", () => {
     expect(at().drafts.shown.summaries).toHaveLength(2);
     expect(sent.map((s) => s.path)).toEqual(['/api/agent/chat']);
 
-    answers.push(
-      Response.json({
-        results: [
-          { tool: 'update_spot', ok: true, output: { spot: { ...BEFORE, data: { headline: 'Hot breakfast, fast' }, version: 4 } } },
-          { tool: 'create_schedule_entry', ok: true, output: { entry: { id: 'sch_new', version: 1 } } },
-        ],
-      }),
-    );
+    answers.push(savedBoth());
     await store.getState().saveDrafts(1);
     expect(sent.at(-1)).toEqual({ path: '/api/agent/apply', body: { calls: CARD.drafts.map(({ tool, input }) => ({ tool, input })) } });
     expect(at().drafts).toMatchObject({ status: 'saved', error: null });

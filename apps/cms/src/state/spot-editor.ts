@@ -36,7 +36,7 @@ import { playerMessage } from '~/lib/preview';
 import { overviewKey } from '~/lib/overview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { problemWords } from '~/lib/field-words';
-import { compilePreview, draftOf, fieldProblems, versionsById, type SampleMarks, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
+import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
 import { callTool, Refusal, toolMessage } from '~/lib/tools';
@@ -105,8 +105,6 @@ interface SpotEditorState {
    * Publish was pressed: an empty field's problem shows only then (#359), not on a spot just made.
    */
   checks: Record<string, { touched: string[]; all: boolean }>;
-  /** By spot, its sample copy not replaced yet (`SampleMarks`): the editor marks it, and Publish asks first. */
-  samples: Record<string, SampleMarks>;
   /** Delete's confirmation: open, deleting, or refused, with the playlists that play the spot when that is why. */
   deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[] };
 }
@@ -133,13 +131,8 @@ export interface SpotEditorSlice {
   openNewSpot: (open: boolean) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
   /** Creates the spot from the dialog's draft, called `name`, and opens its editor. */
-  createSpot: (orgId: string, name: string, start?: { durationMs: number; data: Record<string, unknown>; samples: SampleMarks }) => Promise<void>;
-  /** A field of the spot edited (`cell`: one cell of a list's row): its sample mark goes. */
-  editedSample: (spotId: string, field: string, cell?: { row: number; key: string }) => void;
-  /** A list's row removed: its sample mark goes with it, and the rows after it move up. */
-  removedSampleRow: (spotId: string, field: string, row: number) => void;
-  /** Fields the agent wrote: their sample marks go. */
-  clearSamples: (spotId: string, fields: readonly string[]) => void;
+  /** `sample`: a template spot started with its template's sample copy, which the server records (#360). */
+  createSpot: (orgId: string, name: string, sample?: boolean) => Promise<void>;
   /** A field of the spot touched: its empty-field problem may show now. */
   touchField: (spotId: string, field: string) => void;
   /** Publish pressed: every field's problem shows. */
@@ -189,7 +182,6 @@ const initial: SpotEditorState = {
   stageBox: null,
   newSpot: newSpotDraft(),
   checks: {},
-  samples: {},
   deleting: closedDelete(),
 };
 
@@ -219,12 +211,6 @@ function frameInView(frame: Window): boolean {
 
 export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
-  /** Changes a spot's sample marks; a spot with none is left alone. */
-  const samples = (spotId: string, change: (m: SampleMarks) => SampleMarks) =>
-    editor((e) => {
-      const was = e.samples[spotId];
-      return was ? { ...e, samples: { ...e.samples, [spotId]: change(was) } } : e;
-    });
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
   let hearing = false;
 
@@ -431,20 +417,19 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     openNewSpot: (open) => editor((e) => ({ ...e, newSpot: open ? { ...newSpotDraft(), open } : newSpotDraft() })),
     editNewSpot: (change) => editor((e) => ({ ...e, newSpot: { ...e.newSpot, ...change, error: null } })),
 
-    async createSpot(orgId, name, start) {
+    async createSpot(orgId, name, sample) {
       const key = get().spotEditor.newSpot.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newSpot: { ...e.newSpot, key, pending: true, error: null } }));
       const d = get().spotEditor.newSpot;
       const kind =
         d.kind === 'template'
-          ? { kind: 'template', templateVersionId: d.templateVersionId, ...(start && { durationMs: start.durationMs, data: start.data }) }
+          ? { kind: 'template', templateVersionId: d.templateVersionId, ...(sample && { sample }) }
           : d.kind === 'url'
             ? { kind: 'url', url: d.url.trim() }
             : { kind: 'image', assetId: d.assetId };
       try {
         const spot = (await callTool('create_spot', { name: name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
-        if (start) editor((e) => ({ ...e, samples: { ...e.samples, [spot.id]: start.samples } }));
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         await router.navigate({ to: '/spots/$spotId', params: { spotId: spot.id } });
@@ -453,30 +438,6 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         editor((e) => ({ ...e, newSpot: { ...e.newSpot, pending: false, error: toolMessage(err) } }));
       }
     },
-
-    editedSample: (spotId, field, cell) =>
-      samples(spotId, (m) => {
-        if (!cell) {
-          const { [field]: _edited, ...texts } = m.texts;
-          return { ...m, texts };
-        }
-        const list = m.lists[field];
-        if (!list) return m;
-        const rows = list.rows.map((keys, i) => (i === cell.row ? keys.filter((k) => k !== cell.key) : keys));
-        return { ...m, lists: { ...m.lists, [field]: { ...list, rows } } };
-      }),
-
-    removedSampleRow: (spotId, field, row) =>
-      samples(spotId, (m) => {
-        const list = m.lists[field];
-        return list ? { ...m, lists: { ...m.lists, [field]: { ...list, rows: list.rows.filter((_, i) => i !== row) } } } : m;
-      }),
-
-    clearSamples: (spotId, fields) =>
-      samples(spotId, (m) => ({
-        texts: Object.fromEntries(Object.entries(m.texts).filter(([f]) => !fields.includes(f))),
-        lists: Object.fromEntries(Object.entries(m.lists).filter(([f]) => !fields.includes(f))),
-      })),
 
     touchField(spotId, field) {
       const was = get().spotEditor.checks[spotId] ?? { touched: [], all: false };

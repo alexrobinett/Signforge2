@@ -345,13 +345,24 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const at = draftsAt(index);
       const orgId = orgOnScreen(router);
       if (!at || !orgId || at.drafts.status !== 'saved') return;
-      drafts(index, (d) => ({ ...d, status: 'publishing', confirming: false }));
+      drafts(index, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
       for (const r of at.drafts.results) {
         const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
         if (!saved) continue;
-        if (r.tool === 'update_spot') await get().publishSpot(orgId, String(saved.id));
-        else if (r.tool === 'update_playlist') await get().publishPlaylist(orgId, String(saved.id));
-        else if (r.tool === 'create_schedule_entry' || r.tool === 'update_schedule_entry') await get().publishEntry(orgId, String(saved.id));
+        const id = String(saved.id);
+        const published =
+          r.tool === 'update_spot'
+            ? await get().publishSpot(orgId, id)
+            : r.tool === 'update_playlist'
+              ? await get().publishPlaylist(orgId, id)
+              : r.tool === 'create_schedule_entry' || r.tool === 'update_schedule_entry'
+                ? await get().publishEntry(orgId, id)
+                : true;
+        // Not published (Edit first on sample text, #360, or a refusal the toast told): the drafts stay saved, and the card says so.
+        if (!published) {
+          drafts(index, (d) => ({ ...d, status: 'saved', error: 'Not published: the changes are saved as drafts.' }));
+          return;
+        }
       }
       drafts(index, (d) => ({ ...d, status: 'published' }));
     },
