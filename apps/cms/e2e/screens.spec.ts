@@ -319,7 +319,8 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await refuse();
   await page.goto('/screens');
   await hydrated(page);
-  const notice = page.getByRole('status').filter({ hasText: 'Status is not current.' });
+  // The page's own notice: the sidebar's counts, read by the same server functions, say theirs are not current too (#361).
+  const notice = page.getByRole('main').getByRole('status').filter({ hasText: 'Status is not current.' });
   await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
   await expect(notice).toBeVisible({ timeout: 20_000 });
   await expect(notice).toContainText(/SignForge has not answered since \d{1,2}\D\d{2}/);

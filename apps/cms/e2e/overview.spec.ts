@@ -189,7 +189,7 @@ test('a long playlist name wraps on a phone, hiding the checklist keeps it hidde
     new URL(route.request().url()).pathname.startsWith('/_serverFn/getScreenStatus_') ? route.abort('connectionrefused') : route.fallback(),
   );
   await page.reload();
-  await expect(page.getByRole('status').filter({ hasText: 'Status is not current.' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('main').getByRole('status').filter({ hasText: 'Status is not current.' })).toBeVisible({ timeout: 20_000 });
   await axe(page);
   await page.unroute('**/_serverFn/**');
 });
