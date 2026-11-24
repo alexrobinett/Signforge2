@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon, SparklesIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AgentDrawer } from '~/components/agent-drawer';
@@ -108,7 +108,8 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
   const openDrawer = useAppStore((s) => s.openDrawer);
   const closeDrawer = useAppStore((s) => s.closeDrawer);
   const status = useAppStore((s) => s.orgs.status);
-  const folded = useAppStore((s) => isFolded(s.ui));
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const folded = useAppStore((s) => isFolded(s.ui, path));
   const agentOpen = useAppStore((s) => s.agentDrawer.open);
   const openAgent = useAppStore((s) => s.openAgentDrawer);
   const hues = orgHues(shell.organizations.map((o) => o.id));
