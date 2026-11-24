@@ -23,6 +23,7 @@ import {
   portTaken,
   RUN_DIR,
   STUB_FILL,
+  STUB_MENU,
 } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
@@ -62,7 +63,7 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
  * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
  * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
  * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
- * Promo template. On a free port, so the run never reaches the internet or spends a token.
+ * Promo template, or, asked to update a Menu Board (#264), with `STUB_MENU`. On a free port, so the run never reaches the internet or spends a token.
  */
 async function anthropicStub(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
@@ -76,8 +77,8 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
       req.on('end', () => {
         const asked = JSON.parse(body);
         const keys: string[] = asked.output_config.format.schema.properties.template.enum;
-        const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0];
-        const { name, ...data } = STUB_FILL;
+        const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0] ?? '';
+        const { name, ...data } = template.startsWith('base/menu-board@') ? STUB_MENU : STUB_FILL;
         const text = JSON.stringify({ template, name, data_json: JSON.stringify(data), unsure: ['price'] });
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(

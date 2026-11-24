@@ -750,7 +750,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     expect(body.review.data).toEqual({ ...MENU_DATA, title: 'Lunch' });
     const listing = m.model.asked[0]!.body.messages[0].content.at(-1).text;
     expect(listing).toContain('"title"');
-    expect(listing).not.toMatch(/<templates>[^]*"items"[^]*<\/templates>/);
+    expect(listing).not.toMatch(/<templates>[\s\S]*"items"[\s\S]*<\/templates>/);
   });
 
   it('keeps the review as the agent, through update_spot with the version it was made on', async () => {

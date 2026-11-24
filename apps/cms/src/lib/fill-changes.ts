@@ -33,7 +33,7 @@ export type FieldChange =
       field: string;
       label: string;
       kind: 'rows';
-      changed: { name: string; key: string; cells: { label: string; before: string; after: string }[] }[];
+      changed: { name: string; key: string; cells: { column: string; label: string; before: string; after: string }[] }[];
       added: string[];
       removed: string[];
     };
@@ -51,7 +51,7 @@ export function fillChanges(fields: Record<string, FieldDef>, before: Record<str
       const b = now[j] ?? {};
       const cells = Object.entries(def.item)
         .filter(([k]) => !same(a[k], b[k]))
-        .map(([k, d]) => ({ label: d.label, before: shown(a[k]), after: shown(b[k]) }));
+        .map(([k, d]) => ({ column: k, label: d.label, before: shown(a[k]), after: shown(b[k]) }));
       return cells.length ? [{ name: column ? shown(a[column]) : `Row ${i + 1}`, key: column ? rowKey(a, column) : '', cells }] : [];
     });
     return [
@@ -79,8 +79,8 @@ export interface AlsoOn {
 
 /**
  * The org's other template spots with a list row named as a row this update changes (`changes`'
- * `changed`), each with its data as the same review would leave it: in each such row, every column
- * the changed row changed that this spot's row has too. Rows added or removed are this spot's own.
+ * `changed`), each with its data as the same review would leave it: in each such row, only the
+ * columns the update changed, where this spot's row has them too. Rows added or removed are this spot's own.
  */
 export function alsoOn(
   spotId: string,
@@ -90,14 +90,17 @@ export function alsoOn(
   spots: SpotView[],
   versions: Map<string, TemplateVersionView>,
 ): AlsoOn[] {
-  // The changed rows, by key: their new values, as the update leaves them.
+  // The changed rows, by key: the columns the update changed, with their new values.
   const updated = new Map<string, Row>();
   for (const c of changes) {
     if (c.kind !== 'rows') continue;
     const def = fields[c.field];
     const column = def?.type === 'list' ? keyColumn(def.item) : undefined;
     if (!column) continue;
-    for (const row of rowsOf(after[c.field])) if (c.changed.some((x) => x.key === rowKey(row, column))) updated.set(rowKey(row, column), row);
+    for (const row of rowsOf(after[c.field])) {
+      const changed = c.changed.find((x) => x.key === rowKey(row, column));
+      if (changed) updated.set(rowKey(row, column), Object.fromEntries(changed.cells.filter((x) => x.column !== column).map((x) => [x.column, row[x.column]])));
+    }
   }
   if (!updated.size) return [];
   return spots.flatMap((spot): AlsoOn[] => {
@@ -113,7 +116,7 @@ export function alsoOn(
         const now = updated.get(rowKey(row, column));
         if (!now) return row;
         const next = Object.fromEntries(
-          Object.entries(row).map(([k, v]) => [k, k !== column && k in now && ['text', 'number', 'select'].includes(def.item[k]?.type ?? '') ? now[k] : v]),
+          Object.entries(row).map(([k, v]) => [k, k in now && ['text', 'number', 'select'].includes(def.item[k]?.type ?? '') ? now[k] : v]),
         );
         if (!same(next, row)) items.push(shown(row[column]));
         return next;

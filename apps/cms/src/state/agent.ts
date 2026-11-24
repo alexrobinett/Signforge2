@@ -62,7 +62,7 @@ interface Filled {
 }
 
 /** What an update would change, until it is kept or let go (#264). */
-export interface Review {
+interface Review {
   orgId: string;
   version: number;
   before: Record<string, unknown>;
@@ -268,7 +268,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         // Where else a changed row is, from the org's spots and templates as the Spots page reads them: a help, so a
         // read that fails offers none rather than failing the review.
         const changes = fillChanges(fields, review.before, review.data);
-        const others = await Promise.all([queryClient.fetchQuery(spotsQuery(orgId)), queryClient.fetchQuery(templatesQuery(orgId))]).then(
+        const others = await Promise.all([queryClient.query(spotsQuery(orgId)), queryClient.query(templatesQuery(orgId))]).then(
           ([spots, templates]) => alsoOn(spotId, fields, review.data, changes, spots.spots, versionsById(templates.templates)),
           (): AlsoOn[] => [],
         );
