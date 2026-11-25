@@ -1,29 +1,321 @@
 import { describe, expect, it } from 'vitest';
-import { at, brandColourTests, host, spotData, useTemplate } from '@signforge/template-test';
+import type { Frame } from 'playwright';
+import type { FrameTheme, Orientation } from '@signforge/contract';
+import { rowAsset } from '@signforge/template-sdk/rows';
+import {
+  at,
+  DEMO_KIT,
+  host,
+  layoutFaults,
+  LIGHT_KIT,
+  motion,
+  noDemoAndLight,
+  NOW,
+  paintedContrast,
+  spotData,
+  useTemplate,
+  type Data,
+} from '@signforge/template-test';
 
+const img = { file: 'a'.repeat(64), thumb: 'b'.repeat(64) };
 const t = useTemplate(new URL('..', import.meta.url), {
-  a: { items: [] },
-  b: { source: 'Wire', items: [1, 2, 3].map((i) => ({ title: `Headline ${i}`, published: at(-i), source: 'Wire' })) },
+  a: { look: 'night', items: [] },
+  b: { look: 'poster', showList: false, items: [{ title: 'Ferry runs late', published: '', source: 'Wire', summary: 'By an hour.', image: img }] },
+  assetsB: { [rowAsset('items', 0, 'image')]: '#369', [rowAsset('items', 0, 'image', 'thumb')]: '#369' },
 });
 
-describe('template time', () => {
-  // Wednesday 2031-01-01 09:30 UTC: years from the machine's own clock, so the device time cannot pass for it.
-  const later = Date.parse('2031-01-01T09:30:00Z');
+describe('news 2.0 (#202)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  const toggles = ['showImages', 'showSummary', 'showList', 'showMeta', 'showCrawl'];
+  const demo: FrameTheme = { colors: DEMO_KIT, shape: 'soft', fonts: {} };
 
-  it('shows the time from init, not the device clock', async () => {
-    const hst = await host();
-    const text = async (sel: string) => (await hst.page.mainFrame().childFrames()[0]!.locator(sel).first().textContent())?.trim();
-    await hst.open('fresh', t().html);
-    const items = [{ title: 'Story', published: '2031-01-01T08:30:00Z', source: 'Wire' }];
-    await hst.init('fresh', spotData(t().manifest, { items }), {}, later);
-    await hst.waitFor('fresh', 'ready', 1);
-    expect(await text('#clock')).toBe('9:30 AM');
-    expect(await text('#age')).toBe('1 hour ago');
+  interface Story {
+    title: string;
+    published: string;
+    source: string;
+    summary: string;
+    image?: typeof img;
+  }
+  const story = (i: number, over: Partial<Story> = {}): Story => ({
+    title: `Council approves the riverside park, story ${i + 1}`,
+    published: at(-(i + 1)),
+    source: 'Metro Desk',
+    summary: 'The park opens in phases from next spring, with a boardwalk and a ferry stop.',
+    image: img,
+    ...over,
   });
-});
+  /** Each story's photo and thumbnail, but for the indices in `missing`: their blobs never arrived. */
+  const photos = (n: number, missing: number[] = []) =>
+    Object.fromEntries(
+      Array.from({ length: n }, (_, i) => i)
+        .filter((i) => !missing.includes(i))
+        .flatMap((i) => [
+          [rowAsset('items', i, 'image'), '64x36: #4b86b4; #1b2a3a 0,22,64,14'],
+          [rowAsset('items', i, 'image', 'thumb'), '32x18: #a0522d; #1b2a3a 0,11,32,7'],
+        ]),
+    );
+  /** Every text at its longest: 30 stories, each headline at 200 characters and summary at 240. */
+  const sentence = 'Harbor commission votes to rebuild the north pier and widen the ferry terminal before the summer season begins. ';
+  const longest = (bare = false): Story[] =>
+    Array.from({ length: 30 }, (_, i) =>
+      story(i, {
+        title: sentence.repeat(2).slice(0, 200),
+        summary: sentence.repeat(3).slice(0, 240),
+        source: 'Metropolitan Harbor Authority Newsroom',
+        ...(bare && i === 0 ? { image: undefined } : {}),
+      }),
+    );
 
-brandColourTests(t, {
-  spots: (accent) => [[{ accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }]],
-  onFill: [['.badge', '.badge', 4.5]],
-  onBackdrop: ['.age'],
+  /** One frame at a screen's own size; `show` inits it and waits for ready. One turn per play unless `rotate`. */
+  async function frame(orientation: Orientation = 'landscape') {
+    const hst = await host(orientation, true);
+    await hst.open('fresh', t().html);
+    let inits = 0;
+    return {
+      hst,
+      async show(data: Data, assets: Record<string, string> = photos(30), theme: FrameTheme | null = demo, durationMs = 15_000) {
+        await hst.init('fresh', spotData(t().manifest, { rotationSeconds: 30, ...data }), assets, NOW, theme ?? undefined, false, durationMs);
+        await hst.waitFor('fresh', 'ready', ++inits);
+        return hst.page.mainFrame().childFrames()[0]!;
+      },
+    };
+  }
+  const settings: Data[] = Array.from({ length: 32 }, (_, bits) => Object.fromEntries(toggles.map((k, i) => [k, !(bits & (1 << i))])));
+  const named = (set: Data) =>
+    toggles
+      .filter((k) => !set[k])
+      .map((k) => `${k.slice(4).toLowerCase()} off`)
+      .join(', ') || 'all on';
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    for (const look of looks)
+      it(`${look}, ${orientation}: in every toggle setting, at the longest copy, with and without a lead photo, nothing overflows, overlaps or runs off`, async () => {
+        const r = await frame(orientation);
+        const found: string[] = [];
+        for (const bare of [false, true])
+          for (const set of settings) {
+            const f = await r.show({ look, items: longest(bare), ...set }, photos(30, bare ? [0] : []));
+            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${bare ? 'no lead photo' : 'lead photo'}, ${named(set)}: ${fault}`);
+          }
+        expect(found).toEqual([]);
+      }, 300_000);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`ordinary stories fit at the look's own size, no headline stepped down, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show({ look, items: [0, 1, 2, 3, 4].map((i) => story(i, bare ? { image: undefined } : {})) });
+          for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${look}: ${fault}`);
+          if (await f.evaluate(() => document.querySelector<HTMLElement>('.story')!.style.getPropertyValue('--fit')))
+            found.push(`${look}: the headline is stepped down`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  /** Settings whose painted text differs: all on, each toggle off alone, all off. */
+  const contrastSets: Data[] = [{}, ...toggles.map((k) => ({ [k]: false })), Object.fromEntries(toggles.map((k) => [k, false]))];
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text reads as painted, with no kit, the demo kit and a light kit, on a photo lead and a bare one, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const [kit, theme] of noDemoAndLight(LIGHT_KIT))
+        for (const look of looks)
+          for (const bare of [false, true])
+            for (const set of contrastSets) {
+              const items = [0, 1, 2, 3, 4].map((i) => story(i));
+              const f = await r.show({ look, items, ...set }, photos(5, bare ? [0] : []), theme ?? null);
+              // The lead is painted from play.
+              await r.hst.post('fresh', 'play');
+              await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+              const all = Object.fromEntries(toggles.map((k) => [k, true]));
+              for (const l of await paintedContrast(r.hst.page, f, '.stage'))
+                found.push(`${look}, ${kit}, ${bare ? 'bare lead' : 'photo lead'}, ${named({ ...all, ...set })}: ${l}`);
+            }
+      expect(found).toEqual([]);
+    }, 600_000);
+
+  /** At `ms` into the play, all animations paused there: the story on top, the stories shown, and the row the marker is on. */
+  const at_ = (f: Frame, ms: number) =>
+    f.evaluate((ms) => {
+      for (const a of document.getAnimations()) {
+        a.pause();
+        a.currentTime = ms;
+      }
+      const shown = [...document.querySelectorAll<HTMLElement>('.story')].filter((s) => getComputedStyle(s).opacity === '1');
+      const marker = document.querySelector<HTMLElement>('.marker');
+      const y = marker ? new DOMMatrix(getComputedStyle(marker).transform).m42 : undefined;
+      const rows = [...document.querySelectorAll<HTMLElement>('.row')];
+      return {
+        lead: shown.at(-1)?.querySelector('.headline')?.textContent,
+        shown: shown.length,
+        marked: y === undefined ? undefined : rows.findIndex((row) => Math.abs(row.offsetTop - y) < 1),
+      };
+    }, ms);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`turns the lead through the listed stories over the play, the marker arriving as each comes on, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const items = Array.from({ length: 8 }, (_, i) => story(i));
+      const rows = orientation === 'landscape' ? 5 : 4;
+      for (const look of looks) {
+        // 40 s at 8 s a story: five turns in landscape; the four listed stories in portrait, 10 s each.
+        const f = await r.show({ look, items, rotationSeconds: 8 }, photos(8), demo, 40_000);
+        const slot = 40_000 / rows;
+        expect(await f.evaluate(() => document.querySelectorAll('.story').length), look).toBe(rows);
+        for (let i = 0; i < rows; i++) {
+          expect(await at_(f, i * slot + slot / 2), `${look}, story ${i + 1}`).toEqual({ lead: items[i]!.title, shown: 1, marked: i });
+        }
+        // The last story stays to the end; the first is on from the start.
+        expect(await at_(f, 40_000), look).toEqual({ lead: items[rows - 1]!.title, shown: 1, marked: rows - 1 });
+        expect((await at_(f, 0)).lead, look).toBe(items[0]!.title);
+      }
+    }, 120_000);
+
+  it('turns as often as rotationSeconds asks, at most once per listed story, and not at all with one story', async () => {
+    const r = await frame();
+    const turns = async (data: Data, durationMs: number) =>
+      (await r.show(data, photos(8), demo, durationMs)).evaluate(() => document.querySelectorAll('.story').length);
+    const items = Array.from({ length: 8 }, (_, i) => story(i));
+    expect(await turns({ items, rotationSeconds: 8 }, 16_000)).toBe(2);
+    expect(await turns({ items, rotationSeconds: 4 }, 16_000)).toBe(4);
+    expect(await turns({ items, rotationSeconds: 4 }, 300_000)).toBe(5);
+    expect(await turns({ items: [story(0)], rotationSeconds: 4 }, 16_000)).toBe(1);
+  });
+
+  it('shows every photo, some, or none, a story without one as a bigger headline with its initial in the list, and never decodes a photo switched off', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        images: document.documentElement.dataset.images,
+        bare: [...document.querySelectorAll('.story')].map((s) => s.classList.contains('no-photo')),
+        thumbs: [...document.querySelectorAll('.row')].map((row) =>
+          row.querySelector('.thumb img[src]') ? 'photo' : (row.querySelector('.initial')?.textContent ?? 'none'),
+        ),
+        srcs: document.querySelectorAll('img[src]').length,
+        sizes: [...document.querySelectorAll('.headline')].map((h) => Number.parseFloat(getComputedStyle(h).fontSize)),
+      }));
+    const items = [story(0), story(1, { image: undefined, source: 'weather desk' }), story(2), story(3, { source: '' })];
+    const all = await read(await r.show({ items, rotationSeconds: 8 }, photos(4, [1]), demo, 32_000));
+    expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', 'W', 'photo', 'photo'] });
+    expect(all.sizes[1]).toBeGreaterThan(all.sizes[0]!);
+    // A photo whose blob never arrived plays as a story without one; with no source, the feed's credit gives the initial.
+    const missing = await read(await r.show({ items, source: 'Harbor Times', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
+    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', 'W', 'photo', 'H'] });
+    expect(await read(await r.show({ items, rotationSeconds: 8 }, {}, demo, 32_000))).toMatchObject({
+      images: 'off',
+      bare: [true, true, true, true],
+      thumbs: ['none', 'none', 'none', 'none'],
+    });
+    expect(await read(await r.show({ items, showImages: false, rotationSeconds: 8 }, photos(4), demo, 32_000))).toMatchObject({ images: 'off', srcs: 0 });
+  });
+
+  it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        marks: ['images', 'summary', 'list', 'meta', 'crawl'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
+        present: ['.media', '.summary', '.list', '.meta', '.ticker'].filter((s) => document.querySelector(s)),
+      }));
+    const items = [0, 1, 2].map((i) => story(i));
+    expect(await read(await r.show({ items }))).toEqual({
+      marks: ['images=on', 'summary=on', 'list=on', 'meta=on', 'crawl=on'],
+      present: ['.media', '.summary', '.list', '.meta', '.ticker'],
+    });
+    expect(await read(await r.show({ items, ...Object.fromEntries(toggles.map((k) => [k, false])) }))).toEqual({
+      marks: ['images=off', 'summary=off', 'list=off', 'meta=off', 'crawl=off'],
+      present: [],
+    });
+    // One story is no list; a story without a summary or a source and age has neither.
+    expect(await read(await r.show({ items: [story(0, { summary: '', source: '', published: '' })] }))).toEqual({
+      marks: ['images=on', 'summary=on', 'list=off', 'meta=on', 'crawl=on'],
+      present: ['.media', '.ticker'],
+    });
+  });
+
+  it('with no headlines, says so, with no list and no crawl', async () => {
+    const r = await frame();
+    const f = await r.show({ items: [] }, {});
+    expect(
+      await f.evaluate(() => ({
+        lead: document.querySelector('.headline')!.textContent,
+        present: ['.list', '.ticker', '.media', '.meta'].filter((s) => document.querySelector(s)),
+      })),
+    ).toEqual({ lead: 'No headlines yet', present: [] });
+    expect(await layoutFaults(f)).toEqual([]);
+  });
+
+  it("shows the time from init, not the device clock, and each story's age in the feed's language", async () => {
+    const r = await frame();
+    const items = [story(0, { published: at(-1) }), story(1, { published: at(-26) })];
+    const read = async (data: Data) =>
+      (await r.show({ items, rotationSeconds: 8, ...data }, photos(2), demo, 16_000)).evaluate(() => ({
+        clock: document.getElementById('clock')!.textContent,
+        ages: [...document.querySelectorAll('.age')].map((a) => a.textContent),
+      }));
+    expect(await read({})).toEqual({ clock: '3:00 PM', ages: ['1 hour ago', 'yesterday'] });
+    expect(await read({ language: 'fr-FR' })).toEqual({ clock: '3:00 PM', ages: ['il y a 1 heure', 'hier'] });
+  });
+
+  it('crawls every headline, at the look kit speed', async () => {
+    const r = await frame();
+    const f = await r.show({ look: 'poster', items: [0, 1, 2].map((i) => story(i, { title: `Story ${i + 1}` })) });
+    expect(await f.evaluate(() => document.querySelector('.lk-crawl')!.firstElementChild!.textContent)).toBe('Story 1  —  Story 2  —  Story 3');
+  });
+
+  it('keeps the photos unpainted until play', async () => {
+    const r = await frame();
+    const f = await r.show({ items: [story(0), story(1)] });
+    expect(await f.evaluate(() => getComputedStyle(document.getElementById('leads')!).visibility)).toBe('hidden');
+    await r.hst.post('fresh', 'play');
+    await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+  });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`moves only transform and opacity, within the cap; each story's parts end as the story does, and the rest as the play does, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const durationMs = 40_000;
+      for (const look of looks) {
+        const f = await r.show({ look, items: Array.from({ length: 8 }, (_, i) => story(i)), rotationSeconds: 8 }, photos(8), demo, durationMs);
+        const seen = await motion(f, durationMs);
+        expect({ props: seen.props, withinCap: seen.withinCap }, look).toEqual({ props: ['opacity', 'transform'], withinCap: true });
+        const ends = await f.evaluate((durationMs) => {
+          const end = (el: Element) => Math.max(...el.getAnimations().map((a) => Math.round(Number(a.effect!.getComputedTiming().endTime))));
+          const stories = [...document.querySelectorAll<HTMLElement>('.story')];
+          // Poster's photo has no motion of its own (its ink cover moves): only what animates.
+          const parts = (scope: ParentNode) =>
+            [...scope.querySelectorAll('.lk-text, .lk-fade, .lk-photo, .lk-cover, .lk-badge')].filter((el) => el.getAnimations().length);
+          return {
+            // Each story's parts, and each but the last itself, which hides as it ends.
+            stories: stories.map((s, i) => [...new Set([...(i < stories.length - 1 ? [end(s)] : []), ...parts(s).map(end)])]),
+            rest: [
+              ...new Set(
+                parts(document)
+                  .filter((el) => !el.closest('.story'))
+                  .map(end),
+              ),
+            ],
+            slot: durationMs / stories.length,
+          };
+        }, durationMs);
+        expect(ends.rest, look).toEqual([durationMs]);
+        ends.stories.forEach((e, i) =>
+          expect(e, `${look}, story ${i + 1}`).toEqual([i === ends.stories.length - 1 ? durationMs : Math.round((i + 1) * ends.slot)]),
+        );
+      }
+    }, 120_000);
+
+  it('with reduced motion, shows the first story still, nothing animating', async () => {
+    const r = await frame();
+    await r.hst.page.emulateMedia({ reducedMotion: 'reduce' });
+    for (const look of looks) {
+      const f = await r.show({ look, items: Array.from({ length: 5 }, (_, i) => story(i)), rotationSeconds: 8 }, photos(5), demo, 40_000);
+      await r.hst.post('fresh', 'play');
+      expect(await f.evaluate(() => ({ animations: document.getAnimations().length, stories: document.querySelectorAll('.story').length })), look).toEqual({
+        animations: 0,
+        stories: 1,
+      });
+    }
+  });
 });
