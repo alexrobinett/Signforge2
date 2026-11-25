@@ -38,7 +38,8 @@ import { contentJson, published } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
-import { commit, fullRow, GUARD_ABORT, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
+import { storage } from './storage';
+import { commit, fullRow, StaleVersionError, staged, staleGuard, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type AlertChannel = typeof s.alertChannels.$inferSelect;
@@ -111,20 +112,6 @@ function chunk<T>(rows: T[], columns: number): T[][] {
  * its credential and its Durable Object name it by id alone).
  */
 type Ids = 'content' | 'server';
-
-/**
- * A first statement for a batch that fails it unless `holds` is true when it runs, so a change made
- * from an old read writes nothing: `commit` then throws `StaleVersionError` with `id` and the
- * version `stale` reads now. Every version check inside a batch is one of these.
- */
-function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
-  // A JSON path that is not one raises an error naming it, which aborts the batch: `commit` knows a guard's abort by it.
-  const check = db
-    .select({ ok: sql`json_extract('{}', CASE WHEN ${holds} THEN '$' ELSE ${GUARD_ABORT} END)` })
-    .from(s.organization)
-    .where(eq(s.organization.id, orgId));
-  return guard(check, { id, version, holds, stale });
-}
 
 /**
  * The org's brand state as `brandKits.state` reads it, from rows already read: what the compiler used
@@ -1152,6 +1139,22 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.assetRenditions.orgId, orgId), eq(s.assetRenditions.assetId, assetId)))
             .all(),
       },
+      stage: {
+        ...assets.stage,
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `asset in use`) if, as it runs, a spot's draft or
+         * published version, or a brand kit's logo, names the asset: `delete_asset`'s rule held to its commit (review of #429).
+         * A spot's asset map and published version are matched as text, which can only err towards in use.
+         */
+        unused: (assetId: string): Write => {
+          const sp = s.spots;
+          const bk = s.brandKits;
+          const holds = sql`NOT EXISTS (SELECT 1 FROM ${sp} WHERE ${sp.orgId} = ${orgId} AND (${sp.assetId} = ${assetId}
+            OR instr(coalesce(${sp.assetMapJson}, ''), ${assetId}) > 0 OR instr(coalesce(${sp.publishedJson}, ''), ${assetId}) > 0))
+            AND NOT EXISTS (SELECT 1 FROM ${bk} WHERE ${bk.orgId} = ${orgId} AND (${bk.logoOnDarkAssetId} = ${assetId} OR ${bk.logoOnLightAssetId} = ${assetId}))`;
+          return staleGuard(db, orgId, 'asset in use', 0, holds, async () => 0);
+        },
+      },
     },
 
     templates: {
@@ -2080,6 +2083,8 @@ export function scoped(d1: D1Database, orgId: string) {
 
     /** The photos the org's news sources name (./feed-photos.ts). Written by the poller and the photos queue, not by tools. */
     feedPhotos: feedPhotos(db, orgId),
+    /** What it stores that nothing needs any more (#235, ./storage.ts). */
+    storage: storage(db, orgId),
 
     connections: {
       ...connectionRows,

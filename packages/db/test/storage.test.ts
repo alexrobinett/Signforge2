@@ -1,0 +1,781 @@
+// Storage clean-up (#235, reworked after the review of #429): what each org keeps is explicit, and a deleted asset's file
+// goes only outside it. On a fixed clock and deterministic fixtures, each scenario in orgs of its own: the grace period
+// to the millisecond; the manifests kept (every screen pointer, the heartbeat's included, and every manifest effective at
+// a publish of the last 90 days, one inherited from before them or re-stamped by a roll back included); files kept by
+// those manifests through the index, and by the org's own rows; the lease and claims with their owner; the writers' and
+// a publish's guards; and lists past D1's 100 bound values.
+import { env } from 'cloudflare:workers';
+import { describe, expect, it } from 'vitest';
+import { nothingDue, orgsWithStorageDue, scoped, STORAGE_GRACE_MS, STORAGE_LEASE_MS, StaleVersionError } from '../src/index';
+import { queueDeletedFiles, runSql, seedOrganization, testScope } from '../src/testing';
+
+const T0 = Date.UTC(2026, 0, 1);
+const DAY = 24 * 60 * 60_000;
+/** The first moment something queued or published at T0 is past the grace period. */
+const DUE = T0 + STORAGE_GRACE_MS;
+const sha = (c: string) => c.repeat(64);
+
+const run = (query: string, ...binds: unknown[]) => runSql(env.DB, query, ...binds);
+let orgs = 0;
+/** An org of its own, with `screens` screens. */
+async function fresh(screens = 0) {
+  const orgId = `storage-${++orgs}`;
+  await seedOrganization(env.DB, orgId);
+  const ids: string[] = [];
+  for (let i = 0; i < screens; i++) ids.push((await testScope(env.DB, orgId).screens.insert({ name: `S${i}`, timezone: 'UTC', orientation: 'landscape' })).id);
+  return { orgId, org: scoped(env.DB, orgId), screens: ids };
+}
+async function publish(orgId: string, id: string, revision: number, at: number, rows: [string, string][]) {
+  await run(
+    "INSERT INTO publishes (id, org_id, status, actor_kind, actor_id, revision, created_at) VALUES (?, ?, 'published', 'user', 'u', ?, ?)",
+    id,
+    orgId,
+    revision,
+    at,
+  );
+  for (const [screenId, manifestId] of rows)
+    await run('INSERT INTO publish_screens (org_id, publish_id, screen_id, manifest_id) VALUES (?, ?, ?, ?)', orgId, id, screenId, manifestId);
+}
+/** Indexes manifests as stored for `screenId` (a manifest's files are its own whatever the screen). */
+const index = async (orgId: string, manifests: { id: string; files: string[] | null }[], screenId = 'scr_stored') => {
+  const org = scoped(env.DB, orgId);
+  await org.commit(
+    org.storage.stage.index(
+      manifests.map((m) => ({ ...m, screenId })),
+      T0,
+    ).writes,
+  );
+};
+/** Leases the org for `owner` at `at` and claims what is due then. */
+async function claimed(orgId: string, at: number, owner = 'sweep-a') {
+  const org = scoped(env.DB, orgId);
+  expect(await org.storage.lease(owner, at)).toBe(true);
+  return org.storage.claim(owner, at, 90);
+}
+const queuedAt = async (orgId: string, hash: string) =>
+  (await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ q: number }>())?.q;
+const deletedAt = async (orgId: string, hash: string) =>
+  (await env.DB.prepare('SELECT deleted_at AS d FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ d: number | null }>())?.d;
+const m = (c: string) => `m${c.repeat(63)}`;
+/** Each pointer by which a screen keeps a manifest: its column, and the SQL that sets it to a bound id. */
+const POINTERS: [string, string][] = [
+  ['desired_manifest_id', '?'],
+  ['previous_manifest_id', '?'],
+  ['reported_manifest_id', '?'],
+  ['heartbeat_json', `json_object('manifest', json_object('active', ?))`],
+  ['heartbeat_json', `json_object('manifest', json_object('fallbackFrom', ?))`],
+  ['heartbeat_json', `json_object('manifest', json_object('lastGood', ?))`],
+];
+
+describe("a deleted asset's file", () => {
+  it('is due once queued for the grace period, not a millisecond before; another org’s queue is its own', async () => {
+    const a = await fresh();
+    const b = await fresh();
+    await queueDeletedFiles(env.DB, a.orgId, [sha('1')], T0);
+    await queueDeletedFiles(env.DB, b.orgId, [sha('1')], T0 + DAY);
+    expect((await claimed(a.orgId, DUE - 1)).files).toEqual([]);
+    await a.org.commit(a.org.storage.stage.release('sweep-a', DUE - 1).writes);
+    expect((await claimed(a.orgId, DUE)).files).toEqual([sha('1')]);
+    // B's, queued a day later, is not due yet; A's claim never touched it.
+    expect((await claimed(b.orgId, DUE)).files).toEqual([]);
+    expect(await queuedAt(b.orgId, sha('1'))).toBe(T0 + DAY);
+  });
+
+  it('keeps the later queued time when its bytes are queued again, never the earlier (review of #429, 8)', async () => {
+    const { orgId } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('2')], T0);
+    await queueDeletedFiles(env.DB, orgId, [sha('2')], T0 + 89 * DAY);
+    expect(await queuedAt(orgId, sha('2'))).toBe(T0 + 89 * DAY);
+    await queueDeletedFiles(env.DB, orgId, [sha('2')], T0 + DAY);
+    expect(await queuedAt(orgId, sha('2'))).toBe(T0 + 89 * DAY);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+  });
+
+  it('is kept, and forgotten as a deleted asset’s, while the org names its bytes: an asset, a pending upload’s rendition, a sample, a template', async () => {
+    const { orgId } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('3'), sha('4'), sha('5'), sha('6')], T0);
+    const t = testScope(env.DB, orgId);
+    await t.assets.insert({ kind: 'video', name: 'Again', sha256: sha('3'), type: 'video/mp4', size: 1, status: 'verified' });
+    const pending = await t.assets.insert({ kind: 'image', name: 'Pending', sha256: sha('9'), type: 'image/png', size: 1, width: 1, height: 1 });
+    await t.assets.renditions.insert({
+      assetId: pending.id,
+      orientation: 'landscape',
+      sha256: sha('4'),
+      type: 'image/png',
+      size: 1,
+      width: 1,
+      height: 1,
+      sampleSha256: sha('5'),
+    });
+    const template = await t.templates.insert({ key: 'card', name: 'Card' });
+    await t.templates.versions.insert({ templateId: template.id, version: '1.0.0', manifestJson: '{}', bundleSha256: sha('6'), status: 'approved' });
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+    for (const c of ['3', '4', '5', '6']) expect(await queuedAt(orgId, sha(c)), c).toBeUndefined();
+  });
+});
+
+describe('the manifests an org keeps, and the files they name (review of #429, 1, 3, 4)', () => {
+  it("keeps a file a screen's pointer names: desired, previous, reported, and the heartbeat's active, fallback and last good", async () => {
+    const { orgId, screens } = await fresh(1);
+    const [screen] = screens as [string];
+    await queueDeletedFiles(env.DB, orgId, [sha('a')], T0);
+    await index(orgId, [{ id: m('1'), files: [sha('a')] }]);
+    for (const [column, value] of POINTERS) {
+      await run(`UPDATE screens SET ${column} = ${value} WHERE id = ?`, m('1'), screen);
+      const org = scoped(env.DB, orgId);
+      expect((await claimed(orgId, DUE)).files, `${column} ${value}`).toEqual([]);
+      await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+      await run(`UPDATE screens SET ${column} = NULL WHERE id = ?`, screen);
+    }
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('a')]);
+  });
+
+  it('keeps a file a roll back put back on a screen, though the asset was deleted after the manifest was first published (1)', async () => {
+    const { orgId, screens } = await fresh(1);
+    const [screen] = screens as [string];
+    // Published on day -10, the asset deleted on day 0; a roll back on day 50 re-stamps the old manifest with a new publish.
+    await publish(orgId, 'pub_r1', 1, T0 - 10 * DAY, [[screen, m('2')]]);
+    await index(orgId, [{ id: m('2'), files: [sha('b')] }]);
+    await queueDeletedFiles(env.DB, orgId, [sha('b')], T0);
+    await publish(orgId, 'pub_r2', 2, T0 + 20 * DAY, [[screen, m('3')]]);
+    await publish(orgId, 'pub_r3', 3, T0 + 50 * DAY, [[screen, m('2')]]);
+    await run('UPDATE screens SET desired_manifest_id = ?, previous_manifest_id = ? WHERE id = ?', m('2'), m('3'), screen);
+    await index(orgId, [{ id: m('3'), files: [] }]);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+  });
+
+  it('keeps a manifest a screen inherited into a recent publish that did not switch it, with its files (3)', async () => {
+    const { orgId, screens } = await fresh(2);
+    const [lobby, hall] = screens as [string, string];
+    const now = DUE + 10 * DAY;
+    // Day 0 switches both; day 95 only the lobby, the hall inheriting day 0's; days 96 and 97 move the hall on twice.
+    await publish(orgId, 'pub_i1', 1, T0, [
+      [lobby, m('4')],
+      [hall, m('5')],
+    ]);
+    await publish(orgId, 'pub_i2', 2, now - 5 * DAY, [[lobby, m('6')]]);
+    await publish(orgId, 'pub_i3', 3, now - 4 * DAY, [[hall, m('7')]]);
+    await publish(orgId, 'pub_i4', 4, now - 3 * DAY, [[hall, m('8')]]);
+    await run('UPDATE screens SET desired_manifest_id = ?, previous_manifest_id = ? WHERE id = ?', m('8'), m('7'), hall);
+    await run('UPDATE screens SET desired_manifest_id = ? WHERE id = ?', m('6'), lobby);
+    await index(orgId, [
+      { id: m('4'), files: [] },
+      { id: m('5'), files: [sha('c')] },
+      { id: m('6'), files: [] },
+      { id: m('7'), files: [] },
+      { id: m('8'), files: [] },
+    ]);
+    // Rolling back to day 95 would put day 0's back on the hall: its file stays.
+    await queueDeletedFiles(env.DB, orgId, [sha('c')], T0);
+    expect((await claimed(orgId, now)).files).toEqual([]);
+    expect(await scoped(env.DB, orgId).storage.unindexed(now, 10)).toEqual([]);
+  });
+
+  it('names a kept manifest not indexed yet, with a screen it is stored for: the sweep indexes it before any file is judged', async () => {
+    const { orgId, screens } = await fresh(1);
+    const [screen] = screens as [string];
+    await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('9'), screen);
+    expect(await scoped(env.DB, orgId).storage.unindexed(DUE, 10)).toEqual([{ screenId: screen, manifestId: m('9') }]);
+    await index(orgId, [{ id: m('9'), files: [sha('d')] }], screen);
+    // Known files are never replaced by unknown ones.
+    await index(orgId, [{ id: m('9'), files: null }], screen);
+    expect(await scoped(env.DB, orgId).storage.unindexed(DUE, 10)).toEqual([]);
+    expect(await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ?').bind(orgId).first<{ f: string }>()).toEqual({
+      f: JSON.stringify([sha('d')]),
+    });
+  });
+
+  it("keeps a manifest's files when a screen it is not stored for reports it: no object there, unknown, not empty (round 2, 2: case A)", async () => {
+    const { orgId, screens } = await fresh(2);
+    const [a, b] = screens as [string, string];
+    await publish(orgId, 'pub_x1', 1, T0 - DAY, [[a, m('a')]]);
+    await index(orgId, [{ id: m('a'), files: [sha('a')] }], a);
+    await queueDeletedFiles(env.DB, orgId, [sha('a'), sha('b')], T0);
+    // B reports A's manifest; the sweep finds no object for B and indexes it as unknown there.
+    await run("UPDATE screens SET heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?", m('a'), b);
+    await index(orgId, [{ id: m('a'), files: null }], b);
+    // A's row still says what it names: its file stays, and the org's other due file goes.
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('b')]);
+  });
+
+  it('holds every file back while a screen reports a manifest not looked for yet; once found in no object, none (round 2 case B, round 3)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await queueDeletedFiles(env.DB, orgId, [sha('c')], T0);
+    // The screen reports a manifest before its publish stores it, or one never stored at all.
+    await run("UPDATE screens SET heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?", m('c'), s);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([{ screenId: s, manifestId: m('c') }]);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Looked for and found in no object: the screen can fetch nothing through it, so it holds nothing back, for good.
+    await index(orgId, [{ id: m('c'), files: null }], s);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('c')]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Its publish stores it later: the real write replaces the unknown one, and keeps what it names.
+    await index(orgId, [{ id: m('c'), files: [sha('e')] }], s);
+    await queueDeletedFiles(env.DB, orgId, [sha('e')], T0);
+    // (c, claimed before and never forgotten, is due again once that claim runs out.)
+    expect((await claimed(orgId, DUE + STORAGE_LEASE_MS)).files).toEqual([sha('c')]);
+  });
+
+  it("keeps nothing for a revoked screen's own pointers, which it can never fetch through again (round 3)", async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await index(orgId, [{ id: m('r'), files: [sha('r')] }], s);
+    await queueDeletedFiles(env.DB, orgId, [sha('r')], T0);
+    await run(
+      "UPDATE screens SET desired_manifest_id = ?, heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?",
+      m('r'),
+      m('r'),
+      s,
+    );
+    await run("INSERT INTO screen_credentials (id, org_id, screen_id, secret_hash, created_at) VALUES ('crd_r', ?, ?, 'h', 0)", orgId, s);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Its only credential revoked: revoked for good.
+    await run("UPDATE screen_credentials SET revoked_at = 1 WHERE id = 'crd_r'");
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('r')]);
+  });
+
+  it('indexes a thousand manifests in parts under D1’s limits', async () => {
+    const { orgId } = await fresh();
+    const many = Array.from({ length: 1000 }, (_, i) => ({ id: `n${String(i).padStart(63, '0')}`, files: [sha('e'), sha('f'), `${i}`.padStart(64, '0')] }));
+    await index(orgId, many);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM stored_manifests WHERE org_id = ?').bind(orgId).first<{ n: number }>()).toEqual({ n: 1000 });
+  });
+});
+
+describe("the sweep's lease and claims (review of #429, 7)", () => {
+  it('lets one sweep lease an org at a time, until the lease runs out, and claims only for the holder', async () => {
+    const { orgId, org } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('1')], T0);
+    expect(await org.storage.lease('sweep-a', DUE)).toBe(true);
+    expect(await org.storage.lease('sweep-b', DUE + STORAGE_LEASE_MS - 1)).toBe(false);
+    // A claim made by one that does not hold the lease takes nothing.
+    expect((await org.storage.claim('sweep-b', DUE, 90)).files).toEqual([]);
+    expect((await org.storage.claim('sweep-a', DUE, 90)).files).toEqual([sha('1')]);
+    // Past the lease, another may take over, and A's claims have expired with it.
+    expect(await org.storage.lease('sweep-b', DUE + STORAGE_LEASE_MS)).toBe(true);
+    expect((await org.storage.claim('sweep-b', DUE + STORAGE_LEASE_MS, 90)).files).toEqual([sha('1')]);
+    // A's last batch is refused: it no longer holds the lease, and B's claim stands.
+    await expect(
+      org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-a', DUE + STORAGE_LEASE_MS).writes),
+    ).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await queuedAt(orgId, sha('1'))).toBe(T0);
+    await org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-b', DUE + STORAGE_LEASE_MS).writes);
+    // Its object deleted: kept as a tombstone, at the time it was forgotten (#432).
+    expect(await deletedAt(orgId, sha('1'))).toBe(DUE + STORAGE_LEASE_MS);
+    const [row] = (await org.auditLog.list({ limit: 5 })).filter((e) => e.action === 'sweep_storage');
+    expect(row).toMatchObject({ actorKind: 'system', actorId: 'storage-sweep', clientId: null, at: DUE + STORAGE_LEASE_MS });
+  });
+
+  it('claims no file when a manifest is kept, unindexed, between the look for unindexed ones and the claim (round 2, 1)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await queueDeletedFiles(env.DB, orgId, [sha('2')], T0);
+    expect(await org.storage.lease('sweep-a', DUE)).toBe(true);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
+    // The screen reports a manifest the index does not know after the sweep looked: its claim takes no file.
+    await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('d'), s);
+    expect((await org.storage.claim('sweep-a', DUE, 90)).files).toEqual([]);
+  });
+
+  it('puts an org whose sweep failed behind the others: the lease marks it swept as it is taken (round 2, 6)', async () => {
+    const failing = await fresh();
+    const other = await fresh();
+    for (const o of [failing, other]) await queueDeletedFiles(env.DB, o.orgId, [sha('4')], T0);
+    const at = DUE + 900 * DAY;
+    const order = async (now: number) => (await orgsWithStorageDue(env.DB, now, 1000)).filter((id) => id === failing.orgId || id === other.orgId);
+    expect(await order(at)).toEqual([failing.orgId, other.orgId]);
+    // Its sweep takes the lease and throws before letting it go.
+    expect(await failing.org.storage.lease('sweep-a', at)).toBe(true);
+    expect(await order(at + STORAGE_LEASE_MS)).toEqual([other.orgId, failing.orgId]);
+  });
+
+  it('lists the orgs due, the least recently swept first, so none waits behind another’s backlog (9)', async () => {
+    const first = await fresh();
+    const second = await fresh();
+    for (const o of [first, second]) await queueDeletedFiles(env.DB, o.orgId, [sha('3')], T0);
+    const late = DUE + 400 * DAY;
+    const due = async () => (await orgsWithStorageDue(env.DB, late, 1000)).filter((id) => id === first.orgId || id === second.orgId);
+    expect(await due()).toEqual([first.orgId, second.orgId]);
+    // The first is swept (its file pinned, say): it goes behind the second.
+    expect(await first.org.storage.lease('sweep-a', late - DAY)).toBe(true);
+    await first.org.commit(first.org.storage.stage.release('sweep-a', late - DAY).writes);
+    expect(await due()).toEqual([second.orgId, first.orgId]);
+  });
+});
+
+describe('unfinished uploads', () => {
+  it('are due once pending for the grace period, with their files; a finished one stays; their hashes are queued again (8)', async () => {
+    const { orgId, org } = await fresh();
+    const t = testScope(env.DB, orgId);
+    const left = await t.assets.insert({ kind: 'image', name: 'Left', sha256: sha('a'), type: 'image/png', size: 1, width: 1, height: 1 });
+    await t.assets.renditions.insert({
+      assetId: left.id,
+      orientation: 'portrait',
+      sha256: sha('b'),
+      type: 'image/png',
+      size: 1,
+      width: 1,
+      height: 1,
+      sampleSha256: sha('c'),
+    });
+    const done = await t.assets.insert({ kind: 'image', name: 'Done', sha256: sha('d'), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });
+    await run('UPDATE assets SET created_at = ? WHERE id IN (?, ?)', T0, left.id, done.id);
+    expect((await claimed(orgId, DUE - 1)).uploads).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE - 1).writes);
+    const due = await claimed(orgId, DUE);
+    expect(due.uploads).toEqual([{ assetId: left.id, files: [sha('b'), sha('c')] }]);
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE).writes);
+    expect(await t.assets.get(left.id)).toBeUndefined();
+    expect(await t.assets.get(done.id)).toBeDefined();
+    // A stored copy it was reusing is not left unqueued: its hashes wait their own grace period.
+    expect(await queuedAt(orgId, sha('b'))).toBe(DUE);
+    expect(await queuedAt(orgId, sha('c'))).toBe(DUE);
+  });
+
+  it('claims and forgets 90 uploads with 180 files and 90 files, past D1’s 100 bound values (9)', async () => {
+    const { orgId, org } = await fresh();
+    const t = testScope(env.DB, orgId);
+    const hex = (i: number, p: string) => `${p}${i.toString(16).padStart(63, '0')}`;
+    for (let i = 0; i < 90; i++) {
+      const asset = await t.assets.insert({ kind: 'image', name: `U${i}`, sha256: hex(i, 'a'), type: 'image/png', size: 1, width: 1, height: 1 });
+      await t.assets.renditions.insert({
+        assetId: asset.id,
+        orientation: 'landscape',
+        sha256: hex(i, 'b'),
+        type: 'image/png',
+        size: 1,
+        width: 1,
+        height: 1,
+        sampleSha256: hex(i, 'c'),
+      });
+    }
+    await run('UPDATE assets SET created_at = ? WHERE org_id = ?', T0, orgId);
+    await queueDeletedFiles(
+      env.DB,
+      orgId,
+      Array.from({ length: 90 }, (_, i) => hex(i, 'd')),
+      T0,
+    );
+    const due = await claimed(orgId, DUE);
+    expect({ files: due.files.length, uploads: due.uploads.length, uploadFiles: due.uploads.flatMap((u) => u.files).length }).toEqual({
+      files: 90,
+      uploads: 90,
+      uploadFiles: 180,
+    });
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE).writes);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM assets WHERE org_id = ?').bind(orgId).first<{ n: number }>()).toEqual({ n: 0 });
+  });
+});
+
+describe('the guards writers and a publish hold to their commits (review of #429, 5, 6)', () => {
+  it('refuses a writer while a sweep claims its bytes, and lets it once the claim has run out', async () => {
+    const { orgId, org } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('1')], T0);
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('1')]);
+    expect(await org.storage.claimed([sha('2'), sha('1')], DUE)).toBe(true);
+    await expect(org.commit(org.storage.stage.unclaimed([sha('1')], DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.storage.claimed([sha('1')], DUE + STORAGE_LEASE_MS)).toBe(false);
+    await org.commit(org.storage.stage.unclaimed([sha('1')], DUE + STORAGE_LEASE_MS));
+  });
+
+  it("refuses a publish whose manifests name a deleted asset's file nothing names, and lets one whose bytes a live asset names", async () => {
+    const { orgId, org } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('3'), sha('4')], T0);
+    await expect(org.commit(org.storage.stage.filesLive([sha('3')]))).rejects.toBeInstanceOf(StaleVersionError);
+    await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Live', sha256: sha('4'), type: 'video/mp4', size: 1, status: 'verified' });
+    await org.commit(org.storage.stage.filesLive([sha('4'), sha('5')]));
+  });
+
+  it("refuses an asset's deletion while a spot's draft or published version, or a brand kit, names it", async () => {
+    const { orgId, org } = await fresh();
+    const t = testScope(env.DB, orgId);
+    const asset = await t.assets.insert({ kind: 'image', name: 'Logo', sha256: sha('6'), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });
+    await org.commit([org.assets.stage.unused(asset.id)]);
+    const spot = await t.spots.insert({ name: 'Uses it', kind: 'image', durationMs: 10_000, assetId: asset.id });
+    await expect(org.commit([org.assets.stage.unused(asset.id)])).rejects.toBeInstanceOf(StaleVersionError);
+    await run('UPDATE spots SET asset_id = NULL, published_json = ? WHERE id = ?', JSON.stringify({ assetId: asset.id }), spot.id);
+    await expect(org.commit([org.assets.stage.unused(asset.id)])).rejects.toBeInstanceOf(StaleVersionError);
+    await run('UPDATE spots SET published_json = NULL WHERE id = ?', spot.id);
+    await org.commit([org.assets.stage.unused(asset.id)]);
+  });
+});
+
+describe('a stored manifest (#235)', () => {
+  /** Claims at `at` and lets the lease go again: the stored manifests it claimed. */
+  async function claimedManifests(orgId: string, at: number) {
+    const org = scoped(env.DB, orgId);
+    const due = await claimed(orgId, at);
+    await org.commit(org.storage.stage.forget({ files: [], uploads: [], manifests: [] }, 'sweep-a', at).writes);
+    // Forgetting nothing releases its claims only by their time: put them back, so the next look starts clean.
+    await run('UPDATE stored_manifests SET claim_owner = NULL, claim_until = 0 WHERE org_id = ?', orgId);
+    return due.manifests;
+  }
+  const stored = (screenId: string, manifestId: string) => ({ screenId, manifestId });
+
+  it('is never claimed while its screen points at it, or while a publish of the last 90 days makes it effective there', async () => {
+    const { orgId, screens } = await fresh(2);
+    const [s, t] = screens as [string, string];
+    const now = DUE + DAY;
+    // Day -2 sends a to s and c to t; day -1 moves s on to b. Past the grace period, a is effective at no publish since
+    // (b is s's newest before it); c stays t's, inherited by every publish after, so it is kept.
+    await publish(orgId, 'pub_p1', 1, T0 - 2 * DAY, [
+      [s, m('a')],
+      [t, m('c')],
+    ]);
+    await publish(orgId, 'pub_p2', 2, T0 - DAY, [[s, m('b')]]);
+    await index(
+      orgId,
+      [
+        { id: m('a'), files: [] },
+        { id: m('b'), files: [] },
+      ],
+      s,
+    );
+    await index(orgId, [{ id: m('c'), files: [] }], t);
+    for (const [column, value] of POINTERS) {
+      await run(`UPDATE screens SET ${column} = ${value} WHERE id = ?`, m('a'), s);
+      expect(await claimedManifests(orgId, now), `${column} ${value}`).toEqual([]);
+      await run(`UPDATE screens SET ${column} = NULL WHERE id = ?`, s);
+    }
+    // A roll back of the last 90 days that put a back on s.
+    await publish(orgId, 'pub_p3', 3, now - 5 * DAY, [[s, m('a')]]);
+    expect(await claimedManifests(orgId, now)).toEqual([]);
+    await run("DELETE FROM publishes WHERE id = 'pub_p3'");
+    expect(await claimedManifests(orgId, now)).toEqual([stored(s, m('a'))]);
+  });
+
+  it('is claimed once stored for the grace period, one object a screen, and marked deleted when forgotten; one never found is not', async () => {
+    const { orgId, org, screens } = await fresh(3);
+    const [s, t, u] = screens as [string, string, string];
+    await publish(orgId, 'pub_d1', 1, T0 - DAY, [
+      [s, m('d')],
+      [t, m('d')],
+      [u, m('e')],
+    ]);
+    await publish(orgId, 'pub_d2', 2, T0 - DAY / 2, [
+      [s, m('f')],
+      [t, m('f')],
+      [u, m('f')],
+    ]);
+    for (const screen of [s, t])
+      await index(
+        orgId,
+        [
+          { id: m('d'), files: [] },
+          { id: m('f'), files: [] },
+        ],
+        screen,
+      );
+    await index(
+      orgId,
+      [
+        { id: m('e'), files: [] },
+        { id: m('f'), files: [] },
+      ],
+      u,
+    );
+    // Indexed as found in no object: nothing to delete there.
+    await index(orgId, [{ id: m('d'), files: null }], u);
+    // e stored a day later: not before the grace period has passed since.
+    await run('UPDATE stored_manifests SET stored_at = ? WHERE manifest_id = ?', T0 + DAY, m('e'));
+    expect(await claimedManifests(orgId, DUE - 1)).toEqual([]);
+    const due = await claimed(orgId, DUE);
+    expect(due.manifests.toSorted((x, y) => x.screenId.localeCompare(y.screenId))).toEqual(
+      [stored(s, m('d')), stored(t, m('d'))].sort((x, y) => x.screenId.localeCompare(y.screenId)),
+    );
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 1).writes);
+    const rows = await env.DB.prepare('SELECT count(*) AS n FROM stored_manifests WHERE org_id = ? AND deleted_at = ? AND claim_owner IS NULL')
+      .bind(orgId, DUE + 1)
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(2);
+    // Deleted once, d is never claimed again; e is, a day on.
+    expect(await claimedManifests(orgId, DUE + DAY)).toEqual([stored(u, m('e'))]);
+    const audits = (await org.auditLog.list({ limit: 10 })).filter((e) => e.action === 'sweep_storage').map((e) => JSON.parse(e.detailJson!));
+    expect(audits).toContainEqual({ files: 0, uploads: [], manifests: 2 });
+  });
+
+  it('lists an org with an old manifest weekly while one is kept, so one its screen drops without a publish goes (review of #431, B-2)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    // g sent from /admin (no publish row), h backfilled by the sweep: both only the screen's pointers keep.
+    await run('UPDATE screens SET desired_manifest_id = ?, previous_manifest_id = ? WHERE id = ?', m('g'), m('h'), s);
+    await index(
+      orgId,
+      [
+        { id: m('g'), files: [] },
+        { id: m('h'), files: [] },
+      ],
+      s,
+    );
+    const listed = async (now: number) => (await orgsWithStorageDue(env.DB, now, 1000)).includes(orgId);
+    expect(await listed(DUE - 1)).toBe(false);
+    expect(await listed(DUE)).toBe(true);
+    // Looked at with nothing due: not listed again for a week.
+    expect((await claimed(orgId, DUE)).manifests).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    expect(await listed(DUE + 7 * DAY - 1)).toBe(false);
+    // The screen drops h, with no publish to say so: within the week it is looked at again, and h goes.
+    await run('UPDATE screens SET previous_manifest_id = NULL WHERE id = ?', s);
+    expect(await listed(DUE + 7 * DAY)).toBe(true);
+    const due = await claimed(orgId, DUE + 7 * DAY);
+    expect(due.manifests).toEqual([stored(s, m('h'))]);
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 7 * DAY).writes);
+    expect(await listed(DUE + 8 * DAY)).toBe(false);
+    // Then g, sent from /admin, once the screen moves on.
+    await run('UPDATE screens SET desired_manifest_id = NULL WHERE id = ?', s);
+    expect(await listed(DUE + 14 * DAY)).toBe(true);
+    expect((await claimed(orgId, DUE + 14 * DAY)).manifests).toEqual([stored(s, m('g'))]);
+  });
+
+  it('claims a thousand stored manifests a sweep, the oldest first (review of #431, B-1)', async () => {
+    const { orgId, org } = await fresh();
+    // 1,001 rows, each stored a millisecond after the last, in one statement: no screen or publish keeps any.
+    await run(
+      `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 1000)
+       INSERT INTO stored_manifests (org_id, screen_id, manifest_id, files_json, stored_at) SELECT ?, printf('scr_%04d', i), ?, '[]', ? + i FROM n`,
+      orgId,
+      m('k'),
+      T0 - 1000,
+    );
+    const first = await claimed(orgId, DUE);
+    expect(first.manifests).toHaveLength(1000);
+    expect(first.manifests.map((x) => x.screenId)).not.toContain('scr_1000');
+    await org.commit(org.storage.stage.forget(first, 'sweep-a', DUE).writes);
+    expect((await claimed(orgId, DUE)).manifests).toEqual([stored('scr_1000', m('k'))]);
+  });
+});
+
+describe("the storage sweep's queries (review of #431, round 2)", () => {
+  /** `db`, recording each statement prepared on it with the values bound to it. */
+  function recording(db: D1Database) {
+    const seen: { query: string; binds: unknown[] }[] = [];
+    const proxy = new Proxy(db, {
+      get(target, key) {
+        if (key !== 'prepare') {
+          const v: unknown = Reflect.get(target, key, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          const entry: { query: string; binds: unknown[] } = { query, binds: [] };
+          seen.push(entry);
+          return new Proxy(statement, {
+            get(st, k) {
+              if (k === 'bind') return (...binds: unknown[]) => ((entry.binds = binds), st.bind(...binds));
+              const v: unknown = Reflect.get(st, k, st);
+              return typeof v === 'function' ? v.bind(st) : v;
+            },
+          });
+        };
+      },
+    });
+    return { proxy, seen };
+  }
+  const plan = async (q: { query: string; binds: unknown[] }) =>
+    (
+      await env.DB.prepare(`EXPLAIN QUERY PLAN ${q.query}`)
+        .bind(...q.binds)
+        .all<{ detail: string }>()
+    ).results.map((r) => r.detail);
+  /** Its reads of `table` (or its alias): one through `index` at least, and none a scan of the table. */
+  const searchedThrough = (details: string[], table: string, alias: string, index: string) => {
+    const reads = details.filter((d) => new RegExp(`^(?:SCAN|SEARCH) (?:${table}|${alias})\\b`).test(d));
+    expect(
+      reads.some((d) => d.includes(`USING INDEX ${index}`) || d.includes(`USING COVERING INDEX ${index}`)),
+      details.join('\n'),
+    ).toBe(true);
+    for (const d of reads) expect(d.startsWith('SCAN'), d).toBe(false);
+  };
+  const throughLiveIndex = (details: string[]) => searchedThrough(details, 'stored_manifests', 'm', 'stored_manifests_live_idx');
+
+  it('finds orgs with old manifests, and an org’s due manifests, through the live rows’ partial index', async () => {
+    const { orgId, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await index(orgId, [{ id: m('q'), files: [] }], s);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    expect(orgs.seen).toHaveLength(1);
+    throughLiveIndex(await plan(orgs.seen[0]!));
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    await scope.storage.claim('sweep-a', DUE, 90);
+    await scope.commit(scope.storage.stage.release('sweep-a', DUE).writes);
+    const touching = sweep.seen.filter((q) =>
+      /stored_manifests m\s+WHERE m\.org_id = \? AND m\.files_json IS NOT NULL AND m\.deleted_at IS NULL/.test(q.query),
+    );
+    // The claim's and the release's look for due manifests.
+    expect(touching).toHaveLength(2);
+    for (const q of touching) throughLiveIndex(await plan(q));
+  });
+
+  it('finds orgs with due files or unfinished uploads, and an org’s own, through org-led indexes (#433)', async () => {
+    const { orgId } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('p')], T0);
+    // A tombstone too (#432): outside the due files' index, inside the tombstones'.
+    await run('INSERT INTO blob_deletes (org_id, sha256, queued_at, deleted_at) VALUES (?, ?, ?, ?)', orgId, sha('o'), T0, T0);
+    const upload = await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Left', sha256: sha('q'), type: 'video/mp4', size: 1 });
+    await run('UPDATE assets SET created_at = ? WHERE id = ?', T0, upload.id);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    const listing = await plan(orgs.seen[0]!);
+    searchedThrough(listing, 'blob_deletes', 'b', 'blob_deletes_due_idx');
+    searchedThrough(listing, 'blob_deletes', 't', 'blob_deletes_tombstone_idx');
+    searchedThrough(listing, 'assets', 'a', 'assets_pending_idx');
+    throughLiveIndex(listing);
+    // The org's own claim: its due files and its unfinished uploads.
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    const due = await scope.storage.claim('sweep-a', DUE, 90);
+    expect(due).toMatchObject({ files: [sha('p')], uploads: [{ assetId: upload.id }] });
+    const claimFiles = sweep.seen.find((q) => q.query.startsWith('update "blob_deletes" set "claim_owner"'));
+    const pending = sweep.seen.find((q) => q.query.startsWith('select "id", "kind", "sha256" from "assets"'));
+    searchedThrough(await plan(claimFiles!), 'blob_deletes', 'blob_deletes', 'blob_deletes_due_idx');
+    searchedThrough(await plan(pending!), 'assets', 'assets', 'assets_pending_idx');
+    // Its release prunes old tombstones through theirs (review of #434, 5).
+    await scope.commit(scope.storage.stage.release('sweep-a', DUE).writes);
+    const prune = sweep.seen.find((q) => q.query.startsWith('delete from "blob_deletes" where ("blob_deletes"."org_id", "blob_deletes"."sha256") IN'));
+    searchedThrough(await plan(prune!), 'blob_deletes', 'blob_deletes', 'blob_deletes_tombstone_idx');
+  });
+
+  it('starts a manifest’s grace period when a real store replaces a look that found no object', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    const storedAt = async () =>
+      (await env.DB.prepare('SELECT stored_at AS t FROM stored_manifests WHERE org_id = ? AND screen_id = ?').bind(orgId, s).first<{ t: number }>())?.t;
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+    // Known already: stored again, or looked for again, it keeps its time.
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + 2 * DAY).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0 + 3 * DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+  });
+});
+
+describe('the guards a manifest writer holds to its commit (#235)', () => {
+  it('refuses a writer while a sweep claims the manifest, or deleted it since the writer started; marks one stored again', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await publish(orgId, 'pub_w1', 1, T0 - DAY, [[s, m('o')]]);
+    await publish(orgId, 'pub_w2', 2, T0 - DAY / 2, [[s, m('p')]]);
+    await index(
+      orgId,
+      [
+        { id: m('o'), files: [] },
+        { id: m('p'), files: [] },
+      ],
+      s,
+    );
+    const o = { screenId: s, manifestId: m('o') };
+    const due = await claimed(orgId, DUE);
+    expect(due.manifests).toEqual([o]);
+    // Claimed: refused, whenever the writer started. The same id for another screen is another object.
+    expect(await org.storage.manifestsGone([o, { screenId: s, manifestId: m('p') }, { screenId: 'scr_other', manifestId: m('o') }], DUE + 1, 0)).toEqual([o]);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 1, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 2).writes);
+    // Deleted at DUE + 2: refused to a writer that started at or before then, or that stores nothing (since 0)...
+    expect(await org.storage.manifestsGone([o], DUE + 3, DUE + 2)).toEqual([o]);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 3, DUE + 2))).rejects.toBeInstanceOf(StaleVersionError);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 3, 0))).rejects.toBeInstanceOf(StaleVersionError);
+    // ...and let to one that started after and stored it again, which marks it stored.
+    expect(await org.storage.manifestsGone([o], DUE + 4, DUE + 3)).toEqual([]);
+    await org.commit(org.storage.stage.manifestsStored([o], DUE + 4, DUE + 3));
+    expect(await org.storage.manifestsGone([o], DUE + 5, 0)).toEqual([]);
+    // Stored again at DUE + 4: its grace period starts again (review of #431).
+    const row = await env.DB.prepare('SELECT stored_at AS t FROM stored_manifests WHERE org_id = ? AND screen_id = ? AND manifest_id = ?')
+      .bind(orgId, s, m('o'))
+      .first<{ t: number }>();
+    expect(row?.t).toBe(DUE + 4);
+  });
+});
+
+describe('a deleted file’s tombstone (#432)', () => {
+  /** Queues `hashes` at T0, then claims, "deletes" and forgets them at DUE + 1: tombstones from then on. */
+  async function swept(orgId: string, hashes: string[]) {
+    const org = scoped(env.DB, orgId);
+    await queueDeletedFiles(env.DB, orgId, hashes, T0);
+    const due = await claimed(orgId, DUE);
+    expect(due.files.toSorted()).toEqual(hashes.toSorted());
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 1).writes);
+  }
+  const AFTER = DUE + DAY;
+
+  it('is never claimed or listed again, refuses a writer naming it, and goes when the bytes are stored again', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('t')]);
+    expect(await deletedAt(orgId, sha('t'))).toBe(DUE + 1);
+    expect(await orgsWithStorageDue(env.DB, AFTER, 1000)).not.toContain(orgId);
+    expect((await claimed(orgId, AFTER)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', AFTER).writes);
+    // Named again by an asset, it stays: the object is gone until a writer stores the bytes.
+    await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Again', sha256: sha('t'), type: 'video/mp4', size: 1 });
+    expect((await claimed(orgId, AFTER + DAY)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', AFTER + DAY).writes);
+    expect(await org.storage.deleted([sha('t'), sha('w')], AFTER)).toEqual([sha('t')]);
+    await expect(org.commit(org.storage.stage.notDeleted([sha('w'), sha('t')], AFTER))).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit(org.storage.stage.notDeleted([sha('w')], AFTER));
+    // Stored again by a writer that started after the deletion: the tombstone goes, and the writer passes.
+    await org.commit(org.storage.stage.restored([sha('t'), sha('w')], AFTER, DUE + 2));
+    expect(await org.storage.deleted([sha('t')], AFTER)).toEqual([]);
+    await org.commit(org.storage.stage.notDeleted([sha('t')], AFTER));
+  });
+
+  it('is kept from a writer that started before it, and refuses one while the sweep claims the bytes (review of #434, 1)', async () => {
+    const { orgId, org } = await fresh();
+    // The writer started at DUE (before the sweep deleted at DUE + 1): its copy may be the one deleted. Refused, kept.
+    await swept(orgId, [sha('x')]);
+    await expect(org.commit(org.storage.stage.restored([sha('x')], AFTER, DUE))).rejects.toBeInstanceOf(StaleVersionError);
+    await expect(org.commit(org.storage.stage.restored([sha('x')], AFTER, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await deletedAt(orgId, sha('x'))).toBe(DUE + 1);
+    // A claim on the bytes as the writer commits: refused, whenever it started.
+    await queueDeletedFiles(env.DB, orgId, [sha('y')], T0);
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('y')]);
+    await expect(org.commit(org.storage.stage.restored([sha('y')], DUE + 1, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+  });
+
+  it('says nothing once a week old, whether or not it was pruned (review of #434, 3)', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('z')]);
+    const weekOn = DUE + 1 + 7 * DAY;
+    expect(await org.storage.deleted([sha('z')], weekOn - 1)).toEqual([sha('z')]);
+    expect(await org.storage.deleted([sha('z')], weekOn)).toEqual([]);
+    await org.commit(org.storage.stage.notDeleted([sha('z')], weekOn));
+  });
+
+  it('is pruned a week on, in a quiet org too, a bounded number a sweep (review of #434, 5)', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('v')]);
+    // 600 more, deleted at DUE + 1 too: past the 500 one sweep prunes.
+    await run(
+      `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 599)
+       INSERT INTO blob_deletes (org_id, sha256, queued_at, deleted_at) SELECT ?, printf('%064d', i), ?, ? FROM n`,
+      orgId,
+      T0,
+      DUE + 1,
+    );
+    const count = async () => (await env.DB.prepare('SELECT count(*) AS n FROM blob_deletes WHERE org_id = ?').bind(orgId).first<{ n: number }>())?.n;
+    const weekOn = DUE + 1 + 7 * DAY;
+    // Nothing else is due, yet the org is listed for its old tombstones, and its sweep prunes them.
+    expect(await orgsWithStorageDue(env.DB, weekOn - 1, 1000)).not.toContain(orgId);
+    for (const left of [101, 0]) {
+      expect(await orgsWithStorageDue(env.DB, weekOn, 1000)).toContain(orgId);
+      expect(nothingDue(await claimed(orgId, weekOn))).toBe(true);
+      await org.commit(org.storage.stage.release('sweep-a', weekOn).writes);
+      expect(await count()).toBe(left);
+    }
+    expect(await orgsWithStorageDue(env.DB, weekOn, 1000)).not.toContain(orgId);
+  });
+
+  it('is queued afresh when its bytes are deleted again', async () => {
+    const { orgId } = await fresh();
+    await swept(orgId, [sha('u')]);
+    await queueDeletedFiles(env.DB, orgId, [sha('u')], DUE + 2);
+    expect({ queued: await queuedAt(orgId, sha('u')), deleted: await deletedAt(orgId, sha('u')) }).toEqual({ queued: DUE + 2, deleted: null });
+  });
+});

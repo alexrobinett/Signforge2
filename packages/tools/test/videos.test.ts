@@ -2,11 +2,12 @@
 // The clips are media-check's, made by ffmpeg. Parts are uploaded through the R2 binding here; the
 // browser's presigned PUTs to the S3 API are in test/e2e/upload.test.ts.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg, tombstoneFile } from '@signforge/db/testing';
 import { EXPORT_ADVICE } from '@signforge/media-check';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
+import { racing } from './calls';
 import { memberOf } from './member';
 
 // These tests upload, complete and re-hash multi-megabyte videos in workerd: several seconds each
@@ -22,6 +23,7 @@ const call = async <T = any>(name: string, input: unknown): Promise<T> => {
   return r.output as T;
 };
 const run = (name: string, input: unknown) => dispatch(registry, name, input, owner);
+const tombstone = (sha: string, at: number) => tombstoneFile(env.DB, o.orgId, sha, at);
 
 const clips: Record<string, string> = JSON.parse(env.VIDEO_CLIPS);
 const clip = (name: string) => Uint8Array.from(atob(clips[name]!), (c) => c.charCodeAt(0));
@@ -88,6 +90,46 @@ describe('create_video_upload', () => {
   it('refuses a file over the size cap before anything is stored', async () => {
     const r = await run('create_video_upload', { name: 'Huge', sha256: 'a'.repeat(64), type: 'video/mp4', size: 500_000_001 });
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'size', message: 'a video may be at most 500 MB' }] });
+  });
+
+  it('refuses a file the storage sweep has claimed for deletion (#235)', async () => {
+    const sha = 'c'.repeat(64);
+    const at = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    try {
+      await claimFileForSweep(env.DB, o.orgId, sha, at + 60_000);
+      expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses a held file only if the sweep has not deleted it, and its finish clears an older tombstone (review of #434, 3, 4)', async () => {
+    const at = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'], now: at });
+    try {
+      const bytes = clip('high.mp4');
+      const sha = await sha256(bytes);
+      await env.BLOBS.put(orgBlobKey(o.orgId, sha), bytes);
+      const input = (name: string) => ({ name, sha256: sha, type: 'video/mp4', size: bytes.length });
+      // Held: no upload. The sweep deletes it between the read and the commit: refused.
+      const raced = racing(owner, () => tombstone(sha, at));
+      expect(await dispatch(registry, 'create_video_upload', input('Raced'), raced)).toMatchObject({ ok: false, error: 'conflict' });
+      // Deleted, though a copy is back: uploaded again all the same.
+      const again = await call<Created>('create_video_upload', input('Again'));
+      expect(again.upload).not.toBeNull();
+      // Finished from the copy now held, read after the tombstone was stamped: verified, and the tombstone goes.
+      await tombstone(sha, at - 1);
+      expect((await call('finalize_video_upload', { assetId: again.asset.id })).asset.status).toBe('verified');
+      expect(await scoped(env.DB, o.orgId).storage.deleted([sha], at)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

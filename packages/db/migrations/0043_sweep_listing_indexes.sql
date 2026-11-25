@@ -1,0 +1,2 @@
+CREATE INDEX `assets_pending_idx` ON `assets` (`org_id`,`created_at`) WHERE status = 'pending';--> statement-breakpoint
+CREATE INDEX `blob_deletes_due_idx` ON `blob_deletes` (`org_id`,`queued_at`,`claim_until`);

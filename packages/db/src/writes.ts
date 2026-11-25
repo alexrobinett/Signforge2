@@ -9,9 +9,10 @@
  *
  * A `Write` is opaque: only this package builds one, always stamped with its scope's org.
  */
-import { getTableColumns, SQL, sql } from 'drizzle-orm';
+import { eq, getTableColumns, SQL, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { organization } from './schema';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type Query = Parameters<Db['batch']>[0][number];
@@ -57,7 +58,7 @@ export class StaleVersionError extends Error {
  * What a version guard aborts its batch with (`staleGuard`, ./scoped.ts): a JSON path that is not one,
  * which D1's error names, so a guard's abort is told from any other failure of the batch.
  */
-export const GUARD_ABORT = 'sf-guard: stale version';
+const GUARD_ABORT = 'sf-guard: stale version';
 
 /** A staged change: the statements to run, and the row (if any) as it will be afterwards. */
 export interface Staged<T = void> {
@@ -69,7 +70,7 @@ const write = (query: unknown): Write => ({ [QUERY]: query as Query });
 export const staged = <T>(row: T, ...queries: unknown[]): Staged<T> => ({ row, writes: queries.map(write) });
 
 /** A statement that fails its batch unless the row is still the version it was read at. */
-export const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: query as Query, [GUARD]: g });
+const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: query as Query, [GUARD]: g });
 
 /**
  * Run writes in one atomic batch. Nothing to write runs nothing. A batch failed by a version
@@ -167,4 +168,18 @@ export function updateSet(table: SQLiteTable, patch: Record<string, unknown>): R
     if (col.onUpdateFn && set[key] === undefined) set[key] = col.onUpdateFn();
   }
   return set;
+}
+
+/**
+ * A first statement for a batch that fails it unless `holds` is true when it runs, so a change made
+ * from an old read writes nothing: `commit` then throws `StaleVersionError` with `id` and the
+ * version `stale` reads now. Every version check inside a batch is one of these.
+ */
+export function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
+  // A JSON path that is not one raises an error naming it, which aborts the batch: `commit` knows a guard's abort by it.
+  const check = db
+    .select({ ok: sql`json_extract('{}', CASE WHEN ${holds} THEN '$' ELSE ${GUARD_ABORT} END)` })
+    .from(organization)
+    .where(eq(organization.id, orgId));
+  return guard(check, { id, version, holds, stale });
 }

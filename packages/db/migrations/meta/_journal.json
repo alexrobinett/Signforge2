@@ -288,6 +288,34 @@
       "when": 1795548833876,
       "tag": "0040_draft_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1795572742845,
+      "tag": "0041_storage_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1795577292586,
+      "tag": "0042_storage_manifests",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1795578832050,
+      "tag": "0043_sweep_listing_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1795580155023,
+      "tag": "0044_blob_tombstones",
+      "breakpoints": true
     }
   ]
 }

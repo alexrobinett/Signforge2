@@ -8,8 +8,10 @@
  *   up/<org>/<asset>/<sha256>             asset uploads waiting for `finalize_asset`
  *
  * Uploads land outside `o/<org>/b/` so a client never writes a content-addressed key: what it PUTs
- * is moved there only once its hash, type and size are checked. One lifecycle rule on `up/` can
- * expire uploads that were never finalized.
+ * is moved there only once its hash, type and size are checked. The storage sweep (#235) deletes the
+ * uploads of an asset left pending for 90 days, a deleted asset's files in `o/<org>/b/` 90 days
+ * after, once nothing names them, and a manifest in `o/<org>/m/` 90 days after it was stored, once
+ * no screen keeps it; a lifecycle rule on `up/` can expire uploads sooner.
  *
  * Feed photos live under `o/<org>/f/` rather than `o/<org>/b/` so daily feed-photo cleanup can
  * never delete an uploaded asset, template bundle or `/admin`-published manifest file that happens

@@ -11,7 +11,7 @@
 import { VIDEO_SPEC } from '@signforge/contract';
 import { checkVideo, EXPORT_ADVICE } from '@signforge/media-check';
 import { z } from 'zod';
-import { assetView, requireAsset, SHA256 } from './assets';
+import { assetView, clearOfSweep, requireAsset, SHA256 } from './assets';
 import { id, idempotencyKey, name } from './fields';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, ToolError } from './tool';
@@ -47,6 +47,7 @@ const createVideoUpload = defineTool({
   example: { name: 'Summer promo', sha256: '1'.repeat(64), type: 'video/mp4', size: 48_000_000 },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, input, write, services: { uploads } }) => {
+    await clearOfSweep(org, write, [input.sha256]);
     const asset = write(
       org.assets.stage.insert({
         kind: 'video',
@@ -59,8 +60,13 @@ const createVideoUpload = defineTool({
         status: 'pending',
       }),
     );
-    // Already stored and checked (an earlier upload, or `sf push`): finalize reads it from there.
-    if (await blobs.head(orgBlobKey(org.orgId, input.sha256))) return { asset: assetView(asset, []), upload: null };
+    // Already stored and checked (an earlier upload, or `sf push`): finalize reads it from there. Not if the sweep deleted
+    // it (a copy back is uploaded again, which clears its tombstone), and refused at the commit if it does meanwhile.
+    const now = Date.now();
+    if (!(await org.storage.deleted([input.sha256], now)).length && (await blobs.head(orgBlobKey(org.orgId, input.sha256)))) {
+      write({ row: undefined, writes: org.storage.stage.notDeleted([input.sha256], now) });
+      return { asset: assetView(asset, []), upload: null };
+    }
     const key = uploadKey(org.orgId, asset.id, input.sha256);
     const { uploadId } = await blobs.createMultipartUpload(key, { httpMetadata: { contentType: input.type } });
     const count = Math.ceil(input.size / VIDEO_PART_BYTES);
@@ -114,6 +120,9 @@ const finalizeVideoUpload = defineTool({
     if (asset.kind !== 'video') throw new ToolError('conflict', `asset ${asset.id} is an image; finish it with finalize_asset`);
     if (asset.status === 'verified') return { asset: assetView(asset, []), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the video again`);
+    // Before the file is read: what the sweep deletes from here on refuses the commit (review of #434).
+    const since = Date.now();
+    await clearOfSweep(org, write, [asset.sha256]);
 
     const staged = uploadKey(org.orgId, asset.id, asset.sha256);
     const stored = orgBlobKey(org.orgId, asset.sha256);
@@ -182,6 +191,8 @@ const finalizeVideoUpload = defineTool({
       }
       await blobs.delete(staged);
     }
+    // Read or stored since `since`: a tombstone from before goes (review of #434, 3).
+    write({ row: undefined, writes: org.storage.stage.restored([asset.sha256], Date.now(), since) });
     const verified = write(org.assets.stage.update(asset, { status: 'verified', width: info.width, height: info.height, durationMs: info.durationMs }));
     return { asset: assetView(verified, []), changed: true };
   },

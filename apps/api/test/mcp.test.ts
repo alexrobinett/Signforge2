@@ -76,6 +76,36 @@ describe('the transport', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
     const res = await post(access_token, { jsonrpc: '2.0', id: 1, method: 'ping', params: { pad: 'x'.repeat(300 * 1024) } });
     expect(res.status).toBe(413);
+    // A JSON-RPC error, as the batch refusal is, so a client that reads only those can read it (#323).
+    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: null, error: { code: -32_000, message: expect.stringContaining('262144 bytes') } });
+  });
+
+  // The 2026-07-28 era: each request carries its version in its own envelope (_meta).
+  const MODERN = {
+    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+    'io.modelcontextprotocol/clientInfo': { name: 'mcp-test', version: '1' },
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
+  it("serves the 2026 era from one handler, each request its own grant's tools, without a warning a call (#323)", async () => {
+    const { t, owner, org } = await team();
+    const reader = (await agentToken(t, owner, org.id, ['content:read'])).access_token;
+    const drafter = (await agentToken(t, owner, org.id, ['content:read', 'content:draft'])).access_token;
+    const warn = vi.spyOn(console, 'warn');
+    const listed = async (token: string) => {
+      const res = await post(
+        token,
+        { jsonrpc: '2.0', id: ++rpcId, method: 'tools/list', params: { _meta: MODERN } },
+        { headers: { 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/list' } },
+      );
+      expect(res.status, await res.clone().text()).toBe(200);
+      return ((await res.json<{ result: { tools: { name: string }[] } }>()).result.tools ?? []).map((x) => x.name);
+    };
+    const [read, drafted] = await Promise.all([listed(reader), listed(drafter)]);
+    expect(read).toContain('list_spots');
+    expect(read).not.toContain('create_spot');
+    expect(drafted).toContain('create_spot');
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('responseMode');
+    warn.mockRestore();
   });
 });
 
