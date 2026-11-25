@@ -815,7 +815,7 @@ describe('budgets, resilience and cleanup', () => {
     const unfitId = await news('https://unfit.test/rss', { bind: false });
     await bindSpot(o, unfitId, {
       tvId: unfitTv,
-      bindings: { count: { source: unfitId, path: 'title' }, items: { source: unfitId, path: 'items' } },
+      bindings: { count: { source: unfitId, path: 'title' }, items: { source: unfitId, path: 'title' } },
       publish: true,
     });
     await poll({ now: NOW, guards: web({ 'https://unfit.test/rss': { body: feedOf(1, () => 'https://cdn.unfit.test/0.jpg') } }).guards });

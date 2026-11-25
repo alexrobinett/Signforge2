@@ -87,7 +87,13 @@ function withDefaults(spot: Extract<Spot, { kind: 'template' }>, t: TemplateMani
   for (const [name, def] of Object.entries(t.fields)) {
     if (def.type === 'list') {
       const rows = (spot.data[name] ?? def.default ?? []) as Record<string, unknown>[];
-      data[name] = rows.map((row) => Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, resolve(d, row[k] ?? d.default, colors)])));
+      data[name] = rows.map((row) =>
+        Object.fromEntries(
+          Object.entries(def.item).flatMap(([k, d]) =>
+            d.type === 'image' ? (row[k] !== undefined ? [[k, row[k]]] : []) : [[k, resolve(d, row[k] ?? d.default, colors)]],
+          ),
+        ),
+      );
     } else if (def.type !== 'image') data[name] = resolve(def, spot.data[name] ?? def.default, colors);
   }
   return { ...spot, data };
@@ -102,7 +108,7 @@ function tokenProblems(t: TemplateManifest, data: Record<string, unknown>): stri
   };
   for (const [name, def] of Object.entries(t.fields)) {
     if (def.type === 'list') {
-      for (const [k, d] of Object.entries(def.item)) check(`${name}.${k}`, d, d.default, 'defaults to');
+      for (const [k, d] of Object.entries(def.item)) if (d.type !== 'image') check(`${name}.${k}`, d, d.default, 'defaults to');
       const rows = Array.isArray(data[name]) ? (data[name] as unknown[]) : [];
       rows.forEach((row, i) => {
         if (row && typeof row === 'object')

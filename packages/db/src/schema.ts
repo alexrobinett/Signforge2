@@ -1061,6 +1061,11 @@ export const publishes = sqliteTable(
     finishedAt: integer('finished_at'),
     /** How many of its screens the check saw playing it then: 0 when replaced before any check saw one report it. Null until finished. */
     reached: integer('reached'),
+    /**
+     * What it made live and removed, named as published (#370): `{ kind, name, removed }[]`, as JSON. Null for a roll back,
+     * and for a publish made before this was kept.
+     */
+    changesJson: text('changes_json'),
   },
   (t) => [
     uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),

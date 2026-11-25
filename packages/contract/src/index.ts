@@ -22,6 +22,7 @@
  */
 
 export * from './frame.ts';
+export * from './row-asset.ts';
 export * from './sample.ts';
 export * from './shapes.ts';
 export * from './validate.ts';

@@ -5,8 +5,10 @@
 import { isCatalogueFontFile } from '@signforge/compiler';
 import { isId, type DataSnapshot } from '@signforge/contract';
 import { scoped } from '@signforge/db';
+import { boundImageHashes, hasBoundListImage, snapshotFit } from '@signforge/player-core';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { feedBlobKey } from '../data/feed-photos';
 import { baseBlobKey, blobHeaders, manifestKey, matches, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { fileManifests, screenManifests } from './manifests';
@@ -60,16 +62,38 @@ device.get('/blobs/:sha256', async (c) => {
   if (!SHA256.test(sha)) return notFound('file not found');
   const manifests = await fileManifests(c.env.BLOBS, screen);
   const listed = manifests.find((m) => m.files.has(sha));
-  if (!listed) return notFound('file not found');
+  if (listed) {
+    // The org's own copy, or for a base template's HTML or a catalogue brand font the shared one.
+    // Never another org's prefix.
+    let obj = await c.env.BLOBS.get(orgBlobKey(screen.orgId, sha));
+    if (!obj && (isCatalogueFontFile(sha) || manifests.some((m) => m.baseHtml.has(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
+    if (!obj) return notFound('file not found');
 
-  // The org's own copy, or for a base template's HTML or a catalogue brand font the shared one.
-  // Never another org's prefix.
-  let obj = await c.env.BLOBS.get(orgBlobKey(screen.orgId, sha));
-  if (!obj && (isCatalogueFontFile(sha) || manifests.some((m) => m.baseHtml.has(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
+    // A screen keeps what it fetched in its own offline store, keyed by hash, so a file never changes under it.
+    const type = listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream';
+    return new Response(obj.body, { headers: blobHeaders(sha, type, obj.size, 'private, max-age=31536000, immutable') });
+  }
+
+  // Feed image blob: served only from this org's feed prefix (`o/<org>/f/`) when referenced by a
+  // fit snapshot of a data source bound to a list-image field in the screen's desired or previous manifest.
+  const active = manifests.filter((m) => m.id === screen.desiredManifestId || m.id === screen.previousManifestId);
+  const imageSources = new Set<string>();
+  for (const m of active) {
+    for (const [sourceId, bound] of m.bound) if (hasBoundListImage(bound)) imageSources.add(sourceId);
+  }
+  if (!imageSources.size) return notFound('file not found');
+  const rows = await scoped(c.env.DB, screen.orgId).dataSources.snapshots([...imageSources]);
+  const referenced = rows.some((r) => {
+    const data: unknown = JSON.parse(r.dataJson);
+    return active.some((m) => {
+      const bound = m.bound.get(r.dataSourceId);
+      return !!bound?.length && !snapshotFit(bound, data).refused && boundImageHashes(bound, data).includes(sha);
+    });
+  });
+  if (!referenced) return notFound('file not found');
+  const obj = await c.env.BLOBS.get(feedBlobKey(screen.orgId, sha));
   if (!obj) return notFound('file not found');
-
-  // A screen keeps what it fetched in its own offline store, keyed by hash, so a file never changes under it.
-  const type = listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream';
+  const type = obj.httpMetadata?.contentType || 'application/octet-stream';
   return new Response(obj.body, { headers: blobHeaders(sha, type, obj.size, 'private, max-age=31536000, immutable') });
 });
 

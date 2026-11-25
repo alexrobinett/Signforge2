@@ -6,7 +6,7 @@
  * constants and the list rows' matching, which the route and the CMS's summary share, so the CMS
  * imports it without the API's code or schemas; the route parses a request with its own (./inline.ts).
  */
-import type { ScalarFieldDef } from '@signforge/contract';
+import type { ListItemFieldDef } from '@signforge/contract';
 import type { SpotView } from '@signforge/tools/outputs';
 
 /** The image types a fill takes: what the browser's scaling makes, and what both providers read. */
@@ -55,7 +55,7 @@ export interface KeepRequest {
 type Row = Record<string, unknown>;
 
 /** The column a list's rows are told apart by: its first text column, as a menu's item name; undefined for a list with none. */
-export function keyColumn(item: Record<string, ScalarFieldDef>): string | undefined {
+export function keyColumn(item: Record<string, ListItemFieldDef>): string | undefined {
   return Object.entries(item).find(([, d]) => d.type === 'text')?.[0];
 }
 
@@ -70,7 +70,7 @@ export const rowKey = (row: Row, column: string) => {
  * by place in a list with no text column. A row of `after` with no match is added; one of `before`
  * left over is removed. Indexes into each list.
  */
-export function matchRows(item: Record<string, ScalarFieldDef>, before: Row[], after: Row[]) {
+export function matchRows(item: Record<string, ListItemFieldDef>, before: Row[], after: Row[]) {
   const column = keyColumn(item);
   const pairs: [number, number][] = [];
   const added: number[] = [];

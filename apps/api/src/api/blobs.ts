@@ -13,6 +13,7 @@
  */
 import { isCatalogueFontFile } from '@signforge/compiler';
 import type { Hono } from 'hono';
+import { feedBlobKey } from '../data/feed-photos';
 import { baseBlobKey, blobHeaders, matches, orgBlobKey } from '../r2';
 import type { ApiEnv } from '.';
 
@@ -24,6 +25,7 @@ export function mountBlobs(api: Hono<ApiEnv>): void {
     const notFound = () => c.json({ error: 'file not found' }, 404, { 'cache-control': 'no-store' });
     if (!SHA256.test(sha)) return notFound();
     let obj = await c.env.BLOBS.get(orgBlobKey(c.var.orgId, sha));
+    if (!obj) obj = await c.env.BLOBS.get(feedBlobKey(c.var.orgId, sha));
     if (!obj && (isCatalogueFontFile(sha) || (await c.var.org.templates.versions.baseBundle(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
     if (!obj) return notFound();
     const headers = blobHeaders(sha, obj.httpMetadata?.contentType || 'application/octet-stream', obj.size, 'private, no-cache');
