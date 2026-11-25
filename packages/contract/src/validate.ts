@@ -165,16 +165,20 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       return isStr(v) ? undefined : `field "${name}" must be a colour`;
     case 'select':
       return isStr(v) && def.options.includes(v) ? undefined : `field "${name}" must be one of ${def.options.join(', ')}`;
-    case 'url':
+    case 'url': {
       if (!isStr(v)) return `field "${name}" must be an https address`;
       // A lone surrogate has no UTF-8 form: no QR code can carry it. In a `u` pattern a pair is one code point, so only lone ones match.
       if (/\p{Surrogate}/u.test(v)) return `field "${name}" must be well-formed text`;
       // The URL parser ignores space around an address, but the value is stored and drawn as typed: a QR code would carry it.
       if (v !== v.trim()) return `field "${name}" must not start or end with a space`;
       if (v !== '' && !safeUrl(v)) return `field "${name}" must be an https address`;
-      if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
+      const bytes = new TextEncoder().encode(v).length;
+      if (bytes > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      if (def.maxBytes && bytes > def.maxBytes)
+        return `field "${name}" is longer than ${def.maxBytes} bytes, the most its QR code holds (a letter outside A to Z takes 2 to 4)`;
       return undefined;
+    }
     case 'date':
     case 'datetime': {
       if (!isStr(v)) return `field "${name}" must be ${CALENDAR[def.type].what}`;
@@ -203,8 +207,11 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   };
   switch (def.type) {
     case 'text':
+      optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      break;
     case 'url':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      optional('maxBytes', (v) => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= MAX_URL_BYTES, `a whole number from 1 to ${MAX_URL_BYTES}`);
       break;
     case 'number':
       optional('min', isNum, 'a number');

@@ -62,8 +62,11 @@ export type ScalarFieldDef =
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string }
-  /** A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. */
-  | { type: 'url'; label: string; default?: string; maxLength?: number }
+  /**
+   * A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. `maxBytes`
+   * bounds its UTF-8 bytes, which is what a QR code holds: a letter outside A to Z takes 2 to 4 (#230).
+   */
+  | { type: 'url'; label: string; default?: string; maxLength?: number; maxBytes?: number }
   /** A calendar day, `YYYY-MM-DD`; `min` and `max` are days too. */
   | { type: 'date'; label: string; default?: string; min?: string; max?: string }
   /**

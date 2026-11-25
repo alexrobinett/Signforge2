@@ -172,6 +172,21 @@ describe('validateSpotData', () => {
     expect(validateSpotData(link, { link: `${euros}a` }, {})).toEqual(['field "link" is longer than 2048 bytes']);
   });
 
+  // What a QR code holds is bytes, not characters: 200 characters of Japanese are 560 bytes, a far denser code (#230).
+  it('holds a url to its maxBytes of UTF-8, counting a character outside A to Z by its 2 to 4 bytes', () => {
+    const qr: Record<string, FieldDef> = { qrUrl: { type: 'url', label: 'QR link', maxBytes: 213 } };
+    const long = 'field "qrUrl" is longer than 213 bytes, the most its QR code holds (a letter outside A to Z takes 2 to 4)';
+    const ascii = `https://example.com/${'w'.repeat(193)}`;
+    const japanese = `https://example.com/w${'避難案内'.repeat(16)}`;
+    expect([ascii, japanese].map((v) => new TextEncoder().encode(v).length)).toEqual([213, 213]);
+    expect(validateSpotData(qr, { qrUrl: ascii }, {})).toEqual([]);
+    expect(validateSpotData(qr, { qrUrl: japanese }, {})).toEqual([]);
+    expect(validateSpotData(qr, { qrUrl: `${ascii}w` }, {})).toEqual([long]);
+    expect(validateSpotData(qr, { qrUrl: `${japanese}w` }, {})).toEqual([long]);
+    // 200 characters, as a character limit would have allowed.
+    expect(validateSpotData(qr, { qrUrl: `https://example.com/${'避難案内'.repeat(45)}` }, {})).toEqual([long]);
+  });
+
   it('refuses a url that is not well-formed Unicode, which cannot be written as UTF-8, and keeps a surrogate pair', () => {
     const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
     for (const lone of ['https://example.com/\uD800', 'https://example.com/\uDC00x', 'https://example.com/\uDC00\uD800'])
@@ -513,6 +528,8 @@ describe('validateTemplateManifest', () => {
     bad.fields.items = { type: 'list', label: 'Items', item: { pic: { type: 'image', label: 'Pic' } } };
     bad.fields.odd = { type: 'video', label: 'Odd' };
     bad.fields.link = { type: 'url', label: 'Link', maxLength: 0 };
+    bad.fields.qr = { type: 'url', label: 'QR', maxBytes: 2049 };
+    bad.fields.qr2 = { type: 'url', label: 'QR', maxBytes: 0.5 };
     expect(validateTemplateManifest(bad)).toEqual([
       'field "price": step must be a number above 0',
       'field "price": min must not be above max',
@@ -520,6 +537,8 @@ describe('validateTemplateManifest', () => {
       'field "size": options must be a list of text',
       'field "odd": type must be one of text, number, boolean, color, select, url, date, datetime, image, list',
       'field "link": maxLength must be a whole number above 0',
+      'field "qr": maxBytes must be a whole number from 1 to 2048',
+      'field "qr2": maxBytes must be a whole number from 1 to 2048',
     ]);
   });
 
