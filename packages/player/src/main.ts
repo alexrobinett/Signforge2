@@ -776,10 +776,6 @@ async function contentLoop(): Promise<never> {
         });
         contentFetch = pass;
         evictDue = await pass;
-        if (!pendingFeedBlobs.size && !contentDue) {
-          incomingFeedBlobs.clear();
-          pins.release('snapshots-incoming');
-        }
       } catch (err) {
         if (signal.aborted) return;
         if (err instanceof UnauthorisedError) return poll.wake();
@@ -791,6 +787,14 @@ async function contentLoop(): Promise<never> {
           settleSources(playback.manifest);
         }
       }
+    }
+    // Once nothing is pending and the manifest is in, the images a sync sent need no pin of their own: the manifest's
+    // snapshots pin those it names. Any they do not name go on the next pass (review of #240, round 2).
+    if (incomingFeedBlobs.size && !pendingFeedBlobs.size && !contentDue) {
+      refreshSnapshotPins();
+      if ([...incomingFeedBlobs].some((sha) => !lastSnapshotPins.has(sha))) feedBlobsDue = true;
+      incomingFeedBlobs.clear();
+      pins.release('snapshots-incoming');
     }
     if (retry) await content.wait(contentRetryMs(++failures, timing()));
   });

@@ -272,6 +272,59 @@ describe('feed images on screens (#196)', () => {
     for (const sha of [f1, t1]) expect(requestsFor(p, sha), sha).toHaveLength(1);
   }, 40_000);
 
+  // And the pin goes once that manifest is in (review of #240, round 2): photos it does not name, or a later snapshot
+  // drops, are evicted like any other.
+  describe('once the manifest the images came for is in', () => {
+    /** A player on a feedless manifest whose next one's images arrive while it cannot be fetched. */
+    async function sentWhileFailing(
+      spots: Parameters<typeof h.content>[0] = [{ id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: bound }],
+    ) {
+      const { images, shas } = twoPhotos();
+      const [f1, t1] = shas;
+      const p = await h.openPlayer((s) => {
+        s.nextSyncS = 1;
+        s.publish(h.content([{ id: 'other', durationMs: 600 }]));
+      }, api);
+      await p.until((s) => s.played >= 1);
+      const failing = p.server.intercept(/^\/content\/manifest\.json$/, { status: 503 });
+      p.server.publish(h.content(spots, { variant: 'news' }));
+      feed(p.server, 1000, [photo('One', f1, t1)], images.slice(0, 2));
+      await expect.poll(() => cached(p), { timeout: 10_000 }).toEqual(expect.arrayContaining([`/_sf/blob/${f1}`, `/_sf/blob/${t1}`]));
+      return { p, f1, t1, failing };
+    }
+    const gone = (p: Player, ...shas: string[]) =>
+      expect.poll(async () => (await cached(p)).filter((k) => shas.some((sha) => k.endsWith(sha))), { timeout: 15_000 }).toEqual([]);
+
+    it('evicts them when it recovers onto a manifest that does not name them', async () => {
+      const { p, f1, t1, failing } = await sentWhileFailing();
+      const other = h.content([{ id: 'other', durationMs: 600 }], { variant: 'other' });
+      p.server.publish(other);
+      failing();
+      await p.until((s) => s.manifestId === other.manifest.id);
+      await gone(p, f1, t1);
+    }, 40_000);
+
+    it('evicts them when it recovers onto the manifest that names them, and a later snapshot drops them', async () => {
+      // Another spot stays on screen: when the snapshot drops the images, nothing on screen or loading holds them, and the
+      // first pass after evicts them.
+      const { p, f1, t1, failing } = await sentWhileFailing([
+        { id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: bound },
+        { id: 'still', durationMs: 600_000 },
+      ]);
+      // No sync while it recovers: one would send the images again, and its pass let the pin go anyway.
+      p.server.nextSyncS = 600;
+      const syncs = p.server.syncs.length;
+      await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(syncs);
+      failing();
+      await p.until((s) => s.spot === 'still');
+      expect(await cached(p)).toEqual(expect.arrayContaining([`/_sf/blob/${f1}`, `/_sf/blob/${t1}`]));
+      // The snapshot drops them, and a nudge brings it: its pass evicts them.
+      p.server.setData('news', makeSnap(2000, [{ title: 'Text only' }]));
+      p.server.push({ type: 'manifest', id: 'nudge' });
+      await gone(p, f1, t1);
+    }, 40_000);
+  });
+
   it('fetches feed images while the manifest cannot be fetched', async () => {
     const { images, shas } = twoPhotos();
     const [f1, t1] = shas;

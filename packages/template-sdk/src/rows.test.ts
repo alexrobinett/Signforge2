@@ -106,4 +106,45 @@ describe('@signforge/template-sdk/rows', { timeout: 30_000 }, () => {
     expect(res.directSrc).toBe('blob:thumb-0');
     expect(res.directHidden).toBe(false);
   });
+
+  // A photo the browser cannot decode leaves its row text only; the same image bound again to a good one shows it, whether
+  // the bad one's decode has failed by then or not (review of #240, round 2).
+  it('shows a good photo bound after a bad one on the same image, before or after the bad one fails', async () => {
+    const res = await page.evaluate(async () => {
+      const canvas = new OffscreenCanvas(4, 3);
+      canvas.getContext('2d')!.fillRect(0, 0, 4, 3);
+      const good = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/png' }));
+      const bad = URL.createObjectURL(new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])], { type: 'image/jpeg' }));
+      const ctxOf = (url: string) => ({ data: { items: [{ title: 'Story' }] }, assets: { [sfRows.rowAsset('items', 0, 'image')]: url } });
+      const settled = (img: HTMLImageElement) =>
+        img.decode().then(
+          () => undefined,
+          () => undefined,
+        );
+      const view = (img: HTMLImageElement) => ({ src: img.getAttribute('src'), hidden: img.hidden, width: img.naturalWidth });
+      const row = () => {
+        const li = document.createElement('li');
+        li.innerHTML = '<img data-sf-src="image">';
+        return [li, li.querySelector('img')!] as const;
+      };
+      // Bound again at once, while the bad one's decode is still under way.
+      const [a, imgA] = row();
+      sfRows.bindRow(a, ctxOf(bad), 'items', 0);
+      sfRows.bindRow(a, ctxOf(good), 'items', 0);
+      await settled(imgA);
+      await new Promise((r) => setTimeout(r, 50));
+      // Bound again after the bad one failed and hid the image.
+      const [b, imgB] = row();
+      sfRows.bindRow(b, ctxOf(bad), 'items', 0);
+      await settled(imgB);
+      await new Promise((r) => setTimeout(r, 50));
+      const failed = view(imgB);
+      sfRows.bindRow(b, ctxOf(good), 'items', 0);
+      await settled(imgB);
+      return { good, at: view(imgA), failed, after: view(imgB) };
+    });
+    expect(res.failed).toEqual({ src: null, hidden: true, width: 0 });
+    expect(res.at).toEqual({ src: res.good, hidden: false, width: 4 });
+    expect(res.after).toEqual({ src: res.good, hidden: false, width: 4 });
+  });
 });
