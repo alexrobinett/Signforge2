@@ -2,29 +2,34 @@
  * Storage clean-up (#235): what an org stores in R2 that nothing needs any more, decided here from what the org keeps, and
  * deleted by the API's daily sweep (apps/api/src/storage.ts), which builds every key under the org's own prefixes.
  * Owner decisions (2026-11-24): a 90-day grace period (`STORAGE_GRACE_MS`); the current publish and every publish of
- * the last 90 days keep their files, and a roll back reaches no further; only deleted assets' files and unfinished
- * uploads go, never an asset in the library.
+ * the last 90 days keep their files and manifests, and a roll back reaches no further; only deleted assets' files,
+ * unfinished uploads and manifests no screen keeps go, never an asset in the library.
  *
  * **What the org keeps** is explicit, never inferred from when something was published (review of #429):
  * - Manifests (`keptManifests`): each screen's desired, previous and reported manifest, and the ones its last heartbeat
  *   names (`active`, `fallbackFrom`, `lastGood`, which the device API lets it fetch files for), a revoked screen's
  *   excepted; and every manifest effective on a screen at any publish of the last 90 days, one it inherited from an older
  *   publish included.
- * - Files: every file a kept manifest names (`stored_manifests`, the index written in the batch of the publish that stores
- *   a manifest, and by the sweep for one stored before it), and every file an asset, a rendition, a rendition's sample or
- *   a template version of the org names, a pending upload's included.
+ * - Files: every file a kept manifest names (`stored_manifests`, per screen as R2 stores manifests: the index written in
+ *   the batch of the publish or `/admin` push that stores one, and by the sweep for one stored before it), and every file
+ *   an asset, a rendition, a rendition's sample or a template version of the org names, a pending upload's included.
  *
  * **A deleted asset's file** (`blob_deletes`, queued by `delete_asset`) is deleted once queued for the grace period,
  * outside all of that, and only while every kept manifest is indexed or was looked for in R2: an unindexed one could name
  * it, and one found in no object authorizes no fetch.
  * **An unfinished upload**: an asset still `pending` for the grace period, its `up/` objects and its row; the hashes it
  * named are queued again, so a stored copy it was reusing is not left unqueued.
+ * **A stored manifest** (a `stored_manifests` row, one R2 object), once stored for the grace period and not kept for its
+ * screen: a thousand a sweep (`manifestsDue`), marked deleted, never taken again unless a writer stores it again. An org
+ * with one old enough is looked at weekly (`STORAGE_RECHECK_MS`, `storage_sweeps.manifests_checked_at`). One stored before the index and never kept since, or found in no object, is never deleted.
  *
  * **Writers and the sweep exclude each other.** The sweep leases the org (`storage_sweeps`, with an owner token) and claims
  * the files it deletes with that owner; a writer that could reuse a claimed file's bytes (an upload made or verified, a
  * template registered) is refused while the claim holds (`stage.unclaimed`), and a publish whose manifests name a deleted
- * asset's file is refused at its commit (`stage.filesLive`). The sweep deletes objects only while its lease holds, and its
- * last batch, guarded by that lease, forgets only its own claims. A run that fails part-way is taken up by the next.
+ * asset's file is refused at its commit (`stage.filesLive`). A writer that stores a manifest again or points a screen at
+ * one (a publish, `publish_manifest_to_screen`, a roll back) is refused while the sweep claims it, or if it deleted it
+ * after the writer started (`stage.manifestsStored`). The sweep deletes objects only while its lease holds, and its last
+ * batch, guarded by that lease, forgets only its own claims. A run that fails part-way is taken up by the next.
  */
 import { and, eq, inArray, lte, type SQL, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -44,6 +49,14 @@ export const STORAGE_LEASE_MS = 10 * 60_000;
 const CHUNK = 90;
 /** A manifest index written in a publish's batch: its JSON in parts of at most this many characters, each one statement. */
 const INDEX_CHARS = 90_000;
+/**
+ * How often an org's stored manifests are looked at while one is old enough to go: what stops a manifest being kept (a
+ * screen's pointer moving on, a publish passing the grace period, a pointer only `/admin` set) is not tracked, so one
+ * left behind goes within a week of it.
+ */
+const STORAGE_RECHECK_MS = 7 * DAY_MS;
+/** Stored manifests one sweep of an org claims at most: one R2 key each, one delete call. */
+const MANIFESTS_PER_SWEEP = 1000;
 
 const chunks = <T>(list: readonly T[], size = CHUNK): T[][] =>
   Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
@@ -108,6 +121,22 @@ const allKnown = (orgId: string, cutoff: number) =>
   sql`NOT EXISTS (SELECT 1 FROM (${keptManifests(orgId, cutoff)}) k WHERE NOT ${known(orgId, sql`k.manifest_id`)}
     AND NOT EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.screen_id = k.screen_id AND m.manifest_id = k.manifest_id))`;
 
+/**
+ * The org's stored manifests a sweep at `now` may delete, one R2 object a row: stored before `cutoff` for a screen, its
+ * object found, not deleted, claimed by no sweep, and kept for that screen by nothing (`keptManifests`).
+ */
+const manifestsDue = (orgId: string, cutoff: number, now: number) =>
+  sql`SELECT m.screen_id, m.manifest_id, m.stored_at FROM stored_manifests m
+    WHERE m.org_id = ${orgId} AND m.files_json IS NOT NULL AND m.deleted_at IS NULL AND m.stored_at <= ${cutoff} AND m.claim_until <= ${now}
+    AND NOT EXISTS (SELECT 1 FROM (${keptManifests(orgId, cutoff)}) k WHERE k.screen_id = m.screen_id AND k.manifest_id = m.manifest_id)`;
+
+/** A stored manifest a sweep claims at `now`, or deleted at or after `since`. */
+const gone = (now: number, since: number) => sql`(${sm.claimUntil} > ${now} OR coalesce(${sm.deletedAt}, -1) >= ${since})`;
+
+/** Stored manifests by screen and id, as one bound value: `(screen_id, manifest_id) IN (...)`. */
+const storedAs = (stored: readonly StoredManifest[]) =>
+  sql`(${sm.screenId}, ${sm.manifestId}) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(${JSON.stringify(stored.map((x) => [x.screenId, x.manifestId]))}))`;
+
 /** A list of hashes as one bound value: `IN (SELECT value FROM json_each(?))`. */
 const anyOf = (shas: readonly string[]) => sql`(SELECT value FROM json_each(${JSON.stringify([...new Set(shas)])}))`;
 
@@ -118,22 +147,35 @@ interface IndexedManifest {
   files: readonly string[] | null;
 }
 
-/** What one sweep of an org deletes: its claimed files, and unfinished uploads with their files. */
+/** A manifest as R2 stores it: for a screen, by its id. */
+export interface StoredManifest {
+  screenId: string;
+  manifestId: string;
+}
+
+/** What one sweep of an org deletes: its claimed files, unfinished uploads with their files, and claimed stored manifests. */
 export interface StorageDue {
   files: string[];
   uploads: { assetId: string; files: string[] }[];
+  manifests: StoredManifest[];
 }
 
 /**
- * Up to `limit` orgs with a queued file or an unfinished upload past the grace period at `now`, the least recently swept
+ * Up to `limit` orgs with a queued file or an unfinished upload past the grace period at `now`, or with a stored manifest
+ * past it whose manifests were not looked at in the last STORAGE_RECHECK_MS (review of #431), the least recently swept
  * first, so an org whose files stay pinned, or whose sweep fails, never holds the others back. One statement.
  */
 export async function orgsWithStorageDue(d1: D1Database, now: number, limit: number): Promise<string[]> {
   const cutoff = now - STORAGE_GRACE_MS;
+  // Manifests: one probe of `stored_manifests_live_idx` an org, its live rows by age, none of its deleted ones (review of #431).
   const rows = await drizzle(d1).all<{ orgId: string }>(sql`
     SELECT d.org_id AS orgId FROM (
       SELECT org_id FROM blob_deletes WHERE queued_at <= ${cutoff} AND claim_until <= ${now}
       UNION SELECT org_id FROM assets WHERE status = 'pending' AND created_at <= ${cutoff}
+      UNION SELECT o.id FROM organization o LEFT JOIN storage_sweeps x ON x.org_id = o.id
+        WHERE coalesce(x.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
+        AND EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = o.id AND m.files_json IS NOT NULL AND m.deleted_at IS NULL
+          AND m.stored_at <= ${cutoff})
     ) d LEFT JOIN storage_sweeps w ON w.org_id = d.org_id
     WHERE coalesce(w.lease_until, 0) <= ${now}
     ORDER BY coalesce(w.swept_at, 0), d.org_id LIMIT ${limit}`);
@@ -170,7 +212,8 @@ export function storage(db: Db, orgId: string) {
         AND NOT EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.screen_id = k.screen_id AND m.manifest_id = k.manifest_id)
         ORDER BY k.manifest_id, k.screen_id LIMIT ${limit}`),
     /**
-     * Claims for `owner`, which holds the org's lease, up to `limit` files due at `now` and up to `limit` unfinished uploads.
+     * Claims for `owner`, which holds the org's lease, up to `limit` files due at `now`, up to `limit` unfinished uploads,
+     * and up to MANIFESTS_PER_SWEEP stored manifests, the oldest first.
      * Files only while every kept manifest's files are known (`allKnown`, checked as the claim runs). A queued file the org
      * names again is forgotten there: it is not a deleted asset's alone any more. Nothing is deleted here.
      */
@@ -183,12 +226,25 @@ export function storage(db: Db, orgId: string) {
         .where(and(mine, lte(bd.queuedAt, cutoff), lte(bd.claimUntil, now), sql`NOT ${named}`, sql`NOT ${inKept(orgId, cutoff)}`))
         .orderBy(bd.queuedAt, bd.sha256)
         .limit(limit);
-      const [claimed] = await db.batch([
+      const [claimed, manifests] = await db.batch([
         db
           .update(bd)
           .set({ claimOwner: owner, claimUntil: now + STORAGE_LEASE_MS })
           .where(and(mine, inArray(bd.sha256, due), leased(owner, now), allKnown(orgId, cutoff)))
           .returning({ sha256: bd.sha256 }),
+        db
+          .update(sm)
+          .set({ claimOwner: owner, claimUntil: now + STORAGE_LEASE_MS })
+          .where(
+            and(
+              eq(sm.orgId, orgId),
+              sql`(${sm.screenId}, ${sm.manifestId}) IN (SELECT screen_id, manifest_id FROM (
+                SELECT d.screen_id, d.manifest_id FROM (${manifestsDue(orgId, cutoff, now)}) d
+                ORDER BY d.stored_at, d.screen_id, d.manifest_id LIMIT ${MANIFESTS_PER_SWEEP}))`,
+              leased(owner, now),
+            ),
+          )
+          .returning({ screenId: sm.screenId, manifestId: sm.manifestId }),
         db.delete(bd).where(and(mine, sql`${named}`)),
       ]);
       const pending = await db
@@ -211,6 +267,7 @@ export function storage(db: Db, orgId: string) {
       ).flat();
       return {
         files: claimed.map((row) => row.sha256),
+        manifests,
         // A video's one file is the asset's own; an image's, its renditions' and their samples'.
         uploads: pending.map((p) => ({
           assetId: p.id,
@@ -224,6 +281,19 @@ export function storage(db: Db, orgId: string) {
         })),
       };
     },
+    /**
+     * Of these stored manifests, the ones a sweep claims at `now` or deleted at or after `since`: a writer that stores one
+     * again (a publish, `/admin`) passes when it started, so one deleted before that it stores afresh; one that only
+     * points screens at stored ones (a roll back) passes 0.
+     */
+    manifestsGone: async (stored: readonly StoredManifest[], now: number, since: number): Promise<StoredManifest[]> =>
+      stored.length
+        ? db
+            .select({ screenId: sm.screenId, manifestId: sm.manifestId })
+            .from(sm)
+            .where(and(eq(sm.orgId, orgId), storedAs(stored), gone(now, since)))
+            .all()
+        : [],
     /** Whether any of these hashes is claimed by a sweep at `now`: a writer about to reuse them says so before it starts. */
     claimed: async (shas: readonly string[], now: number) =>
       shas.length > 0 &&
@@ -284,6 +354,32 @@ export function storage(db: Db, orgId: string) {
             ]
           : [],
       /**
+       * Refuses the batch if a sweep claims any of these stored manifests at `now`, or deleted one at or after `since`
+       * (`manifestsGone`), and marks stored again one deleted before: the writer stored it afresh, or saw it stored. A
+       * manifest the writer points a screen at is then never one the sweep deletes meanwhile.
+       */
+      manifestsStored: (stored: readonly StoredManifest[], now: number, since: number): Write[] =>
+        stored.length
+          ? [
+              staleGuard(
+                db,
+                orgId,
+                'manifest storage',
+                0,
+                sql`NOT EXISTS (SELECT 1 FROM ${sm} WHERE ${sm.orgId} = ${orgId} AND ${storedAs(stored)} AND ${gone(now, since)})`,
+                async () => 0,
+              ),
+              ...staged(
+                undefined,
+                // Stored again now: its grace period starts again (review of #431).
+                db
+                  .update(sm)
+                  .set({ deletedAt: null, storedAt: now })
+                  .where(and(eq(sm.orgId, orgId), storedAs(stored), sql`${sm.deletedAt} IS NOT NULL`)),
+              ).writes,
+            ]
+          : [],
+      /**
        * The files each manifest names, indexed for the screen it is stored for at `now`: `files` null for one the sweep
        * found no object for, unknown. In parts under D1's limits.
        */
@@ -309,13 +405,18 @@ export function storage(db: Db, orgId: string) {
                 .insert(sm)
                 .select(
                   // `WHERE true`: SQLite reads `ON CONFLICT` after a bare `SELECT ... FROM` as the select's own join.
-                  sql`SELECT ${orgId}, json_extract(value, '$.screenId'), json_extract(value, '$.id'), json_extract(value, '$.files'), ${now}
-                    FROM json_each(${JSON.stringify(part)}) WHERE true`,
+                  // Every column, unclaimed and not deleted: drizzle inserts into all of them.
+                  sql`SELECT ${orgId}, json_extract(value, '$.screenId'), json_extract(value, '$.id'), json_extract(value, '$.files'), ${now},
+                    NULL, 0, NULL FROM json_each(${JSON.stringify(part)}) WHERE true`,
                 )
-                // Files known replace files unknown, never the other way round.
+                // Files known replace files unknown, never the other way round; a manifest found stored only now is stored
+                // as of now, its grace period starting then (review of #431).
                 .onConflictDoUpdate({
                   target: [sm.orgId, sm.screenId, sm.manifestId],
-                  set: { filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})` },
+                  set: {
+                    filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})`,
+                    storedAt: sql`CASE WHEN ${sm.filesJson} IS NULL AND excluded.files_json IS NOT NULL THEN excluded.stored_at ELSE ${sm.storedAt} END`,
+                  },
                 }),
             ),
         );
@@ -326,11 +427,14 @@ export function storage(db: Db, orgId: string) {
        * they named queued again, one audit row as the system, and the lease released with the org marked swept.
        */
       forget: (due: StorageDue, owner: string, now: number): Staged => {
+        const mine = and(eq(sm.orgId, orgId), eq(sm.claimOwner, owner));
         const uploads = due.uploads.map((u) => u.assetId);
         const requeued = [...new Set(due.uploads.flatMap((u) => u.files))];
         const writes: Write[] = [
           staleGuard(db, orgId, 'storage sweep', 0, leased(owner, now), async () => 0),
           ...staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), eq(bd.claimOwner, owner)))).writes,
+          // Its manifests marked deleted, at a time after their objects went: a writer that started since stores them afresh.
+          ...staged(undefined, db.update(sm).set({ claimOwner: null, claimUntil: 0, deletedAt: now }).where(mine)).writes,
           ...chunks(uploads).flatMap(
             (ids) => staged(undefined, db.delete(a).where(and(eq(a.orgId, orgId), inArray(a.id, ids), eq(a.status, 'pending')))).writes,
           ),
@@ -347,28 +451,38 @@ export function storage(db: Db, orgId: string) {
               action: 'sweep_storage',
               targetKind: null,
               targetId: null,
-              detailJson: JSON.stringify({ files: due.files.length, uploads }),
+              detailJson: JSON.stringify({ files: due.files.length, uploads, manifests: due.manifests.length }),
             }),
           ).writes,
           ...storage(db, orgId).stage.release(owner, now).writes,
         ];
         return { row: undefined, writes };
       },
-      /** The org's lease let go by `owner`, and the org marked swept at `now`. */
-      release: (owner: string, now: number): Staged =>
-        staged(
+      /**
+       * The org's lease let go by `owner`, and the org marked swept at `now`: its manifests looked at too, once none is
+       * left due; with more due than a sweep claims, it is listed again the next day.
+       */
+      release: (owner: string, now: number): Staged => {
+        const cutoff = now - STORAGE_GRACE_MS;
+        return staged(
           undefined,
           db
             .update(sw)
-            .set({ owner: null, leaseUntil: 0, sweptAt: now })
+            .set({
+              owner: null,
+              leaseUntil: 0,
+              sweptAt: now,
+              manifestsCheckedAt: sql`CASE WHEN EXISTS (${manifestsDue(orgId, cutoff, now)}) THEN ${sw.manifestsCheckedAt} ELSE ${now} END`,
+            })
             .where(and(eq(sw.orgId, orgId), eq(sw.owner, owner))),
-        ),
+        );
+      },
     },
   };
 }
 
 /** Whether a claim found nothing to delete. */
-export const nothingDue = (due: StorageDue) => !due.files.length && !due.uploads.length;
+export const nothingDue = (due: StorageDue) => !due.files.length && !due.uploads.length && !due.manifests.length;
 
 /** The rule a roll back is held to (owner decision on #235): a publish made before `now - STORAGE_GRACE_MS` may have lost its files. */
 export const rollbackOpen = (createdAt: number, now: number) => createdAt >= now - STORAGE_GRACE_MS;

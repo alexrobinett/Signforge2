@@ -55,6 +55,15 @@ async function claimed(orgId: string, at: number, owner = 'sweep-a') {
 const queuedAt = async (orgId: string, hash: string) =>
   (await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ q: number }>())?.q;
 const m = (c: string) => `m${c.repeat(63)}`;
+/** Each pointer by which a screen keeps a manifest: its column, and the SQL that sets it to a bound id. */
+const POINTERS: [string, string][] = [
+  ['desired_manifest_id', '?'],
+  ['previous_manifest_id', '?'],
+  ['reported_manifest_id', '?'],
+  ['heartbeat_json', `json_object('manifest', json_object('active', ?))`],
+  ['heartbeat_json', `json_object('manifest', json_object('fallbackFrom', ?))`],
+  ['heartbeat_json', `json_object('manifest', json_object('lastGood', ?))`],
+];
 
 describe("a deleted asset's file", () => {
   it('is due once queued for the grace period, not a millisecond before; another org’s queue is its own', async () => {
@@ -109,15 +118,7 @@ describe('the manifests an org keeps, and the files they name (review of #429, 1
     const [screen] = screens as [string];
     await queueDeletedFiles(env.DB, orgId, [sha('a')], T0);
     await index(orgId, [{ id: m('1'), files: [sha('a')] }]);
-    const columns: [string, string][] = [
-      ['desired_manifest_id', '?'],
-      ['previous_manifest_id', '?'],
-      ['reported_manifest_id', '?'],
-      ['heartbeat_json', `json_object('manifest', json_object('active', ?))`],
-      ['heartbeat_json', `json_object('manifest', json_object('fallbackFrom', ?))`],
-      ['heartbeat_json', `json_object('manifest', json_object('lastGood', ?))`],
-    ];
-    for (const [column, value] of columns) {
+    for (const [column, value] of POINTERS) {
       await run(`UPDATE screens SET ${column} = ${value} WHERE id = ?`, m('1'), screen);
       const org = scoped(env.DB, orgId);
       expect((await claimed(orgId, DUE)).files, `${column} ${value}`).toEqual([]);
@@ -256,11 +257,11 @@ describe("the sweep's lease and claims (review of #429, 7)", () => {
     expect(await org.storage.lease('sweep-b', DUE + STORAGE_LEASE_MS)).toBe(true);
     expect((await org.storage.claim('sweep-b', DUE + STORAGE_LEASE_MS, 90)).files).toEqual([sha('1')]);
     // A's last batch is refused: it no longer holds the lease, and B's claim stands.
-    await expect(org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [] }, 'sweep-a', DUE + STORAGE_LEASE_MS).writes)).rejects.toBeInstanceOf(
-      StaleVersionError,
-    );
+    await expect(
+      org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-a', DUE + STORAGE_LEASE_MS).writes),
+    ).rejects.toBeInstanceOf(StaleVersionError);
     expect(await queuedAt(orgId, sha('1'))).toBe(T0);
-    await org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [] }, 'sweep-b', DUE + STORAGE_LEASE_MS).writes);
+    await org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-b', DUE + STORAGE_LEASE_MS).writes);
     expect(await queuedAt(orgId, sha('1'))).toBeUndefined();
     const [row] = (await org.auditLog.list({ limit: 5 })).filter((e) => e.action === 'sweep_storage');
     expect(row).toMatchObject({ actorKind: 'system', actorId: 'storage-sweep', clientId: null, at: DUE + STORAGE_LEASE_MS });
@@ -397,5 +398,265 @@ describe('the guards writers and a publish hold to their commits (review of #429
     await expect(org.commit([org.assets.stage.unused(asset.id)])).rejects.toBeInstanceOf(StaleVersionError);
     await run('UPDATE spots SET published_json = NULL WHERE id = ?', spot.id);
     await org.commit([org.assets.stage.unused(asset.id)]);
+  });
+});
+
+describe('a stored manifest (#235)', () => {
+  /** Claims at `at` and lets the lease go again: the stored manifests it claimed. */
+  async function claimedManifests(orgId: string, at: number) {
+    const org = scoped(env.DB, orgId);
+    const due = await claimed(orgId, at);
+    await org.commit(org.storage.stage.forget({ files: [], uploads: [], manifests: [] }, 'sweep-a', at).writes);
+    // Forgetting nothing releases its claims only by their time: put them back, so the next look starts clean.
+    await run('UPDATE stored_manifests SET claim_owner = NULL, claim_until = 0 WHERE org_id = ?', orgId);
+    return due.manifests;
+  }
+  const stored = (screenId: string, manifestId: string) => ({ screenId, manifestId });
+
+  it('is never claimed while its screen points at it, or while a publish of the last 90 days makes it effective there', async () => {
+    const { orgId, screens } = await fresh(2);
+    const [s, t] = screens as [string, string];
+    const now = DUE + DAY;
+    // Day -2 sends a to s and c to t; day -1 moves s on to b. Past the grace period, a is effective at no publish since
+    // (b is s's newest before it); c stays t's, inherited by every publish after, so it is kept.
+    await publish(orgId, 'pub_p1', 1, T0 - 2 * DAY, [
+      [s, m('a')],
+      [t, m('c')],
+    ]);
+    await publish(orgId, 'pub_p2', 2, T0 - DAY, [[s, m('b')]]);
+    await index(
+      orgId,
+      [
+        { id: m('a'), files: [] },
+        { id: m('b'), files: [] },
+      ],
+      s,
+    );
+    await index(orgId, [{ id: m('c'), files: [] }], t);
+    for (const [column, value] of POINTERS) {
+      await run(`UPDATE screens SET ${column} = ${value} WHERE id = ?`, m('a'), s);
+      expect(await claimedManifests(orgId, now), `${column} ${value}`).toEqual([]);
+      await run(`UPDATE screens SET ${column} = NULL WHERE id = ?`, s);
+    }
+    // A roll back of the last 90 days that put a back on s.
+    await publish(orgId, 'pub_p3', 3, now - 5 * DAY, [[s, m('a')]]);
+    expect(await claimedManifests(orgId, now)).toEqual([]);
+    await run("DELETE FROM publishes WHERE id = 'pub_p3'");
+    expect(await claimedManifests(orgId, now)).toEqual([stored(s, m('a'))]);
+  });
+
+  it('is claimed once stored for the grace period, one object a screen, and marked deleted when forgotten; one never found is not', async () => {
+    const { orgId, org, screens } = await fresh(3);
+    const [s, t, u] = screens as [string, string, string];
+    await publish(orgId, 'pub_d1', 1, T0 - DAY, [
+      [s, m('d')],
+      [t, m('d')],
+      [u, m('e')],
+    ]);
+    await publish(orgId, 'pub_d2', 2, T0 - DAY / 2, [
+      [s, m('f')],
+      [t, m('f')],
+      [u, m('f')],
+    ]);
+    for (const screen of [s, t])
+      await index(
+        orgId,
+        [
+          { id: m('d'), files: [] },
+          { id: m('f'), files: [] },
+        ],
+        screen,
+      );
+    await index(
+      orgId,
+      [
+        { id: m('e'), files: [] },
+        { id: m('f'), files: [] },
+      ],
+      u,
+    );
+    // Indexed as found in no object: nothing to delete there.
+    await index(orgId, [{ id: m('d'), files: null }], u);
+    // e stored a day later: not before the grace period has passed since.
+    await run('UPDATE stored_manifests SET stored_at = ? WHERE manifest_id = ?', T0 + DAY, m('e'));
+    expect(await claimedManifests(orgId, DUE - 1)).toEqual([]);
+    const due = await claimed(orgId, DUE);
+    expect(due.manifests.toSorted((x, y) => x.screenId.localeCompare(y.screenId))).toEqual(
+      [stored(s, m('d')), stored(t, m('d'))].sort((x, y) => x.screenId.localeCompare(y.screenId)),
+    );
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 1).writes);
+    const rows = await env.DB.prepare('SELECT count(*) AS n FROM stored_manifests WHERE org_id = ? AND deleted_at = ? AND claim_owner IS NULL')
+      .bind(orgId, DUE + 1)
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(2);
+    // Deleted once, d is never claimed again; e is, a day on.
+    expect(await claimedManifests(orgId, DUE + DAY)).toEqual([stored(u, m('e'))]);
+    const audits = (await org.auditLog.list({ limit: 10 })).filter((e) => e.action === 'sweep_storage').map((e) => JSON.parse(e.detailJson!));
+    expect(audits).toContainEqual({ files: 0, uploads: [], manifests: 2 });
+  });
+
+  it('lists an org with an old manifest weekly while one is kept, so one its screen drops without a publish goes (review of #431, B-2)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    // g sent from /admin (no publish row), h backfilled by the sweep: both only the screen's pointers keep.
+    await run('UPDATE screens SET desired_manifest_id = ?, previous_manifest_id = ? WHERE id = ?', m('g'), m('h'), s);
+    await index(
+      orgId,
+      [
+        { id: m('g'), files: [] },
+        { id: m('h'), files: [] },
+      ],
+      s,
+    );
+    const listed = async (now: number) => (await orgsWithStorageDue(env.DB, now, 1000)).includes(orgId);
+    expect(await listed(DUE - 1)).toBe(false);
+    expect(await listed(DUE)).toBe(true);
+    // Looked at with nothing due: not listed again for a week.
+    expect((await claimed(orgId, DUE)).manifests).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    expect(await listed(DUE + 7 * DAY - 1)).toBe(false);
+    // The screen drops h, with no publish to say so: within the week it is looked at again, and h goes.
+    await run('UPDATE screens SET previous_manifest_id = NULL WHERE id = ?', s);
+    expect(await listed(DUE + 7 * DAY)).toBe(true);
+    const due = await claimed(orgId, DUE + 7 * DAY);
+    expect(due.manifests).toEqual([stored(s, m('h'))]);
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 7 * DAY).writes);
+    expect(await listed(DUE + 8 * DAY)).toBe(false);
+    // Then g, sent from /admin, once the screen moves on.
+    await run('UPDATE screens SET desired_manifest_id = NULL WHERE id = ?', s);
+    expect(await listed(DUE + 14 * DAY)).toBe(true);
+    expect((await claimed(orgId, DUE + 14 * DAY)).manifests).toEqual([stored(s, m('g'))]);
+  });
+
+  it('claims a thousand stored manifests a sweep, the oldest first (review of #431, B-1)', async () => {
+    const { orgId, org } = await fresh();
+    // 1,001 rows, each stored a millisecond after the last, in one statement: no screen or publish keeps any.
+    await run(
+      `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 1000)
+       INSERT INTO stored_manifests (org_id, screen_id, manifest_id, files_json, stored_at) SELECT ?, printf('scr_%04d', i), ?, '[]', ? + i FROM n`,
+      orgId,
+      m('k'),
+      T0 - 1000,
+    );
+    const first = await claimed(orgId, DUE);
+    expect(first.manifests).toHaveLength(1000);
+    expect(first.manifests.map((x) => x.screenId)).not.toContain('scr_1000');
+    await org.commit(org.storage.stage.forget(first, 'sweep-a', DUE).writes);
+    expect((await claimed(orgId, DUE)).manifests).toEqual([stored('scr_1000', m('k'))]);
+  });
+});
+
+describe("the storage sweep's queries (review of #431, round 2)", () => {
+  /** `db`, recording each statement prepared on it with the values bound to it. */
+  function recording(db: D1Database) {
+    const seen: { query: string; binds: unknown[] }[] = [];
+    const proxy = new Proxy(db, {
+      get(target, key) {
+        if (key !== 'prepare') {
+          const v: unknown = Reflect.get(target, key, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          const entry: { query: string; binds: unknown[] } = { query, binds: [] };
+          seen.push(entry);
+          return new Proxy(statement, {
+            get(st, k) {
+              if (k === 'bind') return (...binds: unknown[]) => ((entry.binds = binds), st.bind(...binds));
+              const v: unknown = Reflect.get(st, k, st);
+              return typeof v === 'function' ? v.bind(st) : v;
+            },
+          });
+        };
+      },
+    });
+    return { proxy, seen };
+  }
+  const plan = async (q: { query: string; binds: unknown[] }) =>
+    (
+      await env.DB.prepare(`EXPLAIN QUERY PLAN ${q.query}`)
+        .bind(...q.binds)
+        .all<{ detail: string }>()
+    ).results.map((r) => r.detail);
+  /** Its reads of stored_manifests: each through the live rows' index, never a scan of the table. */
+  const throughLiveIndex = (details: string[]) => {
+    const reads = details.filter((d) => /^(?:SCAN|SEARCH) (?:stored_manifests|m)\b/.test(d));
+    expect(
+      reads.some((d) => d.includes('USING INDEX stored_manifests_live_idx')),
+      details.join('\n'),
+    ).toBe(true);
+    for (const d of reads) expect(d.startsWith('SCAN'), d).toBe(false);
+  };
+
+  it('finds orgs with old manifests, and an org’s due manifests, through the live rows’ partial index', async () => {
+    const { orgId, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await index(orgId, [{ id: m('q'), files: [] }], s);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    expect(orgs.seen).toHaveLength(1);
+    throughLiveIndex(await plan(orgs.seen[0]!));
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    await scope.storage.claim('sweep-a', DUE, 90);
+    await scope.commit(scope.storage.stage.release('sweep-a', DUE).writes);
+    const touching = sweep.seen.filter((q) =>
+      /stored_manifests m\s+WHERE m\.org_id = \? AND m\.files_json IS NOT NULL AND m\.deleted_at IS NULL/.test(q.query),
+    );
+    // The claim's and the release's look for due manifests.
+    expect(touching).toHaveLength(2);
+    for (const q of touching) throughLiveIndex(await plan(q));
+  });
+
+  it('starts a manifest’s grace period when a real store replaces a look that found no object', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    const storedAt = async () =>
+      (await env.DB.prepare('SELECT stored_at AS t FROM stored_manifests WHERE org_id = ? AND screen_id = ?').bind(orgId, s).first<{ t: number }>())?.t;
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+    // Known already: stored again, or looked for again, it keeps its time.
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + 2 * DAY).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0 + 3 * DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+  });
+});
+
+describe('the guards a manifest writer holds to its commit (#235)', () => {
+  it('refuses a writer while a sweep claims the manifest, or deleted it since the writer started; marks one stored again', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await publish(orgId, 'pub_w1', 1, T0 - DAY, [[s, m('o')]]);
+    await publish(orgId, 'pub_w2', 2, T0 - DAY / 2, [[s, m('p')]]);
+    await index(
+      orgId,
+      [
+        { id: m('o'), files: [] },
+        { id: m('p'), files: [] },
+      ],
+      s,
+    );
+    const o = { screenId: s, manifestId: m('o') };
+    const due = await claimed(orgId, DUE);
+    expect(due.manifests).toEqual([o]);
+    // Claimed: refused, whenever the writer started. The same id for another screen is another object.
+    expect(await org.storage.manifestsGone([o, { screenId: s, manifestId: m('p') }, { screenId: 'scr_other', manifestId: m('o') }], DUE + 1, 0)).toEqual([o]);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 1, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 2).writes);
+    // Deleted at DUE + 2: refused to a writer that started at or before then, or that stores nothing (since 0)...
+    expect(await org.storage.manifestsGone([o], DUE + 3, DUE + 2)).toEqual([o]);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 3, DUE + 2))).rejects.toBeInstanceOf(StaleVersionError);
+    await expect(org.commit(org.storage.stage.manifestsStored([o], DUE + 3, 0))).rejects.toBeInstanceOf(StaleVersionError);
+    // ...and let to one that started after and stored it again, which marks it stored.
+    expect(await org.storage.manifestsGone([o], DUE + 4, DUE + 3)).toEqual([]);
+    await org.commit(org.storage.stage.manifestsStored([o], DUE + 4, DUE + 3));
+    expect(await org.storage.manifestsGone([o], DUE + 5, 0)).toEqual([]);
+    // Stored again at DUE + 4: its grace period starts again (review of #431).
+    const row = await env.DB.prepare('SELECT stored_at AS t FROM stored_manifests WHERE org_id = ? AND screen_id = ? AND manifest_id = ?')
+      .bind(orgId, s, m('o'))
+      .first<{ t: number }>();
+    expect(row?.t).toBe(DUE + 4);
   });
 });
