@@ -278,10 +278,10 @@ function FeedPicker({
         <SourceChoice target={target} sources={mine} boundId={boundId} id={`${ids}.feed`} label={format === 'ical' ? 'Calendar' : 'News feed'} word={word} />
       )}
       {st.adding || mine.length === 0 ? (
-        <fieldset className="rounded-lg border p-3">
-          {/* Floated, so it sits inside the frame instead of cutting its border. */}
-          <legend className="float-left mb-3 font-medium">Add a {word}</legend>
-          <div className="clear-left flex flex-col gap-3">
+        // Grouped by its heading and space, not a box inside the editor's form (#377).
+        <fieldset>
+          <legend className="mb-3 font-medium">Add a {word}</legend>
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor={`${ids}.url`} className="text-sm font-medium">
                 Address
@@ -404,18 +404,18 @@ function LiveSource({
         </p>
       )}
       {/* A disclosure the store controls: open while the person has it open, and while a fallback value is invalid. An unbound table's items are typed in Content. */}
-      <div hidden={live.source === 'table' && !boundId} className="rounded-lg border">
+      <div hidden={live.source === 'table' && !boundId}>
         <button
           type="button"
           aria-expanded={fallbackShown}
           aria-controls={`${ids}.fallback`}
           onClick={() => toggleFallback(target, fallbackBad || !fallbackShown)}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <ChevronRightIcon className={cn('size-4 text-muted-foreground transition-transform', fallbackShown && 'rotate-90')} aria-hidden />
           If the source is down
         </button>
-        <div id={`${ids}.fallback`} hidden={!fallbackShown} className="flex flex-col gap-4 px-3 pb-4">
+        <div id={`${ids}.fallback`} hidden={!fallbackShown} className="flex flex-col gap-4 pt-1 pb-2">
           <p className="text-sm text-muted-foreground">What screens show while the source has no fresh data. They start as the template's own values.</p>
           <FieldForm spotId={target.spot.id} fields={manifest.fields} shown={fallback} draft={draft} assets={assets} onChange={onChange} />
         </div>

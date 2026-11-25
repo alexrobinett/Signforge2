@@ -285,10 +285,10 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
     <div className="flex flex-col gap-3">
       {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}.table`} label="Table" word="table" />}
       {st.adding ? (
-        <fieldset className="rounded-lg border p-3">
-          {/* Floated, so it sits inside the frame instead of cutting its border. */}
-          <legend className="float-left mb-3 font-medium">From a CSV or JSON link</legend>
-          <div className="clear-left flex flex-col gap-3">
+        // Grouped by its heading and space, not a box inside the editor's form (#377).
+        <fieldset>
+          <legend className="mb-3 font-medium">From a CSV or JSON link</legend>
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor={`${ids}.table-url`} className="text-sm font-medium">
                 Address

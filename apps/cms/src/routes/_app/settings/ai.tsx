@@ -274,7 +274,7 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
           {MODELS.map((m) => (
             <div key={m.name} className="contents">
               <dt className="text-muted-foreground">{m.label}</dt>
-              <dd className="font-mono">{provider[m.name] ?? 'Not chosen'}</dd>
+              <dd>{provider[m.name] ? <span className="font-mono">{provider[m.name]}</span> : 'Not chosen'}</dd>
             </div>
           ))}
           <dt className="text-muted-foreground">Daily ceiling</dt>
