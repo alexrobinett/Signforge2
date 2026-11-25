@@ -418,7 +418,7 @@ export function AgentDrawer() {
                         <>
                           {' '}
                           <Link to="/settings/ai" className="underline underline-offset-4">
-                            Open Settings, AI & agents
+                            Open Settings, AI model
                           </Link>
                         </>
                       )}

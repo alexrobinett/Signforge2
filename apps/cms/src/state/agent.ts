@@ -37,7 +37,7 @@ interface FillDraft {
   photo: File | null;
   pending: boolean;
   error: string | null;
-  /** Whether an owner mends the error in Settings, AI & agents: the dialog links there. */
+  /** Whether an owner mends the error in Settings, AI model: the dialog links there. */
   inSettings: boolean;
   /** Try another template: the template is the one the person picks, not the model's choice. */
   again: boolean;
@@ -140,7 +140,7 @@ const keptMarks = (fields: Record<string, FieldDef>, r: Review) =>
 
 const newFill = (): FillDraft => ({ link: '', photo: null, pending: false, error: null, inSettings: false, again: false, key: null });
 
-/** Problems an owner mends in Settings, AI & agents. */
+/** Problems an owner mends in Settings, AI model. */
 const IN_SETTINGS = new Set(['no_model', 'cannot_fill', 'model_refused']);
 
 const idOf = (asset: unknown) => (typeof asset === 'object' && asset !== null && 'id' in asset && typeof asset.id === 'string' ? asset.id : undefined);

@@ -252,7 +252,7 @@ const STATUSES: Record<Exclude<ChatProblem, 'over_budget' | 'unreadable' | 'unre
   rate_limited: 429,
 };
 
-const SETTINGS = 'Settings, AI & agents';
+const SETTINGS = 'Settings, AI model';
 
 /** What a read did, on its card: "Checked 20 screens". */
 function summaryOf(name: string, output: unknown): string {

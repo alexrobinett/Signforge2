@@ -391,7 +391,7 @@ describe("the org's name, which the settings' version does not cover (re-check o
   });
 });
 
-describe('AI & agents (#261)', () => {
+describe('AI model (#261)', () => {
   const provider = {
     provider: 'anthropic',
     keyLast4: '7Q2c',
