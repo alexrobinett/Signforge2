@@ -57,8 +57,11 @@ import { useAppStore } from '~/state/provider';
 const section = sectionFor('/integrations');
 
 interface Search {
-  /** Built when absent (#368): the page opens on what can be used. */
-  show?: Exclude<Show, 'built'>;
+  /**
+   * When absent, Built (#368): the page opens on what can be used; with a search, All, so a search finds every
+   * connector (review of #459). Either is in the URL only when chosen against that.
+   */
+  show?: Show;
   q?: string;
   connected?: string;
   connectionError?: string;
@@ -69,7 +72,7 @@ const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 export const Route = createFileRoute('/_app/integrations')({
   validateSearch: (s: Record<string, unknown>): Search => {
     const out: Search = {};
-    if (isShow(s.show) && s.show !== 'built') out.show = s.show;
+    if (isShow(s.show)) out.show = s.show;
     const q = text(s.q);
     const connected = text(s.connected);
     const connectionError = text(s.connectionError);
@@ -117,8 +120,9 @@ function IntegrationsPage() {
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;
   const sources = data.dataSources;
   const clock: Clock = { timezone, locale, now: useNow(dataUpdatedAt) };
-  const show: Show = search.show ?? 'built';
   const q = search.q ?? '';
+  const unchosen: Show = q ? 'all' : 'built';
+  const show: Show = search.show ?? unchosen;
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const all = CATALOGUE.flatMap((g) => g.items);
   const groups = CATALOGUE.map((g) => ({ ...g, items: g.items.filter((c) => shows(c, show, q, sources)) })).filter((g) => g.items.length);
@@ -165,7 +169,7 @@ function IntegrationsPage() {
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
             <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md tabular-nums">
               {SHOW.map((s) => (
-                <Choice key={s} selected={show === s} onClick={() => set({ show: s === 'built' ? undefined : s })} className="min-h-10 rounded-full px-3.5">
+                <Choice key={s} selected={show === s} onClick={() => set({ show: s === unchosen ? undefined : s })} className="min-h-10 rounded-full px-3.5">
                   {SHOW_WORD[s]} {all.filter((c) => shows(c, s, '', sources)).length}
                 </Choice>
               ))}

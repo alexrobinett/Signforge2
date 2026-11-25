@@ -89,6 +89,20 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   // Built again is the page as it opens: no filter in the URL.
   await owner.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Built 5' }).click();
   await expect(owner).not.toHaveURL(/show=/);
+  // A search with no filter chosen, as a bookmark has it, finds every connector, not only those built (review of #459).
+  await owner.goto('/integrations?q=square');
+  await hydrated(owner);
+  await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(owner.getByText('No integration matches')).toHaveCount(0);
+  await expect(owner.getByRole('main').getByRole('listitem').filter({ hasText: 'Square' }).first()).toBeVisible();
+  // Built chosen while searching is kept, in the URL.
+  await owner
+    .getByRole('group', { name: 'Show' })
+    .getByRole('button', { name: /^Built/ })
+    .click();
+  await expect(owner).toHaveURL(/show=built/);
+  await owner.goto('/integrations');
+  await hydrated(owner);
   // A new org: the first Connect is the page's one filled button.
   await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
 
