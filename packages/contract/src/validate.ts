@@ -118,6 +118,12 @@ export function safeUrl(url: unknown): boolean {
 
 // ----------------------------------------------------------- template fields
 
+/**
+ * Characters as a reader sees them (grapheme clusters), for `maxMarks`: marks are counted per character, not per run, as a
+ * joiner between runs of them would hide a stack in one character (review of #448). In Node, browsers and Workers alike.
+ */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url', 'date', 'datetime'] as const;
 
 /** How a `date` and a `datetime` are written, and how a message names them. */
@@ -151,7 +157,7 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
     case 'text':
       if (!isStr(v)) return `field "${name}" must be text`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
-      if (def.maxMarks && new RegExp(`\\p{M}{${def.maxMarks + 1}}`, 'u').test(v))
+      if (def.maxMarks && [...GRAPHEMES.segment(v)].some(({ segment }) => (segment.match(/\p{M}/gu)?.length ?? 0) > (def.maxMarks ?? 0)))
         return `field "${name}" stacks more than ${def.maxMarks} accents or marks on one character`;
       return undefined;
     case 'number':

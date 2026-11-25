@@ -196,6 +196,12 @@ describe('validateSpotData', () => {
     expect(validateSpotData(t, { t: `U${'\u030d'.repeat(5)}se` }, {})).toEqual([many]);
     expect(validateSpotData(t, { t: `U${'\u030d'.repeat(160)}se the stairs` }, {})).toEqual([many]);
     expect(validateSpotData(t, { t: `WW${'\u0346'.repeat(16)}${'W'.repeat(14)}` }, {})).toEqual([many]);
+    // Per character, not per run: joiners between runs of four keep twenty marks in one character (review of #448, round 5).
+    const joined = `U${`${'\u030d'.repeat(4)}\u200d`.repeat(4)}${'\u030d'.repeat(4)}`;
+    expect([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(joined)]).toHaveLength(1);
+    expect(validateSpotData(t, { t: joined }, {})).toEqual([many]);
+    // Two characters of four each are within it.
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(4)}a${'\u030d'.repeat(4)}` }, {})).toEqual([]);
     expect(validateSpotData({ t: { type: 'text', label: 'T' } }, { t: `U${'\u030d'.repeat(160)}` }, {})).toEqual([]);
   });
 

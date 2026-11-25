@@ -58,8 +58,8 @@ export type Sha256 = string;
 
 export type ScalarFieldDef =
   /**
-   * Text. `maxMarks` bounds the combining marks (accents, vowel signs, tone marks) stacked on any one character: Zalgo
-   * text stacks dozens, whose ink stands far past its line, over whatever is near (#230).
+   * Text. `maxMarks` bounds the combining marks (accents, vowel signs, tone marks) on any one character, a grapheme
+   * cluster: Zalgo text stacks dozens, whose ink stands far past its line, over whatever is near (#230).
    */
   | { type: 'text'; label: string; default?: string; maxLength?: number; maxMarks?: number }
   | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
