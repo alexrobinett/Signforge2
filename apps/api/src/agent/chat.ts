@@ -30,7 +30,7 @@
  * aborted, and no tool runs after it.
  */
 import { scoped } from '@signforge/db';
-import { CMS_AGENT_CLIENT_ID, type Caller, describeTools, dispatch, grantOf, type Grant, registry } from '@signforge/tools';
+import { CMS_AGENT_CLIENT_ID, type Caller, describeTools, dispatch, grantOf, type Grant, inputSchemaOf, registry } from '@signforge/tools';
 import { chat, EventType, maxIterations, parsePartialJSON, type StreamChunk, toServerSentEventsResponse } from '@tanstack/ai';
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -53,7 +53,7 @@ import {
   type ProposedCall,
   type ToolCard,
 } from './chat-shapes';
-import { CardProblem, canonical, CONFIRM_MS, CONFIRMABLE, whyNot } from './confirm';
+import { CardProblem, canonical, CONFIRM_MS, CONFIRMABLE, pressable, whyNot } from './confirm';
 import { draftTools, MAX_DRAFTS, propose, SAVE_STATEMENTS, saveStatements } from './drafts';
 import { type AgentDeps, dayIn, fenced, readBody } from './inline';
 import { type ModelReach, turnWith } from './provider';
@@ -450,7 +450,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       ...drafting.map((t) => ({
         name: t.name,
         description: `${t.description} From the drawer this is a proposal: the person sees what it changes and saves it as a draft, or not.`,
-        inputSchema: z.toJSONSchema(t.input, { io: 'input', unrepresentable: 'any' }),
+        inputSchema: inputSchemaOf(t.input),
         execute: (input: unknown) =>
           within(async () => {
             // A drafting tool's call is a proposal: checked and its target read, never written here (#268).
@@ -480,40 +480,43 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           }),
       })),
       // Behind a card (#269): the run pauses before it runs (`needsApproval`), and it runs only on the person's press.
-      ...Object.entries(CONFIRMABLE).map(([name, confirmable]) => ({
-        name,
-        description: `${confirmable.description()} From the drawer it stops at a card the person sees, and runs only if they press it.`,
-        inputSchema: confirmable.schema(),
-        needsApproval: true,
-        execute: (input: unknown) =>
-          within(async () => {
-            // The record this request's press took, for this tool, with the input the card showed: once.
-            const record = pressed;
-            pressed = undefined;
-            if (record?.name !== name || canonical(input) !== canonical(parsedJson(record.calledJson)))
-              return {
-                card: card(name, 'Not done: only a press of its card runs it', false),
-                content: 'refused: only the person pressing its card runs this',
-                refused: true,
+      // Offered only to a member who could press it (#345): a card their role cannot run is never worth the model's reading.
+      ...Object.entries(CONFIRMABLE)
+        .filter(([name]) => pressable(grant, name))
+        .map(([name, confirmable]) => ({
+          name,
+          description: `${confirmable.description()} From the drawer it stops at a card the person sees, and runs only if they press it.`,
+          inputSchema: confirmable.schema(),
+          needsApproval: true,
+          execute: (input: unknown) =>
+            within(async () => {
+              // The record this request's press took, for this tool, with the input the card showed: once.
+              const record = pressed;
+              pressed = undefined;
+              if (record?.name !== name || canonical(input) !== canonical(parsedJson(record.calledJson)))
+                return {
+                  card: card(name, 'Not done: only a press of its card runs it', false),
+                  content: 'refused: only the person pressing its card runs this',
+                  refused: true,
+                };
+              // The person's own action, as the CMS would do it: on the org's scoped repositories, not the turn's
+              // counted reading, so a publish to every screen of a large org is never cut short halfway.
+              const own: Caller = {
+                ...caller,
+                org: scoped(c.env.DB, org.orgId),
+                confirmed: { summary: record.summary, runId: record.runId, callId: record.toolCallId },
               };
-            // The person's own action, as the CMS would do it: on the org's scoped repositories, not the turn's
-            // counted reading, so a publish to every screen of a large org is never cut short halfway.
-            const own: Caller = {
-              ...caller,
-              org: scoped(c.env.DB, org.orgId),
-              confirmed: { summary: record.summary, runId: record.runId, callId: record.toolCallId },
-            };
-            const out = await confirmable.run(own, Object.fromEntries(Object.entries(parsedJson(record.inputJson) ?? {})));
-            // What it did, from its own result: the drawer says done or not from this, never from the model's answer after it.
-            const done: ConfirmDone = out.ok
-              ? { tool: name, ok: true, message: TOOL_CARDS[name]?.did ?? 'Done' }
-              : { tool: name, ok: false, message: `Not done: ${out.message}. This card is spent: ask again for a new one.` };
-            shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
-            return out.ok
-              ? { card: card(name, done.message, true), content: asData(out.output) }
-              : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${asData(out.message)}`, refused: true };
-          }),
-      })),
+              const out = await confirmable.run(own, Object.fromEntries(Object.entries(parsedJson(record.inputJson) ?? {})));
+              // What it did, from its own result: the drawer says done or not from this, never from the model's answer after it.
+              const done: ConfirmDone = out.ok
+                ? { tool: name, ok: true, message: TOOL_CARDS[name]?.did ?? 'Done' }
+                : { tool: name, ok: false, message: `Not done: ${out.message}. This card is spent: ask again for a new one.` };
+              shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
+              return out.ok
+                ? { card: card(name, done.message, true), content: asData(out.output) }
+                : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${asData(out.message)}`, refused: true };
+            }),
+        })),
     ];
 
     // The conversation so far comes back from the browser, each answer its whole card. It may repeat org content (a
@@ -618,7 +621,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       /**
        * The run paused at a tool behind a card (#269): the card, read from the org now, its record kept
        * under a one-use token for this member, then the run's end, without its pause: the press sends the
-       * token, and the API resumes the call here. A member who may not press it gets its title and who may,
+       * token, and the API resumes the call here. Only cards the member's role could press are offered (#345); one this input puts
+       * beyond them (a publish where editors do not publish) gets its title and who may,
        * and nothing is read for it: a card can name what their role does not show them, as an invitee's
        * address (review of #414).
        */

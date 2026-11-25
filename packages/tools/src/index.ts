@@ -49,6 +49,7 @@ export {
   dispatch,
   refusedPress,
   describeTools,
+  inputSchemaOf,
   effectiveScopes,
   grantOf,
   overLimit,

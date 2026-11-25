@@ -80,21 +80,41 @@ describe('tools/list', () => {
     expect(without).not.toContain('invite_member');
   });
 
-  it('hints from the registry: a read is read-only, a delete or revoke destructive, a keyed creation idempotent', () => {
+  it('hints from the registry: a read is read-only, a delete, revoke, roll back, ended takeover or disconnect destructive, a keyed creation idempotent', () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
+    const destructive = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
     for (const t of listedTools(owner, AGENT)) {
       const tool = registry.get(t.name);
       expect(t.annotations, t.name).toEqual({
         readOnlyHint: !tool?.mutates,
-        destructiveHint: tool?.mutates === true && /^(delete|revoke|cancel)_/.test(t.name),
+        destructiveHint: tool?.mutates === true && destructive.test(t.name),
         idempotentHint: tool?.idempotent === true,
       });
     }
+    for (const name of ['roll_back_publish', 'end_takeover', 'disconnect'])
+      expect(listedTools(owner, AGENT).find((t) => t.name === name)?.annotations?.destructiveHint, name).toBe(true);
     const hints = (name: string) => listedTools(owner, AGENT).find((t) => t.name === name)?.annotations;
     expect(hints('list_screens')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('cancel_invitation')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+  });
+
+  it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound, which the input still checks', () => {
+    const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
+    const listed = listedTools(owner, AGENT);
+    expect(listed.find((t) => t.name === 'list_screens')?.title).toBe('List screens');
+    for (const t of listed) {
+      expect(t.title, t.name).toMatch(/^[A-Z][a-z0-9 ]+$/);
+      const json = JSON.stringify(t.inputSchema);
+      expect(json, t.name).not.toContain('$schema');
+      expect(json, t.name).not.toContain(JSON.stringify('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'));
+      expect(json, t.name).not.toContain(String(Number.MAX_SAFE_INTEGER));
+    }
+    // The dispatcher checks the zod input, which keeps all three.
+    const input = registry.get('rename_screen')?.input;
+    expect(input?.safeParse({ screenId: 'not an id!', name: 'Lobby' }).success).toBe(false);
+    expect(input?.safeParse({ screenId: 'scr_1', name: 'Lobby', ifVersion: Number.MAX_SAFE_INTEGER + 2 }).success).toBe(false);
   });
 
   it('lists nothing that needs content:publish without it, or a role above the grant', () => {

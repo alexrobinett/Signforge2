@@ -20,6 +20,7 @@ import {
   type DraftPin,
   effectiveScopes,
   type Grant,
+  inputSchemaOf,
   OVERRIDE_LIMIT_MS,
   permits,
   dryPublish,
@@ -29,7 +30,6 @@ import {
   sha256Hex,
   ToolError,
 } from '@signforge/tools';
-import { z } from 'zod';
 import type { ConfirmCard } from './chat-shapes';
 
 type Row = Record<string, unknown>;
@@ -75,7 +75,7 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const ofRegistry = (name: string) => () => {
   const tool = registry.get(name);
   if (!tool) throw new Error(`no registry tool ${name}`);
-  return z.toJSONSchema(tool.input, { io: 'input', unrepresentable: 'any' });
+  return inputSchemaOf(tool.input);
 };
 const describedAs = (name: string) => () => registry.get(name)?.description ?? '';
 const run = (name: string) => (caller: Caller, input: Row) => dispatch(registry, name, input, caller);
@@ -566,6 +566,13 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     run: run('update_spot'),
   },
 };
+
+/** Whether `grant` may press `name`'s card for some input: it permits every tool the card runs. */
+export const pressable = (grant: Grant, name: string) =>
+  (CONFIRMABLE[name]?.tools ?? []).every((t) => {
+    const tool = registry.get(t);
+    return tool !== undefined && permits(grant, tool);
+  });
 
 /** Who may press the card: null when `grant` permits every tool it runs, else who to ask. */
 export function whyNot(grant: Grant, name: string, called: Row): string | null {

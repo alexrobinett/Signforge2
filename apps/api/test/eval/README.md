@@ -55,11 +55,11 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 83 tools · 25,388 tokens | 79 · 23,667 | 36 · 6,472 |
-| Drawer request | 52 · 13,548 | 51 · 13,429 | 51 · 13,429 |
-| /mcp `tools/list` (discovery) | 83 · 27,214 | 79 · 25,405 | 36 · 7,264 |
+| /mcp request | 83 tools · 21,312 tokens | 79 · 19,783 | 36 · 5,532 |
+| Drawer request | 52 · 12,122 | 49 · 11,715 | 38 · 8,221 |
+| /mcp `tools/list` (discovery) | 83 · 23,519 | 79 · 21,883 | 36 · 6,489 |
 
-The /mcp request carries each tool's name, description and input schema, and leaves out the annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`) and no `$schema`, so it isn't the audit's 13,908, which was built from `chat.ts`'s lists. `tools/list` is the audit's JSON byte for byte, with keys in another order, which comes to 22 more tokens.
+The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264.
 
 ## Adding a task
 

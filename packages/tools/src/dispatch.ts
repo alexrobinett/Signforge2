@@ -29,7 +29,7 @@
  * in `platform_audit_log`, since what it changes belongs to no org.
  */
 import { NotInOrgError, StaleVersionError, type OrgScope, type Staged, type Write } from '@signforge/db';
-import { canonicalJson } from '@signforge/contract';
+import { canonicalJson, ID_PATTERN } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import { orgSettings } from './settings';
@@ -514,6 +514,24 @@ export async function sha256Hex(text: string) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * A tool's input as an agent is shown it (#345): JSON Schema with only what helps it write a call. Dropped: the
+ * `$schema` line, the id pattern, and the safe-integer bounds zod gives every integer. The dispatcher still checks
+ * the input against the zod schema, so a malformed id or an out-of-range number is refused all the same.
+ */
+export function inputSchemaOf(input: z.ZodType): Record<string, unknown> {
+  const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
+    io: 'input',
+    unrepresentable: 'any',
+    override: ({ jsonSchema: s }) => {
+      if (s.pattern === ID_PATTERN.source) delete s.pattern;
+      if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
+      if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+    },
+  });
+  return schema;
+}
+
 /** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
 export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant) {
   return [...registry.values()]
@@ -524,7 +542,7 @@ export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant
       scope: t.scope,
       minRole: t.minRole,
       mutates: t.mutates,
-      inputSchema: z.toJSONSchema(t.input, { io: 'input', unrepresentable: 'any' }),
+      inputSchema: inputSchemaOf(t.input),
       outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));

@@ -761,22 +761,12 @@ describe('confirmation cards (#269)', () => {
     expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
   });
 
-  it('shows a member who may not press who may, and gives no token', async () => {
+  it('offers no card a member may not press (#345); a call to one all the same shows no card and runs nothing', async () => {
     const s = await takeover({ role: 'viewer' });
-    const { card } = pressOf(await raw(await s.ask('q')), 'q');
-    expect(card).toEqual({
-      tool: 'start_takeover',
-      // The tool's own title: nothing is read for the card.
-      title: 'Takeover',
-      lines: [],
-      address: null,
-      when: '',
-      undo: '',
-      press: '',
-      token: null,
-      why: 'You can view only: ask an editor.',
-      expiresAt: expect.any(Number),
-    });
+    const all = await raw(await s.ask('q'));
+    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('start_takeover');
+    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)).toBeUndefined();
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
   });
 
   it('pins a publish at the versions shown, keeps every constraint the model gave, says how many screens it changes, and lists the sample text a press publishes (#392)', async () => {
@@ -922,7 +912,7 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
-  it('shows a viewer or an editor asking to cancel an invitation who may, and nothing of the invitation: not whose, nor its role (review of #414)', async () => {
+  it('offers a viewer or an editor no card to cancel an invitation, and a call to one shows nothing of it: not whose, nor its role (review of #414, #345)', async () => {
     for (const role of ['viewer', 'editor'] as const) {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({ role, steps: () => ({ calls: [{ name: 'cancel_invitation', input: ask.called }] }) });
@@ -930,14 +920,14 @@ describe('confirmation cards (#269)', () => {
       const invited = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email, role: 'owner' });
       ask.called = { invitationId: invited.id };
       const all = await raw(await s.ask(`Cancel the invitation ${invited.id}`));
-      const { card } = pressOf(all, 'q');
-      expect(card, role).toMatchObject({
-        tool: 'cancel_invitation',
-        title: 'Cancel an invitation',
-        lines: [],
-        token: null,
-        why: 'Only owners can do this: ask an owner.',
-      });
+      expect(
+        s.model.asked[0].tools.map((t: { name: string }) => t.name),
+        role,
+      ).not.toContain('cancel_invitation');
+      expect(
+        all.find((e) => e.name === CHAT_EVENTS.confirm),
+        role,
+      ).toBeUndefined();
       // Nowhere in what reaches the browser.
       expect(JSON.stringify(all), role).not.toContain(email);
       expect(JSON.stringify(all), role).not.toMatch(/as owner/);
