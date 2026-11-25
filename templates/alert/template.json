@@ -14,7 +14,7 @@
     },
     "issuedBy": { "type": "text", "label": "Issued by", "default": "Issued by Building Safety", "maxLength": 48 },
     "endsAt": { "type": "text", "label": "Ends at", "default": "4:00 PM", "maxLength": 24 },
-    "qrUrl": { "type": "url", "label": "QR code address", "default": "", "maxLength": 200 },
+    "qrUrl": { "type": "url", "label": "QR code address", "default": "", "maxBytes": 213 },
     "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for updates", "maxLength": 32 },
     "showQr": { "type": "boolean", "label": "Show the QR code", "default": true },
     "showIssuedBy": { "type": "boolean", "label": "Show who issued it", "default": true },

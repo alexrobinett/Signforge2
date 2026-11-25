@@ -16,6 +16,10 @@
       "size": 320263,
       "type": "image/jpeg"
     },
+    "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee": {
+      "size": 123092,
+      "type": "text/html"
+    },
     "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
       "size": 401879,
       "type": "text/html"
@@ -39,10 +43,6 @@
     "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f": {
       "size": 44306,
       "type": "image/png"
-    },
-    "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26": {
-      "size": 122816,
-      "type": "text/html"
     },
     "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215": {
       "size": 79453,
@@ -162,7 +162,7 @@
             "type": "url",
             "label": "QR code address",
             "default": "",
-            "maxLength": 200
+            "maxBytes": 213
           },
           "qrLabel": {
             "type": "text",
@@ -199,7 +199,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26"
+      "html": "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "87402d2fc2080911455fd5c443054c89fdf464f0a42fb9ad45f7d428dcaf2868"
+  "id": "715f1ebb423444182651893f9174701aa042a0e4750b31c4cd5bff54103919c1"
 }

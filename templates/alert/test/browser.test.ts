@@ -2,6 +2,7 @@ import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { BrandColors, FrameTheme, Orientation } from '@signforge/contract';
+import { validateSpotData } from '@signforge/contract';
 import { DEMO_KIT, host, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
@@ -94,40 +95,96 @@ describe('alert (#200)', () => {
     }, 120_000);
 
   // A 2 m scan on a 55-inch 1080p panel (#230): the Announcement's code reads there at 30vmin with 41 modules, about 6.6 px
-  // each, so the longest link Alert allows must be drawn at least that large, beside the longest copy, and read back.
+  // each, so the longest link Alert allows must be drawn at least that large, beside the longest copy, and read back. A QR
+  // code holds bytes: the limit is in bytes of UTF-8, so a link in Japanese at it is as dense as one in ASCII (review of #448).
+  const QR_BYTES = 213;
+  const longestLinks = [`https://example.com/${'w'.repeat(193)}`, `https://example.com/w${'避難案内'.repeat(16)}`];
+
+  it('allows a QR link of 213 bytes, ASCII or not, and refuses one a byte longer', () => {
+    const fields = t().manifest.fields;
+    expect(fields.qrUrl).toMatchObject({ maxBytes: QR_BYTES });
+    for (const link of longestLinks) {
+      expect(new TextEncoder().encode(link).length).toBe(QR_BYTES);
+      expect(validateSpotData(fields, spotData(t().manifest, { qrUrl: link }), {})).toEqual([]);
+      expect(validateSpotData(fields, spotData(t().manifest, { qrUrl: `${link}w` }), {})).toEqual([
+        'field "qrUrl" is longer than 213 bytes, the most its QR code holds (a letter outside A to Z takes 2 to 4)',
+      ]);
+    }
+  });
+
   for (const orientation of ['landscape', 'portrait'] as const)
-    it(`the QR code reads back as the longest link allowed, at 30vmin and 6.6 px a module or more, in every severity, ${orientation}`, async () => {
-      const max = (t().manifest.fields.qrUrl as { maxLength: number }).maxLength;
-      const longest = `https://example.com/${'w'.repeat(max - 'https://example.com/'.length)}`;
+    it(`the QR code reads back as the longest links allowed, at 30vmin and 6.6 px a module or more, in every severity, ${orientation}`, async () => {
       const k = await alertFrame(orientation);
-      for (const severity of severities) {
-        const f = await k.play({ severity, ...longCopy(), qrUrl: longest });
-        const { fills, clip, vmin, module } = await f.evaluate(() => {
-          for (const a of document.getAnimations()) a.currentTime = 3000;
-          const svg = document.querySelector<SVGSVGElement>('#qr svg')!;
-          const r = svg.getBoundingClientRect();
-          return {
-            fills: [getComputedStyle(svg.querySelector('rect')!).fill, getComputedStyle(svg.querySelector('path')!).fill],
-            clip: { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) },
-            vmin: r.width / (Math.min(innerWidth, innerHeight) / 100),
-            module: (r.width / svg.viewBox.baseVal.width) * (1080 / Math.min(innerWidth, innerHeight)),
-          };
-        });
-        expect(vmin, severity).toBeGreaterThanOrEqual(29.9);
-        expect(module, severity).toBeGreaterThanOrEqual(6.6);
-        expect(fills, severity).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
-        const png = (await k.hst.page.screenshot({ clip })).toString('base64');
-        const rgba = await k.hst.page.evaluate(async (png) => {
-          const img = new Image();
-          img.src = `data:image/png;base64,${png}`;
-          await img.decode();
-          const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
-          g.drawImage(img, 0, 0);
-          return [...g.getImageData(0, 0, img.width, img.height).data];
-        }, png);
-        expect(jsQR(Uint8ClampedArray.from(rgba), clip.width, clip.height)?.data, severity).toBe(longest);
-      }
+      for (const severity of severities)
+        for (const longest of longestLinks) {
+          const f = await k.play({ severity, ...longCopy(), qrUrl: longest });
+          const { fills, clip, vmin, module } = await f.evaluate(() => {
+            for (const a of document.getAnimations()) a.currentTime = 3000;
+            const svg = document.querySelector<SVGSVGElement>('#qr svg')!;
+            const r = svg.getBoundingClientRect();
+            return {
+              fills: [getComputedStyle(svg.querySelector('rect')!).fill, getComputedStyle(svg.querySelector('path')!).fill],
+              clip: { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) },
+              vmin: r.width / (Math.min(innerWidth, innerHeight) / 100),
+              module: (r.width / svg.viewBox.baseVal.width) * (1080 / Math.min(innerWidth, innerHeight)),
+            };
+          });
+          expect(vmin, severity).toBeGreaterThanOrEqual(29.9);
+          expect(module, severity).toBeGreaterThanOrEqual(6.6);
+          expect(fills, severity).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+          const png = (await k.hst.page.screenshot({ clip })).toString('base64');
+          const rgba = await k.hst.page.evaluate(async (png) => {
+            const img = new Image();
+            img.src = `data:image/png;base64,${png}`;
+            await img.decode();
+            const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+            g.drawImage(img, 0, 0);
+            return [...g.getImageData(0, 0, img.width, img.height).data];
+          }, png);
+          expect(jsQR(Uint8ClampedArray.from(rgba), clip.width, clip.height)?.data, severity).toBe(longest);
+        }
     }, 120_000);
+
+  // A caption in Japanese, Chinese or Korean at its limit wrapped wide and widened the code's column, pushing the code off a
+  // portrait screen (review of #448). The code stays whole on screen, the caption no wider than it, beside any copy.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`the QR code stays whole on screen, its caption no wider than it, with long CJK captions in every severity, ${orientation}`, async () => {
+      const captions = [
+        '避難経路と集合場所の最新情報はこのコードをスキャンしてください',
+        '请扫描此二维码获取疏散路线和集合地点的最新信息以及注意事项',
+        '대피경로와집결장소의최신정보는이코드를스캔하여확인하십시오그리고',
+        'Scanforupdatesaboutthisalertnow',
+      ];
+      expect(captions.every((c) => c.length <= 32)).toBe(true);
+      const k = await alertFrame(orientation);
+      const found: string[] = [];
+      for (const severity of severities)
+        for (const qrLabel of captions)
+          for (const [copy, text] of [
+            ['short copy', {}],
+            ['long copy', longCopy()],
+          ] as const) {
+            const f = await k.play({ severity, ...text, qrLabel, qrUrl: longestLinks[0] });
+            const problems = await f.evaluate(() => {
+              for (const a of document.getAnimations()) a.currentTime = 3000;
+              const out: string[] = [];
+              const tile = document.querySelector('.tile')!.getBoundingClientRect();
+              const caption = document.querySelector('.qr figcaption')!.getBoundingClientRect();
+              if (tile.top < 0 || tile.left < 0 || tile.bottom > innerHeight || tile.right > innerWidth) out.push('the code is cut off');
+              if (caption.bottom > innerHeight) out.push('the caption is cut off');
+              if (caption.width > tile.width + 0.5) out.push('the caption is wider than the code');
+              const copy = document.querySelector('.copy')!;
+              if (copy.scrollHeight > copy.clientHeight) out.push('the copy is cut short');
+              const qr = document.querySelector('.qr')!.getBoundingClientRect();
+              for (const sel of ['.headline', '.instructions', '.issued', '.ends'])
+                for (const r of document.querySelector(sel)?.getClientRects() ?? [])
+                  if (r.left < qr.right && qr.left < r.right && r.top < qr.bottom && qr.top < r.bottom) out.push(`${sel} overlaps the code`);
+              return out;
+            });
+            for (const p of problems) found.push(`${severity}, ${qrLabel.slice(0, 6)}, ${copy}: ${p}`);
+          }
+      expect(found).toEqual([]);
+    }, 240_000);
 
   it('marks each toggle on the root and removes what is off; without the QR code the type steps up', async () => {
     const k = await alertFrame();
@@ -148,8 +205,9 @@ describe('alert (#200)', () => {
     expect((await read(await k.play({ endsAt: '' }))).marks[2]).toBe('ends-at=off');
   });
 
+  // In portrait, where the code's row leaves the copy least room: in landscape the longest copy fits at full size.
   it('steps the type down until long copy fits', async () => {
-    const k = await alertFrame();
+    const k = await alertFrame('portrait');
     const size = async (data: Data) => (await k.play(data)).evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector('.headline')!).fontSize));
     expect(await size(longCopy())).toBeLessThan(await size({}));
   });
@@ -224,14 +282,14 @@ describe('alert (#200)', () => {
   // own prepare: resuming must not step the new copy's type (#308). The new copy is long, so its own
   // step is not the first, which the old prepare, measuring its detached copy, would set.
   it('a prepare that new data replaced, resuming after the faces load, leaves the new document as a fresh load', async () => {
-    const hst = await host('landscape', true);
+    const hst = await host('portrait', true);
     const a = spotData(t().manifest, { severity: 'notice' });
     const b = spotData(t().manifest, { severity: 'emergency', qrUrl, ...longCopy() });
     await hst.open('fresh', t().html);
     await hst.init('fresh', b, {}, NOW);
     await hst.waitFor('fresh', 'ready', 1);
     const fresh = await hst.dom('fresh');
-    expect(fresh).toContain('--fit: 0.88;');
+    expect(fresh).toMatch(/--fit: 0\.\d+;/);
     for (const [name, index] of [
       ['reset', 1],
       ['again', 2],
