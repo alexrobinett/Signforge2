@@ -6,7 +6,7 @@ import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
@@ -225,13 +225,20 @@ describe('blob upload', () => {
 });
 
 describe('the storage sweep (#235, review of #429, round 2)', () => {
+  // On a fixed clock (review of #429, round 3): the API reads the same one.
+  const AT = Date.UTC(2026, 4, 1, 9);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(AT);
+  });
+  afterEach(() => vi.useRealTimers());
   /** The sweep's claim on an org's hash: held for an hour, or run out. */
   const claimFile = (orgId: string, sha: string, held: boolean) =>
     env.DB.prepare(
       `INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)
        ON CONFLICT (org_id, sha256) DO UPDATE SET claim_until = excluded.claim_until`,
     )
-      .bind(orgId, sha, held ? Date.now() + 3_600_000 : 0)
+      .bind(orgId, sha, held ? AT + 3_600_000 : 0)
       .run();
 
   it("refuses an org's blob while the sweep claims its hash, and stores it once the claim has run out", async () => {

@@ -154,11 +154,9 @@ describe('the storage sweep', () => {
     };
     expect(await sweepStorage(env.DB, blobs, at(DUE))).toBe(0);
     expect(await exists(key)).toBe(true);
-    // Read on the next run and found in no object: unknown, so still no file goes while it is reported.
-    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + STORAGE_LEASE_MS))).toBe(0);
-    expect(await exists(key)).toBe(true);
-    await run('UPDATE screens SET heartbeat_json = NULL WHERE id = ?', other);
-    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + 2 * STORAGE_LEASE_MS))).toBe(1);
+    // Looked for on the next run and found in no object: the screen can fetch nothing through it, so the file goes
+    // (review of #429, round 3).
+    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + STORAGE_LEASE_MS))).toBe(1);
     expect(await exists(key)).toBe(false);
   });
 

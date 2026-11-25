@@ -1274,8 +1274,8 @@ export const blobDeletes = sqliteTable(
  * The files each stored manifest names (`ScreenManifest.files`' hashes, as a JSON array), by the screen it is stored for
  * and its content-addressed id, as R2 keys it (#235): written in the batch of the publish or `/admin` push that stores
  * it, and by the storage sweep for one stored before this table. What the sweep keeps a file for. `files_json` is null
- * for one the sweep found no object for: its files are unknown, so while it is kept no file of the org is deleted, and a
- * real write replaces it.
+ * for one the sweep found no object for: its files are unknown, the screen can fetch nothing through it, and a real
+ * write replaces it.
  */
 export const storedManifests = sqliteTable(
   'stored_manifests',

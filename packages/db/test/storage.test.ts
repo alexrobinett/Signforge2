@@ -198,20 +198,44 @@ describe('the manifests an org keeps, and the files they name (review of #429, 1
     expect((await claimed(orgId, DUE)).files).toEqual([sha('b')]);
   });
 
-  it('holds every file back while a screen reports a manifest not stored yet, until its publish indexes it (round 2, 2: case B)', async () => {
+  it('holds every file back while a screen reports a manifest not looked for yet; once found in no object, none (round 2 case B, round 3)', async () => {
     const { orgId, org, screens } = await fresh(1);
     const [s] = screens as [string];
     await queueDeletedFiles(env.DB, orgId, [sha('c')], T0);
-    await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('c'), s);
+    // The screen reports a manifest before its publish stores it, or one never stored at all.
+    await run("UPDATE screens SET heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?", m('c'), s);
     expect(await org.storage.unindexed(DUE, 10)).toEqual([{ screenId: s, manifestId: m('c') }]);
-    // No object yet: unknown, not looked for again, and no file goes.
-    await index(orgId, [{ id: m('c'), files: null }], s);
-    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
     expect((await claimed(orgId, DUE)).files).toEqual([]);
     await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
-    // Its publish stores it: the real write replaces the unknown one, and the file goes.
-    await index(orgId, [{ id: m('c'), files: [] }], s);
+    // Looked for and found in no object: the screen can fetch nothing through it, so it holds nothing back, for good.
+    await index(orgId, [{ id: m('c'), files: null }], s);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
     expect((await claimed(orgId, DUE)).files).toEqual([sha('c')]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Its publish stores it later: the real write replaces the unknown one, and keeps what it names.
+    await index(orgId, [{ id: m('c'), files: [sha('e')] }], s);
+    await queueDeletedFiles(env.DB, orgId, [sha('e')], T0);
+    // (c, claimed before and never forgotten, is due again once that claim runs out.)
+    expect((await claimed(orgId, DUE + STORAGE_LEASE_MS)).files).toEqual([sha('c')]);
+  });
+
+  it("keeps nothing for a revoked screen's own pointers, which it can never fetch through again (round 3)", async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await index(orgId, [{ id: m('r'), files: [sha('r')] }], s);
+    await queueDeletedFiles(env.DB, orgId, [sha('r')], T0);
+    await run(
+      "UPDATE screens SET desired_manifest_id = ?, heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?",
+      m('r'),
+      m('r'),
+      s,
+    );
+    await run("INSERT INTO screen_credentials (id, org_id, screen_id, secret_hash, created_at) VALUES ('crd_r', ?, ?, 'h', 0)", orgId, s);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Its only credential revoked: revoked for good.
+    await run("UPDATE screen_credentials SET revoked_at = 1 WHERE id = 'crd_r'");
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('r')]);
   });
 
   it('indexes a thousand manifests in parts under D1’s limits', async () => {

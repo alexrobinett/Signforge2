@@ -7,14 +7,16 @@
  *
  * **What the org keeps** is explicit, never inferred from when something was published (review of #429):
  * - Manifests (`keptManifests`): each screen's desired, previous and reported manifest, and the ones its last heartbeat
- *   names (`active`, `fallbackFrom`, `lastGood`, which the device API lets it fetch files for); and every manifest
- *   effective on a screen at any publish of the last 90 days, one it inherited from an older publish included.
+ *   names (`active`, `fallbackFrom`, `lastGood`, which the device API lets it fetch files for), a revoked screen's
+ *   excepted; and every manifest effective on a screen at any publish of the last 90 days, one it inherited from an older
+ *   publish included.
  * - Files: every file a kept manifest names (`stored_manifests`, the index written in the batch of the publish that stores
  *   a manifest, and by the sweep for one stored before it), and every file an asset, a rendition, a rendition's sample or
  *   a template version of the org names, a pending upload's included.
  *
  * **A deleted asset's file** (`blob_deletes`, queued by `delete_asset`) is deleted once queued for the grace period,
- * outside all of that, and only while every kept manifest is indexed: an unindexed one could name it.
+ * outside all of that, and only while every kept manifest is indexed or was looked for in R2: an unindexed one could name
+ * it, and one found in no object authorizes no fetch.
  * **An unfinished upload**: an asset still `pending` for the grace period, its `up/` objects and its row; the hashes it
  * named are queued again, so a stored copy it was reusing is not left unqueued.
  *
@@ -53,6 +55,13 @@ const sm = s.storedManifests;
 const sw = s.storageSweeps;
 
 /**
+ * A screen revoked for good, `sc` in its query: marked so, or every credential it collected revoked. Pairing never gives
+ * it a credential again (`claim_screen` makes a new screen), so it fetches nothing, and its own pointers keep nothing.
+ */
+const revoked = sql`(sc.status = 'revoked' OR (EXISTS (SELECT 1 FROM screen_credentials c WHERE c.org_id = sc.org_id AND c.screen_id = sc.id)
+  AND NOT EXISTS (SELECT 1 FROM screen_credentials c WHERE c.org_id = sc.org_id AND c.screen_id = sc.id AND c.revoked_at IS NULL)))`;
+
+/**
  * The org's kept manifests (`keptManifests` above), as `(screen_id, manifest_id)` rows: a screen's own pointers, and the
  * publishes' rows effective at any publish made since `cutoff`, those of the publishes since and each screen's newest
  * from before.
@@ -63,7 +72,7 @@ const keptManifests = (orgId: string, cutoff: number) =>
       sc.desired_manifest_id, sc.previous_manifest_id, sc.reported_manifest_id,
       json_extract(sc.heartbeat_json, '$.manifest.active'), json_extract(sc.heartbeat_json, '$.manifest.fallbackFrom'),
       json_extract(sc.heartbeat_json, '$.manifest.lastGood'))) j
-    WHERE sc.org_id = ${orgId} AND j.value IS NOT NULL
+    WHERE sc.org_id = ${orgId} AND j.value IS NOT NULL AND NOT ${revoked}
     UNION SELECT ps.screen_id, ps.manifest_id FROM publish_screens ps JOIN publishes p ON p.org_id = ps.org_id AND p.id = ps.publish_id
     WHERE ps.org_id = ${orgId} AND (p.created_at >= ${cutoff} OR p.revision = (
       SELECT max(p2.revision) FROM publish_screens ps2 JOIN publishes p2 ON p2.org_id = ps2.org_id AND p2.id = ps2.publish_id
@@ -89,12 +98,15 @@ const known = (orgId: string, manifestId: SQL) =>
   sql`EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.manifest_id = ${manifestId} AND m.files_json IS NOT NULL)`;
 
 /**
- * Every kept manifest's files are known when the batch runs (review of #429, round 2): read in the claim's own statement,
- * so a screen reporting, or a push naming, a manifest not indexed yet while a sweep runs holds every file back. One found
- * in no R2 object is unknown, and holds them back for as long as it is kept.
+ * Every kept manifest's files are known, or its object looked for, when the batch runs (review of #429, rounds 2 and 3):
+ * read in the claim's own statement, so a screen reporting, or a push naming, a manifest not indexed yet while a sweep
+ * runs holds every file back. One the sweep found no object for, for that screen, holds nothing back: the device API
+ * lets a screen fetch files only through a manifest stored for it (`fileManifests` reads R2), and a writer that stores
+ * it indexes it.
  */
 const allKnown = (orgId: string, cutoff: number) =>
-  sql`NOT EXISTS (SELECT 1 FROM (${keptManifests(orgId, cutoff)}) k WHERE NOT ${known(orgId, sql`k.manifest_id`)})`;
+  sql`NOT EXISTS (SELECT 1 FROM (${keptManifests(orgId, cutoff)}) k WHERE NOT ${known(orgId, sql`k.manifest_id`)}
+    AND NOT EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.screen_id = k.screen_id AND m.manifest_id = k.manifest_id))`;
 
 /** A list of hashes as one bound value: `IN (SELECT value FROM json_each(?))`. */
 const anyOf = (shas: readonly string[]) => sql`(SELECT value FROM json_each(${JSON.stringify([...new Set(shas)])}))`;
