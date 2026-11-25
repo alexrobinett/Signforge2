@@ -169,6 +169,8 @@ Manifests are immutable, so "undo publish" is safe and cheap: re-point the scree
 
 ### 7. The command menu is the tool registry, the same verbs an agent uses
 
+*Since #358 the CMS took another path: ⌘K offers people's actions, each the page's own dialog, not the registry's ~100 tools and their schema forms. The registry stays the agents' and the API's, and the audit log still names each change by its tool.*
+
 ⌘K searches the fleet's nouns (screens by name, location or pairing code; spots; playlists) and runs actions on the selection, as Raycast's Action Panel does: "Put Lobby to sleep now", "Publish Spring menu to Downtown", "Pair a screen…". Every entry shows its shortcut (Superhuman, NN/g). The original part: the entries are generated from the same tool registry the MCP server and WebMCP expose, with the same names, scopes and roles. Anything an agent can do, a person can find in ⌘K, and the audit log uses the same verb. One vocabulary for people and agents.
 *Evidence:* §1.4. *Ours:* the tool registry ("every change is a tool… a scope and a role, audited"; architecture, Agents).
 

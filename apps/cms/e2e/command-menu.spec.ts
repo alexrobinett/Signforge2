@@ -5,7 +5,7 @@ import { API_PORT } from './servers';
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.13';
 
-test('the command menu, keyboard only: open, filter, run a tool with and without a form, see a refusal, go to a page, close', async ({ page, request }) => {
+test("the command menu, keyboard only: the page's own actions, each its page's dialog; pages and actions when typed; close", async ({ page, request }) => {
   // 34-39 s on CI at 3 workers (runs 45146239608, 45147142350, 45147984299), over half the 60 s default.
   test.setTimeout(90_000);
   await page.goto('/sign-in');
@@ -26,76 +26,71 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   page.on('requestfinished', (r) => void reading.delete(r));
   page.on('requestfailed', (r) => void reading.delete(r));
   const listReadsDone = () => expect.poll(() => reading.size).toBe(0);
+  const forThisPage = menu.getByRole('group', { name: 'For this page' });
 
-  // Open with Ctrl+K: focus is in the search, every tool an owner may use is listed.
-  await page.keyboard.press('ControlOrMeta+k');
-  await expect(search).toBeFocused();
-  await expect(menu.getByRole('option', { name: /claim_screen/ })).toBeVisible();
-  await expect(menu.getByRole('option', { name: /revoke_screen_credential/ })).toHaveCount(1);
-  await axe(page);
-  await screenshot(page, '30-command-menu');
-
-  // Filter to a tool that needs input, run it from its form: pair a screen a player started.
+  // A screen to pair, and one paired by a player's code, so the Screens page has its Pair dialog.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.14' } });
   const { code, pollToken } = (await start.json()) as { code: string; pollToken: string };
-  await page.keyboard.type('pair a screen');
-  await expect(menu.getByRole('option', { selected: true })).toContainText('Pair a screen');
-  await page.keyboard.press('Enter');
-  await expect(menu.getByLabel('code')).toBeFocused();
-  await page.keyboard.type(code);
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Deli counter');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Europe/London');
+  await tool(page, 'claim_screen', { code, name: 'Deli counter', timezone: 'Europe/London', orientation: 'landscape' });
+
+  // Opened on Screens: its own actions, then the questions for the agent; no page the sidebar lists, no tool by its API name (#358).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect(forThisPage.getByRole('option')).toHaveText(['Pair a screen…', 'Take over screens now…']);
+  await expect(menu.getByRole('group', { name: 'Go to' })).toHaveCount(0);
+  await expect(menu.getByRole('option', { name: /_screen|list_|tool registry/ })).toHaveCount(0);
   await axe(page);
-  await screenshot(page, '31-command-form');
-  await page.keyboard.press('Enter');
-  await expect(toast('Deli counter')).toBeVisible();
-  await expect(menu).toBeHidden();
+  await screenshot(page, '30-command-menu');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
-  // A tool that needs no input runs at once.
-  await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('list_screens');
+  // Pair a screen opens the Screens page's own dialog, not a form of the tool's fields.
   await page.keyboard.press('Enter');
-  await expect(toast('1 screens')).toBeVisible();
-
-  // A refusal is a toast with the tool's own message, and the form stays open to fix.
-  await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('rename_screen');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('scr_missing');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Nowhere');
-  await page.keyboard.press('Enter');
-  await expect(toast(/not found/)).toBeVisible();
-  await expect(menu.getByLabel('name')).toBeVisible();
-
-  // A field the menu cannot read is refused before anything is sent: focus leaves Run for that
-  // field, which reads out the error as its description.
+  const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  await expect(pair.getByLabel('Name it')).toBeVisible();
+  await expect(page).toHaveURL(/[?&]pair=true/);
   await page.keyboard.press('Escape');
+  await expect(pair).toBeHidden();
+  await expect(page).not.toHaveURL(/pair=/);
+
+  // Typed on another page: every action the role allows, found by its words; New spot opens the Spots page's dialog.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click();
+  await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('pair a screen');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('new spot');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('New spot…');
+  await axe(page);
+  await screenshot(page, '31-command-menu-typed');
   await page.keyboard.press('Enter');
-  await expect(menu.getByLabel('code')).toBeFocused();
-  await page.keyboard.type('ABC234');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Back office');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('UTC');
-  const hours = menu.getByLabel('displayHours');
-  await hours.fill('{"mon": [');
-  const run = menu.getByRole('button', { name: 'Run' });
-  await run.focus();
+  const newSpot = page.getByRole('dialog', { name: 'New spot' });
+  await expect(newSpot).toBeVisible();
+  await expect(page).toHaveURL(/\/spots$/);
+  await page.keyboard.press('Escape');
+  await expect(newSpot).toBeHidden();
+
+  // With a change unpublished, every page offers Publish all, which asks with the sidebar's own question (#361).
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
+  await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
+  await page.reload();
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(forThisPage.getByRole('option')).toHaveText(['New spot…', 'Publish all changes…']);
+  await page.keyboard.type('publish all');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('Publish all changes…');
   await page.keyboard.press('Enter');
-  await expect(hours).toBeFocused();
-  await expect(hours).toHaveAttribute('aria-invalid', 'true');
-  await expect(hours).toHaveAccessibleDescription(/must be JSON/);
-  // Refused again after a move back to Run: focus returns to the field.
-  await run.focus();
-  await page.keyboard.press('Enter');
-  await expect(hours).toBeFocused();
+  const publishAll = page.getByRole('alertdialog');
+  await expect(publishAll).toContainText('Publish 1 unpublished change?');
+  await publishAll.getByRole('button', { name: 'Cancel' }).click();
+  await expect(publishAll).toBeHidden();
 
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await page.keyboard.press('ControlOrMeta+k');
@@ -280,13 +275,13 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await page.keyboard.type('deli');
   await expect(listStatus).toHaveText('Looking for screens…');
-  // Neither is the member choosing: a pointer over the search or the footer selects nothing, and cmdk ignores PageDown.
-  const centre = async (target: ReturnType<typeof menu.getByText>) => {
+  // Neither is the member choosing: a pointer over the search or the status line selects nothing, and cmdk ignores PageDown.
+  const centre = async (target: ReturnType<typeof menu.getByRole>) => {
     const box = (await target.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   };
   await centre(search);
-  await centre(menu.getByText(/These actions are the tool registry/));
+  await centre(listStatus);
   await page.keyboard.press('PageDown');
   release();
   await expect(selected).toContainText('Deli counter');
@@ -340,7 +335,7 @@ test('the command menu tells a screen reader the row that is selected, after eac
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await pointsAtSelected('What is on screen now?');
-  await page.keyboard.type('playl');
+  await page.keyboard.type('go to playl');
   await pointsAtSelected('Go to Playlists');
   await axe(page);
   // Cleared, the first row is selected again, and named.
@@ -348,7 +343,7 @@ test('the command menu tells a screen reader the row that is selected, after eac
   await page.keyboard.press('Backspace');
   await pointsAtSelected('Which screens need me, and why?');
   await page.keyboard.press('End');
-  await page.keyboard.type('spots');
+  await page.keyboard.type('go to spots');
   await pointsAtSelected('Go to Spots');
   await axe(page);
 });

@@ -1,38 +1,37 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams, useRouterState } from '@tanstack/react-router';
+import { useRouterState } from '@tanstack/react-router';
 import { defaultFilter } from 'cmdk';
-import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, SparklesIcon, UsersIcon } from 'lucide-react';
+import { ArrowLeftIcon, Building2Icon, SparklesIcon, UsersIcon, ZapIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import { useCallback } from 'react';
 import { OrgAvatar } from '~/components/org-switcher';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
 import { reachable } from '~/lib/screen-status';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
-import { Input } from '~/components/ui/input';
-import { Label } from '~/components/ui/label';
 import {
+  agentEntry,
   askEntry,
-  commandEntries,
+  asksFirst,
   foundValues,
   movesSelection,
-  NULL_CHOICE,
   orgCommands,
+  pageActions,
+  pageEntries,
   pageQuestions,
+  peopleActions,
   pointerMovesSelection,
-  asksFirst,
   selectedItem,
   targetActions,
   targetItemKey,
   type CommandEntry,
   type CommandTarget,
-  type Field,
   type ToolListing,
 } from '~/lib/command-menu';
-import { useOrgId, useRole } from '~/lib/live';
+import { useCanPublish, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
+import { navCountsQuery } from '~/queries/nav-counts';
 import { retryUnlessRedirect } from '~/queries/retry';
 import { playlistsQuery } from '~/queries/playlists';
 import { screensQuery } from '~/queries/screens';
@@ -40,18 +39,8 @@ import { spotsQuery } from '~/queries/spots';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
-const FIELD =
-  'flex w-full min-w-0 rounded-lg border border-input bg-card px-3 py-2 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive md:text-sm';
-
-const Mono = ({ children, className = '' }: { children: string; className?: string }) => (
-  <span className={`shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground ${className}`}>{children}</span>
-);
-
 /** The org list's first button takes focus when the list replaces the commands. Stable, so it runs once. */
 const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector('button')?.focus();
-
-/** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
-const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
 
 /** A search takes focus when its view appears within an open menu (Back). Stable, so it runs once per view. */
 const focusSearch = (input: HTMLInputElement | null) => input?.focus();
@@ -151,120 +140,6 @@ function TargetView({
   );
 }
 
-function FieldInput({
-  field,
-  id,
-  defaultValue,
-  invalid,
-  ref,
-}: {
-  field: Field;
-  id: string;
-  defaultValue: string | undefined;
-  invalid: boolean;
-  ref: ((el: HTMLElement | null) => void) | undefined;
-}) {
-  const common = {
-    ref,
-    id,
-    name: field.name,
-    required: field.required && !field.nullable,
-    defaultValue,
-    'aria-invalid': invalid || undefined,
-    'aria-describedby': `${id}-hint`,
-  };
-  switch (field.type) {
-    case 'key':
-      return null;
-    case 'boolean':
-      return <input type="checkbox" {...common} className="size-4.5 accent-primary" />;
-    case 'choice':
-      return (
-        <select {...common} className={`${FIELD} h-10`}>
-          {!field.required && <option value="">Not set</option>}
-          {field.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-          {field.nullable && <option value={NULL_CHOICE}>null</option>}
-        </select>
-      );
-    case 'json':
-      return <textarea {...common} rows={3} spellCheck={false} className={`${FIELD} font-mono`} />;
-    case 'integer':
-    case 'number':
-      return <Input {...common} type="number" step={field.type === 'integer' ? 1 : 'any'} />;
-    case 'text':
-      return <Input {...common} autoComplete="off" spellCheck={false} />;
-  }
-}
-
-/** A picked tool's form: one field per input, from its JSON Schema. */
-function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> }) {
-  const running = useAppStore((s) => s.commandMenu.running);
-  const fieldError = useAppStore((s) => s.commandMenu.fieldError);
-  const back = useAppStore((s) => s.backToCommands);
-  const submit = useAppStore((s) => s.submitToolForm);
-  // The page's own ids fill the fields of the same name: on a screen's page, its screenId.
-  const params: Record<string, string | undefined> = useParams({ strict: false });
-  const { tool } = entry;
-  // Each refusal moves focus to its field, which then reads out its error (its description): from
-  // Run, a keyboard or screen-reader user would miss both. A new error is a new ref, so React calls it again.
-  const focusInvalid = useCallback((el: HTMLElement | null) => (fieldError ? el?.focus() : undefined), [fieldError]);
-
-  return (
-    <form
-      ref={focusFirstField}
-      className="flex flex-col"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit(entry.label, tool, new FormData(e.currentTarget));
-      }}
-    >
-      <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
-        <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
-          <ArrowLeftIcon className="size-4.5" aria-hidden />
-        </Button>
-        <div className="flex min-w-0 flex-1 flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-3">
-          <h3 className="line-clamp-2 flex-1 text-base font-semibold">{entry.label}</h3>
-          <Mono>{tool.name}</Mono>
-        </div>
-      </div>
-      <div className="max-h-[min(470px,60dvh)] space-y-4 overflow-y-auto px-4 py-4">
-        <p className="text-sm text-muted-foreground">{tool.description}</p>
-        {tool.fields
-          .filter((f) => f.type !== 'key')
-          .map((f) => {
-            const id = `cmd-field-${f.name}`;
-            const error = fieldError?.field === f.name ? fieldError.message : null;
-            return (
-              <div key={f.name} className={f.type === 'boolean' ? 'flex flex-row-reverse items-center justify-end gap-2.5' : 'space-y-1.5'}>
-                <Label htmlFor={id} className="font-mono text-xs">
-                  {f.name}
-                  {f.required ? '' : ' (optional)'}
-                </Label>
-                <FieldInput field={f} id={id} defaultValue={params[f.name]} invalid={error !== null} ref={error === null ? undefined : focusInvalid} />
-                <p id={`${id}-hint`} className={error ? 'text-xs font-medium text-destructive' : 'text-xs text-muted-foreground empty:hidden'}>
-                  {error ?? f.hint}
-                </p>
-              </div>
-            );
-          })}
-      </div>
-      <div className="flex items-center justify-end gap-2 border-t bg-muted/50 px-4 py-3">
-        <Button type="button" variant="ghost" onClick={back}>
-          Back
-        </Button>
-        <Button type="submit" disabled={running}>
-          {running && <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />}
-          Run
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 /**
  * "Switch organization…": the member's other orgs as buttons, the first focused. The active one is
  * not offered: choosing it would reload for nothing, and the sidebar switcher ignores it too.
@@ -305,9 +180,9 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
 }
 
 /**
- * ⌘K: go to any section, run any tool the member's role allows, switch or create an org, or find a
- * screen or group by name and act on it, from every signed-in page. The tools are the registry
- * agents call (src/lib/command-menu.ts). It opens with no motion.
+ * ⌘K (#358): the page's own actions and questions for the agent on opening; typed, every action the
+ * member's role allows, the pages, the org commands, and screens and groups by name, each with its
+ * actions. Each action opens the page's own dialog (src/lib/command-menu.ts). It opens with no motion.
  */
 export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
@@ -321,7 +196,7 @@ export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, n
         <DialogPrimitive.Content className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong">
           <DialogPrimitive.Title className="sr-only">Command menu</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">
-            Go to a page, or run an action. Type to filter; Enter runs the selected one.
+            Run an action for this page, ask the agent, or type to find a page, a screen or another action. Enter runs the selected one.
           </DialogPrimitive.Description>
           <MenuBody shell={shell} hues={hues} />
         </DialogPrimitive.Content>
@@ -330,12 +205,11 @@ export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, n
   );
 }
 
-/** The open menu: the list, a tool's form, the org list, or a found screen's or group's actions. Mounted on each open, so it reads the screens again then. */
+/** The open menu: the list, the org list, or a found screen's or group's actions. Mounted on each open, so it reads the screens again then. */
 function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const { tools } = shell;
   const query = useAppStore((s) => s.commandMenu.query);
   const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
-  const form = useAppStore((s) => s.commandMenu.form);
   const target = useAppStore((s) => s.commandMenu.target);
   const running = useAppStore((s) => s.commandMenu.running);
   const choose = useAppStore((s) => s.chooseCommand);
@@ -348,7 +222,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const chooseTarget = useAppStore((s) => s.chooseTarget);
   const askFromMenu = useAppStore((s) => s.askFromMenu);
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const owner = useRole() === 'owner';
+  const canPublish = useCanPublish();
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
   // on each opening (this body mounts on each), so a screen or group someone else made since is found.
   const orgId = useOrgId();
@@ -363,10 +237,12 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   // The spots and playlists the pages have read, from their cache: a name typed in full is found, not asked about.
   const spots = useQuery({ ...spotsQuery(orgId), enabled: false });
   const playlists = useQuery({ ...playlistsQuery(orgId), enabled: false });
+  // Publish all is offered while there is something to publish: the sidebar's own count, read on opening.
+  const counts = useQuery({ ...navCountsQuery(orgId, false, false), enabled: orgId !== '' && canPublish, refetchOnMount: 'always' });
+  const drafts = counts.data ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
   const shownSelection = selectedItem(selection, found, moved);
-  // Said in the list, as the tools' long descriptions match almost any search, so the empty text seldom shows.
   const listStatus = running
     ? 'A call is on its way: the commands wait for its answer.'
     : !searching
@@ -379,7 +255,9 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
           ? 'Looking for screens…'
           : '';
 
-  const entries = [...commandEntries(tools, owner), ...orgCommands(shell.organizations.length)];
+  const actions = peopleActions(tools, drafts);
+  const pages = pageEntries();
+  const org = orgCommands(shell.organizations.length);
   // What was typed, for the agent: first when it reads as a sentence, else last, below what it found (#270).
   // First only when it reads as a question or request and nothing listed matches it well (review of #406).
   const sentence =
@@ -389,15 +267,11 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       ...groups.map((x) => x.name),
       ...(spots.data?.spots ?? []).map((x) => x.name),
       ...(playlists.data?.playlists ?? []).map((x) => x.name),
-      ...entries.map((e) => e.label),
+      ...[...actions, ...pages, ...org].map((e) => e.label),
     ]);
   const asked = searching ? askEntry(query, sentence) : undefined;
   const questions = searching ? [] : pageQuestions(path);
-  const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
-  const go = entries.filter((e) => e.kind === 'go' || e.kind === 'agent');
-  const org = entries.filter((e) => e.kind === 'org');
-  const actions = entries.filter((e) => (e.kind === 'tool' && !e.developer) || e.kind === 'takeover');
-  const developer = entries.filter((e) => e.kind === 'tool' && e.developer);
+  const suggested = searching ? [] : pageActions(path, actions);
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
 
   const item = (e: CommandEntry) => {
@@ -406,16 +280,14 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
+        {e.kind === 'action' && <ZapIcon className="size-4 text-muted-foreground" aria-hidden />}
         {(e.kind === 'agent' || e.kind === 'ask') && <SparklesIcon className="size-4 text-actor-agent" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
-        {(e.kind === 'tool' || e.kind === 'takeover') && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
     );
   };
 
-  return picked?.kind === 'tool' ? (
-    <ToolForm key={picked.id} entry={picked} />
-  ) : choosingOrg ? (
+  return choosingOrg ? (
     <OrgList shell={shell} hues={hues} />
   ) : target ? (
     <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} failed={failed} />
@@ -444,17 +316,18 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       }}
     >
       {/* On opening, Radix's focus trap focuses the search, once it holds focus: a focus before that is lost to a menu still closing. */}
-      <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
+      <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Find an action, a screen or a page">
         <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
       </CommandInput>
       <p role="status" className="border-b px-4 py-2 text-meta text-muted-foreground empty:sr-only">
         {listStatus}
       </p>
       <CommandList>
-        <CommandEmpty>No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.</CommandEmpty>
+        <CommandEmpty>No action, screen or page matches. Try part of a screen’s name, or ask the agent.</CommandEmpty>
         {asked && sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}
-        {/* Empty, the page's questions first, above Go to (#358). */}
-        {questions.length > 0 && <CommandGroup heading="Ask the agent">{questions.map(item)}</CommandGroup>}
+        {/* Empty, the page's own actions, then its questions for the agent (#358). */}
+        {suggested.length > 0 && <CommandGroup heading="For this page">{suggested.map(item)}</CommandGroup>}
+        {!searching && <CommandGroup heading="Ask the agent">{[...questions, agentEntry].map(item)}</CommandGroup>}
         {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
         {searching && screens.length > 0 && (
           <CommandGroup heading="Screens">
@@ -493,16 +366,12 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
             ))}
           </CommandGroup>
         )}
-        <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
-        <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
-        {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
-        {developer.length > 0 && <CommandGroup heading="Developer">{developer.map(item)}</CommandGroup>}
+        {/* Typed: every action allowed, then the pages and the org commands, which the sidebar lists already (#358). */}
+        {searching && actions.length > 0 && <CommandGroup heading="Actions">{[...actions, agentEntry].map(item)}</CommandGroup>}
+        {searching && <CommandGroup heading="Go to">{pages.map(item)}</CommandGroup>}
+        {searching && <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>}
         {asked && !sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}
       </CommandList>
-      <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-meta text-muted-foreground">
-        <CornerDownLeftIcon className="size-3.5 shrink-0" aria-hidden />
-        These actions are the tool registry: the same names and roles agents call. The audit log records them by name.
-      </p>
     </Command>
   );
 }

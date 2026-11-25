@@ -91,23 +91,6 @@ describe('a call on its way across closing and opening again', () => {
     await call;
     expect(store.getState().commandMenu).toMatchObject({ open: false, running: false });
   });
-
-  it('holds a tool run from the list too: no second call while the first is on its way', async () => {
-    const { store } = menuStore();
-    const held = holdNextCall();
-    const list = { name: 'list_screens', description: 'List the screens.', mutates: false, fields: [] };
-    const entry: CommandEntry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [], developer: false };
-    store.getState().openCommandMenu();
-    const first = store.getState().chooseCommand(entry);
-    await held.sent;
-    store.getState().closeCommandMenu();
-    store.getState().openCommandMenu();
-    await store.getState().chooseCommand(entry);
-    expect(calls.map((c) => c.name)).toEqual(['list_screens']);
-    held.answer(200);
-    await first;
-    expect(store.getState().commandMenu).toMatchObject({ open: true, running: false });
-  });
 });
 
 describe("⌘K's selection and focus (#180)", () => {
@@ -177,91 +160,64 @@ describe('⌘K on a found screen or group', () => {
   });
 });
 
-describe('a tool refused for sample text (#360)', () => {
-  /** ⌘K on a page of org_1, with the question about sample text answering `yes`. */
-  function sampleStore(yes: boolean) {
+describe("⌘K's actions open the page's own dialogs (#358)", () => {
+  /** ⌘K on a page of org_1, with the dialogs it opens as spies. */
+  function actionStore() {
     const router = {
       navigate: vi.fn(async () => {}),
       invalidate: vi.fn(async () => {}),
       state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }] },
     };
-    const askSampleText = vi.fn(async (_orgId: string, _spots: unknown) => yes);
-    const queryClient = new QueryClient();
-    const store = createStore<CommandMenuSlice & { ui: object; askSampleText: typeof askSampleText }>()((set, get) => ({
+    const dialogs = {
+      openNewSpot: vi.fn(),
+      openNewPlaylist: vi.fn(),
+      openNewEntry: vi.fn(),
+      openTakeover: vi.fn(),
+      askPublishAll: vi.fn(async () => {}),
+    };
+    const store = createStore<CommandMenuSlice & { ui: object } & typeof dialogs>()((set, get) => ({
       ui: {},
-      askSampleText,
-      ...createCommandMenuSlice(set as never, get as never, { router, queryClient } as never),
+      ...dialogs,
+      ...createCommandMenuSlice(set as never, get as never, { router, queryClient: new QueryClient() } as never),
     }));
-    return { store, askSampleText, queryClient };
+    return { store, router, dialogs };
   }
-  const spots = [{ id: 'spt_pier', name: 'Pier 9', version: 3, fields: ['headline'] }];
-  const later = [{ id: 'spt_dock', name: 'Dock', version: 1, fields: ['title'] }];
-  /** The first calls refused for sample text, naming `named` in turn, the next answered. */
-  const refusedOnce = (...named: (typeof spots)[]) => {
-    const refusals = named.length ? named : [spots];
-    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
-      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
-      const refused = refusals[calls.length - 1];
-      return refused
-        ? new Response(JSON.stringify({ error: 'sample_text', message: 'still holding sample text', details: { spots: refused } }), { status: 409 })
-        : new Response('{}', { status: 200 });
-    });
-  };
-  const entry = (name: string): CommandEntry => ({
-    kind: 'tool',
-    id: `tool:${name}`,
-    label: name,
-    tool: { name, description: '', mutates: true, fields: [] },
+  const action = (a: Extract<CommandEntry, { kind: 'action' }>['action']): CommandEntry => ({
+    kind: 'action',
+    id: `action:${a}`,
+    label: a,
+    action: a,
     keywords: [],
-    developer: false,
   });
 
-  for (const name of ['publish', 'approve_publish_request'])
-    it(`${name}: closes the menu to ask, and Publish anyway runs it again acknowledging exactly what it showed`, async () => {
-      const { store, askSampleText } = sampleStore(true);
-      refusedOnce();
-      store.getState().openCommandMenu();
-      await store.getState().chooseCommand(entry(name));
-      expect(askSampleText).toHaveBeenCalledWith('org_1', spots);
-      expect(calls).toEqual([
-        { name, input: {} },
-        { name, input: { allowSample: [{ spotId: 'spt_pier', version: 3, fields: ['headline'] }] } },
-      ]);
-      expect(store.getState().commandMenu.open).toBe(false);
-      expect(toast.error).not.toHaveBeenCalled();
-    });
-
-  it('a draft with sample text that came after the question is asked about in turn, not published unseen', async () => {
-    const { store, askSampleText } = sampleStore(true);
-    refusedOnce(spots, later);
+  it('Pair a screen opens the Screens page with its dialog, through the URL', async () => {
+    const { store, router } = actionStore();
     store.getState().openCommandMenu();
-    await store.getState().chooseCommand(entry('publish'));
-    expect(askSampleText.mock.calls.map((c) => c[1])).toEqual([spots, later]);
-    expect(calls.at(-1)?.input).toEqual({
-      allowSample: [
-        { spotId: 'spt_pier', version: 3, fields: ['headline'] },
-        { spotId: 'spt_dock', version: 1, fields: ['title'] },
-      ],
-    });
+    await store.getState().chooseCommand(action('pair'));
+    expect(router.navigate).toHaveBeenCalledWith({ to: '/screens', search: { pair: true } });
+    expect(store.getState().commandMenu.open).toBe(false);
   });
 
-  it('a publish from ⌘K counts the sidebar again: Overview and its counts are read again (#361)', async () => {
-    const { store, queryClient } = sampleStore(true);
-    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-    store.getState().openCommandMenu();
-    await store.getState().chooseCommand(entry('publish'));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'overview'] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', 'org_1', 'screenStatus'] });
+  it('New spot and New playlist open their pages and their dialogs', async () => {
+    const { store, router, dialogs } = actionStore();
+    await store.getState().chooseCommand(action('new-spot'));
+    expect(router.navigate).toHaveBeenLastCalledWith({ to: '/spots' });
+    expect(dialogs.openNewSpot).toHaveBeenCalledWith(true);
+    await store.getState().chooseCommand(action('new-playlist'));
+    expect(router.navigate).toHaveBeenLastCalledWith({ to: '/playlists' });
+    expect(dialogs.openNewPlaylist).toHaveBeenCalledWith(true);
   });
 
-  it('Edit first runs nothing more, and says nothing went wrong', async () => {
-    const { store } = sampleStore(false);
-    refusedOnce();
-    store.getState().openCommandMenu();
-    await store.getState().chooseCommand(entry('publish'));
-    expect(calls.map((c) => c.name)).toEqual(['publish']);
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(store.getState().commandMenu.running).toBe(false);
+  it('Add to the schedule, Take over and Publish all open the shell dialogs, for the org on screen, and call no tool', async () => {
+    const { store, dialogs } = actionStore();
+    await store.getState().chooseCommand(action('new-entry'));
+    await store.getState().chooseCommand(action('take-over'));
+    await store.getState().chooseCommand(action('publish-all'));
+    expect(dialogs.openNewEntry).toHaveBeenCalledWith('org_1');
+    expect(dialogs.openTakeover).toHaveBeenCalledWith('org_1');
+    // The sidebar's question: it shows what goes and publishes exactly that (#361).
+    expect(dialogs.askPublishAll).toHaveBeenCalledWith('org_1');
+    expect(calls).toEqual([]);
   });
 });
 

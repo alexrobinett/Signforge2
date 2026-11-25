@@ -1,33 +1,19 @@
 /**
- * The command menu (⌘K): open or closed, what is typed, the tool whose form or the screen or group
- * whose actions are showing, and running a tool or an action. The entries come from the shell's
- * loader and the screens list (src/lib/command-menu.ts); results and refusals are toasts.
+ * The command menu (⌘K): open or closed, what is typed, the screen or group whose actions are showing,
+ * and an action chosen: each opens the page's own dialog (#358), and a found screen's Identify or
+ * Restart is sent from here. The entries come from the shell's loader and the screens list
+ * (src/lib/command-menu.ts); a sent command's answer is a toast.
  */
 import { toast } from 'sonner';
-import {
-  needsInput,
-  resultText,
-  toolInput,
-  withKey,
-  type CommandEntry,
-  type CommandTarget,
-  type PendingCall,
-  type Selection,
-  type TargetAction,
-  type ToolListing,
-} from '~/lib/command-menu';
+import type { CommandEntry, CommandTarget, PeopleAction, Selection, TargetAction } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
-import { overviewKey } from '~/lib/overview';
-import { screenStatusQuery } from '~/queries/screens';
-import { callTool, callToolByName, sampleAcks, sampleTextOf, toolMessage } from '~/lib/tools';
+import { callTool, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
   open: boolean;
-  /** What is typed in the list's search: past the sections and tools, it finds screens and groups. */
+  /** What is typed in the list's search: it finds pages, actions, screens and groups. */
   query: string;
-  /** The tool whose form is showing, by name; null shows the list. */
-  form: string | null;
   /** The list's selected item, as cmdk reports it (`selectedItem` in src/lib/command-menu.ts); null until it has. */
   selection: Selection | null;
   /** The member moved the selection (keys, pointer) since they last typed: a list that lands then keeps their choice. */
@@ -42,10 +28,6 @@ interface CommandMenuState {
   running: boolean;
   /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
   opening: number;
-  /** A form field the menu could not read, before anything was sent. */
-  fieldError: { field: string; message: string } | null;
-  /** The last call that did not succeed: sent again with the same input, it keeps its idempotency key, closed or not. */
-  pending: PendingCall | null;
 }
 
 export interface CommandMenuSlice {
@@ -69,7 +51,6 @@ export interface CommandMenuSlice {
   runTargetAction: (action: TargetAction) => Promise<void>;
   /** Closes the menu and switches to `org`, from its list of orgs. */
   chooseOrg: (org: { id: string; name: string }) => Promise<void>;
-  submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
 const CLOSED: CommandMenuState = {
@@ -78,66 +59,56 @@ const CLOSED: CommandMenuState = {
   selection: null,
   moved: false,
   backed: false,
-  form: null,
   target: null,
   choosingOrg: false,
   running: false,
   opening: 0,
-  fieldError: null,
-  pending: null,
 };
 
-/** The menu closed: what outlives an opening (a call on its way, the last one that failed, the count) stays. */
-const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening, pending: m.pending });
+/** The menu closed: what outlives an opening (a call on its way, the count) stays. */
+const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening });
 
-export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router, queryClient }) => {
+export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
   /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
-  const start = (change: (m: CommandMenuState) => Partial<CommandMenuState> = () => ({})) => {
+  const start = () => {
     if (get().commandMenu.running) return null;
-    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, ...change(s.commandMenu) } }));
+    set((s) => ({ commandMenu: { ...s.commandMenu, running: true } }));
     return get().commandMenu.opening;
   };
-  /** A call answered: the menu it was sent from closes when it worked, and a later opening is left as it is. A tool's call also settles its `pending`. */
-  const finish = (from: number, ok: boolean, pending?: PendingCall | null) =>
+  /** A call answered: the menu it was sent from closes when it worked, and a later opening is left as it is. */
+  const finish = (from: number, ok: boolean) =>
     set((s) => {
-      const m = { ...s.commandMenu, running: false, ...(pending === undefined ? {} : { pending }) };
+      const m = { ...s.commandMenu, running: false };
       return { commandMenu: ok && m.open && m.opening === from ? closed(m) : m };
     });
 
-  const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
-    const { input, pending } = withKey(tool, read, get().commandMenu.pending);
-    const from = start(() => ({ fieldError: null, pending }));
-    if (from === null) return;
-    try {
-      const output = await callToolByName(tool.name, input);
-      finish(from, true, null);
-      toast.success(label, { description: resultText(output) });
-      if (tool.mutates) {
-        // A publish, or any draft written, changes Overview and the sidebar's counts (#361), and a
-        // publish or a revoke what screens are doing, which no loader reads.
-        const orgId = orgOnScreen(router);
-        if (orgId) {
-          void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
-          void queryClient.invalidateQueries({ queryKey: screenStatusQuery(orgId).queryKey });
-        }
-        await router.invalidate();
-      }
-    } catch (err) {
-      // Refused for sample text (#360): the menu closes for the question, and Publish anyway runs it
-      // again acknowledging exactly the spots shown, at the versions shown, with any acknowledged
-      // before. A draft with sample text that came since is refused again, and asked about in turn.
-      const [first, ...more] = sampleTextOf(err) ?? [];
-      const orgId = orgOnScreen(router);
-      if (first && orgId) {
-        finish(from, true, pending);
-        const before = Array.isArray(read.allowSample) ? read.allowSample : [];
-        if (await get().askSampleText(orgId, [first, ...more])) await run(label, tool, { ...read, allowSample: [...before, ...sampleAcks([first, ...more])] });
+  /** An action's own dialog, on its page (#358): the menu closes first, so focus goes to the dialog. */
+  async function act(action: PeopleAction) {
+    const orgId = orgOnScreen(router);
+    set((s) => ({ commandMenu: closed(s.commandMenu) }));
+    switch (action) {
+      case 'pair':
+        await router.navigate({ to: '/screens', search: { pair: true } });
         return;
-      }
-      finish(from, false, pending);
-      toast.error(label, { description: toolMessage(err) });
+      case 'new-spot':
+        await router.navigate({ to: '/spots' });
+        get().openNewSpot(true);
+        return;
+      case 'new-playlist':
+        await router.navigate({ to: '/playlists' });
+        get().openNewPlaylist(true);
+        return;
+      case 'new-entry':
+        if (orgId) get().openNewEntry(orgId);
+        return;
+      case 'take-over':
+        if (orgId) get().openTakeover(orgId);
+        return;
+      case 'publish-all':
+        // The sidebar's question: it shows what goes, and publishes exactly that (#361).
+        if (orgId) await get().askPublishAll(orgId);
     }
-  };
+  }
 
   return {
     commandMenu: CLOSED,
@@ -151,15 +122,8 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           set((s) => ({ commandMenu: closed(s.commandMenu) }));
           await router.navigate({ to: entry.to });
           return;
-        case 'takeover': {
-          const orgId = orgOnScreen(router);
-          set((s) => ({ commandMenu: closed(s.commandMenu) }));
-          if (orgId) get().openTakeover(orgId);
-          return;
-        }
-        case 'tool':
-          if (needsInput(entry.tool)) set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
-          else await run(entry.label, entry.tool, {});
+        case 'action':
+          await act(entry.action);
           return;
         case 'agent':
           set((s) => ({ commandMenu: closed(s.commandMenu) }));
@@ -184,7 +148,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       void get().askAgent(question);
     },
     // The search stays as typed, so Back returns to what it found.
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null, backed: true } })),
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, target: null, choosingOrg: false, backed: true } })),
     searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query, moved: false } })),
     selectCommand: (value, among) => set((s) => ({ commandMenu: { ...s.commandMenu, selection: { value, among } } })),
     moveCommandSelection: () => set((s) => (s.commandMenu.moved ? s : { commandMenu: { ...s.commandMenu, moved: true } })),
@@ -227,15 +191,6 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     chooseOrg: async (org) => {
       set((s) => ({ commandMenu: closed(s.commandMenu) }));
       await get().switchOrg(org, 'switcher');
-    },
-    submitToolForm: async (label, tool, form) => {
-      if (get().commandMenu.running) return;
-      const read = toolInput(tool.fields, form);
-      if (!read.ok) {
-        set((s) => ({ commandMenu: { ...s.commandMenu, fieldError: { field: read.field, message: read.message } } }));
-        return;
-      }
-      await run(label, tool, read.input);
     },
   };
 };
