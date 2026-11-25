@@ -80,6 +80,15 @@ const makeSnap = (version: number, items: unknown[]): DataSnapshot => ({
   data: { title: 'News', language: 'en', items },
 });
 
+/**
+ * A JPEG cut short where its image data starts: every header whole, as a pass-through photo whose
+ * fetch ended early could be. Chromium refuses to decode it (one cut inside the data decodes in part).
+ */
+const TRUNCATED_JPEG = Buffer.from(
+  '/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAYACADASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAEC/8QAJBAAAgICAgEDBQAAAAAAAAAAAQIDBBESABMhIjFxIyRBQ3T/xAAWAQEBAQAAAAAAAAAAAAAAAAABAgD/xAAqEQABAgMFBwUAAAAAAAAAAAABAhEAMUEDEiFRgSJSYXGi4fATQpGxwQ==',
+  'base64',
+);
+
 /** Two stories' photos, a lead and a thumbnail each: `shas` are `images`' hashes, in order (f1, t1, f2, t2). */
 const twoPhotos = () => {
   const images = [png(12, 8, 200), png(4, 3, 180), png(10, 6, 90), png(5, 4, 70)];
@@ -222,6 +231,46 @@ describe('feed images on screens (#196)', () => {
     expect(requestsFor(p, sha256(asset))).toHaveLength(1);
     expect((await p.state()).fallback).toBe(broken.manifest.id);
   }, 30_000);
+
+  // A broken image would show where the photo was: the row goes without one instead (review of #240).
+  it('plays a story whose photo cannot be decoded as one with no image', async () => {
+    const [f, t] = [sha256(TRUNCATED_JPEG), sha256(Buffer.concat([TRUNCATED_JPEG, Buffer.from([0])]))];
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(newsSpot());
+      s.setFeedBlob(f, TRUNCATED_JPEG, 'image/jpeg');
+      s.setFeedBlob(t, Buffer.concat([TRUNCATED_JPEG, Buffer.from([0])]), 'image/jpeg');
+      s.setData('news', makeSnap(1000, [photo('Cut short', f, t), { title: 'Text story' }]));
+    }, api);
+    // Its photo arrived (the row has one), but neither of its images draws.
+    await expect.poll(() => onScreenRows(p), { timeout: 10_000 }).toEqual([{ ...rowView('Cut short'), hasImage: true }, rowView('Text story')]);
+    expect((await p.state()).skipped).toBe(0);
+  }, 30_000);
+
+  // The images of a manifest not yet adopted are pinned until it is: the cleanup that adopts it must not take them
+  // (review of #240). The server would send them again on a later sync, so syncs stop once they are sent.
+  it('keeps the images a sync sent for a manifest it cannot fetch yet, until that manifest is in', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1] = shas;
+    // On screen: a manifest that binds no feed, so no snapshot of the one on screen names these images.
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(h.content([{ id: 'other', durationMs: 600 }]));
+    }, api);
+    await p.until((s) => s.played >= 1);
+    const failing = p.server.intercept(/^\/content\/manifest\.json$/, { status: 503 });
+    p.server.nextSyncS = 600;
+    p.server.publish(h.content([{ id: 'news', durationMs: 600_000, items: [{ title: 'Fallback' }], bindings: bound }], { variant: 'news' }));
+    feed(p.server, 1000, [photo('One', f1, t1)], images.slice(0, 2));
+    // Fetched while the manifest is not: in the cache, though not reported, as a screen reports only its own manifests'.
+    await expect.poll(() => cached(p), { timeout: 10_000 }).toEqual(expect.arrayContaining([`/_sf/blob/${f1}`, `/_sf/blob/${t1}`]));
+    const syncs = p.server.syncs.length;
+    failing();
+    await expect.poll(async () => (await p.state()).spot, { timeout: 20_000 }).toBe('news');
+    expect(p.server.syncs).toHaveLength(syncs);
+    await expect.poll(() => onScreenRows(p), { timeout: 10_000 }).toEqual([rowView('One', [12, 8], [4, 3])]);
+    for (const sha of [f1, t1]) expect(requestsFor(p, sha), sha).toHaveLength(1);
+  }, 40_000);
 
   it('fetches feed images while the manifest cannot be fetched', async () => {
     const { images, shas } = twoPhotos();

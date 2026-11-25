@@ -546,6 +546,7 @@ function revoked(): Promise<void> {
     evictDue = false;
     settleAfterBlobs = false;
     pendingFeedBlobs.clear();
+    incomingFeedBlobs.clear();
     lastSnapshotPins.clear();
     pins.release('snapshots');
     pins.release('snapshots-incoming');
@@ -710,6 +711,13 @@ let contentDue = false;
 let feedBlobsDue = false;
 /** Feed image hashes a sync asked us to fetch. */
 const pendingFeedBlobs = new Set<string>();
+/**
+ * Feed images a sync sent for a manifest the screen may not have adopted yet: pinned (`snapshots-incoming`) until none
+ * is pending and no manifest is due, so a manifest fetch that fails for a while cannot let a cleanup delete them before
+ * that manifest, whose snapshots name them, is in (review of #240). Every sync's since the last release, as holding
+ * replaces the pin; `pendingFeedBlobs` empties as each pass takes its batch.
+ */
+const incomingFeedBlobs = new Set<string>();
 /** True when a prior cleanup kept stale blobs only because a playing/preparing spot still pinned them. */
 let evictDue = false;
 /** Settle data sources once the initial feed-blob download batch finishes (or on timeout). */
@@ -768,7 +776,10 @@ async function contentLoop(): Promise<never> {
         });
         contentFetch = pass;
         evictDue = await pass;
-        if (!pendingFeedBlobs.size) pins.release('snapshots-incoming');
+        if (!pendingFeedBlobs.size && !contentDue) {
+          incomingFeedBlobs.clear();
+          pins.release('snapshots-incoming');
+        }
       } catch (err) {
         if (signal.aborted) return;
         if (err instanceof UnauthorisedError) return poll.wake();
@@ -856,8 +867,11 @@ async function apiSync(): Promise<void> {
   await offerChecked(r.checked ?? {});
   const dropped = refreshSnapshotPins();
   if (incomingBlobs.length) {
-    for (const sha of incomingBlobs) pendingFeedBlobs.add(sha);
-    pins.hold('snapshots-incoming', pendingFeedBlobs);
+    for (const sha of incomingBlobs) {
+      pendingFeedBlobs.add(sha);
+      incomingFeedBlobs.add(sha);
+    }
+    pins.hold('snapshots-incoming', incomingFeedBlobs);
     feedBlobsDue = true;
     settleAfterBlobs = true;
   } else if (dropped || evictDue) {

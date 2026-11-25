@@ -445,8 +445,7 @@ function keepProblem(offer: Offer, was: Record<string, unknown>, data: Record<st
     const after = data[name].filter(isRow);
     const { pairs, added } = matchRows(def.item, before, after);
     const kept = (k: string, d: ListItemFieldDef) =>
-      pairs.every(([i, j]) => same(after[j]?.[k], before[i]?.[k])) &&
-      added.every((j) => same(after[j]?.[k], d.type === 'image' ? undefined : startValue(d)));
+      pairs.every(([i, j]) => same(after[j]?.[k], before[i]?.[k])) && added.every((j) => same(after[j]?.[k], d.type === 'image' ? undefined : startValue(d)));
     for (const [k, d] of Object.entries(def.item)) if (!WRITES.has(d.type) && !kept(k, d)) return `the agent does not change "${name}.${k}"`;
   }
   for (const name of Object.keys(data)) if (!Object.hasOwn(offer.manifest.fields, name)) return `unknown field "${name}"`;

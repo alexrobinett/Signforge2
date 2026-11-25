@@ -155,14 +155,19 @@ export function sampleData(m: Pick<TemplateManifest, 'fields' | 'live'>): Record
 
 /**
  * The fields `sampleData` filled with sample copy (#360), as the contract's `SampleFields`: each text
- * holding words, and each list's rows, every cell. A live field starts empty, so none is. Null for none.
+ * holding words, and each list's rows, every cell but an image's: only a feed fills one, and the form
+ * has no edit for it, so a mark there could never be cleared (review of #240). A live field starts
+ * empty, so none is. Null for none.
  */
 export function sampleFieldsOf(m: Pick<TemplateManifest, 'fields'>, data: Record<string, unknown>): SampleFields | null {
   const sample: SampleFields = { texts: [], lists: {} };
   for (const [name, def] of Object.entries(m.fields)) {
     const v = data[name];
     if (def.type === 'text' && typeof v === 'string' && v !== '') sample.texts.push(name);
-    if (def.type === 'list' && Array.isArray(v) && v.length) sample.lists[name] = v.map(() => Object.keys(def.item));
+    if (def.type === 'list' && Array.isArray(v) && v.length) {
+      const cells = Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? [] : [k]));
+      sample.lists[name] = v.map(() => cells);
+    }
   }
   return compactSample(sample);
 }

@@ -34,7 +34,10 @@ function resolveRowSrc(ctx: Pick<TemplateContext, 'assets'>, field: string, inde
 /**
  * Fill `[data-sf]` text and `[data-sf-src]` image elements inside `el` (and `el` itself) for row
  * `index` of list `field`. An image whose blob did not arrive (or a row with no image) has its
- * `src` removed and is hidden, so a missing image never leaves an empty frame.
+ * `src` removed and is hidden, so a missing image never leaves an empty frame; so has one the
+ * browser cannot draw, such as a pass-through photo cut short before its image data (review of
+ * #240): the SDK waits for every image's decode and then two frames before `ready`, so the row is
+ * text only by then.
  */
 export function bindRow(el: Element, ctx: RowContext, field: string, index: number): void {
   const list = ctx.data[field];
@@ -57,6 +60,14 @@ export function bindRow(el: Element, ctx: RowContext, field: string, index: numb
     if (url) {
       img.src = url;
       img.hidden = false;
+      // Only while it still shows this photo: a later bind's `src` aborts this decode, and must not be cleared.
+      const drop = () => {
+        if (img.src !== url) return;
+        img.removeAttribute('src');
+        img.hidden = true;
+      };
+      img.addEventListener('error', drop, { once: true });
+      img.decode().catch(drop);
     } else {
       img.removeAttribute('src');
       img.hidden = true;
