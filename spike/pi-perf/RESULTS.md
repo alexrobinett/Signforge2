@@ -933,6 +933,14 @@ Reading ten photos from the cache, decoding them and drawing them in their rows 
 - **Prepares match.** The medians are within 10 ms of each other everywhere. Each build's single stalls fall in the same specs: the 4K photo, and portrait photo-kitchen above all.
 - **Portrait photo-kitchen is over budget in both builds** (1.28 to 2.33% overall), as it was before: The look kit and Info frame above.
 - **The one stall only this branch showed** is landscape photo-kitchen, cut, run 1: a 483 ms frame while it played, which made 1.72% overall. Runs 2 and 3 were 0.17 and 0.28%, and master's portrait run of the same spot held a 567 ms frame. Single stalls of this size come with that spot on both builds. Three runs cannot tell this one apart from them.
+- **Five more runs each, later the same day** (review of #240), landscape photo-kitchen on a cut, the two builds in turn (this branch at `e675efd`, master's player at `dc1244b`, the same stress content):
+
+  | Build | Overall | Playing | Worst frame | Prepares, median |
+  | --- | --- | --- | --- | --- |
+  | master | 0.17, 0.17, 0.22, 0.11, 0.11% | 0.00% | 33 ms | 230 ms |
+  | this branch | 0.17, 0.17, 0.17, 0.17, 0.11% | 0.00% | 33 ms | 231 ms |
+
+  Neither build stalled. Over all eight runs of this spec, this branch had one 483 ms frame and master none; with master's own 567 ms frame on portrait photo-kitchen, that is no sign of a regression.
 
 ## Baseline: the same player on a Mac (2026-11-17)
 
