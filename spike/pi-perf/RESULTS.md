@@ -937,6 +937,40 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 - **Not settled by this many runs.** Counting every portrait run of these two specs, stalls of 200 ms or more came 3 times in 26 runs with the 40vmin tile (above and here) and never in 10 with the 23vmin one. With so few, that difference could be chance (Fisher's exact test, p ≈ 0.5). Every stall came in a spec where emergency's pulse or a fade was moving. The code itself is still once drawn, but a 40vmin tile has more than three times the area of a 23vmin one, so a link to the bigger tile cannot be ruled out. Telling the two apart would take about 30 runs of each.
 - Notice's fade and the prepares barely move. Notice is 0.00 to 0.11% against 0.00%. Later prepares are 266 against 270 ms for emergency, and 179 against 196 ms for notice.
 
+### Regions and scaled text (review of #448, 2026-11-25)
+
+`templates/alert` at `da00cc7`. The body is three regions, text scales to fit its region, and each text box clips its ink (Alert above, and `docs/template-spec.md`, Alert). Measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first), the player and content served from one origin by `packages/cli/bench/feed-images/serve.py`, the supervisor and the soak logger stopped. Each severity was a 10 s spot with default copy and a 213-byte link, 3 runs.
+
+| Orientation | Transition | Severity | Overall | Playing | Worst frame | Prepares, median (range) |
+| --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.11, 0.22, 0.17% | 0.00% | 33 ms | 231 ms (199-248) |
+| | | warning | 0.06, 0.00, 0.00% | 0.00% | 33 ms | 195 ms (180-212) |
+| | | advisory | 0.00, 0.06, 0.11% | 0.00% | 33 ms | 204 ms (189-212) |
+| | | notice | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 198 ms (178-208) |
+| | fade | emergency | 0.22, 0.17, 0.06% | 0.00% | 33 ms | 211 ms (194-245) |
+| | | warning | 0.00% | 0.00% | 17 ms | 189 ms (175-214) |
+| | | advisory | 0.00% | 0.00% | 17 ms | 195 ms (181-228) |
+| | | notice | 0.00% | 0.00% | 17 ms | 195 ms (177-227) |
+| portrait | cut | emergency | 0.28, **1.00**, 0.28% | 0.00, **0.80**, 0.00% | **250 ms** (one, run 2, playing) | 282 ms (268-314) |
+| | | warning | 0.17, 0.06, 0.11% | 0.00% | 33 ms | 209 ms (199-230) |
+| | | advisory | 0.06, 0.11, 0.00% | 0.00% | 33 ms | 212 ms (205-226) |
+| | | notice | 0.06, 0.11, 0.06% | 0.00% | 33 ms | 210 ms (208-227) |
+| | fade | emergency | 0.28, 0.22, 0.22% | 0.00% | 50 ms | 288 ms (261-300) |
+| | | warning | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 196 ms (192-245) |
+| | | advisory | 0.00, 0.06, 0.00% | 0.00% | 33 ms | 201 ms (194-214) |
+| | | notice | 0.06% | 0.00% | 33 ms | 211 ms (192-221) |
+
+- **The two specs that stalled before, 5 more runs each, in the same session.** Portrait emergency on a cut: 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms. Portrait notice on a fade: 0.00 to 0.06%, worst 17 to 33 ms. Neither stalled. With the 250 ms frame above, portrait emergency on a cut has now stalled (200 ms or more) in 3 of its 21 runs with the 40vmin tile, always while playing, against none in 5 with 23vmin (A/B above): it is the spec to watch.
+- **Realistic copy prepares as before.** It fits at full size in one measuring layout. Medians are 189 to 231 ms in landscape and 196 to 288 ms in portrait; portrait emergency is the highest, as before (about 265 ms then).
+- **Worst-case copy over budget cold.** Every field at its limit in `﷽`, so both fit searches run in full (eight halvings each), timed from load to `ready` from a cold start (cache and storage cleared, 25 s, every prepare):
+
+  | Orientation | Cold (first prepare) | Warm (later prepares) |
+  | --- | --- | --- |
+  | landscape | 590, 544, 541 ms | 347, 331, 328, 362, 360, 345 ms |
+  | portrait | 566, 533, 564 ms | 462, 449, 468, 432, 475, 437 ms |
+
+  The cold prepare is 533 to 590 ms, over the 500 ms budget by up to 90 ms, and inside the 2 s ready timeout. Warm prepares are within it: 328 to 362 ms landscape, 432 to 475 ms portrait. Such copy cannot be realistic: 40 of `﷽` in the headline. Fewer halvings would bring it in, at a coarser fit.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
