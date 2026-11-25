@@ -23,9 +23,9 @@ const MODEL_FACING: Record<Arm, Record<Role, Size>> = {
     viewer: { tools: 36, bytes: 23_823, tokens: 5532 },
   },
   drawer: {
-    owner: { tools: 52, bytes: 52_271, tokens: 12_122 },
-    editor: { tools: 49, bytes: 50_431, tokens: 11_715 },
-    viewer: { tools: 38, bytes: 35_172, tokens: 8221 },
+    owner: { tools: 52, bytes: 52_225, tokens: 12_122 },
+    editor: { tools: 49, bytes: 50_387, tokens: 11_715 },
+    viewer: { tools: 38, bytes: 35_130, tokens: 8221 },
   },
 };
 

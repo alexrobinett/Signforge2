@@ -16,7 +16,7 @@ Lists the tools the caller's role may use:
               "example": { … } }] }
 ```
 
-`inputSchema` and `outputSchema` are JSON Schema, generated from the tool's zod input and output. `inputSchema` (`inputSchemaOf`, #345) leaves out the `$schema` line, the id pattern and the safe-integer bounds; the call is still checked against the zod input, so a malformed id or an out-of-range number is refused with `invalid_input`. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
+`inputSchema` and `outputSchema` are JSON Schema, generated from the tool's zod input and output. `inputSchema` (`ListedInput`, #345) leaves out the `$schema` line, the id pattern and the safe-integer bounds; the call is still checked against the zod input, so a malformed id or an out-of-range number is refused with `invalid_input`. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
 
 ### `POST /api/tools/:name`
 

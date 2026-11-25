@@ -515,21 +515,36 @@ export async function sha256Hex(text: string) {
 }
 
 /**
- * A tool's input as an agent is shown it (#345): JSON Schema with only what helps it write a call. Dropped: the
- * `$schema` line, the id pattern, and the safe-integer bounds zod gives every integer. The dispatcher still checks
- * the input against the zod schema, so a malformed id or an out-of-range number is refused all the same.
+ * A tool's input as an agent is shown it (#345). As JSON (`tools/list`, `GET /api/tools`, what a model is sent) it is
+ * the zod input's JSON Schema with only what helps write a call: no `$schema` line, id pattern or safe-integer bounds.
+ * As a Standard Schema (`~standard`, which JSON leaves out) it is the whole zod input, so TanStack AI checks a drawer's
+ * call against it before the tool runs or pauses for a card, and tells the model what was wrong. The dispatcher checks
+ * it again.
  */
-export function inputSchemaOf(input: z.ZodType): Record<string, unknown> {
-  const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
-    io: 'input',
-    unrepresentable: 'any',
-    override: ({ jsonSchema: s }) => {
-      if (s.pattern === ID_PATTERN.source) delete s.pattern;
-      if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
-      if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
-    },
-  });
-  return schema;
+export class ListedInput {
+  [field: string]: unknown;
+  readonly #input: z.ZodType;
+  readonly #schema: Record<string, unknown>;
+
+  constructor(input: z.ZodType) {
+    const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
+      io: 'input',
+      unrepresentable: 'any',
+      override: ({ jsonSchema: s }) => {
+        if (s.pattern === ID_PATTERN.source) delete s.pattern;
+        if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
+        if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+      },
+    });
+    Object.assign(this, schema);
+    this.#input = input;
+    this.#schema = schema;
+  }
+
+  get '~standard'(): z.ZodType['~standard'] {
+    const listed = () => structuredClone(this.#schema);
+    return { ...this.#input['~standard'], jsonSchema: { input: listed, output: listed } };
+  }
 }
 
 /** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
@@ -542,7 +557,7 @@ export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant
       scope: t.scope,
       minRole: t.minRole,
       mutates: t.mutates,
-      inputSchema: inputSchemaOf(t.input),
+      inputSchema: new ListedInput(t.input),
       outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));

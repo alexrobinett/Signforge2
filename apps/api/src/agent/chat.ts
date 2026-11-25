@@ -30,7 +30,7 @@
  * aborted, and no tool runs after it.
  */
 import { scoped } from '@signforge/db';
-import { CMS_AGENT_CLIENT_ID, type Caller, describeTools, dispatch, grantOf, type Grant, inputSchemaOf, registry } from '@signforge/tools';
+import { CMS_AGENT_CLIENT_ID, type Caller, describeTools, dispatch, grantOf, type Grant, ListedInput, registry } from '@signforge/tools';
 import { chat, EventType, maxIterations, parsePartialJSON, type StreamChunk, toServerSentEventsResponse } from '@tanstack/ai';
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -450,7 +450,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       ...drafting.map((t) => ({
         name: t.name,
         description: `${t.description} From the drawer this is a proposal: the person sees what it changes and saves it as a draft, or not.`,
-        inputSchema: inputSchemaOf(t.input),
+        inputSchema: new ListedInput(t.input),
         execute: (input: unknown) =>
           within(async () => {
             // A drafting tool's call is a proposal: checked and its target read, never written here (#268).
@@ -487,7 +487,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         .map(([name, confirmable]) => ({
           name,
           description: `${confirmable.description()} From the drawer it stops at a card the person sees, and runs only if they press it.`,
-          inputSchema: inputSchemaOf(confirmable.input()),
+          inputSchema: new ListedInput(confirmable.input()),
           needsApproval: true,
           execute: (input: unknown) =>
             within(async () => {
@@ -522,9 +522,9 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
 
     // The cards this member is not offered (#345), each group with who may, so the model can say so instead of failing.
     const refusals = new Map<string, string[]>();
-    for (const name of Object.keys(CONFIRMABLE).filter((n) => !pressable(grant, n))) {
-      const why = whyNot(grant, name, {}) ?? '';
-      refusals.set(why, [...(refusals.get(why) ?? []), (TOOL_CARDS[name]?.title ?? name).toLowerCase()]);
+    for (const name of Object.keys(CONFIRMABLE)) {
+      const why = whyNot(grant, name, {});
+      if (why !== null) refusals.set(why, [...(refusals.get(why) ?? []), (TOOL_CARDS[name]?.title ?? name).toLowerCase()]);
     }
     const cannot = [...refusals].map(([why, titles]) => `${titles.join(', ')}: ${why}`);
 
@@ -656,13 +656,6 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return;
         }
         const input = Object.fromEntries(Object.entries(called));
-        // Checked against the tool's own input before a card shows it: the offered schema leaves out its patterns and bounds.
-        const valid = confirmable.input().safeParse(input);
-        if (!valid.success) {
-          const why = valid.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
-          yield ended('unreadable', `The agent asked for something it cannot show on a card: ${why}. Ask again.`);
-          return;
-        }
         let made: Awaited<ReturnType<typeof confirmable.make>>;
         try {
           // On the org's scoped repositories, not the turn's counted reading: a publish card's dry run reads the whole org.
