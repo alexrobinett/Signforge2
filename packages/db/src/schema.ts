@@ -1275,7 +1275,7 @@ export const blobDeletes = sqliteTable(
  * and its content-addressed id, as R2 keys it (#235): written in the batch of the publish or `/admin` push that stores
  * it, and by the storage sweep for one stored before this table. What the sweep keeps a file for. `files_json` is null
  * for one the sweep found no object for: its files are unknown, the screen can fetch nothing through it, and a real
- * write replaces it.
+ * write replaces it. The sweep deletes a row's object once its screen no longer keeps it, and marks it deleted.
  */
 export const storedManifests = sqliteTable(
   'stored_manifests',
@@ -1285,6 +1285,10 @@ export const storedManifests = sqliteTable(
     manifestId: text('manifest_id').notNull(),
     filesJson: text('files_json'),
     storedAt: integer('stored_at').notNull(),
+    // The storage sweep's claim while it deletes the manifest's object, and when it did (#235).
+    claimOwner: text('claim_owner'),
+    claimUntil: integer('claim_until').notNull().default(0),
+    deletedAt: integer('deleted_at'),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] })],
 );
@@ -1300,6 +1304,8 @@ export const storageSweeps = sqliteTable('storage_sweeps', {
   owner: text('owner'),
   leaseUntil: integer('lease_until').notNull().default(0),
   sweptAt: integer('swept_at').notNull().default(0),
+  // When its stored manifests were last looked at with none left due: looked at again a week on (STORAGE_RECHECK_MS).
+  manifestsCheckedAt: integer('manifests_checked_at').notNull().default(0),
 });
 
 // --------------------------------------------------------------- connections

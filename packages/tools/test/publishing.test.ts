@@ -615,6 +615,12 @@ describe('loadCompileInput', () => {
   });
 });
 
+/** A member of the bucket, a method bound to it: workerd refuses one called on a proxy. */
+const bound = (target: R2Bucket, key: string | symbol) => {
+  const v: unknown = Reflect.get(target, key, target);
+  return typeof v === 'function' ? v.bind(target) : v;
+};
+
 describe('the publish tools (M3-18)', () => {
   /** Calls as an editor, with a notifier that records which screens it was told of and a bucket `put` can be wrapped around. */
   function publisher(org: TestScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
@@ -629,7 +635,7 @@ describe('the publish tools (M3-18)', () => {
               await opts.onPut?.(puts);
               return target.put(...args);
             }
-          : Reflect.get(target, key, target),
+          : bound(target, key),
     });
     const screens: ScreenNotifier = {
       manifest: async () => {},
@@ -878,6 +884,132 @@ describe('the publish tools (M3-18)', () => {
       // On its last day it still may.
       vi.setSystemTime(made + STORAGE_GRACE_MS);
       expect(await p.call('roll_back_publish', { publishId: first.publish!.id })).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** Each screen's desired manifest. */
+  const desired = async (org: TestScope) => (await org.screens.list()).map((s) => ({ screenId: s.id, manifestId: s.desiredManifestId! }));
+  const stored = async (org: TestScope, rows: { screenId: string; manifestId: string }[]) =>
+    Promise.all(rows.map(async (r) => (await env.BLOBS.head(manifestKey(org.orgId, r.screenId, r.manifestId))) !== null));
+  /** What the storage sweep does to these manifests: claims them, as of `at`, until the claim runs out an hour on. */
+  const claimManifests = (org: TestScope, ids: string[], at: number) =>
+    env.DB.prepare(`UPDATE stored_manifests SET claim_owner = 'sweep', claim_until = ? WHERE org_id = ? AND manifest_id IN (SELECT value FROM json_each(?))`)
+      .bind(at + 3_600_000, org.orgId, JSON.stringify(ids))
+      .run();
+  /** ...then deletes their objects and, its claim forgotten, marks them deleted at `at`. */
+  async function sweptManifests(org: TestScope, rows: { screenId: string; manifestId: string }[], at: number) {
+    await env.BLOBS.delete(rows.map((r) => manifestKey(org.orgId, r.screenId, r.manifestId)));
+    await env.DB.prepare(
+      `UPDATE stored_manifests SET claim_owner = NULL, claim_until = 0, deleted_at = ? WHERE org_id = ? AND manifest_id IN (SELECT value FROM json_each(?))`,
+    )
+      .bind(at, org.orgId, JSON.stringify(rows.map((r) => r.manifestId)))
+      .run();
+  }
+
+  /** Runs `test` with the clock fixed at AT (review of #431): claims and deletions are timed against it. */
+  const AT = Date.UTC(2026, 4, 1, 9);
+  async function atFixedTime(test: () => Promise<void>) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(AT);
+    try {
+      await test();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('publishes a manifest the storage sweep is deleting only once it is done, storing it again (#235)', () =>
+    atFixedTime(async () => {
+      const { org } = await seedSmallOrg('tool-manifest-sweep');
+      await editDeal(org, 'Two for $4');
+      await ok(publisher(org).call('publish', {}));
+      const a = await desired(org);
+      await editDeal(org, 'Three for $5');
+      await ok(publisher(org).call('publish', {}));
+      const b = await desired(org);
+      // Back to the first content: the same manifests, by their content-addressed ids.
+      await editDeal(org, 'Two for $4');
+      const ids = a.map((r) => r.manifestId);
+      // The sweep claims them as the publish stores them, before its batch: the batch is refused, and the run again too.
+      const raced = publisher(org, { onPut: async (n) => void (n === 1 && (await claimManifests(org, ids, AT))) });
+      expect(await raced.call('publish', {})).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('storage clean-up') });
+      expect(await desired(org)).toEqual(b);
+      // While the claim holds: refused before anything is stored.
+      expect(await publisher(org).call('publish', {})).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('storage clean-up') });
+      // The sweep deleted them after the publish stored them. A publish now stores them again and marks them stored.
+      await sweptManifests(org, a, AT - 1);
+      expect(await stored(org, a)).toEqual(a.map(() => false));
+      await ok(publisher(org).call('publish', {}));
+      expect(await desired(org)).toEqual(a);
+      expect(await stored(org, a)).toEqual(a.map(() => true));
+      const marked = await env.DB.prepare('SELECT count(*) AS n FROM stored_manifests WHERE org_id = ? AND deleted_at IS NOT NULL')
+        .bind(org.orgId)
+        .first<{ n: number }>();
+      expect(marked?.n).toBe(0);
+    }));
+
+  it('points a screen at an uploaded manifest only while the storage sweep is not deleting it (#235)', () =>
+    atFixedTime(async () => {
+      const { org, lobby } = await seedSmallOrg('tool-manifest-pointer');
+      await editDeal(org, 'Two for $4');
+      await ok(publisher(org).call('publish', {}));
+      const [a] = (await desired(org)).filter((r) => r.screenId === lobby.id);
+      await editDeal(org, 'Three for $5');
+      await ok(publisher(org).call('publish', {}));
+      const p = publisher(org);
+      await claimManifests(org, [a!.manifestId], AT);
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+      // Deleted, then uploaded again (as `/admin` does): it is pointed at, and marked stored.
+      await sweptManifests(org, [a!], AT - 1);
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: false, error: 'not_found' });
+      await env.BLOBS.put(manifestKey(org.orgId, a!.screenId, a!.manifestId), JSON.stringify({ files: {} }));
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: true, output: { changed: true } });
+      expect(await org.screens.get(lobby.id)).toMatchObject({ desiredManifestId: a!.manifestId });
+      const row = await env.DB.prepare('SELECT deleted_at AS d FROM stored_manifests WHERE org_id = ? AND manifest_id = ?')
+        .bind(org.orgId, a!.manifestId)
+        .first<{ d: number | null }>();
+      expect(row?.d).toBeNull();
+    }));
+
+  it('rolls back to a publish of the last 90 days after the storage sweep has deleted older manifests (#235)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const start = Date.UTC(2026, 3, 1);
+      const DAY = 24 * 60 * 60_000;
+      vi.setSystemTime(start);
+      const { org } = await seedSmallOrg('tool-manifest-rollback');
+      const p = publisher(org);
+      const titles = ['One for $1', 'Two for $2', 'Three for $3', 'Four for $4'];
+      const at = [start, start + DAY, start + 100 * DAY, start + 101 * DAY];
+      const made: { id: string; screens: { screenId: string; manifestId: string }[] }[] = [];
+      for (const [i, title] of titles.entries()) {
+        vi.setSystemTime(at[i]!);
+        await editDeal(org, title);
+        const out = (await ok(p.call('publish', {}))) as unknown as Out;
+        made.push({ id: out.publish!.id, screens: await desired(org) });
+      }
+      // The sweep, a day on: v1 is outside what is kept (v2 is each screen's newest before the grace period), so it goes.
+      const now = start + 102 * DAY;
+      vi.setSystemTime(now);
+      expect(await org.storage.lease('sweep', now)).toBe(true);
+      const due = await org.storage.claim('sweep', now, 90);
+      const order = (x: { screenId: string }, y: { screenId: string }) => x.screenId.localeCompare(y.screenId);
+      expect(due.manifests.toSorted(order)).toEqual(made[0]!.screens.toSorted(order));
+      await sweptManifests(org, made[0]!.screens, now);
+      await org.commit(org.storage.stage.forget(due, 'sweep', now).writes);
+      // v3, of the last 90 days: rolled back to, every manifest stored.
+      expect(await p.call('roll_back_publish', { publishId: made[2]!.id })).toMatchObject({ ok: true, output: { publish: { revision: 5 } } });
+      expect(await desired(org)).toEqual(made[2]!.screens);
+      expect(await stored(org, made[2]!.screens)).toEqual(made[2]!.screens.map(() => true));
+      // v1 and v2 are older than 90 days: refused.
+      for (const old of [made[0]!, made[1]!])
+        expect(await p.call('roll_back_publish', { publishId: old.id })).toMatchObject({ ok: false, details: { tooOld: true } });
     } finally {
       vi.useRealTimers();
     }
