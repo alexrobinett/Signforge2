@@ -247,9 +247,13 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
       // The next try makes a new spot, so the first goes, at the version the fill made or last saved. One someone has saved or put
       // in a playlist since is refused and kept, which the person is told: the new try goes on.
       if (!(await get().deleteSpot(orgId, spotId))) {
-        const { error, playlists } = get().spotEditor.deleting;
+        const { error, playlists, savedSince } = get().spotEditor.deleting;
         const names = playlists.map((p) => p.name).join(', ');
-        toast.error('The first try was kept', { description: `${error ?? 'It could not be deleted.'}${names ? ` ${names}.` : ''}` });
+        // They are on the spot library by now, not on the spot: it is found there (#355).
+        const description = savedSince
+          ? 'Someone saved it since the fill, so it was kept: you can find it in the spot library.'
+          : `${error ?? 'It could not be deleted.'}${names ? ` ${names}.` : ''}`;
+        toast.error('The first try was kept', { description });
       }
       get().askDeleteSpot(false);
       get().openNewSpot(true);
