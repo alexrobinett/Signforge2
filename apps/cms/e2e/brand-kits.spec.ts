@@ -185,6 +185,28 @@ test('a change someone else made while the kit was open is not overwritten: its 
   await expect(page.getByText('Edits reach 1 screen at the next publish: Coffee bar.')).toBeVisible();
 });
 
+test('a save that gets no answer offers Try again, which saves the edit; until then, closing the tab asks (review of #461)', async () => {
+  await page.goto('/brand-kits');
+  await hydrated(page);
+  await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
+  await hydrated(page);
+  // The first save never reaches SignForge, as on a dropped connection.
+  let aborted = false;
+  await page.route('**/api/tools/update_brand_kit', (route) => {
+    if (aborted) return route.continue();
+    aborted = true;
+    return route.abort('internetdisconnected');
+  });
+  await page.getByLabel('Primary', { exact: true }).fill('#7a3e1f');
+  const alert = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(alert).toBeVisible();
+  await expect(alert.getByRole('button', { name: 'Reload' })).toHaveCount(0);
+  await alert.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText(/kit · Saved \d/)).toBeVisible();
+  await expect(alert).toHaveCount(0);
+  await page.unroute('**/api/tools/update_brand_kit');
+});
+
 test('closing the tab with an edit still to be saved asks first, and sends the save (review of #461)', async () => {
   const tab = await page.context().newPage();
   await tab.goto('/brand-kits');

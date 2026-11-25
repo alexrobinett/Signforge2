@@ -151,12 +151,13 @@ jobs:
           fi
           browsers=false
           stress_media=false
+          script_fonts=false
           if [ -n "$tasks" ]; then
             [ -z "$base" ] || affected=--affected
             TURBO_SCM_BASE=$base pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
             for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
               grep -qE 'playwright|@signforge/template-test' "$dir/package.json" && browsers=true
-              case $dir in packages/cli | packages/tools) stress_media=true ;; esac
+              case $dir in packages/cli | packages/tools) stress_media=true ;; templates/alert) script_fonts=true ;; esac
             done
           fi
           {
@@ -165,6 +166,7 @@ jobs:
             echo "tasks=$tasks"
             echo "browsers=$browsers"
             echo "stress_media=$stress_media"
+            echo "script_fonts=$script_fonts"
             echo "playwright=$(sed -n 's/^  playwright-core@\([^:(]*\):.*/\1/p' pnpm-lock.yaml | sort -u | paste -sd- -)"
           } >> "$GITHUB_OUTPUT"
         env:
@@ -192,6 +194,14 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.browser-cache.outputs.cache-primary-key }}
+
+      # Thai, Arabic and Hebrew fonts for the Alert's browser tests, which check that no real script's marks lose ink to
+      # its clipping (docs/ci.md, "Script fonts"): without them those glyphs draw as empty boxes and the test proves nothing.
+      - name: Install script fonts
+        if: steps.plan.outputs.script_fonts == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends fonts-thai-tlwg fonts-noto-core
 
       # The stress media (docs/ci.md, "Stress media"): the release tarball, cached per version.
       # The script checks every file against examples/stress/media.sha256, cached or not.

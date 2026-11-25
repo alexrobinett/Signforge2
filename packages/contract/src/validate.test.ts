@@ -181,6 +181,39 @@ describe('validateSpotData', () => {
     expect(validateSpotData(link, { link: `${euros}a` }, {})).toEqual(['field "link" is longer than 2048 bytes']);
   });
 
+  // What a QR code holds is bytes, not characters: 200 characters of Japanese are 560 bytes, a far denser code (#230).
+  it('holds a url to its maxBytes of UTF-8, counting a character outside A to Z by its 2 to 4 bytes', () => {
+    const qr: Record<string, FieldDef> = { qrUrl: { type: 'url', label: 'QR link', maxBytes: 213 } };
+    const long = 'field "qrUrl" is longer than 213 bytes, the most its QR code holds. Some characters use more than one byte';
+    const ascii = `https://example.com/${'w'.repeat(193)}`;
+    const japanese = `https://example.com/w${'避難案内'.repeat(16)}`;
+    expect([ascii, japanese].map((v) => new TextEncoder().encode(v).length)).toEqual([213, 213]);
+    expect(validateSpotData(qr, { qrUrl: ascii }, {})).toEqual([]);
+    expect(validateSpotData(qr, { qrUrl: japanese }, {})).toEqual([]);
+    expect(validateSpotData(qr, { qrUrl: `${ascii}w` }, {})).toEqual([long]);
+    expect(validateSpotData(qr, { qrUrl: `${japanese}w` }, {})).toEqual([long]);
+    // 200 characters, as a character limit would have allowed.
+    expect(validateSpotData(qr, { qrUrl: `https://example.com/${'避難案内'.repeat(45)}` }, {})).toEqual([long]);
+  });
+
+  // Zalgo text stacks dozens of marks on a character, whose ink stands far past its line (#230).
+  it('holds a text to its maxMarks accents or marks on any one character', () => {
+    const t: Record<string, FieldDef> = { t: { type: 'text', label: 'T', maxMarks: 4 } };
+    const many = 'field "t" stacks more than 4 accents or marks on one character';
+    // Vietnamese stacks two, Thai up to three.
+    for (const ok of ['Ế Ộ Ở', 'น้ำใจผู้ใหญ่', `U${'\u030d'.repeat(4)}se`]) expect(validateSpotData(t, { t: ok }, {}), ok).toEqual([]);
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(5)}se` }, {})).toEqual([many]);
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(160)}se the stairs` }, {})).toEqual([many]);
+    expect(validateSpotData(t, { t: `WW${'\u0346'.repeat(16)}${'W'.repeat(14)}` }, {})).toEqual([many]);
+    // Per character, not per run: joiners between runs of four keep twenty marks in one character (review of #448, round 5).
+    const joined = `U${`${'\u030d'.repeat(4)}\u200d`.repeat(4)}${'\u030d'.repeat(4)}`;
+    expect([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(joined)]).toHaveLength(1);
+    expect(validateSpotData(t, { t: joined }, {})).toEqual([many]);
+    // Two characters of four each are within it.
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(4)}a${'\u030d'.repeat(4)}` }, {})).toEqual([]);
+    expect(validateSpotData({ t: { type: 'text', label: 'T' } }, { t: `U${'\u030d'.repeat(160)}` }, {})).toEqual([]);
+  });
+
   it('refuses a url that is not well-formed Unicode, which cannot be written as UTF-8, and keeps a surrogate pair', () => {
     const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
     for (const lone of ['https://example.com/\uD800', 'https://example.com/\uDC00x', 'https://example.com/\uDC00\uD800'])
@@ -522,6 +555,9 @@ describe('validateTemplateManifest', () => {
     bad.fields.items = { type: 'list', label: 'Items', item: { nested: { type: 'list', label: 'Nested', item: {} } } };
     bad.fields.odd = { type: 'video', label: 'Odd' };
     bad.fields.link = { type: 'url', label: 'Link', maxLength: 0 };
+    bad.fields.qr = { type: 'url', label: 'QR', maxBytes: 2049 };
+    bad.fields.qr2 = { type: 'url', label: 'QR', maxBytes: 0.5 };
+    bad.fields.zalgo = { type: 'text', label: 'Z', maxMarks: 0 };
     expect(validateTemplateManifest(bad)).toEqual([
       'field "price": step must be a number above 0',
       'field "price": min must not be above max',
@@ -529,6 +565,9 @@ describe('validateTemplateManifest', () => {
       'field "size": options must be a list of text',
       'field "odd": type must be one of text, number, boolean, color, select, url, date, datetime, image, list',
       'field "link": maxLength must be a whole number above 0',
+      'field "qr": maxBytes must be a whole number from 1 to 2048',
+      'field "qr2": maxBytes must be a whole number from 1 to 2048',
+      'field "zalgo": maxMarks must be a whole number above 0',
     ]);
   });
 

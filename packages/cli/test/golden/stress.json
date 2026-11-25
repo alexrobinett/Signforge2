@@ -52,6 +52,10 @@
       "size": 396225,
       "type": "text/html"
     },
+    "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
+      "size": 125360,
+      "type": "text/html"
+    },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
       "type": "video/mp4"
@@ -74,10 +78,6 @@
     },
     "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff": {
       "size": 90095,
-      "type": "text/html"
-    },
-    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
-      "size": 122770,
       "type": "text/html"
     },
     "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
@@ -116,10 +116,10 @@
     }
   },
   "templates": {
-    "base/alert@1.0.1": {
+    "base/alert@1.1.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -138,37 +138,42 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 60
+            "maxLength": 40,
+            "maxMarks": 4
           },
           "instructions": {
             "type": "text",
             "label": "Instructions",
             "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-            "maxLength": 240
+            "maxLength": 240,
+            "maxMarks": 4
           },
           "issuedBy": {
             "type": "text",
             "label": "Issued by",
             "default": "Issued by Building Safety",
-            "maxLength": 48
+            "maxLength": 48,
+            "maxMarks": 4
           },
           "endsAt": {
             "type": "text",
             "label": "Ends at",
             "default": "4:00 PM",
-            "maxLength": 24
+            "maxLength": 24,
+            "maxMarks": 4
           },
           "qrUrl": {
             "type": "url",
             "label": "QR code address",
             "default": "",
-            "maxLength": 200
+            "maxBytes": 213
           },
           "qrLabel": {
             "type": "text",
             "label": "QR code label",
             "default": "Scan for updates",
-            "maxLength": 32
+            "maxLength": 32,
+            "maxMarks": 4
           },
           "showQr": {
             "type": "boolean",
@@ -199,7 +204,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
+      "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -1440,7 +1445,7 @@
       "id": "alert",
       "name": "Evacuation alert",
       "kind": "template",
-      "template": "base/alert@1.0.1",
+      "template": "base/alert@1.1.0",
       "data": {
         "severity": "emergency",
         "headline": "Evacuate the building now",
@@ -2154,5 +2159,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "3fc09c15cc90d9a61ec3e8b2a8cc0ff26d593de9b2353f7deb62724ac7adfe7b"
+  "id": "6e2af16f314a9d3c8c477437ca576f94bc40a90404756b0fb842d91a03bb97cf"
 }

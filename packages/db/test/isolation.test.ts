@@ -162,6 +162,7 @@ describe("a call made for org B with org A's ids", () => {
       await b.screens.sync(a.screen, {
         at: 1,
         playerVersion: 'x',
+        fallbackFrom: null,
         heartbeatJson: '{}',
         epoch: 'e',
         seq: 1,

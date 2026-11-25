@@ -40,10 +40,11 @@ export type SetupStep = 'spot' | 'default' | 'screen';
  */
 export function setupSteps(d: {
   templateSpot: boolean;
-  defaultPlaylist: Pick<PlaylistView, 'published' | 'spotIds'> | null;
+  defaultPlaylist: Pick<PlaylistView, 'publishedSpotCount'> | null;
   screens: readonly Screen[];
 }): Record<SetupStep, boolean> {
-  const def = d.defaultPlaylist?.published === true && d.defaultPlaylist.spotIds.length > 0;
+  // What screens play, not the draft: a spot added to an empty default since its publish has reached no screen (#397).
+  const def = (d.defaultPlaylist?.publishedSpotCount ?? 0) > 0;
   return {
     spot: d.templateSpot,
     default: def,
@@ -102,7 +103,8 @@ export function playingNow(screens: readonly (Screen & Pick<ScreenView, 'showing
   const bySpot = new Map<string, Playing>();
   for (const s of screens) {
     const spot = s.showing?.spot;
-    if (!spot || s.showing?.asleep || isRetired(s) || !tookPublish(s) || s.state.kind === 'needs_you') continue;
+    // Asleep by its state too: `showing` can lag it while the screens are read again (#397).
+    if (!spot || s.showing?.asleep || s.state.kind === 'asleep' || isRetired(s) || !tookPublish(s) || s.state.kind === 'needs_you') continue;
     const row = bySpot.get(spot.id);
     if (row) row.screens += 1;
     else bySpot.set(spot.id, { spot, playlist: s.showing?.playlist?.name ?? null, screens: 1 });

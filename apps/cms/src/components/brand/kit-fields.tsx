@@ -13,7 +13,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
-import { kitPairs, knownFont, pairFix, type KitDraft } from '~/lib/brand-kits';
+import { kitPairs, pairFix, type KitDraft } from '~/lib/brand-kits';
 import { cn } from '~/lib/utils';
 
 /** Every catalogue font's faces, from the session blob route (the seed puts them there), so samples draw in them. */
@@ -203,8 +203,6 @@ export function FontField({
   onChange: (id: string | null) => void;
 }) {
   const id = `kit-font-${role}`;
-  // Not in the catalogue (a kit an agent wrote, a font since withdrawn): shown as it is, marked, and not saved.
-  const unknown = !knownFont(value);
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
       <label htmlFor={id} className="font-medium">
@@ -217,27 +215,14 @@ export function FontField({
       >
         {SAMPLE[role]}
       </span>
-      <NativeSelect
-        id={id}
-        value={value ?? ''}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value || null)}
-        aria-invalid={unknown || undefined}
-        aria-describedby={unknown ? `${id}-bad` : undefined}
-      >
+      <NativeSelect id={id} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)}>
         <option value="">The template's own</option>
-        {unknown && <option value={value ?? ''}>{value}</option>}
         {FONTS.filter((f) => f.roles.includes(role)).map((f) => (
           <option key={f.id} value={f.id}>
             {f.family}
           </option>
         ))}
       </NativeSelect>
-      {unknown && (
-        <p id={`${id}-bad`} className="text-sm font-medium text-destructive">
-          Not a font in the catalogue: choose another.
-        </p>
-      )}
     </div>
   );
 }
