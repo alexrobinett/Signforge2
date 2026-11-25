@@ -269,6 +269,13 @@ test('the old addresses under Settings go to Brand kits, and to the kit (#381)',
   await page.goto('/settings/brand-kits?from=bookmark#kits');
   await expect(page).toHaveURL(/\/brand-kits\?from=bookmark#kits$/);
   await expect(page.getByRole('heading', { name: 'Brand kits', level: 1 })).toBeVisible();
+  // The query as the link had it, a repeated key and JSON-looking values included (review of #450).
+  for (const q of ['?tag=one&tag=two', '?q=%22x%22&n=007', '?x=%5B1%2C2%5D&sp=a+b&flag']) {
+    const redirected = await page.request.get(`/settings/brand-kits${q}`, { maxRedirects: 0 });
+    expect(redirected.headers().location, q).toBe(`/brand-kits${q}`);
+    const toKit = await page.request.get(`/settings/brand-kits/${brandKit.id}${q}`, { maxRedirects: 0 });
+    expect(toKit.headers().location, q).toBe(`/brand-kits/${brandKit.id}${q}`);
+  }
   await page.goto(`/settings/brand-kits/${brandKit.id}?from=bookmark`);
   await expect(page).toHaveURL(new RegExp(`/brand-kits/${brandKit.id}\\?from=bookmark$`));
   await expect(page.getByRole('heading', { name: 'Moved kit', level: 1 })).toBeVisible();
