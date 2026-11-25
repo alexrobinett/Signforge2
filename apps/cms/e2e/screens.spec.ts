@@ -85,6 +85,46 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
+  // Why, said once beside its state, with its fix as the page's one filled button (#367). With no playlist to play,
+  // the fix is to make one: Playlists, whose own first step this org with no spot yet is (review of #458).
+  await expect(page.getByText('Nothing is published to it yet.', { exact: true })).toHaveCount(1);
+  const fix = page.getByRole('main').locator('[data-slot="button"][data-variant="default"]');
+  await expect(fix).toHaveAccessibleName('Make a playlist…');
+  const screenPage = page.url();
+  await fix.click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole('heading', { name: 'Make a spot first, then a playlist' })).toBeVisible();
+  // Nothing is left asked for: with a spot made since, in the app as a person makes one (so what the page holds is
+  // kept), a later visit to Playlists opens no dialog by itself.
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await nav.getByRole('link', { name: 'Spots' }).click();
+  await expect(page.getByRole('heading', { name: 'Spots', level: 1 })).toBeVisible();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New spot' }).first().click();
+  const newSpot = page.getByRole('dialog', { name: 'New spot' });
+  await newSpot.getByRole('radio', { name: 'Clock', exact: true }).check();
+  await newSpot.getByLabel('Name').fill('Arcade clock');
+  await newSpot.getByRole('button', { name: 'Create spot' }).click();
+  await expect(page.getByRole('heading', { name: 'Arcade clock', level: 1 })).toBeVisible();
+  await nav.getByRole('link', { name: 'Playlists' }).click();
+  await expect(page.getByRole('heading', { name: 'Playlists', level: 1 })).toBeVisible();
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'New playlist' }).first()).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'New playlist' })).toHaveCount(0);
+  // With one, it is to play it here.
+  await tool(page, 'create_playlist', { name: 'Arcade loop', spotIds: [] });
+  await page.goto(screenPage);
+  await hydrated(page);
+  await expect(fix).toHaveAccessibleName('Play on this screen…');
+  await fix.click();
+  await expect(page.getByRole('dialog', { name: 'Schedule a playlist' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // What it plays apart from what is done to the screen now, Play not drawn there again while it is the fix; Take
+  // over said to cut in at once.
+  await expect(page.getByRole('button', { name: 'Play on this screen…' })).toHaveCount(1);
+  await expect(page.getByRole('group', { name: 'What it plays' }).getByRole('button')).toHaveText(['Take over this screen…']);
+  await expect(page.getByRole('group', { name: 'The screen now' }).getByRole('button', { name: 'Identify (10 s)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Take over this screen…' })).toHaveAccessibleDescription('Cuts in at once over whatever the screen plays.');
   // The thumbnail's corner fits the stage around it: the stage's radius less its padding (#383).
   const stageCorner = await innerCorner(page.getByRole('img', { name: 'Nothing published yet' }));
   expect(stageCorner.radius).toBe(stageCorner.fits);
@@ -245,6 +285,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText(/credential was revoked/)).toBeVisible();
   // Its thumbnail does not say it plays anything (#362).
   await expect(page.getByRole('img', { name: 'Revoked: plays nothing' })).toBeVisible();
+  // Its fix beside why: pair it again, on the Screens page's pairing form (#367).
+  await expect(page.getByRole('link', { name: 'Pair it again…' })).toHaveAttribute('href', '/screens?pair=true');
   const refused = await request.post(`${DEVICE}/sync`, { headers: { authorization: `Bearer ${credential}` }, data: {} });
   expect(refused.status()).toBe(401);
 });
@@ -432,6 +474,42 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   const restart = page.getByRole('button', { name: 'Restart player' });
   await expect(restart).toBeDisabled();
   await expect(restart).toHaveAccessibleDescription('Restart is off: the screen cannot be reached now, and a restart only reaches a screen in touch.');
+  // Heard from, with nothing published to it, it needs you: its fix is off in the server's HTML too (review of #458).
+  await d1(`UPDATE screens SET last_seen_at = ${Date.now() + 3_600_000} WHERE id = '${screen.id}'`);
+  expect(await disabledOnServer(page, path, ['Make a playlist…'])).toEqual({ 'Make a playlist…': [true] });
+  // And a fix that is a link: Pair it again…, for a revoked screen, is off in the server's HTML too (review of #458).
+  // Revoked, as its row says it: no player here ever took this pairing's credential.
+  await d1(`UPDATE screens SET status = 'revoked' WHERE id = '${screen.id}'`);
+  const html = await (await page.request.get(path)).text();
+  const pairAgain = await page.evaluate((h) => {
+    const link = [...new DOMParser().parseFromString(h, 'text/html').querySelectorAll('a')].find((a) => a.textContent.trim() === 'Pair it again…');
+    return link ? { disabled: link.getAttribute('aria-disabled') } : null;
+  }, html);
+  expect(pairAgain).toEqual({ disabled: 'true' });
+  await page.goto(path);
+  await hydrated(page);
+  await expect(page.getByRole('link', { name: 'Pair it again…' })).not.toHaveAttribute('aria-disabled');
+});
+
+test("Take over's notice keeps a name with no break inside the dialog at a phone's width (review of #453)", async ({ page, request }) => {
+  await signInAs(page, `e2e-screen-takeover-${Date.now()}@example.com`, '192.0.2.17');
+  await createOrg(page, 'Northside Arcade Takeover', '192.0.2.17');
+  const { code } = await startPairing(request);
+  const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'create_playlist', { name: unbroken, spotIds: [] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/screens/${screen.id}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Take over this screen…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Take over screens' });
+  await dialog.getByLabel('Playlist', { exact: true }).selectOption({ label: unbroken });
+  const notice = dialog.getByText('also becomes the default playlist', { exact: false });
+  await expect(notice).toBeVisible();
+  const [box, frame] = await Promise.all([notice.boundingBox(), dialog.boundingBox()]);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(frame!.x + frame!.width);
+  expect(await notice.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+  await axe(page);
 });
 
 test("the Screens page's pairing form, and its search and filters, are disabled in the server's HTML, until the page has hydrated (#140)", async ({

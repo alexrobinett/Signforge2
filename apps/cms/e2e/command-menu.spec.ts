@@ -449,3 +449,18 @@ test('closing it gives focus back to what had it, while that is shown; else to t
   await expect(menu).toBeHidden();
   await expect(page.locator('#main')).toBeFocused();
 });
+
+test("New playlist opens its dialog wherever the page's own button does: an empty playlist and no spot (review of #458)", async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-new-playlist-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Quayside Prints', ADDRESS);
+  await tool(page, 'create_playlist', { name: 'Window loop', spotIds: [] });
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('new playlist');
+  await expect(page.getByRole('option', { selected: true })).toHaveText('New playlist…');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole('dialog', { name: 'New playlist' })).toBeVisible();
+});

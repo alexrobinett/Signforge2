@@ -64,12 +64,16 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await expect(previews.getByRole('link', { name: 'Lobby clock' })).toBeVisible();
   await expect.poll(() => themed(page, 'primary'), { timeout: 30_000 }).toEqual(['#2563eb']);
 
-  // A colour reaches the player before anything is saved.
+  // A colour reaches the player before anything is saved: its save is held, however long the player takes.
+  const saving = await holdFirst(page, '/api/tools/update_brand_kit');
   const typedAt = Date.now();
   await page.getByLabel('Primary', { exact: true }).fill('#7a3e1d');
   await expect.poll(() => themed(page, 'primary'), { intervals: [20], timeout: 5_000 }).toEqual(['#7a3e1d']);
   console.log(`preview re-themed ${Date.now() - typedAt} ms after the edit`);
-  await expect(page.getByText('Brand kit · Unsaved changes').or(page.getByText('Default kit · Unsaved changes'))).toBeVisible();
+  await expect(page.getByText(/^Default kit · (Unsaved changes|Saving…)$/)).toBeVisible();
+  expect(saving.calls()).toBeLessThan(2);
+  await (await saving.arrived).continue();
+  await page.unroute('**/api/tools/update_brand_kit');
 
   // A pair set by hand that fails: its verdict in words, and a fix that derives it again.
   const contrast = page.getByRole('listitem').filter({ hasText: 'On accent on accent' });
@@ -83,10 +87,15 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await expect(page.getByText('Text on accent. Derived for 4.5:1 contrast')).toBeVisible();
   await expect.poll(() => themed(page, 'on-accent'), { timeout: 5_000 }).toEqual(['#000000']);
 
-  // A font from the catalogue, drawn in its sample.
+  // A font from the catalogue, drawn in its sample. A choice says so, with Undo, as the editors' do (#366).
+  await page.getByLabel('Display font').selectOption({ label: 'Archivo' });
+  await page.locator('[data-sonner-toast]').filter({ hasText: 'Display font changed' }).getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByLabel('Display font')).toHaveValue('');
   await page.getByLabel('Display font').selectOption({ label: 'Montserrat' });
-  await page.getByRole('button', { name: 'Save kit' }).click();
+  // It saves itself a second after the last edit, as the editors do (#366): no Save kit, no Discard.
   await expect(page.getByText(/Default kit · Saved \d/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save kit' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Discard changes' })).toHaveCount(0);
   await axe(page);
   await shots(page, '52-brand-kit');
 
@@ -102,7 +111,7 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   await page.getByRole('button', { name: 'Duplicate' }).click();
   await expect(page.getByRole('heading', { name: 'Hearth Café copy', level: 1 })).toBeVisible();
   await hydrated(page);
-  await expect(page.getByText('Brand kit · Saved')).toBeVisible();
+  await expect(page.getByText('Brand kit · No changes yet')).toBeVisible();
   await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
   await expect(page.getByRole('status').filter({ hasText: 'screen' })).toHaveText(
     'No screen wears this kit yet. Edits reach screens once it is used and published.',
@@ -110,8 +119,9 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   // The same players, now for the copy, re-theme with its edits (review of #103, 2).
   await page.getByLabel('Primary', { exact: true }).fill('#0f766e');
   await expect.poll(() => themed(page, 'primary'), { timeout: 5_000 }).toEqual(['#0f766e']);
-  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await page.getByLabel('Primary', { exact: true }).fill('#7a3e1d');
   await expect.poll(() => themed(page, 'primary'), { timeout: 5_000 }).toEqual(['#7a3e1d']);
+  await expect(page.getByText(/Brand kit · Saved \d/)).toBeVisible();
 
   // Given to the group by keyboard: its screen gets it at the next publish, over the default, and
   // the box keeps focus while the change is on its way (review of #103, 3).
@@ -127,7 +137,6 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   await page.getByLabel('Muted', { exact: true }).fill('#3a3a3a');
   await expect(page.getByRole('listitem').filter({ hasText: 'Muted on background' })).toContainText('Fail');
   await expect(page.getByRole('status').filter({ hasText: 'Below 4.5:1' })).toHaveText('Below 4.5:1: Muted on background.');
-  await page.getByRole('button', { name: 'Save kit' }).click();
   await expect(page.getByText(/Brand kit · Saved \d/)).toBeVisible();
 
   await page.getByRole('link', { name: 'Brand kits' }).first().click();
@@ -153,7 +162,7 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   await shots(page, '55-brand-kit-phone');
 });
 
-test('a change someone else made while the kit was open is not overwritten, even after the page reads the kits again', async () => {
+test('a change someone else made while the kit was open is not overwritten: its autosave is refused in place, and Reload shows theirs', async () => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/brand-kits');
   await hydrated(page);
@@ -161,23 +170,60 @@ test('a change someone else made while the kit was open is not overwritten, even
   await expect(page.getByRole('heading', { name: 'Hearth Café', level: 1 })).toBeVisible();
   await hydrated(page);
   const kitId = new URL(page.url()).pathname.split('/').at(-1);
-  await page.getByLabel('Primary', { exact: true }).fill('#c8102e');
-
   // Stands in for someone else: rounder corners land after the page read the kit.
   await tool(page, 'update_brand_kit', { brandKitId: kitId, shape: 'round' });
-  // Giving the kit to a screen reads the kits again: the page now holds the other change's version,
-  // and the draft is kept.
+  // The edit saves itself from the version the page read: refused, said in place, the edit kept.
+  await page.getByLabel('Primary', { exact: true }).fill('#c8102e');
+  await expect(page.getByRole('alert').filter({ hasText: 'This kit changed since you opened it.' })).toBeVisible();
+  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#c8102e');
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
+  await expect(page.getByRole('radio', { name: 'Round' })).toBeChecked();
   const screen = page.getByRole('region', { name: 'Where it is used' }).getByRole('checkbox', { name: 'Coffee bar' });
   await screen.click();
   await expect(screen).toBeChecked();
   await expect(page.getByText('Edits reach 1 screen at the next publish: Coffee bar.')).toBeVisible();
-  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#c8102e');
+});
 
-  await page.getByRole('button', { name: 'Save kit' }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'This kit changed since you opened it.' })).toBeVisible();
-  await page.getByRole('button', { name: 'Reload' }).click();
-  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
-  await expect(page.getByRole('radio', { name: 'Round' })).toBeChecked();
+test('a save that gets no answer offers Try again, which saves the edit; until then, closing the tab asks (review of #461)', async () => {
+  await page.goto('/brand-kits');
+  await hydrated(page);
+  await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
+  await hydrated(page);
+  // The first save never reaches SignForge, as on a dropped connection.
+  let aborted = false;
+  await page.route('**/api/tools/update_brand_kit', (route) => {
+    if (aborted) return route.continue();
+    aborted = true;
+    return route.abort('internetdisconnected');
+  });
+  await page.getByLabel('Primary', { exact: true }).fill('#7a3e1f');
+  const alert = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(alert).toBeVisible();
+  await expect(alert.getByRole('button', { name: 'Reload' })).toHaveCount(0);
+  await alert.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText(/kit · Saved \d/)).toBeVisible();
+  await expect(alert).toHaveCount(0);
+  await page.unroute('**/api/tools/update_brand_kit');
+});
+
+test('closing the tab with an edit still to be saved asks first, and sends the save (review of #461)', async () => {
+  const tab = await page.context().newPage();
+  await tab.goto('/brand-kits');
+  await hydrated(tab);
+  await tab.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
+  await hydrated(tab);
+  // Held, so it is still to be saved however soon the tab is closed.
+  const saving = await holdFirst(tab, '/api/tools/update_brand_kit');
+  await tab.getByLabel('Primary', { exact: true }).fill('#7a3e1e');
+  const asked = tab.waitForEvent('dialog');
+  await tab.close({ runBeforeUnload: true });
+  const dialog = await asked;
+  expect(dialog.type()).toBe('beforeunload');
+  // Its save is sent while the browser asks.
+  await saving.arrived;
+  await dialog.dismiss();
+  await tab.close();
 });
 
 test("a kit's long name wraps in its title, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
@@ -227,10 +273,10 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
   await page.goto(`/brand-kits/${brandKit.id}`);
   await hydrated(page);
   await expect(page.getByLabel('Primary', { exact: true })).toBeEnabled();
-  await page.getByLabel('Primary', { exact: true }).fill('#335577');
   const copies = await holdFirst(page, '/api/tools/create_brand_kit');
   const saving = await holdFirst(page, '/api/tools/update_brand_kit');
-  await page.getByRole('button', { name: 'Save kit' }).click();
+  // Its autosave, held on its way.
+  await page.getByLabel('Primary', { exact: true }).fill('#335577');
   const saveAnswer = await saving.arrived;
   const duplicate = page.getByRole('button', { name: 'Duplicate' });
   await expect(duplicate).toHaveAttribute('aria-disabled', 'true');

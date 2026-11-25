@@ -40,6 +40,21 @@ export const kitDraftOf = (k: BrandKitView): KitDraft => ({
   logoOnLightAssetId: k.logo?.onLightAssetId ?? null,
 });
 
+/**
+ * A logo chosen or removed in `draft`: what it says, what it changes, and what its Undo puts back, which is only what
+ * it changed. Removing the dark logo removes the light one with it: a light logo is only ever the dark one's partner.
+ */
+export function logoChoice(draft: KitDraft, which: 'dark' | 'light', assetId: string | null) {
+  const said = assetId ? 'Logo changed' : 'Logo removed';
+  if (which === 'light') return { said, patch: { logoOnLightAssetId: assetId }, was: { logoOnLightAssetId: draft.logoOnLightAssetId } };
+  if (assetId) return { said, patch: { logoOnDarkAssetId: assetId }, was: { logoOnDarkAssetId: draft.logoOnDarkAssetId } };
+  return {
+    said,
+    patch: { logoOnDarkAssetId: null, logoOnLightAssetId: null },
+    was: { logoOnDarkAssetId: draft.logoOnDarkAssetId, logoOnLightAssetId: draft.logoOnLightAssetId },
+  };
+}
+
 /** The draft's colours as screens would get them, or null while one is not a hex colour yet. */
 export function draftColors(d: KitDraft): BrandColors | null {
   const { onPrimary, onAccent, ...fills } = d.colors;

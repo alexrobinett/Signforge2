@@ -1,0 +1,23 @@
+{
+  "name": "The Guardian (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 32000,
+  "data": {
+    "look": "corporate",
+    "title": "Latest news",
+    "source": "The Guardian",
+    "rotationSeconds": 8,
+    "showImages": true
+  },
+  "bindings": {
+    "items": {
+      "source": "news-guardian",
+      "path": "items"
+    },
+    "language": {
+      "source": "news-guardian",
+      "path": "language"
+    }
+  }
+}

@@ -192,7 +192,7 @@ function PlaylistEditor() {
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
         {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
-      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
+      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} onRetry={() => void save(playlistId)} />
       {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
       {!gone && (
         <ProposalPanel

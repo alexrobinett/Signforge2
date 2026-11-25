@@ -761,22 +761,12 @@ describe('confirmation cards (#269)', () => {
     expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
   });
 
-  it('shows a member who may not press who may, and gives no token', async () => {
+  it('offers no card a member may not press (#345); a call to one all the same shows no card and runs nothing', async () => {
     const s = await takeover({ role: 'viewer' });
-    const { card } = pressOf(await raw(await s.ask('q')), 'q');
-    expect(card).toEqual({
-      tool: 'start_takeover',
-      // The tool's own title: nothing is read for the card.
-      title: 'Takeover',
-      lines: [],
-      address: null,
-      when: '',
-      undo: '',
-      press: '',
-      token: null,
-      why: 'You can view only: ask an editor.',
-      expiresAt: expect.any(Number),
-    });
+    const all = await raw(await s.ask('q'));
+    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('start_takeover');
+    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)).toBeUndefined();
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
   });
 
   it('pins a publish at the versions shown, keeps every constraint the model gave, says how many screens it changes, and lists the sample text a press publishes (#392)', async () => {
@@ -922,7 +912,7 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
-  it('shows a viewer or an editor asking to cancel an invitation who may, and nothing of the invitation: not whose, nor its role (review of #414)', async () => {
+  it('offers a viewer or an editor no card to cancel an invitation, and a call to one shows nothing of it: not whose, nor its role (review of #414, #345)', async () => {
     for (const role of ['viewer', 'editor'] as const) {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({ role, steps: () => ({ calls: [{ name: 'cancel_invitation', input: ask.called }] }) });
@@ -930,14 +920,14 @@ describe('confirmation cards (#269)', () => {
       const invited = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email, role: 'owner' });
       ask.called = { invitationId: invited.id };
       const all = await raw(await s.ask(`Cancel the invitation ${invited.id}`));
-      const { card } = pressOf(all, 'q');
-      expect(card, role).toMatchObject({
-        tool: 'cancel_invitation',
-        title: 'Cancel an invitation',
-        lines: [],
-        token: null,
-        why: 'Only owners can do this: ask an owner.',
-      });
+      expect(
+        s.model.asked[0].tools.map((t: { name: string }) => t.name),
+        role,
+      ).not.toContain('cancel_invitation');
+      expect(
+        all.find((e) => e.name === CHAT_EVENTS.confirm),
+        role,
+      ).toBeUndefined();
       // Nowhere in what reaches the browser.
       expect(JSON.stringify(all), role).not.toContain(email);
       expect(JSON.stringify(all), role).not.toMatch(/as owner/);
@@ -988,6 +978,72 @@ describe('confirmation cards (#269)', () => {
     expect(detail).toMatchObject({ refused: { message: expect.stringMatching(why) }, confirmed: { callId: expect.any(String) } });
     return detail;
   }
+
+  // A card is offered only to who may press it (#345), but a press goes on from the card it was shown: one made before
+  // the member lost the right is refused as the press runs, audited, never lost as a tool the turn no longer has.
+  it('refuses, audited, a press made after editors stopped publishing', async () => {
+    const s = await takeover({ role: 'editor' });
+    const { body } = pressOf(await raw(await s.ask('q')), 'q');
+    expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    await refusedPress(s, body, 'publish_takeover', 'Only owners publish in this organization');
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  it('refuses, audited, a press made after the member was made a viewer', async () => {
+    const s = await takeover({ role: 'editor' });
+    const { body } = pressOf(await raw(await s.ask('q')), 'q');
+    const editor = (await s.member.session()).body.user.id;
+    const row = await env.DB.prepare('SELECT id FROM member WHERE organizationId = ? AND userId = ?').bind(s.org.id, editor).first<{ id: string }>();
+    await s.owner.ok('/api/auth/organization/update-member-role', { memberId: row?.id, role: 'viewer', organizationId: s.org.id });
+    await refusedPress(s, body, 'publish_takeover', 'publish_takeover needs the content:publish scope and at least the editor role');
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  // The listing leaves out the id pattern (#345), but a call is still checked against the tool's whole input before it
+  // runs or pauses for a card: the model is told what was wrong and the turn goes on.
+  it('tells the model a card call has a malformed id, and the turn goes on to the card', async () => {
+    const called = { name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' };
+    const s = await setup({
+      steps: [
+        { calls: [{ name: 'create_data_source', input: { id: 'bad id!', ...called } }] },
+        { calls: [{ name: 'create_data_source', input: { id: 'menu', ...called } }] },
+      ],
+    });
+    const all = await raw(await s.ask('q'));
+    const told = s.model.asked[1].messages.at(-1).content[0];
+    expect(told).toMatchObject({ type: 'tool_result', is_error: true });
+    expect(JSON.stringify(told.content)).toContain('not a valid');
+    expect(pressOf(all, 'q').card).toMatchObject({ tool: 'create_data_source', token: expect.any(String) });
+    expect(await s.scope.dataSources.list()).toEqual([]);
+  });
+
+  it('tells the model a read has a malformed id, before it runs: no card, and no call of the turn spent', async () => {
+    const s = await setup({ steps: [{ calls: [{ name: 'get_screen', input: { screenId: 'bad id!' } }] }, ANSWER] });
+    const lines = await events(await s.ask());
+    const told = s.model.asked[1].messages.at(-1).content[0];
+    expect(told).toMatchObject({ type: 'tool_result', is_error: true });
+    expect(JSON.stringify(told.content)).toContain('not a valid screen id');
+    expect(lines).toEqual([{ type: 'answer', card: { ...CARD, trace: [], drafts: [] } }]);
+  });
+
+  it('tells the model what the member may not do here, and who may, in the words a refused card uses; an owner may do all', async () => {
+    const promptOf = async (s: Awaited<ReturnType<typeof setup>>) => {
+      s.model.asked.length = 0;
+      await raw(await s.ask('Publish everything'));
+      return JSON.stringify(s.model.asked[0].messages[0].content);
+    };
+    const owner = await setup({ steps: [ANSWER] });
+    expect(await promptOf(owner)).not.toContain('What they may not do here');
+    const viewer = await setup({ role: 'viewer', steps: [ANSWER] });
+    expect(await promptOf(viewer)).toMatch(/What they may not do here, and who may: publish[^:]*: You can view only: ask an editor\./);
+    const editor = await setup({ role: 'editor', steps: [ANSWER] });
+    const publishing = await promptOf(editor);
+    expect(publishing).toContain('cancel an invitation');
+    expect(publishing).toContain('Only owners can do this: ask an owner.');
+    expect(publishing).not.toMatch(/publish[^:]*: Only owners publish/);
+    expect((await editor.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    expect(await promptOf(editor)).toMatch(/publish[^:]*: Only owners publish in this organization: ask an owner\./);
+  });
 
   it('names the target of every tool a card runs from its input alone: a refused press has no output', () => {
     for (const c of Object.values(CONFIRMABLE))

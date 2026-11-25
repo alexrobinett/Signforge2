@@ -161,6 +161,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72": {
+      "size": 385461,
+      "type": "text/html"
+    },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
       "type": "text/html"
@@ -887,6 +891,130 @@
       },
       "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
     },
+    "base/news@2.0.0": {
+      "manifest": {
+        "id": "news",
+        "version": "2.0.0",
+        "name": "News",
+        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Latest news",
+            "maxLength": 32
+          },
+          "source": {
+            "type": "text",
+            "label": "Source credit",
+            "default": "",
+            "maxLength": 40
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              },
+              "summary": {
+                "type": "text",
+                "label": "Summary",
+                "default": "",
+                "maxLength": 240
+              },
+              "image": {
+                "type": "image",
+                "label": "Photo"
+              }
+            }
+          },
+          "language": {
+            "type": "text",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "default": "",
+            "maxLength": 35
+          },
+          "rotationSeconds": {
+            "type": "number",
+            "label": "Seconds per lead story",
+            "default": 8,
+            "min": 4,
+            "max": 30
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "default": "pop"
+          },
+          "showImages": {
+            "type": "boolean",
+            "label": "Show photos",
+            "default": true
+          },
+          "showSummary": {
+            "type": "boolean",
+            "label": "Show the summary",
+            "default": true
+          },
+          "showList": {
+            "type": "boolean",
+            "label": "Show the story list",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show the source and age",
+            "default": true
+          },
+          "showCrawl": {
+            "type": "boolean",
+            "label": "Show the crawl",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 32000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "source": "rss",
+          "fields": {
+            "items": "items",
+            "language": "language"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72"
+    },
     "base/room-status@1.0.2": {
       "manifest": {
         "id": "room-status",
@@ -1182,6 +1310,99 @@
       },
       "durationMs": 15000
     },
+    "news-guardian": {
+      "id": "news-guardian",
+      "name": "The Guardian (live)",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The Guardian",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "corporate",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-guardian",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-guardian",
+          "path": "language"
+        }
+      }
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "name": "New York Times (live)",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The New York Times",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "poster",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-nyt",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-nyt",
+          "path": "language"
+        }
+      }
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "name": "The Verge (live)",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The Verge",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "night",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-verge",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-verge",
+          "path": "language"
+        }
+      }
+    },
     "room-status": {
       "id": "room-status",
       "name": "Harbour Room status",
@@ -1257,6 +1478,15 @@
           "spot": "info-frame"
         },
         {
+          "spot": "news-nyt"
+        },
+        {
+          "spot": "news-guardian"
+        },
+        {
+          "spot": "news-verge"
+        },
+        {
           "spot": "fire-drill"
         }
       ]
@@ -1277,7 +1507,20 @@
       ]
     }
   },
-  "dataSources": {},
+  "dataSources": {
+    "news-nyt": {
+      "id": "news-nyt",
+      "refreshS": 300
+    },
+    "news-guardian": {
+      "id": "news-guardian",
+      "refreshS": 300
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "refreshS": 300
+    }
+  },
   "schedule": [
     {
       "id": "breakfast",
@@ -1289,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "85824c05db3b2d2870c92b6bae35692e6bfd44ac528ccf4d155a1f81013285eb"
+  "id": "3c1bb63d55456297cbd9d741f48e22a90cdab22d51e156a8d060c96f6d51492a"
 }

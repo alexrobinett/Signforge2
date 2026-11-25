@@ -8,6 +8,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { AnyRouter } from '@tanstack/react-router';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { saveWaiting, savesWaiting } from './versioned-draft';
 import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } from './command-menu';
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAgentSlice, type AgentSlice } from './agent';
@@ -93,6 +94,12 @@ export function createAppStore(deps: StoreDeps): AppStore {
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
     connectCommandMenu(store, deps);
+    // An edit still to be saved would go with the tab: its save goes now, and the browser asks before the tab closes.
+    window.addEventListener('beforeunload', (e) => {
+      if (!savesWaiting()) return;
+      void saveWaiting();
+      e.preventDefault();
+    });
   }
   return store;
 }

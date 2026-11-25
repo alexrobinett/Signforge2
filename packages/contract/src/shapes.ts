@@ -668,9 +668,16 @@ export interface NewsFeed {
    * bind it whatever the feed.
    */
   language: string;
-  /** Newest first. */
-  items: { title: string; published: string; source: string; image?: NewsImage }[];
+  /**
+   * Newest first. `summary` is the story's description (RSS `description`, Atom `summary` or else
+   * `content`) as plain text, at most `NEWS_SUMMARY_MAX` characters, cut on a word with "…"; absent
+   * when the feed has none or it only repeats the title. Players and templates before it ignore it.
+   */
+  items: { title: string; published: string; source: string; summary?: string; image?: NewsImage }[];
 }
+
+/** The longest `NewsFeed` item `summary`, in characters: two or three lines under a lead headline. */
+export const NEWS_SUMMARY_MAX = 240;
 
 /**
  * A story's photo as a screen gets it: the server's checked copy of the image the feed names,

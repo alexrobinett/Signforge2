@@ -9,6 +9,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
+import { initialOrgs } from '../src/state/orgs';
 
 // The org the tab shows, which a test changes as a switch does; each request names one, as the tab's headers would.
 const active = vi.hoisted(() => ({ org: 'org_1' }));
@@ -108,6 +109,7 @@ function draftsStore(published?: boolean) {
       queryClient: new QueryClient(),
     } as never),
     agent: { filled: {} },
+    orgs: initialOrgs,
     setRightPanel: () => {},
     reloadSpot: async (_o: string, id: string) => void reloaded.push(id),
     publishTogether: vi.fn(async () => published ?? true),

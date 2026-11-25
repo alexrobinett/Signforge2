@@ -46,6 +46,7 @@ import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { screensQuery } from '~/queries/screens';
 import { spotsQuery, templatesQuery } from '~/queries/spots';
+import { changingOrg } from './orgs';
 import type { SliceCreator } from './store';
 
 /** What an answer's drafts do: being worked out, one summary a draft, or why not, so they cannot be saved yet. */
@@ -555,7 +556,9 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // The page shown now: the person may have moved since the drawer opened.
       const page: ChatContext['page'] = { path: router.state.location.pathname, ids: idsOf(router.state.matches.at(-1)?.params) };
       const question = (asked ?? typed).trim();
-      if (!question || busy) return;
+      // Not while the org changes: the drawer was forgotten for the next org, and a turn now would be the last one's,
+      // its answer left in the next org's drawer and sent to its model as history (review of #469).
+      if (!question || busy || changingOrg(get().orgs)) return;
       const context: ChatContext = { history: historyOf(messages), page };
       drawer((d) => ({
         ...d,
@@ -577,7 +580,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const m = get().agentDrawer.messages[index];
       const token = m?.role === 'confirm' && m.press === 'offered' ? m.card.token : null;
       const held = token ? waiting.get(token) : undefined;
-      if (!token || !held || get().agentDrawer.asking) return;
+      if (!token || !held || get().agentDrawer.asking || changingOrg(get().orgs)) return;
       waiting.delete(token);
       const press = (press: Press, error: string | null = null) =>
         drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press, error } : x)) }));

@@ -46,10 +46,13 @@ let calls: Call[] = [];
 const org = { id: ORG };
 
 function setup() {
+  let visits = 0;
   const queryClient = new QueryClient();
   const router = {
-    navigate: vi.fn(async () => {}),
+    // Each navigation is a new history entry with its own key, as in the browser.
+    navigate: vi.fn(async ({ to }: { to: string }) => void (router.state.location = { pathname: to, state: { __TSR_key: `k${++visits}` } })),
     state: {
+      location: { pathname: '/spots', state: { __TSR_key: 'k0' } },
       get matches() {
         return [{ routeId: '/_app', loaderData: { organization: { id: org.id } } }];
       },
@@ -60,7 +63,7 @@ function setup() {
     redrawStage: () => {},
   }));
   const open = (p: PlaylistView) => queryClient.setQueryData(playlistKeys.one(ORG, p.id), p);
-  return { store, queryClient, open, editor: () => store.getState().playlistEditor };
+  return { store, router, queryClient, open, editor: () => store.getState().playlistEditor };
 }
 
 /** Let the store's awaits run. */
@@ -238,5 +241,43 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'closing']);
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
+  });
+});
+
+describe('New playlist from elsewhere (#367, review of #458)', () => {
+  /** Starts New playlist from elsewhere with the org's playlists and spots answered as given. */
+  async function start(playlists: unknown[], spots: unknown[]) {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
+    const { getSpots } = await import('../src/server/spots.functions');
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists } as never);
+    vi.mocked(getSpots).mockResolvedValueOnce({ spots } as never);
+    const { store } = setup();
+    await store.getState().startNewPlaylist(ORG);
+    return store.getState().playlistEditor.newPlaylist.open;
+  }
+
+  it('goes to Playlists and opens its dialog wherever the page shows New playlist', async () => {
+    // Neither a playlist nor a spot: the page offers New spot instead, and nothing is left asked for.
+    expect(await start([], [])).toBe(false);
+    // An empty playlist and no spot: the page's own button is there, so is ⌘K's.
+    expect(await start([playlist('pls_a', 1, [])], [])).toBe(true);
+    expect(await start([], [{ id: 'spt_1' }])).toBe(true);
+  });
+
+  it('asks for nothing once the member has navigated, even back to Playlists, before its reads came back', async () => {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
+    const { getSpots } = await import('../src/server/spots.functions');
+    let answer: (v: unknown) => void = () => {};
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists: [] } as never);
+    vi.mocked(getSpots).mockImplementationOnce(() => new Promise((r) => (answer = r)) as never);
+    const { store, router } = setup();
+    const starting = store.getState().startNewPlaylist(ORG);
+    await settle();
+    // Away to Spots and straight back while the read is on its way: the same page, a later visit.
+    await router.navigate({ to: '/spots' });
+    await router.navigate({ to: '/playlists' });
+    answer({ spots: [{ id: 'spt_1' }] });
+    await starting;
+    expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);
   });
 });
