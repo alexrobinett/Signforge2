@@ -160,8 +160,12 @@ export function DisplayHoursEditor({
                         <fieldset className="space-y-2">
                           <legend className="sr-only">Hours on {date}</legend>
                           {e.on.map((w, k) => (
+                            // Each window its own named group, as a weekly one, so its times say whose they are (#377).
                             // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
-                            <div key={k} className="flex flex-wrap items-end gap-2">
+                            <fieldset key={k} className="flex flex-wrap items-end gap-2">
+                              <legend className="sr-only">
+                                Window {k + 1} on {date}
+                              </legend>
                               <TimeField label="On at" value={w.from} onChange={(from) => setWindows(e.on.map((x, j) => (j === k ? { ...x, from } : x)))} />
                               <TimeField label="Off at" value={w.to} onChange={(to) => setWindows(e.on.map((x, j) => (j === k ? { ...x, to } : x)))} />
                               {e.on.length > 1 && (
@@ -175,7 +179,7 @@ export function DisplayHoursEditor({
                                   <Trash2Icon aria-hidden />
                                 </Button>
                               )}
-                            </div>
+                            </fieldset>
                           ))}
                           <Button type="button" variant="ghost" size="sm" onClick={() => setWindows([...e.on, { from: '18:00', to: '22:00' }])}>
                             <PlusIcon aria-hidden /> Add hours on this date

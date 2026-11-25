@@ -155,8 +155,11 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await eve.getByLabel('On at').fill('08:00');
   await eve.getByLabel('Off at').fill('12:00');
   await eve.getByRole('button', { name: 'Add hours on this date' }).click();
-  await eve.getByLabel('On at').nth(1).fill('17:00');
-  await eve.getByLabel('Off at').nth(1).fill('21:00');
+  // Each window on the date is its own named group, as the weekly ones are (#377).
+  const second = eve.getByRole('group', { name: 'Window 2 on 2026-12-24' });
+  await second.getByLabel('On at').fill('17:00');
+  await second.getByLabel('Off at').fill('21:00');
+  await expect(eve.getByRole('group', { name: 'Window 1 on 2026-12-24' }).getByLabel('On at')).toHaveValue('08:00');
   await hours.getByRole('button', { name: 'Save' }).click();
   await expect(hours).toBeHidden();
   const reopen = async () => {
