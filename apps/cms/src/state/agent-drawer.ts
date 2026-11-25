@@ -39,6 +39,7 @@ import type { FieldMark } from '@signforge/api/agent-inline';
 import { orgOnScreen } from '~/lib/live';
 import { type DraftSummary, summarize } from '~/lib/draft-summary';
 import { versionsById } from '~/lib/spots';
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { tabOrgHeaders } from '~/lib/tab-org';
 import { callToolByName, Refusal, refusalOf, toolMessage } from '~/lib/tools';
 import { playlistsQuery } from '~/queries/playlists';
@@ -316,6 +317,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       ...d,
       messages: d.messages.map((m) => (m.role === 'assistant' && m.card === card && m.drafts ? { ...m, drafts: change(m.drafts) } : m)),
     }));
+  /** Whether the answer whose card is `card` is still in the drawer: forgotten (the org changed), its work stops changing anything. */
+  const kept = (card: AnswerCard) => get().agentDrawer.messages.some((m) => m.role === 'assistant' && m.card === card);
   const draftsAt = (index: number) => {
     const m = get().agentDrawer.messages[index];
     return m?.role === 'assistant' && m.drafts ? { card: m.card, drafts: m.drafts } : undefined;
@@ -416,7 +419,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       if (!at || !orgId || at.drafts.status !== 'proposed' || shown?.state !== 'shown' || shown.summaries.length !== at.card.drafts.length) return;
       drafts(at.card, (d) => ({ ...d, status: 'saving', error: null }));
       try {
-        const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
+        // The org the card was answered in, named, not the tab's when it sends: it may have changed by then (review of #472).
+        const headers = { 'content-type': 'application/json', [TAB_ORG_HEADER]: orgId };
         const calls = at.card.drafts.map(({ tool, input }) => ({ tool, input }));
         const res = await fetch('/api/agent/apply', { method: 'POST', headers, body: JSON.stringify({ calls }) }).catch((cause: unknown) => {
           throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
@@ -425,6 +429,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         if (!isRow(body) || !Array.isArray(body.results)) throw await refusalOf(res, `Something went wrong (${res.status}).`);
         const answer: ApplyAnswer = { results: body.results };
         const refused = answer.results.find((r): r is Extract<ApplyAnswer['results'][number], { ok: false }> => !r.ok);
+        // Answered after the org changed: the editors and pages are the next org's now, and the card is gone.
+        if (!kept(at.card)) return;
         answer.results.forEach((r, i) => {
           const call = at.card.drafts[i];
           if (r.ok && call) markSpot(call, r.output);
@@ -463,13 +469,16 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       try {
         // The last saved first: what each put back is what it found. One put back already, by an Undo that stopped, is skipped.
         for (const [i, r] of [...at.drafts.results.entries()].reverse()) {
+          // The org changed meanwhile: no more of it is put back, and nothing is sent under the next org (review of #472).
+          if (!kept(at.card)) return;
           if (undone.includes(i)) continue;
           const call = at.card.drafts[i];
           const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (call && saved) {
             const id = String(saved.id);
             const undo = undoOf(call, saved, versions[id]);
-            const now = versionOf(undo.tool, await callToolByName(undo.tool, undo.input));
+            const now = versionOf(undo.tool, await callToolByName(undo.tool, undo.input, orgId));
+            if (!kept(at.card)) return;
             if (now !== undefined) versions = { ...versions, [id]: now };
           }
           undone = [...undone, i];
@@ -481,6 +490,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       } catch (err) {
         drafts(at.card, (d) => ({ ...d, status: was, error: toolMessage(err) }));
       }
+      if (!kept(at.card)) return;
       await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
       for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
     },

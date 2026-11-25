@@ -409,6 +409,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       queryClient.query({ ...templatesQuery(orgId), ...once }).catch(none),
       queryClient.query({ ...spotsQuery(orgId), ...once }).catch(none),
     ]);
+    // Left meanwhile (the org changed): no question opens over the next org, and nothing of this one goes live (review of #472).
+    if (!showing(orgId)) return false;
     const versions = versionsById(templates?.templates ?? []);
     const words = sampleWords(
       spots.map((s) => {

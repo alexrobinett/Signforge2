@@ -13,6 +13,7 @@ import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
 import { getAssets } from '../src/server/assets.functions';
 import { getBrandKits, getSpots, getTemplates } from '../src/server/spots.functions';
+import { initialOrgs, type OrgsState } from '../src/state/orgs';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -24,11 +25,21 @@ vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 
 const ORG = 'org_1';
 
-/** The publishing slice alone. */
-function publishingStore(deps: object) {
-  return createStore<PublishingSlice & { closeScheduleDialog: () => void }>()((set, get) => ({
+/** The publishing slice alone, on a page that shows `ORG` (`shown`, which a test changes to leave it), with no switch on its way. */
+const shown = { org: ORG };
+function publishingStore(deps: { router?: object; queryClient?: object }) {
+  const router = {
+    ...deps.router,
+    state: {
+      get matches() {
+        return [{ routeId: '/_app', loaderData: { organization: { id: shown.org } } }];
+      },
+    },
+  };
+  return createStore<PublishingSlice & { closeScheduleDialog: () => void; orgs: OrgsState }>()((set, get) => ({
     closeScheduleDialog: vi.fn(),
-    ...createPublishingSlice(set as never, get as never, deps as never),
+    orgs: initialOrgs,
+    ...createPublishingSlice(set as never, get as never, { ...deps, router } as never),
   }));
 }
 const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
@@ -75,6 +86,7 @@ const undoOf = () => publishToast()?.action;
 
 let revision = 1;
 beforeEach(() => {
+  shown.org = ORG;
   toast.dismiss();
   revision = 1;
   vi.mocked(callTool).mockImplementation(async () => published(++revision) as never);
@@ -549,6 +561,19 @@ describe('sample text the server refuses (#360)', () => {
       ORG,
     );
     expect(store.getState().publishing.sampleCheck).toBeNull();
+  });
+
+  it('opens no question once the org is left while it read the templates: the publish waiting on it stops (review of #472)', async () => {
+    const { store } = refusedOnce();
+    let release: (v: unknown) => void = () => {};
+    vi.mocked(getTemplates).mockImplementationOnce(() => new Promise((r) => (release = r)) as never);
+    const done = store.getState().publishSchedule(ORG);
+    await vi.waitFor(() => expect(getTemplates).toHaveBeenCalled());
+    shown.org = 'org_2';
+    release({ templates: [] });
+    expect(await done).toBe(false);
+    expect(store.getState().publishing.sampleCheck).toBeNull();
+    expect(vi.mocked(callTool)).toHaveBeenCalledTimes(1);
   });
 
   it('refused again for a spot it did not acknowledge, asks about that one and sends both', async () => {

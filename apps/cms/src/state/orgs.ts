@@ -66,9 +66,11 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes to the next.
+      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes
+      // to the next, nor a sample-text question waiting on one of its publishes (review of #472).
       get().forgetAgentDrawer();
       get().cancelPublishAll();
+      get().dropSampleCheck();
       if (changingOrg(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({
@@ -104,6 +106,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       // Creating makes the new org active: the drawer's conversation stays with the org it was in, as on a switch.
       get().forgetAgentDrawer();
       get().cancelPublishAll();
+      get().dropSampleCheck();
       try {
         await createOrganization(router, name);
         get().forgetOrgSettings();
