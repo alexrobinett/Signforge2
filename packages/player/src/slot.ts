@@ -297,6 +297,25 @@ export class Slot {
     });
   }
 
+  /**
+   * Fit a template to the screen as it is now. On an orientation it does not support it is letterboxed at the shape it
+   * does support, over the background it declares.
+   */
+  private fit(t: ScreenManifest['templates'][string]['manifest']): { orientation: Orientation; viewport: { width: number; height: number } } {
+    const sw = innerWidth,
+      sh = innerHeight;
+    const screenIs = orientationOf(sw, sh);
+    const orientation = t.orientations.includes(screenIs) ? screenIs : t.orientations[0]!;
+    if (orientation === screenIs) {
+      this.el.style.removeProperty('--slot-bg');
+      return { orientation, viewport: { width: sw, height: sh } };
+    }
+    const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
+    const width = Math.min(sw, sh * ratio);
+    this.el.style.setProperty('--slot-bg', t.background);
+    return { orientation, viewport: { width, height: width / ratio } };
+  }
+
   private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
@@ -317,20 +336,7 @@ export class Slot {
     const data = rowImages.data;
     alive(signal);
 
-    // Fit the template to the screen. On an orientation it does not support it is letterboxed
-    // at the shape it does support, over the background it declares.
-    const sw = innerWidth,
-      sh = innerHeight;
-    const screenIs = orientationOf(sw, sh);
-    const orientation = t.manifest.orientations.includes(screenIs) ? screenIs : t.manifest.orientations[0]!;
-    let w = sw,
-      h = sh;
-    if (orientation !== screenIs) {
-      const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
-      w = Math.min(sw, sh * ratio);
-      h = w / ratio;
-      this.el.style.setProperty('--slot-bg', t.manifest.background);
-    }
+    const { orientation, viewport } = this.fit(t.manifest);
 
     // The template runs in a wrapper frame the player writes and the template cannot touch. The
     // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
@@ -342,8 +348,8 @@ export class Slot {
     const wrapperFrame = document.createElement('iframe');
     // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
     wrapperFrame.title = spot.name;
-    wrapperFrame.style.width = `${w}px`;
-    wrapperFrame.style.height = `${h}px`;
+    wrapperFrame.style.width = `${viewport.width}px`;
+    wrapperFrame.style.height = `${viewport.height}px`;
     wrapperFrame.srcdoc = wrapperHtml;
     const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
     this.el.appendChild(wrapperFrame);
@@ -370,7 +376,7 @@ export class Slot {
       assets,
       theme,
       orientation,
-      viewport: { width: w, height: h },
+      viewport,
     });
     // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
     // it is already playing, blank it until the next spot.
@@ -421,6 +427,14 @@ export class Slot {
   }
 
   /**
+   * The screen changed size or turned: a template spot is laid out again for the new size, as an update to itself. An
+   * image, video or URL spot fills the slot by its styles and needs nothing.
+   */
+  refit(): Promise<void> {
+    return this.live ? this.update(this.live.spot, this.live.manifest) : Promise.resolve();
+  }
+
+  /**
    * Show a new version of the spot on screen in place, and play it: the preview's instant edit.
    * A template of the same bundle that speaks protocol 2 takes it without a reload: `reset`, then
    * `init` with the new data when it answers `loaded`, then `play`. Anything else (protocol 1,
@@ -444,7 +458,11 @@ export class Slot {
       brandTheme(manifest),
     ]);
     alive(signal);
-    Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
+    // The screen may have turned or resized since the frame was made: its next init has the size it is now.
+    const { orientation, viewport } = this.fit(t.manifest);
+    live.wrapperFrame.style.width = `${viewport.width}px`;
+    live.wrapperFrame.style.height = `${viewport.height}px`;
+    Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme, orientation, viewport });
     // The frames are reused, so a rename in the editor must reach their titles too.
     live.frame.title = live.wrapperFrame.title = spot.name;
     this.spot = spot;

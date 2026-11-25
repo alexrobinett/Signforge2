@@ -40,6 +40,8 @@ export interface PlaybackSlots {
   clear(slot: SlotIndex): void;
   /** Preview: show a new version of the spot in `slot` in place, and play it. Rejects as `prepare` does. */
   update(slot: SlotIndex, spot: Spot, manifest: ScreenManifest): Promise<void>;
+  /** The screen changed size: lay the spot in `slot` out again for it, and play it. Rejects as `prepare` does. */
+  refit(slot: SlotIndex): Promise<void>;
 }
 
 /** The pin holders playback uses: `playing`, `preparing` and `last-good` (store.ts PinSet). */
@@ -141,6 +143,12 @@ export class Playback {
   #cancelTakeoverTimer = () => {};
   /** Preview: raised when a draft is adopted, so a play prepared from the older draft is prepared again at once. */
   #drafted = new Signal();
+  /** Raised when the screen changes size, so a play prepared for the old size is prepared again at once (#457). */
+  #resized = new Signal();
+  #resizedSince = false;
+  /** The spot on screen being laid out again, and whether the screen changed again meanwhile. */
+  #refitting = false;
+  #refitAgain = false;
 
   constructor(private readonly o: PlaybackOptions) {
     this.#asleep.reset();
@@ -201,6 +209,31 @@ export class Playback {
     }
   }
 
+  /**
+   * The screen changed size or turned (an HDMI mode change, a rotation without a reload): the spot on screen is laid
+   * out again at once, and the next is prepared again for the new size. A burst of changes lays it out once more after
+   * the one under way, never twice at a time.
+   */
+  async resized(): Promise<void> {
+    this.#resizedSince = true;
+    this.#resized.raise();
+    if (this.#refitting) {
+      this.#refitAgain = true;
+      return;
+    }
+    this.#refitting = true;
+    do {
+      this.#refitAgain = false;
+      if (!this.#onScreen) continue;
+      try {
+        await this.o.slots.refit(this.#front);
+      } catch (err) {
+        this.o.events.updateFailed(`${this.#onScreen?.spot.id ?? ''}: ${message(err)}`);
+      }
+    } while (this.#refitAgain);
+    this.#refitting = false;
+  }
+
   /** The display loop's decision. Off, the spot on screen gives way at once and nothing is drawn until it is on again. */
   display(on: boolean): void {
     if (on) this.#asleep.reset();
@@ -235,6 +268,9 @@ export class Playback {
     const chosenAt = new Date(clock.now());
     this.#drafted.reset();
     const drafted = this.#drafted.promise;
+    this.#resized.reset();
+    this.#resizedSince = false;
+    const resized = this.#resized.promise;
     const step = this.#sequencer.next(chosenAt, clock.trust());
     this.#chosenTakeover = activeTakeover(m, chosenAt, clock.trust());
     this.#tookOver.reset();
@@ -265,8 +301,15 @@ export class Playback {
 
     // Hold the current spot for its full length; a crossfade overlaps its last moments. A takeover cuts it short.
     if (this.#onScreen && !this.#cutIn)
-      await Promise.race([this.hold(this.#onScreen.startedAt + this.#onScreen.spot.durationMs - fadeMs - clock.mono()), drafted]);
+      await Promise.race([this.hold(this.#onScreen.startedAt + this.#onScreen.spot.durationMs - fadeMs - clock.mono()), drafted, resized]);
     if (!this.#displayOn) return;
+    // Prepared for the size the screen had: prepared again for the size it has.
+    if (this.#resizedSince) {
+      slots.clear(slot);
+      pins.release('preparing');
+      this.#sequencer.again();
+      return;
+    }
     // Preview: a draft posted while this spot loaded or waited has made it old. The spot on screen
     // took the draft at once (adoptDraft); this place is loaded again from it, so the stage never
     // shows an older draft (#123). A screen plays it: a new manifest shows from the next spot.

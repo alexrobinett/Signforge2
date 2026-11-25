@@ -381,6 +381,7 @@ const playback = new Playback({
       slots[i].clear();
     },
     update: (i, spot, manifest) => slots[i].update(spot, manifest),
+    refit: (i) => slots[i].refit(),
   },
   pins,
   events: {
@@ -437,6 +438,8 @@ const playback = new Playback({
   dataSettled: (sources) => dataSettled(sources, DATA_WAIT_MS),
   extraFiles: (spot, manifest) => spotSnapshotFiles(spot, manifest, liveData),
 });
+// A rotation or mode change without a reload: the spot on screen is laid out again for the new size (#457).
+addEventListener('resize', () => void playback.resized());
 
 /**
  * Run a loop body again and again, restarting it 5 s after it throws: a bug or a bad value must

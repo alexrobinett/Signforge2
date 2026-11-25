@@ -95,6 +95,21 @@ class FakeSlots implements PlaybackSlots {
     this.log.push(`${this.clock.t} update ${slot} ${spot.id}@${manifest.id}`);
     this.held[slot] = { spot, manifest };
   }
+
+  private refitGate?: Promise<void>;
+  /** The next refit waits until the returned function is called. */
+  gateRefit(): () => void {
+    let open = () => {};
+    this.refitGate = new Promise((r) => (open = r));
+    return open;
+  }
+
+  async refit(slot: SlotIndex): Promise<void> {
+    this.log.push(`${this.clock.t} refit ${slot} ${this.held[slot]?.spot.id}`);
+    const gate = this.refitGate;
+    this.refitGate = undefined;
+    await gate;
+  }
 }
 
 class FakePins {
@@ -182,6 +197,40 @@ function setup({ preview = false } = {}) {
 }
 
 describe('playback', () => {
+  describe('when the screen changes size (#457)', () => {
+    it('lays the spot on screen out again, and prepares again a next spot made for the old size', async () => {
+      const { clock, slots, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
+      run();
+      await clock.until(8 * SECOND);
+      await playback.resized();
+      await clock.until(12 * SECOND);
+      expect(slots.log.filter((l) => / (refit|prepare 0|clear 0)/.test(l))).toEqual([
+        '7200 prepare 0 b@m1',
+        '8000 refit 1 a',
+        '8000 clear 0',
+        '8000 prepare 0 b@m1',
+      ]);
+      // b still comes on at a's end.
+      expect(shown()).toEqual(['a@m1 200', 'b@m1 10200']);
+    });
+
+    it('lays it out once more after a burst of changes, never twice at a time', async () => {
+      const { clock, slots, playback, run } = setup();
+      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
+      run();
+      await clock.until(SECOND);
+      const open = slots.gateRefit();
+      const first = playback.resized();
+      await playback.resized();
+      await playback.resized();
+      expect(slots.log.filter((l) => l.includes('refit'))).toEqual(['1000 refit 1 a']);
+      open();
+      await first;
+      expect(slots.log.filter((l) => l.includes('refit'))).toEqual(['1000 refit 1 a', '1000 refit 1 a']);
+    });
+  });
+
   it('loads the next spot 3 s before the spot on screen ends, and shows it at the end', async () => {
     const { clock, playback, run, shown } = setup();
     playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));

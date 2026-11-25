@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { spotsPlayed, useHarness } from './harness';
+import { spotsPlayed, useHarness, visibleFrame } from './harness';
 
 const h = useHarness();
 
@@ -25,6 +25,27 @@ describe('playback loop', () => {
         return shown?.playing && shown.label === now;
       })
       .toBe(true);
+  });
+
+  // Turned or resized without a reload (an HDMI mode change, a rotation), the spot on screen is laid out again for the
+  // new size at once, not at its next play (#457).
+  it('lays the template on screen out again when the screen turns', async () => {
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 600_000 }])));
+    /** The template on screen: the orientation its init gave, its frame's size, and whether it plays. */
+    const seen = async () =>
+      (await visibleFrame(p.page, 'label'))
+        ?.evaluate(() => ({
+          orientation: document.documentElement.dataset.orientation,
+          size: `${innerWidth}x${innerHeight}`,
+          playing: document.body.dataset.playing === '1',
+        }))
+        .catch(() => undefined);
+    await expect.poll(seen, { timeout: 10_000 }).toEqual({ orientation: 'landscape', size: '960x540', playing: true });
+    await p.page.setViewportSize({ width: 540, height: 960 });
+    await expect.poll(seen, { timeout: 10_000 }).toEqual({ orientation: 'portrait', size: '540x960', playing: true });
+    const s = await p.state();
+    expect(s.spot).toBe('a');
+    expect(s.skipped).toBe(0);
   });
 
   it('titles a URL spot frame with the spot name (#69)', async () => {
