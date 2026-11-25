@@ -14,9 +14,13 @@ import {
   resolvePlaylist,
   resolveSpotData,
   boundFields,
+  boundImageHashes,
+  hasBoundListImage,
   manifestBoundFields,
+  manifestSnapshotFiles,
   snapshotFit,
   spotFiles,
+  spotSnapshotFiles,
   validateManifest,
 } from './index';
 
@@ -618,13 +622,72 @@ describe('files', () => {
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
     // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
-    expect(validateManifest(manifest({ schema: 6 }))).toEqual([]);
     expect(validateManifest(manifest({ schema: 7 }))).toEqual([]);
-    expect(validateManifest(manifest({ schema: 5 }))).toEqual(['manifest schema 5 is not one this player can play (6, 7)']);
-    expect(validateManifest(manifest({ schema: 8 }))).toEqual(['manifest schema 8 is not one this player can play (6, 7)']);
+    expect(validateManifest(manifest({ schema: 8 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 6 }))).toEqual(['manifest schema 6 is not one this player can play (7, 8)']);
+    expect(validateManifest(manifest({ schema: 9 }))).toEqual(['manifest schema 9 is not one this player can play (7, 8)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
+  });
+
+  it('extracts feed image hashes from bound list-image fields for manifests and spots (#196)', () => {
+    const f1 = '1'.repeat(64);
+    const t1 = '2'.repeat(64);
+    const f2 = '3'.repeat(64);
+    const extra = '4'.repeat(64);
+    const m = manifest({
+      templates: {
+        'base/news@2.0.0': {
+          html: 'sha-h',
+          manifest: {
+            id: 'news',
+            version: '2.0.0',
+            name: 'News',
+            fields: {
+              items: {
+                type: 'list',
+                label: 'Stories',
+                maxItems: 2,
+                default: [],
+                item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } },
+              },
+            },
+            duration: { defaultMs: 10_000, minMs: 4000, maxMs: 60_000 },
+            orientations: ['landscape'],
+            uses: [],
+            background: '#000',
+          },
+        },
+      },
+      spots: {
+        n: {
+          id: 'n',
+          name: 'News',
+          kind: 'template',
+          template: 'base/news@2.0.0',
+          durationMs: 10_000,
+          data: { items: [] },
+          assets: {},
+          bindings: { items: { source: 'feed', path: 'items' } },
+        },
+      },
+      dataSources: { feed: { id: 'feed', refreshS: 300 } },
+    });
+    const bound = manifestBoundFields(m).get('feed') ?? [];
+    expect(hasBoundListImage(bound)).toBe(true);
+    const data = {
+      items: [
+        { title: 'One', image: { file: f1, thumb: t1 } },
+        { title: 'Two', image: { file: f2, thumb: f2 } },
+        // Beyond maxItems (2): ignored.
+        { title: 'Three', image: { file: extra, thumb: extra } },
+      ],
+    };
+    expect(boundImageHashes(bound, data)).toEqual([f1, t1, f2]);
+    const snaps = new Map([['feed', { id: 'feed', version: 1, fetchedAt: '2026-11-22T00:00:00Z', checkedAt: '2026-11-22T00:00:00Z', data }]]);
+    expect([...manifestSnapshotFiles([m], snaps)]).toEqual([f1, t1, f2]);
+    expect([...spotSnapshotFiles(m.spots.n!, m, snaps)]).toEqual([f1, t1, f2]);
   });
 
   it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {

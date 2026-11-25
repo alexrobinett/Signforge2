@@ -11,6 +11,7 @@
  */
 import {
   MAX_SYNC_REQUEST_BYTES,
+  MAX_SYNC_RESPONSE_BLOBS,
   MAX_SYNC_SOURCES,
   parseSyncRequest,
   type DataSnapshot,
@@ -20,7 +21,7 @@ import {
   type SyncResponse,
 } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
-import { snapshotFit } from '@signforge/player-core';
+import { boundImageHashes, hasBoundListImage, snapshotFit } from '@signforge/player-core';
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
@@ -40,31 +41,45 @@ function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
 }
 
 /**
- * Of the desired manifest's sources: the snapshots newer than the screen holds, and for those it
- * holds at the current version, when they were last checked, so an unchanged feed does not go
- * stale on the screen and is not sent again.
+ * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it
+ * holds at the current version were last checked, and any feed image blob hashes referenced by
+ * those snapshots that the screen did not report holding (capped at `MAX_SYNC_RESPONSE_BLOBS`).
  */
 async function snapshotsFor(
   env: Env,
   screen: DeviceScreen,
   desired: ManifestSummary | undefined,
   held: Record<string, number>,
-): Promise<Pick<SyncResponse, 'snapshots' | 'checked'>> {
+  heldBlobs: readonly string[] | undefined,
+  includeBlobs: boolean,
+): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'>> {
   if (!desired?.dataSources.size) return { snapshots: [], checked: {} };
   const rows = await scoped(env.DB, screen.orgId).dataSources.snapshots([...desired.dataSources]);
   // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
   const snapshots: DataSnapshot[] = [];
   const checked: NonNullable<SyncResponse['checked']> = {};
+  const have = new Set(heldBlobs ?? []);
+  const missingBlobs = new Set<string>();
   for (const r of rows) {
     const checkedAt = new Date(r.checkedAt).toISOString();
     if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
-    if (r.fetchedAt <= (held[r.dataSourceId] ?? -1)) continue;
+    const bound = desired.bound.get(r.dataSourceId) ?? [];
+    const newer = r.fetchedAt > (held[r.dataSourceId] ?? -1);
+    const wantBlobs = includeBlobs && hasBoundListImage(bound) && missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS;
+    if (!newer && !wantBlobs) continue;
     const data: unknown = JSON.parse(r.dataJson);
     // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
-    if (!snapshotFit(desired.bound.get(r.dataSourceId) ?? [], data).refused)
-      snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
+    if (snapshotFit(bound, data).refused) continue;
+    if (newer) snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
+    if (wantBlobs) {
+      for (const sha of boundImageHashes(bound, data)) {
+        if (have.has(sha)) continue;
+        missingBlobs.add(sha);
+        if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
+      }
+    }
   }
-  return { snapshots, checked };
+  return { snapshots, checked, ...(missingBlobs.size ? { blobs: [...missingBlobs] } : {}) };
 }
 
 const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
@@ -158,7 +173,8 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   ]);
   if (!stored) return refuse(401, 'unauthorized');
   const desired = manifests.find((m) => m.id === screen.desiredManifestId);
-  const commands: DeviceCommand[] = desired && !canPlay(req.player, desired) ? [{ type: 'reload' }] : [];
+  const playable = !desired || canPlay(req.player, desired);
+  const commands: DeviceCommand[] = playable ? [] : [{ type: 'reload' }];
   const display = overrideCommand(screen, req.display.override, now);
   if (display) commands.push(display);
 
@@ -168,7 +184,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     epoch: req.epoch,
     ackSeq: stored.ackSeq,
     ...(screen.desiredManifestId ? { desiredManifest: screen.desiredManifestId } : {}),
-    ...(await snapshotsFor(c.env, screen, desired, req.snapshots)),
+    ...(await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable)),
     socketTicket: await issueTicket(c.env, { screenId: screen.screenId, credentialId: c.get('credentialId') }),
     commands,
   };

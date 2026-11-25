@@ -270,6 +270,19 @@ describe('a spot’s sample fields (#360)', () => {
     expect(sampleFieldsOf({ fields }, { headline: '', facts: [] })).toBeNull();
   });
 
+  // A row's image is a feed's photo, which the form cannot edit: marked, it would hold the spot in sample text for good.
+  it('leave out a row image, which no edit could clear', () => {
+    const stories: Record<string, FieldDef> = {
+      items: { type: 'list', label: 'Stories', item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } } },
+    };
+    const sampleRows = [{ title: 'One' }, { title: 'Two' }];
+    const marked = sampleFieldsOf({ fields: stories }, { items: sampleRows });
+    expect(marked).toEqual({ texts: [], lists: { items: [['title'], ['title']] } });
+    // Rewriting each title clears the spot of sample text.
+    const after = { data: { items: [{ title: 'Real one' }, { title: 'Real two' }] }, bindings: {} };
+    expect(sampleAfterEdit(marked!, stories, { data: { items: sampleRows } }, after)).toBeNull();
+  });
+
   it('lose a text whose saved value changed, or that is bound, and keep one saved unchanged', () => {
     expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: {} })).toEqual(sample);
     expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, headline: 'Closed' }, bindings: {} })?.texts).toEqual([]);

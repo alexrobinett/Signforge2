@@ -32,6 +32,7 @@
  * shows a code again (owner decision Q2, the default).
  */
 import {
+  MAX_SYNC_BLOBS,
   MAX_SYNC_SOURCES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
@@ -42,7 +43,7 @@ import {
   type SyncRequest,
   type Transition,
 } from '@signforge/contract';
-import { displayOn, localTime } from '@signforge/player-core';
+import { displayOn, localTime, manifestSnapshotFiles, spotSnapshotFiles } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
@@ -53,6 +54,7 @@ import {
   dataSettled,
   dataStatus,
   heldVersions,
+  liveData,
   offerChecked,
   offerPending,
   offerSnapshots,
@@ -69,7 +71,18 @@ import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
 import { parseTransitionOverride } from './transition-override';
-import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
+import {
+  PinSet,
+  UnauthorisedError,
+  filesMissing,
+  heldBlobs,
+  loadManifests,
+  rememberGood,
+  requestPersistence,
+  sync,
+  syncFeedImages,
+  wipeContent,
+} from './store';
 
 declare const __SF_PLAYER_VERSION__: string;
 
@@ -324,10 +337,22 @@ let preview: Preview | undefined;
 
 /**
  * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`), the
- * spot loading (`preparing`), either of which may come from a manifest just replaced, and the last
- * good manifest's (`last-good`).
+ * spot loading (`preparing`), either of which may come from a manifest just replaced, the last
+ * good manifest's (`last-good`), and feed images referenced by held snapshots (`snapshots`).
  */
 const pins = new PinSet();
+
+let lastSnapshotPins = new Set<string>();
+const heldSnapshotHashes = (): Set<string> => manifestSnapshotFiles([playback.manifest, playback.lastGood], liveData);
+/** Keep `pins`'s `snapshots` holder in step with held snapshots. Returns true if any previously pinned hash was dropped. */
+function refreshSnapshotPins(): boolean {
+  const next = heldSnapshotHashes();
+  let dropped = false;
+  for (const sha of lastSnapshotPins) if (!next.has(sha)) dropped = true;
+  lastSnapshotPins = next;
+  pins.hold('snapshots', next);
+  return dropped;
+}
 
 const playback = new Playback({
   clock: {
@@ -391,7 +416,16 @@ const playback = new Playback({
     progress: () => (lastProgress = performance.now()),
     adopted(next) {
       wakeData();
-      if (API) void offerPending(next).then(() => restoreSources(next));
+      if (API)
+        void offerPending(next)
+          .then(() => restoreSources(next))
+          .then(() => {
+            if (refreshSnapshotPins()) {
+              feedBlobsDue = true;
+              content.wake();
+            }
+          });
+      else refreshSnapshotPins();
       socket?.reportApplied(next.id);
     },
     // Its files may have been evicted while another manifest played: the next sync checks them.
@@ -401,6 +435,7 @@ const playback = new Playback({
   preview: SOURCE === 'preview',
   playing: applyOverrides,
   dataSettled: (sources) => dataSettled(sources, DATA_WAIT_MS),
+  extraFiles: (spot, manifest) => spotSnapshotFiles(spot, manifest, liveData),
 });
 
 /**
@@ -507,6 +542,14 @@ function revoked(): Promise<void> {
     const held = !!playback.manifest || !!playback.lastGood || pendingPlays() > 0;
     // No content fetch may store or adopt anything after the wipe: stop the one in flight, and any retry.
     contentDue = false;
+    feedBlobsDue = false;
+    evictDue = false;
+    settleAfterBlobs = false;
+    pendingFeedBlobs.clear();
+    incomingFeedBlobs.clear();
+    lastSnapshotPins.clear();
+    pins.release('snapshots');
+    pins.release('snapshots-incoming');
     contentAbort.abort(new Error('revoked'));
     await contentFetch?.catch(() => undefined);
     contentAbort = new AbortController();
@@ -621,7 +664,11 @@ async function fetchManifest(signal?: AbortSignal): Promise<void> {
     // The sync that named it has kept its snapshots (apiSync offers them before it asks for content):
     // once the stored copies are read, its sources have had their first load, and spots waiting on
     // them start now rather than at the data wait's end.
-    if (API) await restoreSources(result.manifest).then(() => settleSources(result.manifest));
+    if (API)
+      await restoreSources(result.manifest).then(() => {
+        refreshSnapshotPins();
+        if (!settleAfterBlobs) settleSources(result.manifest);
+      });
   }
 }
 
@@ -660,40 +707,96 @@ let lastFileCheck = Number.NEGATIVE_INFINITY;
 const content = wakeable();
 /** A sync asked for the content, and it has not been fetched since. */
 let contentDue = false;
+/** A sync brought missing feed image blobs to fetch, or dropped snapshot pins to evict. */
+let feedBlobsDue = false;
+/** Feed image hashes a sync asked us to fetch. */
+const pendingFeedBlobs = new Set<string>();
+/**
+ * Feed images a sync sent for a manifest the screen may not have adopted yet: pinned (`snapshots-incoming`) until none
+ * is pending and no manifest is due, so a manifest fetch that fails for a while cannot let a cleanup delete them before
+ * that manifest, whose snapshots name them, is in (review of #240). Every sync's since the last release, as holding
+ * replaces the pin; `pendingFeedBlobs` empties as each pass takes its batch.
+ */
+const incomingFeedBlobs = new Set<string>();
+/** True when a prior cleanup kept stale blobs only because a playing/preparing spot still pinned them. */
+let evictDue = false;
+/** Settle data sources once the initial feed-blob download batch finishes (or on timeout). */
+let settleAfterBlobs = false;
 /** Stops the content worker's fetch in flight (a revoke), and the fetch itself while it runs. */
 let contentAbort = new AbortController();
-let contentFetch: Promise<void> | undefined;
+let contentFetch: Promise<unknown> | undefined;
 
 /**
- * The one worker that fetches content from the API: the manifest the server wants now, and its
- * files. A sync only asks for it, so a long download or a failure never holds back the next
- * heartbeat. A failure retries on its own, backing off (src/sync-interval.ts); a sync meanwhile
- * makes it try at once, and every attempt fetches the latest desired manifest.
+ * The one worker that fetches content from the API: the manifest the server wants now, its files,
+ * and missing feed-image blobs for held snapshots. A sync only asks for it, so a long download or
+ * a failure never holds back the next heartbeat. A failure retries on its own, backing off
+ * (src/sync-interval.ts); a sync meanwhile makes it try at once, and every attempt fetches the
+ * latest desired manifest.
  */
 async function contentLoop(): Promise<never> {
   let failures = 0;
   return loopRestartingOnError('content', async () => {
-    if (!contentDue) return content.wait(FILE_CHECK_MS);
-    contentDue = false;
+    if (!contentDue && !feedBlobsDue) return content.wait(FILE_CHECK_MS);
     const { signal } = contentAbort;
-    try {
-      await (contentFetch = fetchManifest(signal));
-      lastFileCheck = performance.now();
-      failures = 0;
-    } catch (err) {
-      // Stopped by a revoke, which also cancelled what was due.
-      if (signal.aborted) return;
-      // Refused: the sync revokes.
-      if (err instanceof UnauthorisedError) return poll.wake();
-      contentDue = true;
-      const message = err instanceof Error ? err.message : String(err);
-      state.lastError = `content: ${message}`;
-      console.warn('[sf] could not fetch the content', err);
-      if (!playback.manifest) status(`SignForge\nWaiting for content…\n${message}`);
-      await content.wait(contentRetryMs(++failures, timing()));
-    } finally {
-      contentFetch = undefined;
+    let retry = false;
+    if (contentDue) {
+      contentDue = false;
+      try {
+        await (contentFetch = fetchManifest(signal));
+        lastFileCheck = performance.now();
+        failures = 0;
+      } catch (err) {
+        // Stopped by a revoke, which also cancelled what was due.
+        if (signal.aborted) return;
+        // Refused: the sync revokes.
+        if (err instanceof UnauthorisedError) return poll.wake();
+        contentDue = true;
+        retry = true;
+        const message = err instanceof Error ? err.message : String(err);
+        state.lastError = `content: ${message}`;
+        console.warn('[sf] could not fetch the content', err);
+        if (!playback.manifest) status(`SignForge\nWaiting for content…\n${message}`);
+      } finally {
+        contentFetch = undefined;
+      }
     }
+    // Even when the manifest could not be fetched: the spots playing wait for these images
+    // (settleAfterBlobs), and a manifest that keeps failing must not make every one wait out the data wait.
+    if (feedBlobsDue) {
+      const batch = [...pendingFeedBlobs];
+      pendingFeedBlobs.clear();
+      feedBlobsDue = false;
+      refreshSnapshotPins();
+      try {
+        const pass = syncFeedImages(BASE, batch, {
+          headers: await deviceHeaders(),
+          ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+          pinned: pins,
+          signal,
+        });
+        contentFetch = pass;
+        evictDue = await pass;
+      } catch (err) {
+        if (signal.aborted) return;
+        if (err instanceof UnauthorisedError) return poll.wake();
+        console.warn('[sf] could not sync feed images', err);
+      } finally {
+        contentFetch = undefined;
+        if (settleAfterBlobs && !pendingFeedBlobs.size) {
+          settleAfterBlobs = false;
+          settleSources(playback.manifest);
+        }
+      }
+    }
+    // Once nothing is pending and the manifest is in, the images a sync sent need no pin of their own: the manifest's
+    // snapshots pin those it names. Any they do not name go on the next pass (review of #240, round 2).
+    if (incomingFeedBlobs.size && !pendingFeedBlobs.size && !contentDue) {
+      refreshSnapshotPins();
+      if ([...incomingFeedBlobs].some((sha) => !lastSnapshotPins.has(sha))) feedBlobsDue = true;
+      incomingFeedBlobs.clear();
+      pins.release('snapshots-incoming');
+    }
+    if (retry) await content.wait(contentRetryMs(++failures, timing()));
   });
 }
 
@@ -710,6 +813,7 @@ function ofHeldSources(values: Record<string, number>): Record<string, number> {
 async function apiSync(): Promise<void> {
   const { manifest } = playback;
   const batch = playBatch(now());
+  const heldFeed = await heldBlobs(heldSnapshotHashes());
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
@@ -726,6 +830,7 @@ async function apiSync(): Promise<void> {
     playCounts: batch.counts,
     snapshots: ofHeldSources(heldVersions()),
     dataRejected: ofHeldSources(dataRejections()),
+    ...(heldFeed.length ? { blobs: heldFeed.slice(0, MAX_SYNC_BLOBS) } : {}),
   };
   const sentAt = Date.now();
   const res = await fetch(`${BASE}/sync`, {
@@ -758,14 +863,30 @@ async function apiSync(): Promise<void> {
   if (!wasTrusted) display.wake();
   playback.clockMoved();
 
+  const incomingBlobs = r.blobs ?? [];
   await offerSnapshots(r.snapshots, () => playback.manifest, r.desiredManifest);
+  // Every source of the manifest playing has had its first load: a spot waiting for its feed starts
+  // with what there is. Unless its images are on their way: the content worker settles it once they are in.
+  if (!incomingBlobs.length) settleSources(playback.manifest);
   await offerChecked(r.checked ?? {});
+  const dropped = refreshSnapshotPins();
+  if (incomingBlobs.length) {
+    for (const sha of incomingBlobs) {
+      pendingFeedBlobs.add(sha);
+      incomingFeedBlobs.add(sha);
+    }
+    pins.hold('snapshots-incoming', incomingFeedBlobs);
+    feedBlobsDue = true;
+    settleAfterBlobs = true;
+  } else if (dropped || evictDue) {
+    feedBlobsDue = true;
+  }
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
   const current = state.fallback || playback.manifest?.id;
   if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
     contentDue = true;
-    content.wake();
   }
+  if (contentDue || feedBlobsDue) content.wake();
 }
 
 // Untrusted, the clock cannot tell whether the saved override has ended: it is reported as saved,
@@ -896,8 +1017,11 @@ async function boot(): Promise<void> {
   // Its files stay until a newer manifest has played, in case the active one plays nothing.
   if (stored.lastGood) playback.restore(stored.lastGood);
   const cached = stored.active ?? stored.lastGood;
-  if (cached) playback.adopt(cached);
-  else status('SignForge\nWaiting for content…');
+  if (cached) {
+    if (API) await restoreSources(cached).catch(() => undefined);
+    playback.adopt(cached);
+    refreshSnapshotPins();
+  } else status('SignForge\nWaiting for content…');
 
   // If playback stops advancing for far longer than any spot should take, start over.
   setInterval(() => {
@@ -914,7 +1038,18 @@ async function boot(): Promise<void> {
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
   // Never with the credential: from the API, data comes on the sync.
-  if (!API) wakeData = startDataLoop(BASE, () => playback.manifest);
+  if (!API)
+    wakeData = startDataLoop(
+      BASE,
+      () => playback.manifest,
+      async (m) => {
+        const dropped = refreshSnapshotPins();
+        const wanted = [...manifestSnapshotFiles([m, playback.lastGood], liveData)];
+        if (wanted.length || dropped || evictDue) {
+          evictDue = await syncFeedImages(BASE, wanted, { ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}), pinned: pins });
+        }
+      },
+    );
   void loopRestartingOnError('playback', () => playback.pass());
   void displayLoop();
 }

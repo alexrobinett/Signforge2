@@ -7,6 +7,7 @@ import { env, exports } from 'cloudflare:workers';
 import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential, parseCredential } from '../src/device/credential';
+import { feedBlobKey } from '../src/data/feed-photos';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
 
 const BASE = 'https://api.test/v1/device';
@@ -322,6 +323,142 @@ describe('GET /v1/device/blobs/:sha256', () => {
     await syncReporting(M1);
     expect((await get(`/blobs/${BLOB1}`, o.credential)).status).toBe(404);
     expect((await get(`/blobs/${blobs[0]}`, o.credential)).status).toBe(404);
+  });
+
+  it('serves feed image blobs only from this org when referenced by a snapshot of a bound list-image source (#196)', async () => {
+    const o = await setUp('dev-feed-a');
+    const other = await setUp('dev-feed-b');
+    const [feedFile, feedThumb, otherSrcBlob, otherOrgBlob, plainBlob] = [sha('1'), sha('2'), sha('3'), sha('4'), sha('5')];
+    const src = o.seed.dataSource;
+    const otherSrc = (await o.seed.scope.dataSources.insert({ name: 'Unbound news', format: 'rss', urlEncrypted: 'enc:u', refreshS: 300 })).id;
+
+    const newsTpl = (withImage: boolean) => ({
+      html: BASE_HTML,
+      manifest: {
+        id: 'news',
+        version: withImage ? '2.0.0' : '1.4.1',
+        name: 'News',
+        fields: {
+          items: {
+            type: 'list' as const,
+            label: 'Headlines',
+            default: [],
+            item: {
+              title: { type: 'text' as const, label: 'Title' },
+              ...(withImage ? { image: { type: 'image' as const, label: 'Photo' } } : {}),
+            },
+          },
+        },
+        duration: { defaultMs: 10_000, minMs: 4000, maxMs: 60_000 },
+        orientations: ['landscape' as const],
+        uses: [],
+        background: '#000',
+        protocol: 2,
+      },
+    });
+
+    const mImg = sha('a');
+    await env.BLOBS.put(
+      manifestKey(o.seed.orgId, o.seed.screen, mImg),
+      JSON.stringify(
+        manifest(mImg, [BASE_HTML], {
+          templates: { 'base/news@2.0.0': newsTpl(true) },
+          spots: {
+            n: {
+              id: 'n',
+              name: 'News',
+              kind: 'template',
+              template: 'base/news@2.0.0',
+              durationMs: 10_000,
+              data: { items: [] },
+              assets: {},
+              bindings: { items: { source: src, path: 'items' } },
+            },
+          },
+          dataSources: { [src]: { id: src, refreshS: 300 } },
+        }),
+      ),
+    );
+    await o.seed.scope.screens.setDesiredManifest(o.seed.screen, mImg);
+
+    await o.seed.scope.dataSources.putSnapshot(src, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({
+        items: [
+          { title: 'Story 1', image: { file: feedFile, thumb: feedThumb } },
+          // Even if a snapshot names another org's hash, feedBlobKey reads only this org's prefix.
+          { title: 'Cross-org', image: { file: otherOrgBlob, thumb: otherOrgBlob } },
+        ],
+      }),
+    });
+    await o.seed.scope.dataSources.putSnapshot(otherSrc, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({ items: [{ title: 'Other source', image: { file: otherSrcBlob, thumb: otherSrcBlob } }] }),
+    });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, feedFile), 'jpeg-lead', { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, feedThumb), 'webp-thumb', { httpMetadata: { contentType: 'image/webp' } });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, otherSrcBlob), 'other-source-blob', { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.BLOBS.put(feedBlobKey(other.seed.orgId, otherOrgBlob), 'other-org-secret', { httpMetadata: { contentType: 'image/jpeg' } });
+    // Stored under orgBlobKey (not feedBlobKey) and unlisted in manifest.files: must NOT be served via feed path.
+    await env.BLOBS.put(orgBlobKey(o.seed.orgId, plainBlob), 'org-asset-not-feed');
+
+    const lead = await get(`/blobs/${feedFile}`, o.credential);
+    expect(lead.status).toBe(200);
+    expect(lead.headers.get('content-type')).toBe('image/jpeg');
+    expect(lead.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    expect(lead.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await lead.text()).toBe('jpeg-lead');
+
+    const thumb = await get(`/blobs/${feedThumb}`, o.credential);
+    expect(thumb.status).toBe(200);
+    expect(thumb.headers.get('content-type')).toBe('image/webp');
+    expect(await thumb.text()).toBe('webp-thumb');
+
+    // Another source in the same org (not in this screen's manifest): 404.
+    expect((await get(`/blobs/${otherSrcBlob}`, o.credential)).status).toBe(404);
+    // Another org's feed blob: 404, even when referenced by hash in this org's snapshot.
+    expect((await get(`/blobs/${otherOrgBlob}`, o.credential)).status).toBe(404);
+    // Another org's screen cannot read org A's feed blob.
+    expect((await get(`/blobs/${feedFile}`, other.credential)).status).toBe(404);
+
+    // A text-only template (news 1.4.1) cannot fetch feed blobs even when its source's snapshot holds them.
+    const oPlain = await setUp('dev-feed-plain');
+    const plainSrc = oPlain.seed.dataSource;
+    const mPlain = sha('b');
+    await env.BLOBS.put(
+      manifestKey(oPlain.seed.orgId, oPlain.seed.screen, mPlain),
+      JSON.stringify(
+        manifest(mPlain, [BASE_HTML], {
+          templates: { 'base/news@1.4.1': newsTpl(false) },
+          spots: {
+            n: {
+              id: 'n',
+              name: 'News',
+              kind: 'template',
+              template: 'base/news@1.4.1',
+              durationMs: 10_000,
+              data: { items: [] },
+              assets: {},
+              bindings: { items: { source: plainSrc, path: 'items' } },
+            },
+          },
+          dataSources: { [plainSrc]: { id: plainSrc, refreshS: 300 } },
+        }),
+      ),
+    );
+    await oPlain.seed.scope.screens.setDesiredManifest(oPlain.seed.screen, mPlain);
+    await oPlain.seed.scope.dataSources.putSnapshot(plainSrc, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({ items: [{ title: 'Story', image: { file: feedFile, thumb: feedThumb } }] }),
+    });
+    await env.BLOBS.put(feedBlobKey(oPlain.seed.orgId, feedFile), 'jpeg-lead', { httpMetadata: { contentType: 'image/jpeg' } });
+    expect((await get(`/blobs/${feedFile}`, oPlain.credential)).status).toBe(404);
   });
 });
 

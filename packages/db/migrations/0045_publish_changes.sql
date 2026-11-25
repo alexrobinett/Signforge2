@@ -1,0 +1,1 @@
+ALTER TABLE `publishes` ADD `changes_json` text;

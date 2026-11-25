@@ -1,0 +1,19 @@
+{
+  "id": "news-bench",
+  "version": "1.0.0",
+  "name": "News bench",
+  "description": "Pi bench for feed images (#196), never published: the top story's photo large, the next nine stories as thumbnails beside their headlines.",
+  "fields": {
+    "items": {
+      "type": "list",
+      "label": "Stories",
+      "maxItems": 10,
+      "default": [],
+      "item": { "title": { "type": "text", "label": "Headline" }, "image": { "type": "image", "label": "Photo" } }
+    }
+  },
+  "duration": { "defaultMs": 6000, "minMs": 3000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#0b0d12"
+}
