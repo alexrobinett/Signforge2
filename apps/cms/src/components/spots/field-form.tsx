@@ -314,9 +314,9 @@ function ListField({
       {mark && <MarkNote id={`field-${name}-mark`} mark={mark} />}
       {rows.some((_, i) => isSampleRow(i)) && <SampleNote id={sampleId} rows />}
       {rows.map((row, i) => (
-        // Rows have no ids of their own; their place is who they are.
+        // Rows have no ids of their own; their place is who they are. A rule and space between rows, not a box (#377).
         // biome-ignore lint/suspicious/noArrayIndexKey: a row is its position in the list.
-        <div key={i} className="flex flex-col gap-2 rounded-lg border p-3">
+        <div key={i} className="flex flex-col gap-2 border-t pt-3">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-2 text-sm text-muted-foreground">
               Row {i + 1}

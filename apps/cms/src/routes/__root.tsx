@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { PendingBar } from '~/components/pending';
 import { createRootRouteWithContext, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { useHydrated } from '~/lib/hydrated';
@@ -40,6 +41,7 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body className="min-h-dvh" data-hydrated={hydrated ? '' : undefined}>
+        <PendingBar />
         {children}
         <Scripts />
       </body>

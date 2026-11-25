@@ -85,10 +85,12 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Nothing published is said by the thumbnail alone: no caption under it (#374).
   await expect(page.locator('figcaption')).toHaveCount(0);
 
-  // Live seconds do not move the page (#375): heard 1 s, then 8 s ago, at phone width. The page's clock
-  // (10 s steps, never before its load) is fixed an hour ahead, past any run; the sync is set before it.
+  // Live seconds do not move the page (#375): heard 1 s, then 8 s ago, at phone width. The page shows the later
+  // of the server's read time and its clock, fixed an hour ahead: the server's can't pass it before the test times out.
   const lobbyId = new URL(page.url()).pathname.split('/').at(-1);
-  const step = Math.ceil(Date.now() / 10_000) * 10_000 + 3_600_000;
+  const ahead = 3_600_000;
+  expect(test.info().timeout).toBeLessThan(ahead);
+  const step = Math.ceil(Date.now() / 10_000) * 10_000 + ahead;
   await page.clock.setFixedTime(step);
   await page.setViewportSize({ width: 390, height: 844 });
   const heardLine = page.getByText(/^last heard \d+ s ago$/);
@@ -128,6 +130,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await page.getByRole('button', { name: 'Edit' }).click();
   const hours = page.getByRole('dialog', { name: 'Display hours for Lobby' });
   await hours.getByText('Set hours', { exact: true }).click();
+  // Each window is a named group, so its times say whose they are (#377).
+  await expect(hours.getByRole('group', { name: 'Window 1' }).getByLabel('On at')).toBeVisible();
   await expect(hours.getByRole('radio', { name: 'Set hours' })).toBeChecked();
   await hours.getByRole('button', { name: 'Sunday' }).click();
   await hours.getByRole('button', { name: 'Saturday' }).click();
@@ -151,8 +155,11 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await eve.getByLabel('On at').fill('08:00');
   await eve.getByLabel('Off at').fill('12:00');
   await eve.getByRole('button', { name: 'Add hours on this date' }).click();
-  await eve.getByLabel('On at').nth(1).fill('17:00');
-  await eve.getByLabel('Off at').nth(1).fill('21:00');
+  // Each window on the date is its own named group, as the weekly ones are (#377).
+  const second = eve.getByRole('group', { name: 'Window 2 on 2026-12-24' });
+  await second.getByLabel('On at').fill('17:00');
+  await second.getByLabel('Off at').fill('21:00');
+  await expect(eve.getByRole('group', { name: 'Window 1 on 2026-12-24' }).getByLabel('On at')).toHaveValue('08:00');
   await hours.getByRole('button', { name: 'Save' }).click();
   await expect(hours).toBeHidden();
   const reopen = async () => {

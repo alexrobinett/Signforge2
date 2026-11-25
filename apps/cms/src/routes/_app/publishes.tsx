@@ -4,6 +4,7 @@
  * earlier publish can be rolled back to. Both stay current while the page is open
  * (src/queries/publishes.ts).
  */
+import { useDeferredValue } from 'react';
 import { PublishTitle } from '~/components/publishes/latest-publish';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
@@ -17,13 +18,17 @@ import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
 import { useAppStore } from '~/state/provider';
 
+const publishesSearch = (s: Record<string, unknown>): { id?: string } => (typeof s.id === 'string' && s.id ? { id: s.id } : {});
+
 export const Route = createFileRoute('/_app/publishes')({
-  validateSearch: (s: Record<string, unknown>): { id?: string } => (typeof s.id === 'string' && s.id ? { id: s.id } : {}),
-  loaderDeps: ({ search }) => ({ id: search.id }),
-  loader: async ({ context: { queryClient }, deps, parentMatchPromise }) => {
+  validateSearch: publishesSearch,
+  // Entering reads the publish in the loader, so the page's skeleton shows while it comes (#376); another
+  // publish picked on the page is read by its query, deferred, keeping the page until it lands.
+  loader: async ({ context: { queryClient }, location, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
-    await Promise.all([queryClient.query(publishQuery(orgId, deps.id ?? null)), queryClient.query(publishesQuery(orgId))]);
+    const { id } = publishesSearch(location.search);
+    await Promise.all([queryClient.query(publishQuery(orgId, id ?? null)), queryClient.query(publishesQuery(orgId))]);
   },
   head: () => ({ meta: [{ title: 'Publishes · SignForge' }] }),
   component: PublishesPage,
@@ -41,7 +46,8 @@ const app = getRouteApi('/_app');
 
 function PublishesPage() {
   const orgId = useOrgId();
-  const search = Route.useSearch();
+  // Deferred: another publish picked keeps this one shown, and the focus, until its own arrives.
+  const search = useDeferredValue(Route.useSearch());
   const current = useSuspenseQuery(publishQuery(orgId, search.id ?? null));
   const { publish, screens } = current.data;
   const { publishes } = useSuspenseQuery(publishesQuery(orgId)).data;

@@ -256,6 +256,23 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  /* Between pages (#376, components/pending.tsx): the bar appears past 300 ms, then slides. */
+  --animate-pending-appear: pending-appear 0s 300ms forwards;
+  --animate-pending-slide: pending-slide 1.2s ease-in-out infinite;
+  @keyframes pending-appear {
+    to {
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+  @keyframes pending-slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

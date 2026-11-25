@@ -67,7 +67,8 @@ export function EditorHeader({
         </p>
       </div>
       {children && (
-        <div className="ml-auto flex gap-2">
+        // Wraps, right-aligned: on a phone four actions are wider than the editor, whose frame clips what overflows.
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           <EditorFields>{children}</EditorFields>
         </div>
       )}
