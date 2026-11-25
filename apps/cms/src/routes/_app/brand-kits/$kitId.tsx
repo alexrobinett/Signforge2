@@ -18,7 +18,7 @@ import { EditorFields, saveWord } from '~/components/editor';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { kitDraftOf, screensText, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { kitDraftOf, logoChoice, screensText, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
@@ -210,6 +210,7 @@ function KitEditor() {
   const edit = useAppStore((s) => s.editKit);
   const fix = useAppStore((s) => s.fixKitPair);
   const reload = useAppStore((s) => s.reloadKit);
+  const retry = useAppStore((s) => s.retryKitSave);
   const pickLogo = useAppStore((s) => s.pickLogo);
   const duplicate = useAppStore((s) => s.duplicateKit);
 
@@ -265,10 +266,17 @@ function KitEditor() {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="flex flex-wrap items-center gap-3">
             {saveError ?? actionError}
-            {stale && (
+            {stale ? (
               <Button size="sm" variant="outline" onClick={() => void reload(orgId, kit.id)}>
                 Reload
               </Button>
+            ) : (
+              saveError && (
+                // Not a conflict: the edit is still here, and saves when tried again (review of #461).
+                <Button size="sm" variant="outline" onClick={() => void retry(kit.id)}>
+                  Try again
+                </Button>
+              )
             )}
           </AlertDescription>
         </Alert>
@@ -322,13 +330,10 @@ function KitEditor() {
                   picking={logoFor}
                   disabled={!canManage}
                   onPick={pickLogo}
-                  onChange={(which, assetId) =>
-                    choose(
-                      assetId ? 'Logo changed' : 'Logo removed',
-                      which === 'dark' ? { logoOnDarkAssetId: assetId, ...(assetId ? {} : { logoOnLightAssetId: null }) } : { logoOnLightAssetId: assetId },
-                      { logoOnDarkAssetId: draft.logoOnDarkAssetId, logoOnLightAssetId: draft.logoOnLightAssetId },
-                    )
-                  }
+                  onChange={(which, assetId) => {
+                    const { said, patch, was } = logoChoice(draft, which, assetId);
+                    choose(said, patch, was);
+                  }}
                 />
               </Panel>
             </form>

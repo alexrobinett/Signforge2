@@ -164,7 +164,21 @@ interface Flight<E, C> {
 }
 
 export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>): VersionedDrafts<E, C> {
-  const { state, clock } = options;
+  const { clock } = options;
+  /** This store's drafts whose last save failed (`unsent`): each leaves it once saved, or dropped. */
+  const failedHere = new Set<string>();
+  const state = {
+    read: options.state.read,
+    write: (change: (drafts: Drafts<E>) => Drafts<E>) => {
+      options.state.write(change);
+      const ids = new Set(Object.values(options.state.read()).map((d) => d.id));
+      for (const id of failedHere)
+        if (!ids.has(id)) {
+          failedHere.delete(id);
+          unsent.delete(id);
+        }
+    },
+  };
   /** By draft id. */
   const flights = new Map<string, Flight<E, C>>();
   /** The last save queued on each record that is still to finish, by org and record: the next one waits for it. */
@@ -236,6 +250,8 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         return settle((x) => ({ ...x, status: 'unsaved' }));
       }
       if (answer.version !== undefined) moved(answer.version);
+      failedHere.delete(id);
+      unsent.delete(id);
       settle((x) => ({
         ...x,
         record: answer.record ?? x.record,
@@ -249,6 +265,11 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
       flight.next = null;
       if (!here()) return settle((x) => ({ ...x, status: 'unsaved' }));
       const gone = d.record !== null && err instanceof Refusal && (options.gone?.(err, key) ?? false);
+      // Not saved, and not tried again until asked: closing the tab now would lose it, unless the record itself is gone.
+      if (!gone) {
+        failedHere.add(id);
+        unsent.add(id);
+      }
       settle((x) => ({ ...x, status: 'unsaved', stale: isStale(err), gone, error: isStale(err) ? STALE : toolMessage(err) }));
     }
   }
@@ -324,6 +345,9 @@ export const AUTOSAVE_MS = 1000;
 /** Saves on their way, in every store. */
 let sending = 0;
 
+/** Drafts whose last save failed, by draft id, in every store: kept until saved or dropped (review of #461). */
+const unsent = new Set<string>();
+
 /**
  * Every save still waiting out its autosave delay, in every store. Leaving the org would strand
  * them (a draft saves only in its own org), and closing the tab would lose them: both send them
@@ -353,5 +377,5 @@ export function autosave(clock: Clock, ms: number, save: (key: string) => Promis
 /** Sends every save still waiting out its delay now, and resolves once they are answered. */
 export const saveWaiting = () => Promise.all([...waiting].map((now) => now()));
 
-/** Whether a save is waiting or on its way: closing the tab now could lose it. */
-export const savesWaiting = () => waiting.size > 0 || sending > 0;
+/** Whether a save is waiting, on its way, or failed and not tried again: closing the tab now could lose it. */
+export const savesWaiting = () => waiting.size > 0 || sending > 0 || unsent.size > 0;

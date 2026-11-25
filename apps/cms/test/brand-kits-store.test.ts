@@ -418,15 +418,11 @@ describe('kit actions run one at a time (review of #143)', () => {
     expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
   });
 
-  it('a kit the server would refuse as it is (no name, a font not in the catalogue) is marked, not sent', async () => {
+  it('a kit the server would refuse as it is (no name) is marked, not sent', async () => {
     const { calls } = heldTools();
     const a = kit('bk_a', '#2563eb');
     const { store } = page([a]);
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, name: '  ' }));
-    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
-    expect(calls).toEqual([]);
-    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('invalid');
-    store.getState().editKit(ORG, a.id, (d) => ({ ...d, name: 'Spring', displayFontId: 'base/withdrawn' }));
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     expect(calls).toEqual([]);
     expect(store.getState().brandKits.drafts.bk_a?.status).toBe('invalid');

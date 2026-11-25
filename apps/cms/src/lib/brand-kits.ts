@@ -4,7 +4,7 @@
  * duplicating sends, the contrast of each pair a template draws text with, in words, and a fix for
  * one that fails. The contrast maths is the compiler's, so the page says what the tools say.
  */
-import { BRAND_PAIRS, brandFont, contrastRatio, fontById, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
+import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
 import { assetFile } from '@signforge/compiler/draft';
 import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
@@ -40,8 +40,20 @@ export const kitDraftOf = (k: BrandKitView): KitDraft => ({
   logoOnLightAssetId: k.logo?.onLightAssetId ?? null,
 });
 
-/** Whether a kit may name this font: none, or one in the catalogue (the server's rule). */
-export const knownFont = (id: string | null) => id === null || fontById(id) !== undefined;
+/**
+ * A logo chosen or removed in `draft`: what it says, what it changes, and what its Undo puts back, which is only what
+ * it changed. Removing the dark logo removes the light one with it: a light logo is only ever the dark one's partner.
+ */
+export function logoChoice(draft: KitDraft, which: 'dark' | 'light', assetId: string | null) {
+  const said = assetId ? 'Logo changed' : 'Logo removed';
+  if (which === 'light') return { said, patch: { logoOnLightAssetId: assetId }, was: { logoOnLightAssetId: draft.logoOnLightAssetId } };
+  if (assetId) return { said, patch: { logoOnDarkAssetId: assetId }, was: { logoOnDarkAssetId: draft.logoOnDarkAssetId } };
+  return {
+    said,
+    patch: { logoOnDarkAssetId: null, logoOnLightAssetId: null },
+    was: { logoOnDarkAssetId: draft.logoOnDarkAssetId, logoOnLightAssetId: draft.logoOnLightAssetId },
+  };
+}
 
 /** The draft's colours as screens would get them, or null while one is not a hex colour yet. */
 export function draftColors(d: KitDraft): BrandColors | null {
