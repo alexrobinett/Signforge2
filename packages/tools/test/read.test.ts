@@ -45,6 +45,51 @@ describe('read', () => {
     expect(Object.keys(template)).toEqual(['id', 'key', 'name', 'latestApproved']);
   });
 
+  it('keeps what a get adds off the fields of its rows: a row read by id has each listed field as its list has it', async () => {
+    const kind = (v: unknown) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+    for (const type of LISTED.map((l) => l.type)) {
+      const def = READ_TYPES[type];
+      if (!('get' in def)) continue;
+      const [listed] = (await call(as('owner'), 'read', { type, detail: 'full', limit: 1 })).items;
+      if (!listed) continue;
+      const [byId] = (await call(as('owner'), 'read', { type, ids: [listed.id], detail: 'full' })).items;
+      for (const key of Object.keys(listed).filter((k) => k in byId && listed[k] !== null && byId[k] !== null))
+        expect(kind(byId[key]), `${type}.${key}`).toBe(kind(listed[key]));
+    }
+    const [publish] = (await call(as('owner'), 'read', { type: 'publish', ids: [o.publish], detail: 'full' })).items;
+    expect(publish.rollout).toEqual(expect.any(Array));
+    expect(typeof publish.screens).toBe('number');
+  });
+
+  it("reads what each get reads: the newest publish by 'latest', and a spot as screens have it", async () => {
+    const latest = await call(as('viewer'), 'get_publish', {});
+    const [read] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'], detail: 'full' })).items;
+    expect(read).toMatchObject({ id: latest.publish.id, rollout: latest.screens });
+    const own = await dispatch(registry, 'get_spot', { spotId: o.templateSpot, published: true }, as('viewer'));
+    const viaRead = await dispatch(registry, 'read', { type: 'spot', ids: [o.templateSpot], filter: { published: true }, detail: 'full' }, as('viewer'));
+    expect(viaRead.ok).toBe(own.ok);
+    if (own.ok && viaRead.ok) expect(viaRead.output).toMatchObject({ items: [(own.output as { spot: unknown }).spot] });
+  });
+
+  it('refuses a filter at the top, a list filter with ids, a field only ids give, and more ids than a call takes', async () => {
+    const refused = async (input: Record<string, unknown>) => {
+      const r = await dispatch(registry, 'read', input, as('viewer'));
+      expect(r, JSON.stringify(input)).toMatchObject({ ok: false, error: 'invalid_input' });
+      return r.ok ? '' : r.message;
+    };
+    expect(await refused({ type: 'playlist', isDefault: true })).toMatch(/read takes no isDefault: put a type's filters under filter/);
+    expect(await refused({ type: 'spot', ids: [o.imageSpot], filter: { kind: 'url' } })).toMatch(/read by ids has no filter kind: it takes published/);
+    expect(await refused({ type: 'screen', fields: ['credentials'] })).toMatch(/listed has no field credentials/);
+    expect(await refused({ type: 'screen', ids: Array(6).fill(o.screen) })).toMatch(/at most 5 screen ids a call/);
+  });
+
+  it("keeps what a type's list says besides its rows: a connection's providers", async () => {
+    const own = await call(as('owner'), 'list_connections', {});
+    const read = await call(as('owner'), 'read', { type: 'connection', detail: 'full' });
+    expect(read.items).toEqual(own.connections);
+    expect(read.extra).toEqual({ providers: own.providers });
+  });
+
   it('reads the org: who is asking, its settings and AI provider', async () => {
     const [org] = (await call(as('editor'), 'read', { type: 'org' })).items;
     expect(org).toMatchObject({ id: o.orgId, name: expect.any(String), role: 'editor', scopes: expect.arrayContaining(['content:read', 'content:draft']) });
@@ -58,7 +103,7 @@ describe('read', () => {
       expect(r, JSON.stringify(input)).toMatchObject({ ok: false, error: 'invalid_input' });
       return r.ok ? '' : r.message;
     };
-    expect(await refused({ type: 'spot', filter: { colour: 'red' } })).toMatch(/its filters are .*unpublished.*describe\(\{ type: 'spot' \}\)/);
+    expect(await refused({ type: 'spot', filter: { colour: 'red' } })).toMatch(/it takes .*unpublished.*describe\(\{ type: 'spot' \}\)/);
     expect(await refused({ type: 'spot', fields: ['colour'] })).toMatch(/its fields are .*durationMs/);
     expect(await refused({ type: 'spot', query: 'menu' })).toMatch(/asset and audit_entry can/);
     expect(await refused({ type: 'schedule_entry', ids: ['x'] })).toMatch(/list it, with a filter/);
@@ -104,12 +149,23 @@ describe('read', () => {
 
 describe('describe', () => {
   it('says what read gives for a type: filters, ids, query, summary and every field, and the tools that change it', async () => {
-    const spot = await call(as('viewer'), 'describe', { type: 'spot' });
+    const spot = await call(as('editor'), 'describe', { type: 'spot' });
     expect(spot).toMatchObject({ type: 'spot', ids: true, query: false, summary: READ_TYPES.spot.summary });
     expect(Object.keys(spot.filters)).toEqual(['kind', 'unpublished']);
     expect(spot.fields).toHaveProperty('data');
     expect(spot.changedBy).toEqual(expect.arrayContaining(['create_spot', 'update_spot']));
     expect(await call(as('viewer'), 'describe', { type: 'asset' })).toMatchObject({ query: true });
+  });
+
+  it('names the tools that change a type, only those the caller may use', async () => {
+    const changers = async (role: 'editor' | 'owner', type: string) => (await call(as(role), 'describe', { type })).changedBy;
+    expect(await changers('owner', 'screen')).toContain('revoke_screen_credential');
+    expect(await changers('editor', 'screen')).not.toContain('revoke_screen_credential');
+    expect(await changers('owner', 'screen')).not.toContain('publish_manifest_to_screen');
+    expect(await changers('owner', 'member')).toEqual([]);
+    expect(await changers('owner', 'publish_request')).toEqual(['request_publish']);
+    for (const type of readTypes(registry, { role: 'owner', editorsPublish: true }))
+      for (const name of await changers('owner', type)) expect(registry.get(name)?.mutates, `${type}: ${name}`).toBe(true);
   });
 
   it('describes every type a caller may read, its tools all in the registry', async () => {

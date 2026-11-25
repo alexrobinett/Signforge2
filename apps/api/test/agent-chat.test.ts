@@ -841,7 +841,9 @@ describe('confirmation cards (#269)', () => {
     const s = await setup({ role: 'editor', steps: [{ calls: [{ name: 'read', input: { type: 'invitation' } }] }, ANSWER] });
     await s.owner.ok('/api/auth/organization/invite-member', { email: 'hidden-425@signforge.test', role: 'viewer' });
     const all = await raw(await s.ask('Who is invited?'));
-    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('list_invitations');
+    const read = s.model.asked[0].tools.find((t: { name: string }) => t.name === 'read');
+    expect(read.input_schema.properties.type.enum).not.toContain('invitation');
+    expect(read.input_schema.properties.type.enum).toContain('member');
     expect(s.model.asked[1].messages.at(-1).content[0]).toMatchObject({ is_error: true });
     expect(JSON.stringify(s.model.asked)).not.toContain('hidden-425');
     expect(JSON.stringify(all)).not.toContain('hidden-425');

@@ -141,10 +141,10 @@ export const TASKS: Task[] = [
     script: both(() => [[{ name: 'read', input: { type: 'screen' } }]]),
     variants: [
       {
-        name: 'each screen by get_screen, called by name, in separate responses',
+        name: 'each screen by read with ids, in separate responses',
         arm: 'mcp',
         passes: true,
-        script: (w) => Object.values(w.screens).map((screenId) => [{ name: 'get_screen', input: { screenId } }]),
+        script: (w) => Object.values(w.screens).map((id) => [{ name: 'read', input: { type: 'screen', ids: [id] } }]),
       },
       {
         name: 'states, then names, in separate responses',

@@ -442,8 +442,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
   needs?: readonly N[];
   input: S;
-  /** The input as a caller with `grant` is listed it, when narrower than `input` (read's types, #345); `input` still checks every call. */
-  listedInput?: (grant: Grant) => z.ZodType;
+  /**
+   * The input and description a caller with `grant` (and `services`, where known) is listed, when narrower than `input`
+   * and `description` (read's types, #345); `input` still checks every call.
+   */
+  listedInput?: (grant: Grant, services?: ToolServices) => z.ZodType;
+  listedDescription?: (grant: Grant, services?: ToolServices) => string;
   /**
    * What the tool returns. Shown to agents as JSON Schema, and checked against every output in
    * tests (./output.ts); production trusts the handler. A list tool pages (./paging.ts).

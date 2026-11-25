@@ -583,17 +583,20 @@ export class ListedInput {
   }
 }
 
-/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
-export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant) {
+/**
+ * What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema
+ * input and output. With `services`, a tool that lists by them (`read`'s types) leaves out what they cannot serve.
+ */
+export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant, services?: ToolServices) {
   return [...registry.values()]
     .filter((t) => permits(grant, t))
     .map((t) => ({
       name: t.name,
-      description: t.description,
+      description: t.listedDescription?.(grant, services) ?? t.description,
       scope: t.scope,
       minRole: t.minRole,
       mutates: t.mutates,
-      inputSchema: new ListedInput(t.listedInput?.(grant) ?? t.input),
+      inputSchema: new ListedInput(t.listedInput?.(grant, services) ?? t.input),
       outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));

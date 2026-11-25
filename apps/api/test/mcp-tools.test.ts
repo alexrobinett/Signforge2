@@ -101,6 +101,26 @@ describe('tools/list', () => {
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });
 
+  it("lists a type's own read as read only where read serves it (#345): an org:manage-only grant keeps its invitations", () => {
+    const orgOnly: Grant = { role: 'owner', scopes: ['org:manage'], editorsPublish: true };
+    const names = listedTools(orgOnly, AGENT).map((t) => t.name);
+    expect(names).toContain('list_invitations');
+    expect(names).not.toContain('read');
+    const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
+    expect(listedTools(owner, AGENT).map((t) => t.name)).not.toContain('list_invitations');
+  });
+
+  it("lists read's types and their lines for the grant and its services: no connection without a provider's service, no invitation for a viewer", () => {
+    const viewer: Grant = { role: 'viewer', scopes: [...SCOPES], editorsPublish: true };
+    const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
+    const readOf = (grant: Grant, services: ToolServices) => listedTools(grant, services).find((t) => t.name === 'read');
+    const types = (grant: Grant, services: ToolServices) => JSON.stringify(readOf(grant, services)?.inputSchema);
+    expect(types(viewer, AGENT)).not.toContain('"invitation"');
+    expect(readOf(viewer, AGENT)?.description).not.toContain('invitation:');
+    expect(types(owner, AGENT)).toContain('"connection"');
+    expect(types(owner, { ...AGENT, connectors: undefined })).not.toContain('"connection"');
+  });
+
   it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound (mcp.test.ts: a call still checks them)', () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
     const listed = listedTools(owner, AGENT);

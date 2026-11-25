@@ -55,9 +55,9 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 52 tools · 17,390 tokens | 49 · 15,962 | 6 · 1,711 |
-| Drawer request | 24 · 8,191 | 22 · 7,897 | 11 · 4,403 |
-| /mcp `tools/list` (discovery) | 52 · 18,770 | 49 · 17,261 | 6 · 1,867 |
+| /mcp request | 52 tools · 17,422 tokens | 49 · 15,986 | 6 · 1,735 |
+| Drawer request | 24 · 8,189 | 22 · 7,887 | 11 · 4,393 |
+| /mcp `tools/list` (discovery) | 52 · 18,802 | 49 · 17,285 | 6 · 1,891 |
 
 The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489.
 
