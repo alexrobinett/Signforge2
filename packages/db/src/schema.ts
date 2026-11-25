@@ -1290,7 +1290,11 @@ export const storedManifests = sqliteTable(
     claimUntil: integer('claim_until').notNull().default(0),
     deletedAt: integer('deleted_at'),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] })],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] }),
+    // The rows the storage sweep may delete, by age: it looks for an org's old ones without reading the deleted (#235).
+    index('stored_manifests_live_idx').on(t.orgId, t.storedAt).where(sql`files_json IS NOT NULL AND deleted_at IS NULL`),
+  ],
 );
 
 /**

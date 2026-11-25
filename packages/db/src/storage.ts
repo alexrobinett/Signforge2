@@ -167,13 +167,15 @@ export interface StorageDue {
  */
 export async function orgsWithStorageDue(d1: D1Database, now: number, limit: number): Promise<string[]> {
   const cutoff = now - STORAGE_GRACE_MS;
+  // Manifests: one probe of `stored_manifests_live_idx` an org, its live rows by age, none of its deleted ones (review of #431).
   const rows = await drizzle(d1).all<{ orgId: string }>(sql`
     SELECT d.org_id AS orgId FROM (
       SELECT org_id FROM blob_deletes WHERE queued_at <= ${cutoff} AND claim_until <= ${now}
       UNION SELECT org_id FROM assets WHERE status = 'pending' AND created_at <= ${cutoff}
-      UNION SELECT m.org_id FROM stored_manifests m LEFT JOIN storage_sweeps x ON x.org_id = m.org_id
-        WHERE m.files_json IS NOT NULL AND m.deleted_at IS NULL AND m.stored_at <= ${cutoff}
-        AND coalesce(x.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
+      UNION SELECT o.id FROM organization o LEFT JOIN storage_sweeps x ON x.org_id = o.id
+        WHERE coalesce(x.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
+        AND EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = o.id AND m.files_json IS NOT NULL AND m.deleted_at IS NULL
+          AND m.stored_at <= ${cutoff})
     ) d LEFT JOIN storage_sweeps w ON w.org_id = d.org_id
     WHERE coalesce(w.lease_until, 0) <= ${now}
     ORDER BY coalesce(w.swept_at, 0), d.org_id LIMIT ${limit}`);
@@ -407,10 +409,14 @@ export function storage(db: Db, orgId: string) {
                   sql`SELECT ${orgId}, json_extract(value, '$.screenId'), json_extract(value, '$.id'), json_extract(value, '$.files'), ${now},
                     NULL, 0, NULL FROM json_each(${JSON.stringify(part)}) WHERE true`,
                 )
-                // Files known replace files unknown, never the other way round.
+                // Files known replace files unknown, never the other way round; a manifest found stored only now is stored
+                // as of now, its grace period starting then (review of #431).
                 .onConflictDoUpdate({
                   target: [sm.orgId, sm.screenId, sm.manifestId],
-                  set: { filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})` },
+                  set: {
+                    filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})`,
+                    storedAt: sql`CASE WHEN ${sm.filesJson} IS NULL AND excluded.files_json IS NOT NULL THEN excluded.stored_at ELSE ${sm.storedAt} END`,
+                  },
                 }),
             ),
         );

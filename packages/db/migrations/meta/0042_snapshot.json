@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7f0152c7-9d0c-413c-b6e8-b1832f8a8e84",
+  "id": "c2c4b6a5-5f05-4fdd-9324-9cc96151b85a",
   "prevId": "9f8d8c9b-cc7d-4588-8314-7c42976600c4",
   "tables": {
     "account": {
@@ -5562,7 +5562,14 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "stored_manifests_live_idx": {
+          "name": "stored_manifests_live_idx",
+          "columns": ["org_id", "stored_at"],
+          "isUnique": false,
+          "where": "files_json IS NOT NULL AND deleted_at IS NULL"
+        }
+      },
       "foreignKeys": {
         "stored_manifests_org_id_organization_id_fk": {
           "name": "stored_manifests_org_id_organization_id_fk",

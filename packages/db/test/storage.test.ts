@@ -546,6 +546,84 @@ describe('a stored manifest (#235)', () => {
   });
 });
 
+describe("the storage sweep's queries (review of #431, round 2)", () => {
+  /** `db`, recording each statement prepared on it with the values bound to it. */
+  function recording(db: D1Database) {
+    const seen: { query: string; binds: unknown[] }[] = [];
+    const proxy = new Proxy(db, {
+      get(target, key) {
+        if (key !== 'prepare') {
+          const v: unknown = Reflect.get(target, key, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          const entry: { query: string; binds: unknown[] } = { query, binds: [] };
+          seen.push(entry);
+          return new Proxy(statement, {
+            get(st, k) {
+              if (k === 'bind') return (...binds: unknown[]) => ((entry.binds = binds), st.bind(...binds));
+              const v: unknown = Reflect.get(st, k, st);
+              return typeof v === 'function' ? v.bind(st) : v;
+            },
+          });
+        };
+      },
+    });
+    return { proxy, seen };
+  }
+  const plan = async (q: { query: string; binds: unknown[] }) =>
+    (
+      await env.DB.prepare(`EXPLAIN QUERY PLAN ${q.query}`)
+        .bind(...q.binds)
+        .all<{ detail: string }>()
+    ).results.map((r) => r.detail);
+  /** Its reads of stored_manifests: each through the live rows' index, never a scan of the table. */
+  const throughLiveIndex = (details: string[]) => {
+    const reads = details.filter((d) => /^(?:SCAN|SEARCH) (?:stored_manifests|m)\b/.test(d));
+    expect(
+      reads.some((d) => d.includes('USING INDEX stored_manifests_live_idx')),
+      details.join('\n'),
+    ).toBe(true);
+    for (const d of reads) expect(d.startsWith('SCAN'), d).toBe(false);
+  };
+
+  it('finds orgs with old manifests, and an org’s due manifests, through the live rows’ partial index', async () => {
+    const { orgId, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await index(orgId, [{ id: m('q'), files: [] }], s);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    expect(orgs.seen).toHaveLength(1);
+    throughLiveIndex(await plan(orgs.seen[0]!));
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    await scope.storage.claim('sweep-a', DUE, 90);
+    await scope.commit(scope.storage.stage.release('sweep-a', DUE).writes);
+    const touching = sweep.seen.filter((q) =>
+      /stored_manifests m\s+WHERE m\.org_id = \? AND m\.files_json IS NOT NULL AND m\.deleted_at IS NULL/.test(q.query),
+    );
+    // The claim's and the release's look for due manifests.
+    expect(touching).toHaveLength(2);
+    for (const q of touching) throughLiveIndex(await plan(q));
+  });
+
+  it('starts a manifest’s grace period when a real store replaces a look that found no object', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    const storedAt = async () =>
+      (await env.DB.prepare('SELECT stored_at AS t FROM stored_manifests WHERE org_id = ? AND screen_id = ?').bind(orgId, s).first<{ t: number }>())?.t;
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+    // Known already: stored again, or looked for again, it keeps its time.
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: [] }], T0 + 2 * DAY).writes);
+    await org.commit(org.storage.stage.index([{ screenId: s, id: m('u'), files: null }], T0 + 3 * DAY).writes);
+    expect(await storedAt()).toBe(T0 + DAY);
+  });
+});
+
 describe('the guards a manifest writer holds to its commit (#235)', () => {
   it('refuses a writer while a sweep claims the manifest, or deleted it since the writer started; marks one stored again', async () => {
     const { orgId, org, screens } = await fresh(1);
