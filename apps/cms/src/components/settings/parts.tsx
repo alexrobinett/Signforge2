@@ -3,12 +3,13 @@
  * the save row with its error.
  */
 import { Link } from '@tanstack/react-router';
-import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { saveWord } from '~/components/editor';
 import { Button } from '~/components/ui/button';
 import { useOrgOnScreen } from '~/lib/live';
 import { useAppStore } from '~/state/provider';
-import { errorOf, hasEdits, runningIn, type SettingsScope } from '~/state/settings';
+import { errorOf, runningIn, type SettingsScope } from '~/state/settings';
 
 const LINK =
   'flex min-h-10 shrink-0 items-center rounded-md px-3 whitespace-nowrap text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[status=active]:bg-accent data-[status=active]:text-accent-foreground';
@@ -88,21 +89,29 @@ export function ActionError({ at }: { at: string }) {
   );
 }
 
-/** A form's save button and its error; only owners get the button. */
-export function SaveRow({ at, scope, canEdit, label = 'Save changes' }: { at: string; scope: SettingsScope; canEdit: boolean; label?: string }) {
-  const running = useRunning(scope);
-  const edited = useAppStore((s) => hasEdits(s.settings, at, scope.orgId));
+/**
+ * How a form's save is going, quietly, in the editors' words (#366): each change saves itself, so
+ * there is no Save button. A refusal is said here, with Reload after a conflict.
+ */
+export function SaveState({ form, canEdit }: { form: string; canEdit: boolean }) {
+  const orgId = useOrgOnScreen();
+  const draft = useAppStore((s) => (s.settings.drafts[form]?.orgId === orgId ? s.settings.drafts[form] : undefined));
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only owners can change these.</p>;
   return (
     <div className="space-y-2">
-      <ActionError at={at} />
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" aria-disabled={running !== undefined || undefined}>
-          {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
-        </Button>
-        {/* Edits are kept on leaving the page, until saved or reloaded; this says they are there. */}
-        {edited && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-      </div>
+      <ActionError at={form} />
+      <p className="text-sm text-muted-foreground" aria-live="polite">
+        {draft ? saveWord(draft.status, draft.savedAt) : 'Changes save as you make them.'}
+      </p>
     </div>
   );
+}
+
+/** Why a typed field would be refused, under it; `id` is what the field's `aria-describedby` names. */
+export function FieldProblem({ id, text }: { id: string; text: string | undefined }) {
+  return text ? (
+    <p id={id} className="text-sm font-medium text-destructive">
+      {text}
+    </p>
+  ) : null;
 }

@@ -201,6 +201,32 @@ export const hasEdits = (settings: SettingsState, at: string, orgId: string | nu
   return draft?.orgId === orgId && draft.status !== 'saved' && Object.keys(draft.edit).length > 0;
 };
 
+/** A typed field of a form, as `settingsProblems` names it. */
+type TypedField = 'name' | 'auditRetentionDays' | 'updateFrom' | 'updateTo' | 'unreachableAfterMinutes';
+
+const whole = (typed: string, min: number, max: number) => /^\d+$/.test(typed.trim()) && Number(typed) >= min && Number(typed) <= max;
+
+/**
+ * Why each typed field the server would refuse would be refused (its ranges): the field says so,
+ * and the form is not sent until it is fixed. `settings` fills the update window's other end.
+ */
+export function settingsProblems(edits: SettingsEdits, settings: OrgSettings): Partial<Record<TypedField, string>> {
+  const from = edits.updateFrom ?? settings.updateWindow.from;
+  const to = edits.updateTo ?? settings.updateWindow.to;
+  return {
+    ...(edits.name !== undefined && !edits.name.trim() ? { name: 'Enter a name.' } : {}),
+    ...(edits.auditRetentionDays !== undefined && !whole(edits.auditRetentionDays, 30, 3650)
+      ? { auditRetentionDays: 'A whole number of days, 30 to 3,650.' }
+      : {}),
+    ...(edits.unreachableAfterMinutes !== undefined && !whole(edits.unreachableAfterMinutes, 5, 1440)
+      ? { unreachableAfterMinutes: 'A whole number of minutes, 5 to 1,440.' }
+      : {}),
+    ...(!from ? { updateFrom: 'Enter a time.' } : {}),
+    ...(!to ? { updateTo: 'Enter a time.' } : {}),
+    ...(from && from === to ? { updateTo: 'The window must end at another time than it starts.' } : {}),
+  };
+}
+
 /** The error of the action `at`, if it failed in the org on screen (or belongs to none): a form's save's, else the action's. */
 export function errorOf(settings: SettingsState, at: string, orgId: string | undefined) {
   const draft = settings.drafts[at];
@@ -251,23 +277,30 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
   const withoutKey = <T>(record: Record<string, T>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
 
+  /** The settings each form's last save was asked with, which `invalid` judges the edits against. */
+  const savingWith = new Map<string, OrgSettings>();
+  /** The action running on each page, by scope key: a form's save waits for it. */
+  const actions = new Map<string, Promise<unknown>>();
+
   /** The forms' edits. A save stays pending until the page's loaders have finished, as `run`'s actions do. */
   const drafts = createVersionedDrafts<SettingsEdits, { settings: OrgSettings; renamed: { id: string; name: string } | undefined }>({
     state: { read: () => get().settings.drafts, write: (change) => patch((s) => ({ ...s, drafts: change(s.drafts) })) },
     async save({ draft, context: { settings, renamed }, moved }) {
       const { name, ...fields } = draft.edit;
-      if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
       const change = changeOf(fields, settings);
       // The versioned write first: a stale save changes nothing, the name included.
       if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version })).settings.version);
       if (name !== undefined && renamed && name.trim() !== renamed.name)
         await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
-      if (orgOnScreen(router) === draft.orgId) {
-        toast.success('Saved');
-        await router.invalidate({ sync: true });
-      }
+      // Saved quietly (#366): the form says Saved where it is, as an editor does.
+      if (orgOnScreen(router) === draft.orgId) await router.invalidate({ sync: true });
       // The name is not under the settings' version: once renamed, the page shows the org's name as read.
       return { edit: fields };
+    },
+    // Marked on its field and not sent: the server would refuse it as it is.
+    invalid: (draft, form) => {
+      const settings = savingWith.get(form);
+      return settings !== undefined && Object.keys(settingsProblems(draft.edit, settings)).length > 0;
     },
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
@@ -281,24 +314,41 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
    * takes another change, in between. Every way out releases it. Other pages, and other orgs, are
    * not held up by it.
    */
-  async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string) {
+  async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string | null) {
     const key = scopeKey(scope);
     if (runningIn(get().settings, scope) !== undefined) return false;
     patch((s) => ({ ...s, pending: { ...s.pending, [key]: at }, errors: withoutKey(s.errors, at) }));
-    try {
-      await work();
-      if (onScreen(router, scope)) {
-        toast.success(done);
-        await router.invalidate({ sync: true });
+    const running = (async () => {
+      try {
+        await work();
+        if (onScreen(router, scope)) {
+          if (done) toast.success(done);
+          await router.invalidate({ sync: true });
+        }
+        return true;
+      } catch (err) {
+        const error = { orgId: scope.orgId, text: isStale(err) ? 'This changed since you opened it.' : toolMessage(err), stale: isStale(err) };
+        patch((s) => ({ ...s, errors: { ...s.errors, [at]: error } }));
+        return false;
+      } finally {
+        patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
       }
-      return true;
-    } catch (err) {
-      const error = { orgId: scope.orgId, text: isStale(err) ? 'This changed since you opened it.' : toolMessage(err), stale: isStale(err) };
-      patch((s) => ({ ...s, errors: { ...s.errors, [at]: error } }));
-      return false;
-    } finally {
-      patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
-    }
+    })();
+    actions.set(key, running);
+    return running;
+  }
+
+  /** The AI settings' version each org's last save from this tab made. */
+  const aiSaved = new Map<string, number>();
+
+  /**
+   * Runs one action as `run` does, once no action runs in `scope`, rather than being dropped: a change saved as it is
+   * made. The check and the start are in one step, so two waiting run one after the other.
+   */
+  async function runNext(...[scope, ...rest]: Parameters<typeof run>) {
+    const key = scopeKey(scope);
+    while (get().settings.pending[key] !== undefined) await actions.get(key);
+    return run(scope, ...rest);
   }
 
   /**
@@ -343,13 +393,13 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     editSettings: (orgId, form, version, change) => drafts.edit(form, { orgId, record: 'settings', version, edit: {} }, (e) => ({ ...e, ...change })),
 
     async saveSettings(orgId, form, settings, renamed) {
-      if (!hasEdits(get().settings, form, orgId)) {
-        toast('Nothing to save');
-        return;
-      }
-      // Its page's other actions wait for it, as it waits for them. The forms' fields are each one
-      // form's: a save moves every other form's draft on its version to the one it made.
-      if (runningIn(get().settings, org(FORM_PAGE[form], orgId)) !== undefined) return;
+      // Asked on every change and every field left (#366): with nothing edited, there is nothing to say.
+      if (!hasEdits(get().settings, form, orgId)) return;
+      // An action running on its page (a channel's, a test) goes first. A save asked for while this form's own runs
+      // follows it with the latest edits, and moves every other form's draft on its version to the one it made.
+      const key = scopeKey(org(FORM_PAGE[form], orgId));
+      while (get().settings.pending[key] !== undefined) await actions.get(key);
+      savingWith.set(form, settings);
       await drafts.save(form, { settings, renamed });
     },
 
@@ -451,20 +501,26 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         },
         'Connected',
       )),
-    saveAiChoices: async (orgId, provider, { fastModel, capableModel, dailyTurnCeiling }, ifVersion) =>
-      void (await run(
+    saveAiChoices: async (orgId, provider, { fastModel, capableModel, dailyTurnCeiling }, ifVersion) => {
+      await runNext(
         ai(orgId),
         'choices',
-        () =>
-          callTool('save_ai_provider', {
+        async () => {
+          const out = await callTool('save_ai_provider', {
             provider,
             fastModel: fastModel || null,
             capableModel: capableModel || null,
             dailyTurnCeiling: dailyTurnCeiling.trim() ? Number(dailyTurnCeiling) : null,
-            ifVersion,
-          }),
-        'Saved',
-      )),
+            // A choice made while the one before it saved was read on the version before that save: this tab's own
+            // save is not a change made since.
+            ifVersion: Math.max(ifVersion, aiSaved.get(orgId) ?? 0),
+          });
+          aiSaved.set(orgId, out.provider.version);
+        },
+        // Saved as each is chosen, quietly (#366).
+        null,
+      );
+    },
     askToRemoveAiKey: (orgId, open) => {
       const was = get().settings.removingAiKey;
       patch((s) => {
@@ -600,16 +656,18 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (removed) patch((s) => (s.removing?.member.id === memberId ? { ...s, removing: null } : s));
     },
 
-    saveProfile: async (name) =>
-      void (await run(
+    saveProfile: async (name) => {
+      await runNext(
         account,
         'profile',
         async () => {
           if (!name.trim()) throw new Error('Enter your name.');
           await auth(authClient.updateUser({ name: name.trim() }), 'Could not save your name.');
         },
-        'Saved',
-      )),
+        // Saved on leaving the field, quietly (#366).
+        null,
+      );
+    },
     signOutSession: async (token) =>
       void (await run(account, `session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
     signOutOtherSessions: async () =>

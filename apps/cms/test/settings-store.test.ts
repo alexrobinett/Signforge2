@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { Member, OrgSettings } from '../src/lib/settings';
-import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, type SettingsSlice } from '../src/state/settings';
+import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, settingsProblems, type SettingsSlice } from '../src/state/settings';
 
 const auth = vi.hoisted(() => ({
   organization: { updateMemberRole: vi.fn(), inviteMember: vi.fn(), removeMember: vi.fn(), acceptInvitation: vi.fn(), update: vi.fn() },
@@ -215,11 +215,91 @@ describe('a settings save (re-check of #143, 1)', () => {
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
-  it('with nothing edited, sends nothing, and says so', async () => {
+  it('with nothing edited, as when a field is left unchanged, sends nothing and says nothing (#366)', async () => {
     const store = settingsStore();
     await store.getState().saveSettings(A, 'screens', settings);
     expect(calls).toEqual([]);
-    expect(toast).toHaveBeenCalledWith('Nothing to save');
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('Settings save on change (#366)', () => {
+  it('a saved change says so quietly, in the form, with no toast', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '15' });
+    await store.getState().saveSettings(A, 'screens', settings);
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 15, ifVersion: 1 } });
+    expect(store.getState().settings.drafts.screens).toMatchObject({ status: 'saved' });
+    expect(toast).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('a field left with a value the server would refuse is marked there and not sent; fixed, it saves', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '12' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(calls).toEqual([]);
+    expect(store.getState().settings.drafts.general?.status).toBe('invalid');
+    expect(settingsProblems({ auditRetentionDays: '12' }, settings)).toEqual({ auditRetentionDays: 'A whole number of days, 30 to 3,650.' });
+    expect(settingsProblems({ name: ' ', updateTo: '02:00' }, settings)).toEqual({
+      name: 'Enter a name.',
+      updateTo: 'The window must end at another time than it starts.',
+    });
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '120' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 1 } });
+  });
+
+  it('two choices made while the first saves: the second follows it with the latest, and nothing is left unsaved', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: false });
+    const one = store.getState().saveSettings(A, 'publishing', settings);
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: true });
+    const two = store.getState().saveSettings(A, 'publishing', settings);
+    first.resolve(saved(2));
+    await Promise.all([one, two]);
+    expect(calls.map((c) => c.input)).toEqual([
+      { editorsPublish: false, ifVersion: 1 },
+      { editorsPublish: true, ifVersion: 2 },
+    ]);
+    expect(store.getState().settings.drafts.publishing).toMatchObject({ status: 'saved', version: 3 });
+  });
+
+  it('an AI choice made while the one before it saves follows it, on the version that save made: not dropped, not a conflict', async () => {
+    const first = held<Reply>();
+    const provider = (version: number): Reply => ({ status: 200, body: { provider: { version } } });
+    replies.push(first.promise, provider(3), provider(4));
+    const store = settingsStore();
+    const one = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 1);
+    // Chosen from the page as it was drawn, on version 1, while the first is on its way; and a third meanwhile: the
+    // two waiting go one after the other, neither dropped.
+    const two = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '' }, 1);
+    const three = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '300' }, 1);
+    first.resolve(provider(2));
+    await Promise.all([one, two, three]);
+    expect(calls.map((c) => c.input)).toMatchObject([
+      { capableModel: null, ifVersion: 1 },
+      { capableModel: 'big-1', ifVersion: 2 },
+      { dailyTurnCeiling: 300, ifVersion: 3 },
+    ]);
+  });
+
+  it('a choice made while an action runs on its page waits for that action, then saves: it is not dropped', async () => {
+    const removal = held<Reply>();
+    replies.push(removal.promise, saved(2));
+    const store = settingsStore();
+    void store.getState().removeAlertChannel(A, 'webhook');
+    store.getState().editSettings(A, 'notifications', 1, { alerts: { screen_offline: { slack: true } } });
+    const saving = store.getState().saveSettings(A, 'notifications', settings);
+    await new Promise((r) => setImmediate(r));
+    expect(calls.map((c) => c.name)).toEqual(['remove_alert_channel']);
+    removal.resolve({ status: 200, body: {} });
+    await saving;
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { alerts: { screen_offline: { slack: true } }, ifVersion: 1 } });
   });
 });
 

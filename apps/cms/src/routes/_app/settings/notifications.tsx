@@ -9,7 +9,7 @@ import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection, useRunning } from '~/components/settings/parts';
+import { ActionError, SaveState, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -356,13 +356,11 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   const saveSettings = useAppStore((s) => s.saveSettings);
   // A rule shows its edited fields, else what the page read: a reload refreshes the rest.
   const rule = (kind: AlertKind): AlertRule => ({ ...settings.alerts[kind], ...edits?.[kind] });
-  const edit = (kind: AlertKind, change: Partial<AlertRule>) =>
+  // Every control here is a choice: it saves at once (#366).
+  const edit = (kind: AlertKind, change: Partial<AlertRule>) => {
     editSettings(orgId, 'notifications', settings.version, { alerts: { ...edits, [kind]: { ...edits?.[kind], ...change } } });
-
-  function submit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
     void saveSettings(orgId, 'notifications', settings);
-  }
+  };
 
   const box = (kind: AlertKind, when: string, channel: 'email' | 'slack' | 'webhook') => (
     <label className="flex items-center gap-2 sm:justify-center">
@@ -382,7 +380,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   );
 
   return (
-    <form onSubmit={submit} noValidate>
+    <form onSubmit={(e) => e.preventDefault()} noValidate>
       <EditorFields>
         <SettingsSection
           id={`${id}-who`}
@@ -436,7 +434,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
             </Link>
             .
           </p>
-          <SaveRow at="notifications" scope={pageOf(orgId)} canEdit={canEdit} />
+          <SaveState form="notifications" canEdit={canEdit} />
         </SettingsSection>
       </EditorFields>
     </form>

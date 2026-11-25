@@ -10,7 +10,7 @@ import { CheckIcon, LoaderCircleIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection, useRunning } from '~/components/settings/parts';
+import { ActionError, SaveState, SettingsSection, useRunning } from '~/components/settings/parts';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -250,13 +250,8 @@ function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit:
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
 
-  function submit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    void saveSettings(orgId, 'publishing', settings);
-  }
-
   return (
-    <form onSubmit={submit} noValidate>
+    <form onSubmit={(e) => e.preventDefault()} noValidate>
       <EditorFields>
         <SettingsSection
           id={`${id}-publishing`}
@@ -268,7 +263,11 @@ function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit:
               type="checkbox"
               name="editorsPublish"
               checked={edited ?? settings.editorsPublish}
-              onChange={(e) => editSettings(orgId, 'publishing', settings.version, { editorsPublish: e.target.checked })}
+              // A choice: it saves at once (#366).
+              onChange={(e) => {
+                editSettings(orgId, 'publishing', settings.version, { editorsPublish: e.target.checked });
+                void saveSettings(orgId, 'publishing', settings);
+              }}
               disabled={!canEdit}
               aria-describedby={`${id}-publishing-help`}
               className="mt-0.5 size-5 shrink-0 accent-primary"
@@ -280,7 +279,7 @@ function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit:
               </span>
             </span>
           </label>
-          <SaveRow at="publishing" scope={pageOf(orgId)} canEdit={canEdit} label="Save" />
+          <SaveState form="publishing" canEdit={canEdit} />
         </SettingsSection>
       </EditorFields>
     </form>

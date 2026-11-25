@@ -304,8 +304,8 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
       }
     >
       <EditorFields>
-        {/* A new list or a new save shows afresh: the selects read what the page has now. */}
-        <form key={`${provider.version}/${listed?.join() ?? ''}`} method="post" onSubmit={submit} className="space-y-4" noValidate>
+        {/* A new list shows afresh. Not each save (#366): a field typed while a choice saves would be lost. */}
+        <form key={listed?.join() ?? ''} method="post" onSubmit={submit} className="space-y-4" noValidate>
           <div className="grid gap-4 sm:grid-cols-2">
             {MODELS.map((m) => {
               const options = [...new Set([...(listed ?? []), ...(provider[m.name] ? [provider[m.name]!] : [])])];
@@ -318,6 +318,8 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
                     defaultValue={provider[m.name] ?? ''}
                     className="w-full font-mono"
                     disabled={!options.length}
+                    // A choice saves at once (#366).
+                    onChange={(e) => e.currentTarget.form?.requestSubmit()}
                   >
                     <option value="">Not chosen</option>
                     {options.map((o) => (
@@ -342,14 +344,17 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
                 min={1}
                 defaultValue={provider.dailyTurnCeiling ?? ''}
                 className="w-28 tabular-nums"
+                // Saved once it is left, if it changed (#366). Not against `defaultValue`: React sets a number field's to its
+                // value as it is left.
+                onBlur={(e) => e.currentTarget.value !== String(provider.dailyTurnCeiling ?? '') && e.currentTarget.form?.requestSubmit()}
               />
               <span className="text-sm text-muted-foreground">agent turns a day, then it pauses until midnight. Empty for none.</span>
             </div>
           </div>
           <ActionError at="choices" />
-          <Button type="submit" aria-disabled={running !== undefined || undefined}>
-            {running === 'choices' && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
-          </Button>
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {running === 'choices' ? 'Saving…' : 'Changes save as you make them.'}
+          </p>
         </form>
       </EditorFields>
     </SettingsSection>

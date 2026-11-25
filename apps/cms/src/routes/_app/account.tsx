@@ -38,7 +38,8 @@ function AccountPage() {
   const { sessions, github, at } = Route.useLoaderData();
   const { user } = app.useLoaderData();
   const id = useId();
-  const busy = useRunning({ page: 'account', orgId: null }) !== undefined;
+  const running = useRunning({ page: 'account', orgId: null });
+  const busy = running !== undefined;
   const saveProfile = useAppStore((s) => s.saveProfile);
   const signOutSession = useAppStore((s) => s.signOutSession);
   const signOutOtherSessions = useAppStore((s) => s.signOutOtherSessions);
@@ -69,7 +70,15 @@ function AccountPage() {
           <EditorFields>
             <div className="grid gap-1.5">
               <Label htmlFor={`${id}-name`}>Name</Label>
-              <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
+              <Input
+                id={`${id}-name`}
+                name="name"
+                defaultValue={user.name}
+                maxLength={100}
+                autoComplete="name"
+                // Saved once it is left, if it changed (#366).
+                onBlur={(e) => e.currentTarget.value !== user.name && e.currentTarget.form?.requestSubmit()}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${id}-email`}>Email</Label>
@@ -79,11 +88,9 @@ function AccountPage() {
               </p>
             </div>
             <ActionError at="profile" />
-            <div>
-              <Button type="submit" aria-disabled={busy || undefined}>
-                Save
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {running === 'profile' ? 'Saving…' : 'Changes save as you make them.'}
+            </p>
           </EditorFields>
         </form>
       </SettingsSection>
