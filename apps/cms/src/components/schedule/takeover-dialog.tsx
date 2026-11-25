@@ -70,7 +70,7 @@ export function TakeoverDialog({
             Sent now: the screens stop what is on screen, play this above any schedule, and go back on their own when it ends, even offline.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
+        <form onSubmit={submit} className="grid grid-cols-1 gap-4">
           <div className="grid gap-1.5">
             <label htmlFor={`${id}-playlist`} className="text-sm font-medium">
               Playlist

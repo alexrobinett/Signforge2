@@ -11,7 +11,7 @@ import { useId } from 'react';
 import { NativeSelect } from '~/components/ui/select';
 import type { PlaylistView } from '~/lib/playlists';
 
-const BOX = 'rounded-md border border-status-updating bg-status-updating-muted px-3 py-2 text-sm text-status-updating-foreground';
+const BOX = 'min-w-0 rounded-md border border-status-updating bg-status-updating-muted px-3 py-2 text-sm text-status-updating-foreground wrap-anywhere';
 
 /** For an entry on every screen at all hours: what its publish will do. */
 export function FirstDefaultNote({ playlists, playlistId, action }: { playlists: PlaylistView[]; playlistId: string; action: string }) {

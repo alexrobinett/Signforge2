@@ -94,7 +94,7 @@ export function EntryDialog({
           <DialogTitle>{draft.record ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
+        <form onSubmit={submit} className="grid grid-cols-1 gap-4">
           <div className="grid gap-1.5">
             <label htmlFor={`${id}-playlist`} className="text-sm font-medium">
               Playlist
@@ -128,7 +128,7 @@ export function EntryDialog({
           )}
           <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           {preview && (
-            <section aria-label="What this screen will play" className="grid gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+            <section aria-label="What this screen will play" className="grid min-w-0 gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm wrap-anywhere">
               <p role="status">
                 <span className="font-medium">This week, {screen?.name}:</span> {preview.text}
               </p>

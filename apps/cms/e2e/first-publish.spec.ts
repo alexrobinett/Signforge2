@@ -60,6 +60,27 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await expect(takeover.getByText('Taking over makes the one chosen here the default first.')).toBeVisible();
   await takeover.getByRole('button', { name: 'Cancel' }).click();
 
+  // A name with no break in it wraps inside the notice at a phone's width, not past the dialog (review of #453).
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'create_playlist', { name: unbroken, transition: { type: 'cut' }, spotIds: [spot.id] });
+  await page.reload();
+  await hydrated(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Play on this screen…' }).click();
+  const narrow = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await narrow.getByLabel('Playlist', { exact: true }).selectOption({ label: unbroken });
+  const notice = narrow.getByText('also becomes the default playlist', { exact: false });
+  await expect(notice).toBeVisible();
+  const [box, frame] = await Promise.all([notice.boundingBox(), narrow.boundingBox()]);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(frame!.x + frame!.width);
+  expect(await notice.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+  // And what the screen will play, which names it too.
+  const week = narrow.getByRole('region', { name: 'What this screen will play' });
+  expect(await week.evaluate((w) => w.scrollWidth <= w.clientWidth)).toBe(true);
+  await axe(page);
+  await narrow.getByRole('button', { name: 'Cancel' }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // So does Play on this screen: an entry on one screen is narrower than a default.
   await page.getByRole('button', { name: 'Play on this screen…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
