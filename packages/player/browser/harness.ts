@@ -3,8 +3,9 @@
  * Storage and no service worker) and fixture server per test, and readers for the player's
  * live state (`window.__sf`) and its template frames.
  */
+import { crc32, deflateSync } from 'node:zlib';
 import { afterAll, afterEach, beforeAll, inject } from 'vitest';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright';
 import { buildContent, type FixtureSpot } from './content';
 import { FixtureServer } from './fixture-server';
 
@@ -193,29 +194,58 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
         throw new Error(`player state never matched within ${timeoutMs} ms; last: ${JSON.stringify(last)}\nconsole:\n${lines.join('\n')}`);
       };
       const onScreen = async () => {
-        for (const frame of page.frames()) {
-          if (frame === page.mainFrame()) continue;
-          const el = await frame.frameElement().catch(() => undefined);
-          const shown = await el?.evaluate((e) => {
-            // A template frame sits in a wrapper frame, which sits in the slot.
-            const el = e as HTMLElement;
-            const slot = (el.ownerDocument.defaultView?.frameElement ?? el).closest<HTMLElement>('.slot');
-            return !!slot && slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
-          });
-          if (!shown) continue;
-          if (!(await frame.evaluate(() => !!document.getElementById('label')).catch(() => false))) continue;
-          return frame.evaluate(() => ({
-            label: document.getElementById('label')?.textContent ?? '',
-            items: document.getElementById('box')?.textContent ?? '',
-            playing: document.body.dataset.playing === '1',
-            sample: document.body.dataset.sample ?? '',
-          }));
-        }
-        return undefined;
+        const frame = await visibleFrame(page, 'label');
+        if (!frame) return undefined;
+        return frame.evaluate(() => ({
+          label: document.getElementById('label')?.textContent ?? '',
+          items: document.getElementById('box')?.textContent ?? '',
+          playing: document.body.dataset.playing === '1',
+          sample: document.body.dataset.sample ?? '',
+        }));
       };
       return { page, server, console: lines, state, until, onScreen };
     },
   };
+}
+
+/** The currently visible template frame containing `#<hasId>`, if any. */
+export async function visibleFrame(page: Page, hasId: string): Promise<Frame | undefined> {
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    const el = await frame.frameElement().catch(() => undefined);
+    const shown = await el?.evaluate((e) => {
+      // A template frame sits in a wrapper frame, which sits in the slot.
+      const el = e as HTMLElement;
+      const slot = (el.ownerDocument.defaultView?.frameElement ?? el).closest<HTMLElement>('.slot');
+      return !!slot && slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
+    });
+    if (!shown) continue;
+    if (await frame.evaluate((id) => !!document.getElementById(id), hasId).catch(() => false)) return frame;
+  }
+  return undefined;
+}
+
+/** Minimal valid greyscale PNG of size `w`x`h` with pixel value `shade`, so fixtures have distinct hashes and sizes. */
+export function png(w: number, h: number, shade = 128): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body), body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(w);
+  header.writeUInt32BE(h, 4);
+  header.set([8, 0, 0, 0, 0], 8);
+  const rows = Buffer.concat(Array.from({ length: h }, () => Buffer.from([0, ...Array(w).fill(shade)])));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 /** The ids of the spots played, in order. */

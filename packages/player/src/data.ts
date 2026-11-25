@@ -114,12 +114,10 @@ async function refresh(base: string, id: string, manifest: ScreenManifest): Prom
  * Snapshots from a sync's response, each checked against the manifest `playing` gives as it comes
  * to it: a new manifest the answer names is adopted later, by the content worker, which then marks
  * that manifest's sources loaded too, and one it adopts while these are written is the one the rest
- * are checked against. Then every source of the manifest playing counts as loaded: a spot waiting
- * for its feed starts with what there is.
+ * are checked against.
  */
 export async function offerSnapshots(list: readonly DataSnapshot[], playing: () => ScreenManifest | undefined, desired: string | undefined): Promise<void> {
   for (const snap of list) await offer(snap.id, snap, playing(), desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
-  settleSources(playing());
 }
 
 /** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */
@@ -167,7 +165,7 @@ export function heldVersions(): Record<string, number> {
  * cold boot the first pass runs before any manifest has loaded and finds no sources). Fetch
  * failures are silent: the last good value stays.
  */
-export function startDataLoop(base: string, manifest: () => ScreenManifest | undefined): () => void {
+export function startDataLoop(base: string, manifest: () => ScreenManifest | undefined, onSnapshot?: (m: ScreenManifest) => Promise<void>): () => void {
   // Every source at once: one slow feed must not hold back the others.
   const one = async (m: ScreenManifest, s: ScreenManifest['dataSources'][string]) => {
     await restore(s.id).catch(() => undefined);
@@ -177,6 +175,7 @@ export function startDataLoop(base: string, manifest: () => ScreenManifest | und
       fetchedAt.set(s.id, Date.now());
       await refresh(base, s.id, m).catch(() => undefined);
     }
+    if (onSnapshot) await onSnapshot(m).catch(() => undefined);
     if (!settled.has(s.id)) markSettled(s.id);
   };
   let running: Promise<void> | undefined;

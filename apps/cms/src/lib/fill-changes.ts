@@ -8,7 +8,7 @@
  * the latte on the lunch menu too, and that spot's data with the same columns changed, for the same review.
  */
 import { keyColumn, matchRows, rowKey } from '@signforge/api/agent-inline';
-import type { FieldDef, ScalarFieldDef } from '@signforge/contract';
+import type { FieldDef, ListItemFieldDef } from '@signforge/contract';
 import type { SpotView, TemplateVersionView } from './spots';
 
 type Row = Record<string, unknown>;
@@ -21,7 +21,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 const rowsOf = (v: unknown): Row[] => (Array.isArray(v) ? v.filter((r): r is Row => typeof r === 'object' && r !== null && !Array.isArray(r)) : []);
 
 /** A row in words: its text, number and choice cells, as a person reads a menu line. */
-const rowText = (item: Record<string, ScalarFieldDef>, row: Row) =>
+const rowText = (item: Record<string, ListItemFieldDef>, row: Row) =>
   Object.entries(item)
     .filter(([k, d]) => ['text', 'number', 'select'].includes(d.type) && row[k] !== '' && row[k] !== undefined)
     .map(([k]) => shown(row[k]))
