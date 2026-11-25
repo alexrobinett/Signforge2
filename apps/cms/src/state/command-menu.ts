@@ -28,6 +28,8 @@ interface CommandMenuState {
   running: boolean;
   /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
   opening: number;
+  /** When this opening began: a read cached before it (the count of unpublished changes) is not trusted. */
+  openedAt: number;
 }
 
 export interface CommandMenuSlice {
@@ -63,6 +65,7 @@ const CLOSED: CommandMenuState = {
   choosingOrg: false,
   running: false,
   opening: 0,
+  openedAt: 0,
 };
 
 /** The menu closed: what outlives an opening (a call on its way, the count) stays. */
@@ -117,7 +120,10 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     commandMenu: CLOSED,
     // The phone drawer has the menu's button: the menu takes its place.
     openCommandMenu: () =>
-      set((s) => ({ commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 }, ui: { ...s.ui, drawerOpen: false } })),
+      set((s) => ({
+        commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1, openedAt: Date.now() },
+        ui: { ...s.ui, drawerOpen: false },
+      })),
     closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {
       switch (entry.kind) {

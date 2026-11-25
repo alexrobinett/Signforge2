@@ -98,6 +98,23 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   await publishAll.getByRole('button', { name: 'Cancel' }).click();
   await expect(publishAll).toBeHidden();
 
+  // The count read again on opening fails: Publish all is not offered from the count read before, which said 1.
+  // The sidebar read it already and reads again only each minute, so the reads refused here are the menu's: its read and its retry.
+  let refused = 0;
+  const countsRead = (url: URL) => url.pathname.startsWith('/_serverFn/getNavCounts');
+  await page.route(countsRead, (route) => {
+    refused += 1;
+    return route.abort('connectionrefused');
+  });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => refused).toBeGreaterThanOrEqual(2);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.type('publish all');
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.unroute(countsRead);
+
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();

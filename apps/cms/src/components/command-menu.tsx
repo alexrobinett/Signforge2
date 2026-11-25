@@ -239,8 +239,10 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const playlists = useQuery({ ...playlistsQuery(orgId), enabled: false });
   // Publish all is offered while there is something to publish: the sidebar's own count, read on opening.
   const counts = useQuery({ ...navCountsQuery(orgId, false, false), enabled: orgId !== '' && canPublish, refetchOnMount: 'always' });
-  // Read again on each opening: a count from before is not trusted until this opening's read lands.
-  const drafts = counts.isFetchedAfterMount && counts.data ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
+  // Read again on each opening: offered only once this opening's read has succeeded. A failed one leaves the
+  // cached count, which is not trusted, whatever it says (`isFetchedAfterMount` is set by a failure too).
+  const openedAt = useAppStore((s) => s.commandMenu.openedAt);
+  const drafts = counts.isSuccess && counts.dataUpdatedAt >= openedAt ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
   const shownSelection = selectedItem(selection, found, moved);
