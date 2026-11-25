@@ -28,8 +28,6 @@ interface CommandMenuState {
   running: boolean;
   /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
   opening: number;
-  /** When this opening began: a read cached before it (the count of unpublished changes) is not trusted. */
-  openedAt: number;
 }
 
 export interface CommandMenuSlice {
@@ -37,9 +35,10 @@ export interface CommandMenuSlice {
   openCommandMenu: () => void;
   closeCommandMenu: () => void;
   /**
-   * The menu closed (its `onCloseAutoFocus`): focus goes back to what had it as the menu opened, while that
-   * is still on the page and is not in a menu or something since closed (a menu's content, which focus would
-   * open again); else to the page's main region.
+   * The menu closed (its `onCloseAutoFocus`, which runs once its closing has played): focus goes back to what
+   * had it as the menu opened (for a menu's content, which focus would open again, that menu's button), while
+   * that is still on the page and shown; else to the page's main region. Only while focus is on nothing: by then the member may have
+   * moved on (opened the org switcher), and taking focus from there would close it.
    */
   menuFocusBack: (e: Event) => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
@@ -71,7 +70,6 @@ const CLOSED: CommandMenuState = {
   choosingOrg: false,
   running: false,
   opening: 0,
-  openedAt: 0,
 };
 
 /** The menu closed: what outlives an opening (a call on its way, the count) stays. */
@@ -130,17 +128,18 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     openCommandMenu: () => {
       opener = typeof document === 'undefined' ? null : document.activeElement;
       set((s) => ({
-        commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1, openedAt: Date.now() },
+        commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 },
         ui: { ...s.ui, drawerOpen: false },
       }));
     },
     menuFocusBack(e) {
       e.preventDefault();
-      const back =
-        opener instanceof HTMLElement && opener.isConnected && opener !== document.body && !opener.closest('[role="menu"], [data-state="closed"]')
-          ? opener
-          : null;
-      (back ?? document.getElementById('main'))?.focus();
+      if (document.activeElement && document.activeElement !== document.body) return;
+      // In a menu's content (⌘K pressed as a menu closed), the menu's button, which the content is labelled by.
+      const menu = opener?.closest('[role="menu"]');
+      const back = menu ? document.getElementById(menu.getAttribute('aria-labelledby') ?? '') : opener;
+      const shown = back instanceof HTMLElement && back.isConnected && back !== document.body && back.checkVisibility();
+      (shown ? back : document.getElementById('main'))?.focus();
     },
     closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {

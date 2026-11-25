@@ -95,6 +95,9 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.getByRole('menuitemradio', { name: 'Acme Coffee' }).click();
   await expect(switcher).toContainText('Acme Coffee');
   expect(await activeOrgId(page)).toBe(acme);
+  // Its menu gone before ⌘K: axe below stops animations, which held the menu's closing mid-way, and it played
+  // again as ⌘K closed, under the next click on the switcher, which it then swallowed.
+  await expect(page.getByRole('menu')).toHaveCount(0);
 
   // ⌘K switches too: "Switch organization…" lists the orgs.
   const menu = page.getByRole('dialog', { name: 'Command menu' });

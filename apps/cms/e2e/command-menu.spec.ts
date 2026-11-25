@@ -1,5 +1,5 @@
-import { expect, test, type Request } from '@playwright/test';
-import { axe, createOrg, hydrated, screenshot, signInAs, tool } from './helpers';
+import { expect, test, type Request, type Route } from '@playwright/test';
+import { accountMenu, axe, createOrg, hydrated, screenshot, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -114,6 +114,24 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.unroute(countsRead);
+
+  // Nor while this opening's read is on its way, though the count cached before says 1 and was written at the
+  // same instant as the opening (the clock fixed): only this opening's own read, come back, offers it.
+  await page.clock.setFixedTime(new Date());
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  const held: Route[] = [];
+  await page.route(countsRead, (route) => void held.push(route));
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => held.length).toBe(1);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await held[0]!.continue();
+  await page.unroute(countsRead);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
   await page.keyboard.press('ControlOrMeta+k');
@@ -373,4 +391,30 @@ test('the command menu tells a screen reader the row that is selected, after eac
   await page.keyboard.type('go to spots');
   await pointsAtSelected('Go to Spots');
   await axe(page);
+});
+
+test('closing it gives focus back to what had it, while that is shown; else to the main region (#358)', async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-focus-${Date.now()}@example.com`, '192.0.2.20');
+  await createOrg(page, 'Lantern Lane Focus', '192.0.2.20');
+  await hydrated(page);
+  const menu = page.getByRole('dialog', { name: 'Command menu' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
+
+  // The account button, its menu closed (`data-state="closed"`): focus goes back to it.
+  await accountMenu(page).focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(accountMenu(page)).toBeFocused();
+
+  // Hidden while the menu was open (the sidebar, at a phone's width): to the main region, not the page's body.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(page.locator('#main')).toBeFocused();
 });
