@@ -141,8 +141,8 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
       )}
       {locked && (
         <p id={whyId} className="text-sm text-muted-foreground">
-          Only owners publish in this organization, so only they change this source’s address{source.format === 'rss' ? ' or photos' : ''}: screens follow
-          those changes without a publish.
+          Only owners publish in this organization, so only they change this source’s address{source.format === 'rss' ? ' or photos' : ''}: screens follow those
+          changes without a publish.
         </p>
       )}
       {canManage &&

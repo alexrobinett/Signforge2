@@ -298,9 +298,7 @@ function FailingSources({ sources, clock, canManage, canFix }: { sources: Listed
           {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
         </p>
         {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
-        {canManage && !canFix && hasAddress(s) && (
-          <p className="text-sm">Only an owner can fix its address here: screens follow it without a publish.</p>
-        )}
+        {canManage && !canFix && hasAddress(s) && <p className="text-sm">Only an owner can fix its address here: screens follow it without a publish.</p>}
         {canFix && hasAddress(s) && (
           <Button
             type="button"
