@@ -1,4 +1,4 @@
-import { expect, test, type Frame, type Page } from '@playwright/test';
+import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
 import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -314,7 +314,21 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });
 
-test('a move slides the rows and rings the moved one; under reduced motion it is just made (#385)', async () => {
+/** Rows still sliding (#385) are where they were drawn, not where they are: a drag waits for them, as a person's would. */
+const slid = (list: Locator) =>
+  expect
+    .poll(() =>
+      list
+        .getByRole('listitem')
+        .evaluateAll(
+          (items) =>
+            items.flatMap((li) => li.getAnimations()).filter((a) => a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k))
+              .length,
+        ),
+    )
+    .toBe(0);
+
+test('a move is made at once, then the rows slide and the moved one is ringed; under reduced motion it is just made (#385)', async () => {
   const { playlist } = await tool(page, 'create_playlist', {
     name: 'Motion loop',
     spotIds: [spots.Opening, spots.Lunch, spots.Closing],
@@ -324,17 +338,15 @@ test('a move slides the rows and rings the moved one; under reduced motion it is
   await hydrated(page);
   const list = page.getByRole('list', { name: 'Spots in play order' });
   const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
-  // What the editor asked the browser to draw, kept on the page: each view transition, and each row it ringed, by name.
+  // What the editor asked the browser to draw, kept on the page: each row it slid and the one it ringed, by place and name.
   await page.evaluate(() => {
     const log = (entry: string) => void (document.body.dataset.motion = `${document.body.dataset.motion ?? ''}${entry};`);
-    const slide = document.startViewTransition.bind(document);
-    document.startViewTransition = (change) => {
-      log('slide');
-      return slide(change);
-    };
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (frames, options) {
-      if (this instanceof HTMLLIElement) log(`ring ${this.querySelector('.font-medium')?.textContent}`);
+      if (this instanceof HTMLLIElement && Array.isArray(frames)) {
+        const at = [...(this.parentElement?.children ?? [])].indexOf(this);
+        log(`${'boxShadow' in (frames[0] ?? {}) ? 'ring' : 'slide'} ${at} ${this.querySelector('.font-medium')?.textContent}`);
+      }
       return animate.call(this, frames, options);
     };
   });
@@ -342,29 +354,21 @@ test('a move slides the rows and rings the moved one; under reduced motion it is
     page.evaluate(() => {
       const seen = (document.body.dataset.motion ?? '').split(';').filter(Boolean);
       document.body.dataset.motion = '';
-      return seen;
+      return seen.toSorted();
     });
 
-  // The slide over: while it plays, the page is drawn by the transition and a drag finds no row.
-  const slid = () =>
-    expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            document.documentElement
-              .getAnimations({ subtree: true })
-              .filter((a) => a.effect instanceof KeyframeEffect && a.effect.pseudoElement?.startsWith('::view-transition')).length,
-        ),
-      )
-      .toBe(0);
+  // By its button: the two rows that swapped slide, and the moved one, now second, is ringed.
   await page.getByRole('button', { name: 'Move Closing up' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
-  expect(await motion()).toEqual(['slide', 'ring Closing']);
-  await slid();
+  expect(await motion()).toEqual(['ring 1 Closing', 'slide 1 Closing', 'slide 2 Lunch']);
+  await slid(list);
+  // By a drag: Lunch onto the first row.
   await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
   await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
-  expect(await motion()).toEqual(['slide', 'ring Lunch']);
+  expect(await motion()).toEqual(['ring 0 Lunch', 'slide 0 Lunch', 'slide 1 Opening', 'slide 2 Closing']);
+  await slid(list);
 
+  // Under reduced motion it is just made: nothing slides, nothing is ringed.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: 'Move Lunch down' }).click();
   await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
@@ -372,4 +376,67 @@ test('a move slides the rows and rings the moved one; under reduced motion it is
   await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
   expect(await motion()).toEqual([]);
   await page.emulateMedia({ reducedMotion: null });
+});
+
+test('a spot listed twice: the row moved is the one ringed, at its new place (review of #449)', async () => {
+  const { playlist } = await tool(page, 'create_playlist', {
+    name: 'Twice loop',
+    spotIds: [spots.Opening, spots.Lunch, spots.Opening],
+    idempotencyKey: `twice-loop-${Date.now()}`,
+  });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const list = page.getByRole('list', { name: 'Spots in play order' });
+  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  await page.evaluate(() => {
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      if (this instanceof HTMLLIElement && Array.isArray(frames) && 'boxShadow' in (frames[0] ?? {}))
+        document.body.dataset.ringed = String([...(this.parentElement?.children ?? [])].indexOf(this));
+      return animate.call(this, frames, options);
+    };
+  });
+  // The second Opening, third, moved up: the row ringed is the one now second, not the first Opening.
+  await list.getByRole('listitem').nth(2).getByRole('button', { name: 'Move Opening up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Opening', 'Lunch']);
+  expect(await page.evaluate(() => document.body.dataset.ringed)).toBe('1');
+  // Moved up past its own copy: React keeps each row's node in place (rows are keyed by copy), so the node pressed
+  // stays second; the row ringed is the first, where the moved one now is.
+  await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Move Opening up' }).click();
+  await expect.poll(() => page.evaluate(() => document.body.dataset.ringed)).toBe('0');
+});
+
+test('a move lands though the browser cannot draw it: no view transitions, or an animation that throws (review of #449)', async () => {
+  const { playlist } = await tool(page, 'create_playlist', {
+    name: 'Plain loop',
+    spotIds: [spots.Opening, spots.Lunch, spots.Closing],
+    idempotencyKey: `plain-loop-${Date.now()}`,
+  });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const list = page.getByRole('list', { name: 'Spots in play order' });
+  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  const errors: Error[] = [];
+  const onError = (e: Error) => void errors.push(e);
+  page.on('pageerror', onError);
+  // A browser without view transitions.
+  await page.evaluate(() => Reflect.deleteProperty(Document.prototype, 'startViewTransition'));
+  await page.getByRole('button', { name: 'Move Closing up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  await slid(list);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
+  await slid(list);
+  // One whose animations throw.
+  await page.evaluate(() => {
+    Element.prototype.animate = () => {
+      throw new Error('no animations here');
+    };
+  });
+  await page.getByRole('button', { name: 'Move Lunch down' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
+  expect(errors).toEqual([]);
+  page.off('pageerror', onError);
 });

@@ -63,8 +63,8 @@ export interface PlaylistEditorSlice {
   /** The moved row's button has taken focus. */
   focusMoved: () => void;
   startDragSpot: (index: number | null) => void;
-  /** A row dragged from `from` was dropped on `index`: `from` is the drag's own, as the move may run after the drag has ended (#385). */
-  dropSpot: (orgId: string, playlistId: string, from: number, index: number) => void;
+  /** Drops the dragged spot at `index`. */
+  dropSpot: (orgId: string, playlistId: string, index: number) => void;
   openAddSpots: (open: boolean) => void;
   searchAddSpots: (query: string) => void;
   /** Saves the playlist's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
@@ -199,9 +199,10 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
     startDragSpot: (dragging) => editor((e) => ({ ...e, dragging })),
 
-    dropSpot(orgId, playlistId, from, index) {
-      get().startDragSpot(null);
-      if (from !== index) get().moveSpotInPlaylist(orgId, playlistId, from, index);
+    dropSpot(orgId, playlistId, index) {
+      const from = get().playlistEditor.dragging;
+      if (from === null || from === index) return get().startDragSpot(null);
+      get().moveSpotInPlaylist(orgId, playlistId, from, index);
     },
 
     openAddSpots: (adding) => editor((e) => ({ ...e, adding, addQuery: '' })),

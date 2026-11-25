@@ -116,6 +116,9 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
       .first()
       .evaluate((s) => [getComputedStyle(s).transitionProperty, getComputedStyle(s).transitionDuration]);
   expect(await easing()).toEqual(['flex-grow', '0.3s']);
+  // Every part stays drawn, an empty one at no width, so the bar can ease to the whole of it, and back.
+  expect(await rollout.locator('span').count()).toBe(8);
+  expect(await rollout.locator('span').evaluateAll((parts) => parts.filter((p) => getComputedStyle(p).flexGrow === '0').length)).toBeGreaterThan(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect((await easing())[1]).toBe('1e-05s');
   await page.emulateMedia({ reducedMotion: null });

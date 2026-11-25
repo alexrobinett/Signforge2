@@ -2,21 +2,25 @@
  * A publish's rollout (canvas boards Screens A and Ideas 5-6, kit RolloutBar): a bar of where its
  * screens stand, and a legend that says why each waiting screen waits, never colour alone.
  */
-import { OUTCOME_COLOR, rolloutLabel, segments, type PublishView, type RolloutScreen } from '~/lib/publishes';
+import { ORDER, OUTCOME_COLOR, rolloutLabel, segments, type PublishView, type RolloutScreen } from '~/lib/publishes';
 import { cn } from '~/lib/utils';
 
-/** The bar, one part per outcome, each as wide as its share of the screens. */
+/**
+ * The bar, one part per outcome, each as wide as its share of the screens. Every part stays drawn, an empty one at no
+ * width, so as screens take a publish each eases to its new width (#385), down to none and up to the whole bar; under
+ * reduced motion it is set at once (styles.css). The gap between parts is an inset edge, which an empty part does not take.
+ */
 export function RolloutBar({ publish, screens, now, className }: { publish: PublishView; screens: RolloutScreen[]; now: number; className?: string }) {
   const segs = segments(publish, screens, now);
+  const counts = new Map(segs.map((s) => [s.outcome, s.count]));
   return (
-    <div
-      role="img"
-      aria-label={rolloutLabel(publish, segs, screens.length)}
-      className={cn('flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-muted', className)}
-    >
-      {segs.map((s) => (
-        // As screens take the publish, each part eases to its new width (#385); under reduced motion it is set at once (styles.css).
-        <span key={s.outcome} className="transition-[flex-grow] duration-300 ease-out" style={{ flex: s.count, background: OUTCOME_COLOR[s.outcome] }} />
+    <div role="img" aria-label={rolloutLabel(publish, segs, screens.length)} className={cn('flex h-2.5 overflow-hidden rounded-full bg-muted', className)}>
+      {ORDER.map((outcome) => (
+        <span
+          key={outcome}
+          className="basis-0 shadow-[inset_2px_0_0_var(--muted)] transition-[flex-grow] duration-300 ease-out first:shadow-none"
+          style={{ flexGrow: counts.get(outcome) ?? 0, background: OUTCOME_COLOR[outcome] }}
+        />
       ))}
     </div>
   );
