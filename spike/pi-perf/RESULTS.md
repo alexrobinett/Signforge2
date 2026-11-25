@@ -982,6 +982,20 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 
   The last was run twice, 6 runs each orientation: every cold prepare under 500 ms (407 to 487 ms), every warm one 244 to 380 ms. The estimate is taken in the layout at full size, from what the text needs: height about as the square of the scale, the regions that share a column together. In the cases tried (W, W words, Japanese, `﷽`, `⸻` and `ﷺ` at every limit, with and without the code, both orientations) it came within 0.07 of the answer in all but one (0.14, portrait without the code, W words), and four probes found the scale in all but that one (six).
 
+### The headline's room and a search that always reaches 1/64 (review of #448, round 5, 2026-11-25)
+
+`b400dee`: the headline keeps room below its line for real scripts' marks (`padding-bottom: 0.25em`, measured by the fit), and the search may take eight probes (it stops at 1/64, four as a rule). Worst-case prepares, cold (first) and warm, with the tools above:
+
+| Copy | Orientation | Cold | Warm |
+| --- | --- | --- | --- |
+| `﷽` in every field (4 probes) | landscape | 517, 408, 475, 439, 433, 438 ms | 255-287 ms |
+| | portrait | 498, 450, 455, 444, 483, 426 ms | 314-371 ms |
+| W words in every field, no code (6 probes, the most seen) | landscape | 332, 343, 320 ms | 178-197 ms |
+| | portrait | 354, 342, 338 ms | 247-281 ms |
+
+- **One cold prepare over 500 ms in 12:** 517 ms, the session's first run (landscape, `﷽`). The other eleven were 408 to 498 ms; the same search at `5ec7a79` gave 407 to 487 ms in 12. The probe cap is not what it costs: `﷽` takes four probes, as before.
+- The case that takes the most probes (six) has light text, and its cold prepare is 320 to 354 ms.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
