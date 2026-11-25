@@ -971,6 +971,17 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 
   The cold prepare is 533 to 590 ms, over the 500 ms budget by up to 90 ms, and inside the 2 s ready timeout. Warm prepares are within it: 328 to 362 ms landscape, 432 to 475 ms portrait. Such copy cannot be realistic: 40 of `﷽` in the headline. Fewer halvings would bring it in, at a coarser fit.
 
+  **Brought under the budget** (the same session's tools, later that day, the Pi otherwise as above). Without any search (the scale left at 1), the cold prepare of that copy is 373 to 394 ms, about default copy's (323 to 397 ms): the search was what took it over, 14 layouts of reshaped text. Step by step, 3 runs each orientation:
+
+  | Search | Layouts | Cold, landscape | Cold, portrait | Warm |
+  | --- | --- | --- | --- | --- |
+  | 8 halvings, each scale in turn | 18 | 541-590 ms | 533-566 ms | 328-475 ms |
+  | 6 halvings, each scale in turn | 14 | 458-579 ms | 471-541 ms | 296-417 ms |
+  | 6 halvings, both scales sharing each layout | 7 | 441-491 ms | 492-510 ms | 278-412 ms |
+  | Estimate, a stride, then halves to 1/64, sharing layouts (shipped) | 5 | 407-466 ms | 452-487 ms | 244-380 ms |
+
+  The last was run twice, 6 runs each orientation: every cold prepare under 500 ms (407 to 487 ms), every warm one 244 to 380 ms. The estimate is taken in the layout at full size, from what the text needs: height about as the square of the scale, the regions that share a column together. In the cases tried (W, W words, Japanese, `﷽`, `⸻` and `ﷺ` at every limit, with and without the code, both orientations) it came within 0.07 of the answer in all but one (0.14, portrait without the code, W words), and four probes found the scale in all but that one (six).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
