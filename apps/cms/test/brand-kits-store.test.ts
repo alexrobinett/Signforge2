@@ -124,7 +124,7 @@ beforeEach(() => {
   vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
   vi.stubGlobal('location', { origin: 'http://cms.test' });
   held.clear();
-  router.state.location.href = '/settings/brand-kits';
+  router.state.location.href = '/brand-kits';
   router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }];
   router.navigate.mockClear();
   vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (_: AlgorithmIdentifier, data: BufferSource) => {
@@ -415,7 +415,7 @@ describe('kit actions run one at a time (review of #143)', () => {
     calls[0]!.answer(200, { brandKit: { ...kit('bk_one', '#2563eb'), name: 'One' } });
     await creating;
     expect(router.navigate).toHaveBeenCalledTimes(1);
-    expect(router.navigate).toHaveBeenCalledWith({ to: '/settings/brand-kits/$kitId', params: { kitId: 'bk_one' } });
+    expect(router.navigate).toHaveBeenCalledWith({ to: '/brand-kits/$kitId', params: { kitId: 'bk_one' } });
   });
 
   it('a copy that is made after the member has moved on does not take them away from where they are now', async () => {

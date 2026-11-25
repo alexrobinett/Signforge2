@@ -16,7 +16,6 @@ const LINK =
 const ORG_PAGES = [
   { to: '/settings/general', label: 'General' },
   { to: '/settings/members', label: 'Members & roles' },
-  { to: '/settings/brand-kits', label: 'Brand kits' },
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/ai', label: 'AI model' },
