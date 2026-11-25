@@ -3,7 +3,7 @@
 // decodes. Real images through the browser and real presigned PUTs: packages/media/test/upload.test.ts.
 import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
 import { racing } from './calls';
 import { memberOf } from './member';
@@ -215,14 +215,15 @@ describe('finalize_asset', () => {
     expect((await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).objects).toHaveLength(1);
     await call('delete_asset', { assetId: pending.asset.id });
     expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).toMatchObject({ objects: [] });
-    // Never finalized, it stored nothing: nothing is queued for the storage sweep (#235).
+    // Never finalized, yet its hashes are queued for the storage sweep: an earlier upload may have stored the same bytes,
+    // which it deletes only if nothing else names them (#235, review of #429, round 2, 5).
     expect(
       (
         await env.DB.prepare('SELECT count(*) AS n FROM blob_deletes WHERE org_id = ? AND sha256 IN (?, ?)')
           .bind(o.orgId, await sha256(l), await sha256(p))
           .first<{ n: number }>()
       )?.n,
-    ).toBe(0);
+    ).toBe(2);
   });
 
   it("refuses a sample that is not a PNG of its rendition's sample size", async () => {
@@ -408,8 +409,8 @@ describe('list, usage and delete', () => {
     expect(await org.assets.get(o.asset)).toBeUndefined();
     expect(await org.assets.renditions.forAsset(o.asset)).toEqual([]);
     // Its stored files are queued, in the same batch, for the storage sweep (#235).
-    const queued = await env.DB.prepare('SELECT sha256, queued_at AS at FROM blob_deletes WHERE org_id = ?')
-      .bind(o.orgId)
+    const queued = await env.DB.prepare('SELECT sha256, queued_at AS at FROM blob_deletes WHERE org_id = ? AND sha256 IN (SELECT value FROM json_each(?))')
+      .bind(o.orgId, JSON.stringify(files))
       .all<{ sha256: string; at: number }>();
     expect(queued.results.map((q) => q.sha256).toSorted()).toEqual([...new Set(files)].sort());
     expect(new Set(queued.results.map((q) => q.at))).toEqual(new Set([at]));
@@ -454,13 +455,20 @@ describe('list, usage and delete', () => {
 });
 
 describe('the storage sweep and uploads (#235, review of #429, 6)', () => {
+  // On a fixed clock (review of #429, round 2, 7).
+  const AT = Date.UTC(2026, 4, 1, 9);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(AT);
+  });
+  afterEach(() => vi.useRealTimers());
   /** The sweep's claim on `sha`, as its claim batch writes it: held for an hour, or run out. */
   const claimFile = (sha: string, held: boolean) =>
     env.DB.prepare(
       `INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)
        ON CONFLICT (org_id, sha256) DO UPDATE SET claim_owner = excluded.claim_owner, claim_until = excluded.claim_until`,
     )
-      .bind(o.orgId, sha, held ? Date.now() + 3_600_000 : 0)
+      .bind(o.orgId, sha, held ? AT + 3_600_000 : 0)
       .run();
   const pair = (seed: number) => {
     const l = png(1920, 1080, seed),
@@ -469,6 +477,15 @@ describe('the storage sweep and uploads (#235, review of #429, 6)', () => {
       ([lc, pc]) => ({ landscape: [l, lc], portrait: [p, pc] }) as { landscape: [Uint8Array, { sha256: string }]; portrait: [Uint8Array, { sha256: string }] },
     );
   };
+
+  it("queues a pending upload's file when it is deleted: an earlier one may have stored the bytes (round 2, 5)", async () => {
+    const org = testScope(env.DB, o.orgId);
+    const sha = 'd'.repeat(64);
+    const pending = await org.assets.insert({ kind: 'video', name: 'Never finished', sha256: sha, type: 'video/mp4', size: 1 });
+    expect(await call('delete_asset', { assetId: pending.id })).toEqual({ deleted: pending.id });
+    const row = await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(o.orgId, sha).first<{ q: number }>();
+    expect(row?.q).toBe(AT);
+  });
 
   it('refuses to start an upload of bytes the sweep has claimed, and starts it once the claim has run out', async () => {
     const files = await pair(30);

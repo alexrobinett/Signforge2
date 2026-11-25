@@ -423,7 +423,9 @@ const deleteAsset = defineTool({
     // Held to the commit: a spot or a brand kit that took it up meanwhile refuses the batch (review of #429).
     write({ row: undefined, writes: [org.assets.stage.unused(asset.id)] });
     write(org.assets.stage.delete(asset.id));
-    if (asset.status === 'verified') write(org.storage.stage.queue(files, Date.now()));
+    // Whatever its status: a pending or rejected upload may name bytes an earlier one stored, which the sweep then deletes
+    // only if nothing else names them (review of #429, round 2, 5).
+    write(org.storage.stage.queue(files, Date.now()));
     return { deleted: asset.id };
   },
   // Its batch refused as it ran: a spot or a brand kit took the asset up meanwhile.

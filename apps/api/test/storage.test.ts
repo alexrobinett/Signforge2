@@ -138,6 +138,30 @@ describe('the storage sweep', () => {
     expect(await exists(key)).toBe(false);
   });
 
+  it('deletes no file when a screen reports a manifest not indexed while the run reads others (review of #429, round 2, 1)', async () => {
+    const { screen, key } = await orgWithDueFile('sweep-race', sha('a'));
+    const t = testScope(env.DB, 'sweep-race');
+    const other = (await t.screens.insert({ name: 'Hall', timezone: 'UTC', orientation: 'landscape' })).id;
+    await published('sweep-race', 'pub_r1', 1, T0 + DAY, screen, 'man_r1', []);
+    // As the run reads man_r1 from R2, the other screen reports a manifest stored nowhere the sweep knows of.
+    const racing = recorded();
+    const blobs: SweptBlobs = {
+      ...racing.blobs,
+      get: async (k) => {
+        await run("UPDATE screens SET heartbeat_json = json_object('manifest', json_object('lastGood', 'man_unknown')) WHERE id = ?", other);
+        return env.BLOBS.get(k);
+      },
+    };
+    expect(await sweepStorage(env.DB, blobs, at(DUE))).toBe(0);
+    expect(await exists(key)).toBe(true);
+    // Read on the next run and found in no object: unknown, so still no file goes while it is reported.
+    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + STORAGE_LEASE_MS))).toBe(0);
+    expect(await exists(key)).toBe(true);
+    await run('UPDATE screens SET heartbeat_json = NULL WHERE id = ?', other);
+    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + 2 * STORAGE_LEASE_MS))).toBe(1);
+    expect(await exists(key)).toBe(false);
+  });
+
   it('deletes nothing once too little of its lease is left, and the next run takes the claim up', async () => {
     const { key } = await orgWithDueFile('sweep-late', sha('7'));
     // The run's start and the lease taken at DUE; by the check before the delete, the lease is nearly out.

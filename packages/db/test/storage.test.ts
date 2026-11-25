@@ -39,15 +39,16 @@ async function publish(orgId: string, id: string, revision: number, at: number, 
   for (const [screenId, manifestId] of rows)
     await run('INSERT INTO publish_screens (org_id, publish_id, screen_id, manifest_id) VALUES (?, ?, ?, ?)', orgId, id, screenId, manifestId);
 }
-const index = async (orgId: string, manifests: { id: string; files: string[] }[]) => {
+/** Indexes manifests as stored for `screenId` (a manifest's files are its own whatever the screen). */
+const index = async (orgId: string, manifests: { id: string; files: string[] | null }[], screenId = 'scr_stored') => {
   const org = scoped(env.DB, orgId);
-  await org.commit(org.storage.stage.index(manifests, T0).writes);
+  await org.commit(org.storage.stage.index(manifests.map((m) => ({ ...m, screenId })), T0).writes);
 };
 /** Leases the org for `owner` at `at` and claims what is due then. */
 async function claimed(orgId: string, at: number, owner = 'sweep-a') {
   const org = scoped(env.DB, orgId);
   expect(await org.storage.lease(owner, at)).toBe(true);
-  return org.storage.claim(owner, at, 90, true);
+  return org.storage.claim(owner, at, 90);
 }
 const queuedAt = async (orgId: string, hash: string) =>
   (await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ q: number }>())?.q;
@@ -170,13 +171,42 @@ describe('the manifests an org keeps, and the files they name (review of #429, 1
     const [screen] = screens as [string];
     await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('9'), screen);
     expect(await scoped(env.DB, orgId).storage.unindexed(DUE, 10)).toEqual([{ screenId: screen, manifestId: m('9') }]);
-    await index(orgId, [{ id: m('9'), files: [sha('d')] }]);
-    // Indexed once: again with other files changes nothing.
-    await index(orgId, [{ id: m('9'), files: [] }]);
+    await index(orgId, [{ id: m('9'), files: [sha('d')] }], screen);
+    // Known files are never replaced by unknown ones.
+    await index(orgId, [{ id: m('9'), files: null }], screen);
     expect(await scoped(env.DB, orgId).storage.unindexed(DUE, 10)).toEqual([]);
     expect(await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ?').bind(orgId).first<{ f: string }>()).toEqual({
       f: JSON.stringify([sha('d')]),
     });
+  });
+
+  it("keeps a manifest's files when a screen it is not stored for reports it: no object there, unknown, not empty (round 2, 2: case A)", async () => {
+    const { orgId, screens } = await fresh(2);
+    const [a, b] = screens as [string, string];
+    await publish(orgId, 'pub_x1', 1, T0 - DAY, [[a, m('a')]]);
+    await index(orgId, [{ id: m('a'), files: [sha('a')] }], a);
+    await queueDeletedFiles(env.DB, orgId, [sha('a'), sha('b')], T0);
+    // B reports A's manifest; the sweep finds no object for B and indexes it as unknown there.
+    await run("UPDATE screens SET heartbeat_json = json_object('manifest', json_object('lastGood', ?)) WHERE id = ?", m('a'), b);
+    await index(orgId, [{ id: m('a'), files: null }], b);
+    // A's row still says what it names: its file stays, and the org's other due file goes.
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('b')]);
+  });
+
+  it('holds every file back while a screen reports a manifest not stored yet, until its publish indexes it (round 2, 2: case B)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
+    await queueDeletedFiles(env.DB, orgId, [sha('c')], T0);
+    await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('c'), s);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([{ screenId: s, manifestId: m('c') }]);
+    // No object yet: unknown, not looked for again, and no file goes.
+    await index(orgId, [{ id: m('c'), files: null }], s);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
+    expect((await claimed(orgId, DUE)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE).writes);
+    // Its publish stores it: the real write replaces the unknown one, and the file goes.
+    await index(orgId, [{ id: m('c'), files: [] }], s);
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('c')]);
   });
 
   it('indexes a thousand manifests in parts under D1’s limits', async () => {
@@ -194,11 +224,11 @@ describe("the sweep's lease and claims (review of #429, 7)", () => {
     expect(await org.storage.lease('sweep-a', DUE)).toBe(true);
     expect(await org.storage.lease('sweep-b', DUE + STORAGE_LEASE_MS - 1)).toBe(false);
     // A claim made by one that does not hold the lease takes nothing.
-    expect((await org.storage.claim('sweep-b', DUE, 90, true)).files).toEqual([]);
-    expect((await org.storage.claim('sweep-a', DUE, 90, true)).files).toEqual([sha('1')]);
+    expect((await org.storage.claim('sweep-b', DUE, 90)).files).toEqual([]);
+    expect((await org.storage.claim('sweep-a', DUE, 90)).files).toEqual([sha('1')]);
     // Past the lease, another may take over, and A's claims have expired with it.
     expect(await org.storage.lease('sweep-b', DUE + STORAGE_LEASE_MS)).toBe(true);
-    expect((await org.storage.claim('sweep-b', DUE + STORAGE_LEASE_MS, 90, true)).files).toEqual([sha('1')]);
+    expect((await org.storage.claim('sweep-b', DUE + STORAGE_LEASE_MS, 90)).files).toEqual([sha('1')]);
     // A's last batch is refused: it no longer holds the lease, and B's claim stands.
     await expect(org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [] }, 'sweep-a', DUE + STORAGE_LEASE_MS).writes)).rejects.toBeInstanceOf(
       StaleVersionError,
@@ -210,11 +240,27 @@ describe("the sweep's lease and claims (review of #429, 7)", () => {
     expect(row).toMatchObject({ actorKind: 'system', actorId: 'storage-sweep', clientId: null, at: DUE + STORAGE_LEASE_MS });
   });
 
-  it('claims nothing while a kept manifest is not indexed', async () => {
-    const { orgId, org } = await fresh();
+  it('claims no file when a manifest is kept, unindexed, between the look for unindexed ones and the claim (round 2, 1)', async () => {
+    const { orgId, org, screens } = await fresh(1);
+    const [s] = screens as [string];
     await queueDeletedFiles(env.DB, orgId, [sha('2')], T0);
     expect(await org.storage.lease('sweep-a', DUE)).toBe(true);
-    expect((await org.storage.claim('sweep-a', DUE, 90, false)).files).toEqual([]);
+    expect(await org.storage.unindexed(DUE, 10)).toEqual([]);
+    // The screen reports a manifest the index does not know after the sweep looked: its claim takes no file.
+    await run('UPDATE screens SET reported_manifest_id = ? WHERE id = ?', m('d'), s);
+    expect((await org.storage.claim('sweep-a', DUE, 90)).files).toEqual([]);
+  });
+
+  it('puts an org whose sweep failed behind the others: the lease marks it swept as it is taken (round 2, 6)', async () => {
+    const failing = await fresh();
+    const other = await fresh();
+    for (const o of [failing, other]) await queueDeletedFiles(env.DB, o.orgId, [sha('4')], T0);
+    const at = DUE + 900 * DAY;
+    const order = async (now: number) => (await orgsWithStorageDue(env.DB, now, 1000)).filter((id) => id === failing.orgId || id === other.orgId);
+    expect(await order(at)).toEqual([failing.orgId, other.orgId]);
+    // Its sweep takes the lease and throws before letting it go.
+    expect(await failing.org.storage.lease('sweep-a', at)).toBe(true);
+    expect(await order(at + STORAGE_LEASE_MS)).toEqual([other.orgId, failing.orgId]);
   });
 
   it('lists the orgs due, the least recently swept first, so none waits behind another’s backlog (9)', async () => {

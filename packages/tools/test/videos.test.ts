@@ -92,14 +92,21 @@ describe('create_video_upload', () => {
 
   it('refuses a file the storage sweep has claimed for deletion (#235)', async () => {
     const sha = 'c'.repeat(64);
-    await env.DB.prepare("INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)")
-      .bind(o.orgId, sha, Date.now() + 3_600_000)
-      .run();
-    expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
-      ok: false,
-      error: 'conflict',
-      message: expect.stringContaining('storage clean-up'),
-    });
+    const at = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    try {
+      await env.DB.prepare("INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)")
+        .bind(o.orgId, sha, at + 60_000)
+        .run();
+      expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

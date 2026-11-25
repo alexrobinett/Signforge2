@@ -18,9 +18,10 @@ CREATE TABLE `storage_sweeps` (
 --> statement-breakpoint
 CREATE TABLE `stored_manifests` (
 	`org_id` text NOT NULL,
+	`screen_id` text NOT NULL,
 	`manifest_id` text NOT NULL,
-	`files_json` text NOT NULL,
+	`files_json` text,
 	`stored_at` integer NOT NULL,
-	PRIMARY KEY(`org_id`, `manifest_id`),
+	PRIMARY KEY(`org_id`, `screen_id`, `manifest_id`),
 	FOREIGN KEY (`org_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE no action
 );

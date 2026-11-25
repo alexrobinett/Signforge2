@@ -14,8 +14,10 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
+import type { ScreenManifest } from '@signforge/contract';
 import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
 import { z } from 'zod';
+import { clearOfSweep } from './assets';
 import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
@@ -53,11 +55,17 @@ const publishManifestToScreen = defineTool({
     if (!screen) throw notFound('screen', input.screenId);
     // A manifest is stored only once every file it lists is in R2 (the /admin upload checks), so
     // a stored manifest is one the screen can fetch completely. The key is under this org alone.
-    if (!(await blobs.head(manifestKey(org.orgId, screen.id, input.manifestId)))) {
+    const stored = await blobs.get(manifestKey(org.orgId, screen.id, input.manifestId));
+    if (!stored) {
       throw new ToolError('not_found', `manifest ${input.manifestId} has not been uploaded for screen ${screen.id}`);
     }
     const changed = screen.desiredManifestId !== input.manifestId;
     if (changed) {
+      // Checked as /admin stored it. Its files are fenced against the storage sweep and indexed with the switch, so the
+      // sweep keeps them from the commit on (#235, review of #429, round 2).
+      const files = Object.keys((await stored.json<Pick<ScreenManifest, 'files'>>()).files);
+      await clearOfSweep(org, write, files);
+      write(org.storage.stage.index([{ screenId: screen.id, id: input.manifestId, files }], Date.now()));
       write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));
       // The screen's socket carries it at once; its next sync would anyway.
       notify((screens) => screens.manifest(screen.id, input.manifestId));
@@ -160,7 +168,7 @@ export async function runPublish(
   write({ row: undefined, writes: org.storage.stage.filesLive(files) });
   write(
     org.storage.stage.index(
-      changed.map((m) => ({ id: m.id, files: Object.keys(m.files) })),
+      changed.map((m) => ({ screenId: m.screen.id, id: m.id, files: Object.keys(m.files) })),
       Date.now(),
     ),
   );

@@ -24,7 +24,7 @@
  * asset's file is refused at its commit (`stage.filesLive`). The sweep deletes objects only while its lease holds, and its
  * last batch, guarded by that lease, forgets only its own claims. A run that fails part-way is taken up by the next.
  */
-import { and, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, eq, inArray, lte, type SQL, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { newId } from './ids';
 import * as s from './schema';
@@ -76,13 +76,35 @@ const named = sql`(
   OR EXISTS (SELECT 1 FROM template_versions tv WHERE tv.org_id = ${bd.orgId} AND (tv.bundle_sha256 = ${bd.sha256} OR instr(tv.check_report_json, ${bd.sha256}) > 0))
 )`;
 
-/** A queued file a kept manifest names, by the index. */
+/**
+ * A queued file a kept manifest names, by the index. By manifest id: its id is its content's hash, so a manifest names
+ * the same files for every screen it is stored for, and a row whose files are known for one screen holds for them all.
+ */
 const inKept = (orgId: string, cutoff: number) =>
   sql`EXISTS (SELECT 1 FROM stored_manifests m, json_each(m.files_json) f WHERE m.org_id = ${orgId} AND f.value = ${bd.sha256}
     AND m.manifest_id IN (SELECT manifest_id FROM (${keptManifests(orgId, cutoff)})))`;
 
+/** A manifest id whose files the index knows (a row for any screen with `files_json`). */
+const known = (orgId: string, manifestId: SQL) =>
+  sql`EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.manifest_id = ${manifestId} AND m.files_json IS NOT NULL)`;
+
+/**
+ * Every kept manifest's files are known when the batch runs (review of #429, round 2): read in the claim's own statement,
+ * so a screen reporting, or a push naming, a manifest not indexed yet while a sweep runs holds every file back. One found
+ * in no R2 object is unknown, and holds them back for as long as it is kept.
+ */
+const allKnown = (orgId: string, cutoff: number) =>
+  sql`NOT EXISTS (SELECT 1 FROM (${keptManifests(orgId, cutoff)}) k WHERE NOT ${known(orgId, sql`k.manifest_id`)})`;
+
 /** A list of hashes as one bound value: `IN (SELECT value FROM json_each(?))`. */
 const anyOf = (shas: readonly string[]) => sql`(SELECT value FROM json_each(${JSON.stringify([...new Set(shas)])}))`;
+
+/** A manifest as the index holds it: the screen it is stored for, its id, and the files it names (null: unknown). */
+interface IndexedManifest {
+  screenId: string;
+  id: string;
+  files: readonly string[] | null;
+}
 
 /** What one sweep of an org deletes: its claimed files, and unfinished uploads with their files. */
 export interface StorageDue {
@@ -112,28 +134,35 @@ export function storage(db: Db, orgId: string) {
   const leased = (owner: string, at: number) =>
     sql`EXISTS (SELECT 1 FROM ${sw} WHERE ${sw.orgId} = ${orgId} AND ${sw.owner} = ${owner} AND ${sw.leaseUntil} > ${at})`;
   return {
-    /** Takes the org's sweep lease for `owner` until `now + STORAGE_LEASE_MS`, unless another holds it. Whether it did. */
+    /**
+     * Takes the org's sweep lease for `owner` until `now + STORAGE_LEASE_MS`, unless another holds it, and marks the org
+     * swept now: one whose sweep then fails goes behind the others next time (review of #429, round 2). Whether it did.
+     */
     lease: async (owner: string, now: number): Promise<boolean> => {
       const taken = await db
         .insert(sw)
-        .values({ orgId, owner, leaseUntil: now + STORAGE_LEASE_MS })
-        .onConflictDoUpdate({ target: sw.orgId, set: { owner, leaseUntil: now + STORAGE_LEASE_MS }, setWhere: lte(sw.leaseUntil, now) })
+        .values({ orgId, owner, leaseUntil: now + STORAGE_LEASE_MS, sweptAt: now })
+        .onConflictDoUpdate({ target: sw.orgId, set: { owner, leaseUntil: now + STORAGE_LEASE_MS, sweptAt: now }, setWhere: lte(sw.leaseUntil, now) })
         .returning({ owner: sw.owner })
         .all();
       return taken[0]?.owner === owner;
     },
-    /** Up to `limit` kept manifests not yet in the index, with a screen they are stored for: what the sweep indexes from R2. */
+    /**
+     * Up to `limit` kept manifests whose files the index does not know, by a screen they are kept for that the sweep has not
+     * looked for yet: what it reads from R2. One it found no object for is not looked for again: a real write replaces it.
+     */
     unindexed: (now: number, limit: number) =>
       db.all<{ screenId: string; manifestId: string }>(sql`
         SELECT k.screen_id AS screenId, k.manifest_id AS manifestId FROM (${keptManifests(orgId, now - STORAGE_GRACE_MS)}) k
-        WHERE NOT EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.manifest_id = k.manifest_id)
-        ORDER BY k.manifest_id LIMIT ${limit}`),
+        WHERE NOT ${known(orgId, sql`k.manifest_id`)}
+        AND NOT EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = ${orgId} AND m.screen_id = k.screen_id AND m.manifest_id = k.manifest_id)
+        ORDER BY k.manifest_id, k.screen_id LIMIT ${limit}`),
     /**
      * Claims for `owner`, which holds the org's lease, up to `limit` files due at `now` and up to `limit` unfinished uploads.
-     * Files only when `filesIndexed`: every kept manifest is in the index. A queued file the org names again is forgotten
-     * there: it is not a deleted asset's alone any more. Nothing is deleted here.
+     * Files only while every kept manifest's files are known (`allKnown`, checked as the claim runs). A queued file the org
+     * names again is forgotten there: it is not a deleted asset's alone any more. Nothing is deleted here.
      */
-    claim: async (owner: string, now: number, limit: number, filesIndexed: boolean): Promise<StorageDue> => {
+    claim: async (owner: string, now: number, limit: number): Promise<StorageDue> => {
       const cutoff = now - STORAGE_GRACE_MS;
       const mine = eq(bd.orgId, orgId);
       const due = db
@@ -142,16 +171,14 @@ export function storage(db: Db, orgId: string) {
         .where(and(mine, lte(bd.queuedAt, cutoff), lte(bd.claimUntil, now), sql`NOT ${named}`, sql`NOT ${inKept(orgId, cutoff)}`))
         .orderBy(bd.queuedAt, bd.sha256)
         .limit(limit);
-      const [claimed] = filesIndexed
-        ? await db.batch([
-            db
-              .update(bd)
-              .set({ claimOwner: owner, claimUntil: now + STORAGE_LEASE_MS })
-              .where(and(mine, inArray(bd.sha256, due), leased(owner, now)))
-              .returning({ sha256: bd.sha256 }),
-            db.delete(bd).where(and(mine, sql`${named}`)),
-          ])
-        : [[]];
+      const [claimed] = await db.batch([
+        db
+          .update(bd)
+          .set({ claimOwner: owner, claimUntil: now + STORAGE_LEASE_MS })
+          .where(and(mine, inArray(bd.sha256, due), leased(owner, now), allKnown(orgId, cutoff)))
+          .returning({ sha256: bd.sha256 }),
+        db.delete(bd).where(and(mine, sql`${named}`)),
+      ]);
       const pending = await db
         .select({ id: a.id, kind: a.kind, sha256: a.sha256 })
         .from(a)
@@ -244,13 +271,16 @@ export function storage(db: Db, orgId: string) {
               ),
             ]
           : [],
-      /** The files each manifest names, indexed as it is stored at `now`: one already indexed is kept. In parts under D1's limits. */
-      index: (manifests: readonly { id: string; files: readonly string[] }[], now: number): Staged => {
-        const parts: { id: string; files: string }[][] = [[]];
+      /**
+       * The files each manifest names, indexed for the screen it is stored for at `now`: `files` null for one the sweep
+       * found no object for, unknown. In parts under D1's limits.
+       */
+      index: (manifests: readonly IndexedManifest[], now: number): Staged => {
+        const parts: { screenId: string; id: string; files: string | null }[][] = [[]];
         let size = 0;
         for (const m of manifests) {
-          const entry = { id: m.id, files: JSON.stringify([...m.files].sort()) };
-          const length = entry.id.length + entry.files.length + 20;
+          const entry = { screenId: m.screenId, id: m.id, files: m.files && JSON.stringify([...m.files].sort()) };
+          const length = entry.screenId.length + entry.id.length + (entry.files?.length ?? 4) + 40;
           if (size + length > INDEX_CHARS && parts.at(-1)!.length) {
             parts.push([]);
             size = 0;
@@ -267,9 +297,11 @@ export function storage(db: Db, orgId: string) {
                 .insert(sm)
                 .select(
                   // `WHERE true`: SQLite reads `ON CONFLICT` after a bare `SELECT ... FROM` as the select's own join.
-                  sql`SELECT ${orgId}, json_extract(value, '$.id'), json_extract(value, '$.files'), ${now} FROM json_each(${JSON.stringify(part)}) WHERE true`,
+                  sql`SELECT ${orgId}, json_extract(value, '$.screenId'), json_extract(value, '$.id'), json_extract(value, '$.files'), ${now}
+                    FROM json_each(${JSON.stringify(part)}) WHERE true`,
                 )
-                .onConflictDoNothing(),
+                // Files known replace files unknown, never the other way round.
+                .onConflictDoUpdate({ target: [sm.orgId, sm.screenId, sm.manifestId], set: { filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})` } }),
             ),
         );
       },

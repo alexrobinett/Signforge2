@@ -3,8 +3,8 @@
  * What the org keeps, and why a file may go, is decided in packages/db `storage.ts`; this is the run that deletes.
  *
  * Per org, the least recently swept first: take the org's lease with an owner token; index from R2 any manifest the org
- * keeps that is not indexed yet (one stored before the index, or sent from `/admin`); claim what is due (files only once
- * every kept manifest is indexed); delete those objects while the lease still holds; then, in one batch held to the lease,
+ * keeps that is not indexed yet (one stored before the index, or one a screen reports); claim what is due (files only
+ * while every kept manifest's files are known, checked in the claim itself); delete those objects while the lease still holds; then, in one batch held to the lease,
  * forget its own claims, delete the uploads still pending, audit the run and let the lease go. Every key it deletes is
  * built here under the org's own prefixes (`orgBlobKey`, `uploadKey`, from the org being swept): a row's hash or id fills
  * in only what follows, and R2 keys are flat strings, so a sweep reaches no other org's objects and none outside them.
@@ -57,16 +57,21 @@ async function sweepOrg(db: D1Database, blobs: SweptBlobs, clock: () => number, 
   const now = clock();
   if (!(await org.storage.lease(owner, now))) return 0;
   // The manifests the org keeps that the index does not hold yet: read and indexed, a few a run.
-  const unindexed = await org.storage.unindexed(now, INDEX_PER_ORG + 1);
+  const unindexed = await org.storage.unindexed(now, INDEX_PER_ORG);
   const indexed = await Promise.all(
-    unindexed.slice(0, INDEX_PER_ORG).map(async (m) => {
+    unindexed.map(async (m) => {
       const object = await blobs.get(manifestKey(orgId, m.screenId, m.manifestId));
-      // One not stored names no file the org stores.
-      return { id: m.manifestId, files: object ? Object.keys((await object.json<{ files?: Record<string, unknown> }>()).files ?? {}) : [] };
+      // One not stored for that screen is unknown, never empty: a screen may report any id (review of #429, round 2).
+      return {
+        screenId: m.screenId,
+        id: m.manifestId,
+        files: object ? Object.keys((await object.json<{ files?: Record<string, unknown> }>()).files ?? {}) : null,
+      };
     }),
   );
   if (indexed.length) await org.commit(org.storage.stage.index(indexed, now).writes);
-  const due = await org.storage.claim(owner, now, DUE_PER_ORG, unindexed.length <= INDEX_PER_ORG);
+  // Files only if every kept manifest's files are known as the claim runs: the rest are indexed on later runs.
+  const due = await org.storage.claim(owner, now, DUE_PER_ORG);
   if (nothingDue(due)) {
     await org.commit(org.storage.stage.release(owner, now).writes);
     return 0;

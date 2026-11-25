@@ -224,6 +224,51 @@ describe('blob upload', () => {
   });
 });
 
+describe('the storage sweep (#235, review of #429, round 2)', () => {
+  /** The sweep's claim on an org's hash: held for an hour, or run out. */
+  const claimFile = (orgId: string, sha: string, held: boolean) =>
+    env.DB.prepare(
+      `INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)
+       ON CONFLICT (org_id, sha256) DO UPDATE SET claim_until = excluded.claim_until`,
+    )
+      .bind(orgId, sha, held ? Date.now() + 3_600_000 : 0)
+      .run();
+
+  it("refuses an org's blob while the sweep claims its hash, and stores it once the claim has run out", async () => {
+    const bytes = 'bytes the sweep is deleting';
+    const sha = await sha256(bytes);
+    await claimFile(org.orgId, sha, true);
+    for (const path of [`/screens/${org.screen}/blobs/${sha}`, `/orgs/${org.orgId}/blobs/${sha}`]) {
+      const res = await admin('PUT', path, bytes, { 'content-type': 'image/png' });
+      expect(res.status, path).toBe(409);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining('storage clean-up') });
+    }
+    expect(await env.BLOBS.head(orgBlobKey(org.orgId, sha))).toBeNull();
+    await claimFile(org.orgId, sha, false);
+    expect((await admin('PUT', `/orgs/${org.orgId}/blobs/${sha}`, bytes, { 'content-type': 'image/png' })).status).toBe(200);
+  });
+
+  it('refuses a push whose files the sweep claims after they were uploaded, and indexes the manifest of one it makes desired', async () => {
+    const b = await build('swept');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    // The files land, then the sweep claims the image before the manifest is pushed.
+    const raced = client(b, org.screen, {
+      fetch: async (url, init) => {
+        if (init?.method === 'PUT' && url.endsWith('/manifest')) await claimFile(org.orgId, image, true);
+        return exports.default.fetch(url, init);
+      },
+    });
+    await expect(raced.run()).rejects.toThrow(/storage clean-up/);
+    expect((await org.scope.screens.get(org.screen))?.desiredManifestId).not.toBe(b.manifest.id);
+    await claimFile(org.orgId, image, false);
+    expect(await client(b, org.screen).run()).toMatchObject({ manifestId: b.manifest.id, changed: true });
+    const row = await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ? AND screen_id = ? AND manifest_id = ?')
+      .bind(org.orgId, org.screen, b.manifest.id)
+      .first<{ f: string }>();
+    expect(JSON.parse(row!.f)).toEqual(Object.keys(b.manifest.files).sort());
+  });
+});
+
 describe('manifest upload', () => {
   it('rejects a manifest that fails validateManifest, before and after the file check', async () => {
     const bad = { ...first.manifest, defaultPlaylist: 'nope' };
