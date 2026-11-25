@@ -34,8 +34,9 @@ export function FillSource({
   const fill = useAppStore((s) => s.agent.fill);
   const editFill = useAppStore((s) => s.editFill);
   const ready = (fill.photo !== null || safeUrl(fill.link.trim())) && !fill.pending && !blocked;
+  // Its heading and space group it, not a box in the dialog or the editor (#377).
   return (
-    <section aria-labelledby="fill-title" className="space-y-3 rounded-lg border bg-actor-agent-muted p-3">
+    <section aria-labelledby="fill-title" className="space-y-3">
       <h3 id="fill-title" className="flex items-center gap-2 text-sm font-medium text-actor-agent">
         <SparklesIcon aria-hidden className="size-4" />
         {title}

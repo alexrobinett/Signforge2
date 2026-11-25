@@ -25,6 +25,9 @@ test('a member fills a new spot from a link and from a photo, checks the marked 
   const dialog = page.getByRole('dialog');
   // One filled button in the dialog, Create spot; filling from a flyer is the other way in (#364).
   await expect(dialog.locator('[data-slot="button"][data-variant="default"]')).toHaveText(['Create spot']);
+  // Grouped by its heading and space, not a box inside the dialog (#377).
+  const fillSection = dialog.getByRole('region', { name: 'Start from a flyer, photo or link' });
+  expect(await fillSection.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe('0px');
   await dialog.getByLabel('Or a link').fill(LINK);
   await expect(dialog.getByRole('button', { name: 'Fill a new spot' })).toBeEnabled();
   await page.setViewportSize({ width: 390, height: 844 });

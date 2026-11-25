@@ -216,7 +216,10 @@ test('make a spot from a template, see it on the real player as you type, and ke
 
 test('a change someone else made while the editor was open is not overwritten', async () => {
   await page.getByRole('link', { name: /Lobby clock/ }).click();
+  // The editor's own page, not the list it came from: hydrated() can resolve before the route commits (review of #427).
+  await expect(page).toHaveURL(/\/spots\/[^/?]+$/);
   await hydrated(page);
+  await expect(page.getByLabel('Message')).toBeVisible();
   const url = new URL(page.url());
   const spotId = url.pathname.split('/').at(-1);
   // Stands in for an agent: a change lands after the page read the spot.
@@ -299,6 +302,7 @@ test('every base template can be configured and previewed', async () => {
   // A desktop-sized window: below about half scale cstore-promo misses the player's 2 s ready
   // timeout on the stage (see docs/tickets/M3-16-spot-editor.md, What is left).
   await page.setViewportSize({ width: 1920, height: 1200 });
+  let newsSpot = '';
   for (const t of templates) {
     const v = t.versions.findLast((x: { status: string }) => x.status === 'approved');
     const fields = Object.entries(v.manifest.fields as Record<string, { type: string; label: string; maxLength?: number; default?: unknown }>);
@@ -310,6 +314,7 @@ test('every base template can be configured and previewed', async () => {
     await page.getByRole('button', { name: 'Create spot' }).click();
     await expect(page.getByRole('heading', { name: `${t.name} spot`, level: 1 })).toBeVisible();
     await hydrated(page);
+    if (t.key === 'news') newsSpot = page.url();
     for (const [, def] of fields.filter(([, d]) => d.type === 'image')) {
       await page.getByRole('button', { name: `Choose image for ${def.label}` }).click();
       await page
@@ -338,6 +343,17 @@ test('every base template can be configured and previewed', async () => {
   await expect(page.getByRole('region', { name: 'Live preview' })).toBeVisible();
   await axe(page);
   await shots(page, '34-spot-editor-phone');
+  // The News spot's actions, its longest row, wrap inside a phone's width: the editor's frame would clip them.
+  await page.goto(newsSpot);
+  await hydrated(page);
+  for (const name of ['Fill from a flyer', 'Save draft', 'Delete', 'Publish']) {
+    const box = await page
+      .locator('header')
+      .filter({ has: page.getByRole('heading', { level: 1 }) })
+      .getByRole('button', { name, exact: true })
+      .boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 390, name).toBe(true);
+  }
 });
 
 test('make an Announcement in a look, with a QR code, and see both on the real player', async () => {

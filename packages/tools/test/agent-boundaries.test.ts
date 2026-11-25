@@ -35,7 +35,7 @@ const REFUSED: Record<string, Record<string, unknown>> = {
   // Its own grant, and every other: scopes, revocation and usage.
   list_agent_grants: {},
   get_agent_grant: { grantId: 'agt_boundaries' },
-  update_agent_grant_scopes: { grantId: 'agt_boundaries', scopes: ['content:read', 'content:publish'] },
+  update_agent_grant_scopes: { grantId: 'agt_boundaries', scopes: ['content:read', 'content:publish'], ifVersion: 1 },
   revoke_agent_grant: { grantId: 'agt_other' },
   get_agent_grant_usage: { grantId: 'agt_boundaries' },
   // Approvals: deciding a request, its own included.

@@ -2,7 +2,7 @@
  * Where agent grants are written and ended (./agent-grants.ts's `GrantDeps`), through packages/db's
  * scoped repository, each change with its audit row in one batch, the person as the actor.
  */
-import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped } from '@signforge/db';
+import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped, StaleVersionError } from '@signforge/db';
 import { effectiveScopes, grantOf, ROLES, type Role, shownClient } from '@signforge/tools';
 import type { GrantDeps } from './agent-grants';
 
@@ -55,13 +55,23 @@ export function grantStore(d1: D1Database): GrantDeps {
         // The client's name only as a page may show it (`shownClient`): a withheld one is null, with where its code goes.
         detailJson: JSON.stringify({ clientId, ...named, scopes: granted }),
       });
-      await org.commit([...made.writes, ...audit.writes]);
+      // Held to the batch: a consent that races the member's removal writes no grant, so none outlives the membership
+      // (`revokeMember` may have run already), and no code or token is issued for it (review of #422).
+      const still = org.members.stage.stillMay(userId, [membership.role], false);
+      try {
+        await org.commit([...still.writes, ...made.writes, ...audit.writes]);
+      } catch (err) {
+        if (err instanceof StaleVersionError && err.id === 'member') return { ok: false, refused: 'not_a_member' };
+        throw err;
+      }
       return { ok: true, grantId: made.row.id, scopes: granted };
     },
     revokeMember: async (orgId, userId, by) => {
       const org = scoped(d1, orgId);
-      const grants = await org.agentGrants.unrevokedFor(userId);
-      if (grants.length) await org.commit(grants.flatMap((g) => revoking(org, g, by, { reason: 'membership_ended', userId })));
+      // In one batch with no version held (#328, review of #422): the member is already gone, so nothing may keep a grant
+      // connected. A grant changed meanwhile is revoked all the same; one revoked meanwhile keeps its own audit row alone.
+      const detail = JSON.stringify({ reason: 'membership_ended', userId });
+      await org.commit(org.agentGrants.stage.revokeAllOf(userId, by, CMS_CLIENT_ID, Date.now(), detail).writes);
     },
     offers: async (userId, requested) => {
       const orgs = await memberships(d1, userId);

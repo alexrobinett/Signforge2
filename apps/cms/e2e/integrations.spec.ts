@@ -262,7 +262,7 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await owner.getByRole('button', { name: 'Manage Weather' }).click();
   const forecasts = owner.getByRole('dialog', { name: 'Weather' });
   await expect(forecasts.getByRole('button', { name: 'Delete Weather, Portland' })).toBeVisible();
-  await expect(forecasts.getByRole('button', { name: 'Change the URL of Weather, Portland' })).toHaveCount(0);
+  await expect(forecasts.getByRole('button', { name: 'Change URL of Weather, Portland' })).toHaveCount(0);
   await forecasts.getByRole('button', { name: 'Delete Weather, Portland' }).click();
   const confirmWeather = owner.getByRole('alertdialog', { name: 'Delete Weather, Portland?' });
   await expect(confirmWeather).toContainText('choose the place again in a weather spot');
@@ -366,7 +366,7 @@ test("a viewer reads the sources and changes nothing; another org's sources neve
   await viewer.getByRole('button', { name: 'View iCal URL' }).click();
   const dialog = viewer.getByRole('dialog', { name: 'iCal calendars' });
   await expect(dialog.getByText('Used by Break room agenda.')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: /Change the URL|Delete/ })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: /Change URL|Delete/ })).toHaveCount(0);
   await viewer.context().close();
 
   const stranger = await memberPage(browser, `e2e-integrations-stranger-${Date.now()}@example.com`, STRANGER_ADDRESS);

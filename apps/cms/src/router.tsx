@@ -1,6 +1,7 @@
 import { environmentManager, QueryClient } from '@tanstack/react-query';
 import { createRouter } from '@tanstack/react-router';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
+import { PageSkeleton } from './components/pending';
 import { RouteError } from './components/route-error';
 import { retryUnlessRedirect } from './queries/retry';
 import { routeTree } from './routeTree.gen';
@@ -23,6 +24,10 @@ export function getRouter() {
     scrollRestoration: true,
     defaultPreload: 'intent',
     defaultErrorComponent: RouteError,
+    // A page still loading past 300 ms shows its skeleton (#376), for at least 300 ms so it does not flash.
+    defaultPendingComponent: PageSkeleton,
+    defaultPendingMs: 300,
+    defaultPendingMinMs: 300,
     // biome-ignore lint/correctness/noComponentHookFactories: made once per router, so its identity never changes and nothing remounts.
     Wrap: ({ children }) => <StoreProvider store={store}>{children}</StoreProvider>,
   });

@@ -110,7 +110,13 @@ describe('who changes a grant', () => {
     expect(await set(['content:draft'])).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await set(['content:read'])).toMatchObject({ ok: true, output: { grant: { scopes: ['content:read'] } } });
     const viewers = await grant('gt-viewer', ['content:read']);
-    expect(await call(person('viewer'), 'update_agent_grant_scopes', { grantId: viewers, scopes: ['content:read', 'content:draft'] })).toMatchObject({
+    expect(
+      await call(person('viewer'), 'update_agent_grant_scopes', {
+        grantId: viewers,
+        scopes: ['content:read', 'content:draft'],
+        ifVersion: await versionOf(viewers),
+      }),
+    ).toMatchObject({
       ok: false,
       error: 'forbidden',
     });
@@ -119,13 +125,19 @@ describe('who changes a grant', () => {
   it('lets its granter lower it while it keeps a scope above their role now (an owner made an editor since)', async () => {
     // Connected as an owner, with org:manage; the granter is an editor now.
     const kept = await grant('gt-editor', ['content:read', 'screens:manage', 'org:manage']);
-    expect(await call(person('editor'), 'update_agent_grant_scopes', { grantId: kept, scopes: ['content:read', 'org:manage'] })).toMatchObject({
+    expect(
+      await call(person('editor'), 'update_agent_grant_scopes', { grantId: kept, scopes: ['content:read', 'org:manage'], ifVersion: await versionOf(kept) }),
+    ).toMatchObject({
       ok: true,
       output: { grant: { scopes: ['content:read', 'org:manage'] } },
     });
     // Adding back a scope an editor may grant still works.
     expect(
-      await call(person('editor'), 'update_agent_grant_scopes', { grantId: kept, scopes: ['content:read', 'screens:manage', 'org:manage'] }),
+      await call(person('editor'), 'update_agent_grant_scopes', {
+        grantId: kept,
+        scopes: ['content:read', 'screens:manage', 'org:manage'],
+        ifVersion: await versionOf(kept),
+      }),
     ).toMatchObject({
       ok: true,
     });
@@ -134,16 +146,24 @@ describe('who changes a grant', () => {
   it("an owner lowers another member's grant, never raises it; and nobody else touches it", async () => {
     const editors = await grant('gt-editor', ['content:read', 'content:draft']);
     const owner = person('owner');
-    expect(await call(owner, 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read', 'content:draft', 'screens:manage'] })).toMatchObject({
+    expect(
+      await call(owner, 'update_agent_grant_scopes', {
+        grantId: editors,
+        scopes: ['content:read', 'content:draft', 'screens:manage'],
+        ifVersion: await versionOf(editors),
+      }),
+    ).toMatchObject({
       ok: false,
       error: 'forbidden',
       message: expect.stringContaining('screens:manage'),
     });
-    expect(await call(owner, 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'] })).toMatchObject({
+    expect(await call(owner, 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'], ifVersion: await versionOf(editors) })).toMatchObject({
       ok: true,
       output: { grant: { scopes: ['content:read'] } },
     });
-    expect(await call(person('viewer'), 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'] })).toMatchObject({
+    expect(
+      await call(person('viewer'), 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'], ifVersion: await versionOf(editors) }),
+    ).toMatchObject({
       ok: false,
       error: 'not_found',
     });
@@ -167,6 +187,25 @@ describe('who changes a grant', () => {
     ]);
   });
 
+  it('needs ifVersion: a set made from a stale read cannot put back a scope an owner took away meanwhile (#328)', async () => {
+    const mine = await grant('gt-owner', ['content:read', 'org:manage']);
+    // The granter reads it; another owner takes org:manage away; the granter sends the set they read.
+    const read = await versionOf(mine);
+    const other: Caller = { ...person('owner'), actor: { kind: 'user', id: 'gt-owner-2', clientId: 'cms' } };
+    expect(await call(other, 'update_agent_grant_scopes', { grantId: mine, scopes: ['content:read'], ifVersion: read })).toMatchObject({ ok: true });
+    expect(await call(person('owner'), 'update_agent_grant_scopes', { grantId: mine, scopes: ['content:read', 'org:manage'], ifVersion: read })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    // Without one, it is refused before anything is read.
+    expect(await call(person('owner'), 'update_agent_grant_scopes', { grantId: mine, scopes: ['content:read', 'org:manage'] })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [expect.objectContaining({ path: 'ifVersion' })],
+    });
+    expect(JSON.parse((await scoped(env.DB, ORG).agentGrants.get(mine))!.scopesJson)).toEqual(['content:read']);
+  });
+
   it('revokes: an owner any grant, a member their own; a revoked grant is no longer listed or changed', async () => {
     const editors = await grant('gt-editor', ['content:read']);
     const viewers = await grant('gt-viewer', ['content:read']);
@@ -174,7 +213,9 @@ describe('who changes a grant', () => {
     expect(await call(person('viewer'), 'revoke_agent_grant', { grantId: viewers })).toMatchObject({ ok: true, output: { revoked: viewers } });
     expect(await scoped(env.DB, ORG).agentGrants.get(editors)).toMatchObject({ revokedBy: 'gt-owner', revokedAt: expect.any(Number) });
     expect(await listed(person('owner'))).not.toContain(editors);
-    expect(await call(person('owner'), 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'] })).toMatchObject({
+    expect(
+      await call(person('owner'), 'update_agent_grant_scopes', { grantId: editors, scopes: ['content:read'], ifVersion: await versionOf(editors) }),
+    ).toMatchObject({
       ok: false,
       error: 'not_found',
     });
@@ -292,7 +333,7 @@ describe('agents', () => {
       for (const [name, input] of [
         ['list_agent_grants', {}],
         ['get_agent_grant', { grantId: owners }],
-        ['update_agent_grant_scopes', { grantId: owners, scopes: ['content:read', 'org:manage'] }],
+        ['update_agent_grant_scopes', { grantId: owners, scopes: ['content:read', 'org:manage'], ifVersion: await versionOf(owners) }],
         ['revoke_agent_grant', { grantId: owners }],
       ] as const) {
         expect(await call(agent, name, input), `${agent.actor.kind} ${name}`).toMatchObject({ ok: false, error: 'forbidden' });
