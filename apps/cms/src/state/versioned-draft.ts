@@ -271,6 +271,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     }
     const started: Flight<E, C> = { next: { context }, done: Promise.resolve(d), result: { ...d, status: 'saving', pending: true, error: null } };
     flights.set(d.id, started);
+    sending += 1;
     const lane = `${d.orgId}/${d.record ?? key}`;
     const run = async () => {
       for (let n = started.next; n; n = started.next) {
@@ -278,6 +279,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         await attempt(key, started, n.context);
       }
       flights.delete(d.id);
+      sending -= 1;
       if (lanes.get(lane) === started.done) lanes.delete(lane);
       // Every way out leaves the draft able to save again: no save of it is on its way now.
       const done = (x: Draft<E>): Draft<E> => ({ ...x, pending: false, status: x.status === 'saving' ? 'unsaved' : x.status });
@@ -319,17 +321,37 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
 /** How long after the last edit an editor saves: the spot, playlist and brand kit editors alike (#366). */
 export const AUTOSAVE_MS = 1000;
 
+/** Saves on their way, in every store. */
+let sending = 0;
+
+/**
+ * Every save still waiting out its autosave delay, in every store. Leaving the org would strand
+ * them (a draft saves only in its own org), and closing the tab would lose them: both send them
+ * first (`saveWaiting`). Only a waiting save is kept here, so it holds nothing once they have gone.
+ */
+const waiting = new Set<() => Promise<unknown>>();
+
 /** Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. */
 export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): (key: string) => void {
-  const timers = new Map<string, () => void>();
+  const timers = new Map<string, { cancel: () => void; now: () => Promise<unknown> }>();
   return (key) => {
-    timers.get(key)?.();
-    timers.set(
-      key,
-      clock.after(ms, () => {
-        timers.delete(key);
-        void save(key);
-      }),
-    );
+    const before = timers.get(key);
+    before?.cancel();
+    if (before) waiting.delete(before.now);
+    const now = () => {
+      cancel();
+      timers.delete(key);
+      waiting.delete(now);
+      return save(key);
+    };
+    const cancel = clock.after(ms, () => void now());
+    timers.set(key, { cancel, now });
+    waiting.add(now);
   };
 }
+
+/** Sends every save still waiting out its delay now, and resolves once they are answered. */
+export const saveWaiting = () => Promise.all([...waiting].map((now) => now()));
+
+/** Whether a save is waiting or on its way: closing the tab now could lose it. */
+export const savesWaiting = () => waiting.size > 0 || sending > 0;

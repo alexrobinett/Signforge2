@@ -220,6 +220,9 @@ function KitEditor() {
   const colors = shownColors(draft, kit.colors);
   const change = (c: (d: KitDraft) => KitDraft) => edit(orgId, kit.id, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
+  /** A choice, with Undo putting back what the page showed before it. */
+  const choose = (said: string, patch: Partial<KitDraft>, was: Partial<KitDraft>) =>
+    edit(orgId, kit.id, (d) => ({ ...d, ...patch }), { said, change: (d) => ({ ...d, ...was }) });
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
   // How its save is going, in the editors' words (#366): it saves itself, a second after the last edit.
@@ -298,10 +301,20 @@ function KitEditor() {
               </Panel>
               <Panel id="kit-type" title="Type and shape">
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-                  <FontField use="display" value={draft.displayFontId} disabled={!canManage} onChange={(displayFontId) => set({ displayFontId })} />
-                  <FontField use="body" value={draft.bodyFontId} disabled={!canManage} onChange={(bodyFontId) => set({ bodyFontId })} />
+                  <FontField
+                    use="display"
+                    value={draft.displayFontId}
+                    disabled={!canManage}
+                    onChange={(displayFontId) => choose('Display font changed', { displayFontId }, { displayFontId: draft.displayFontId })}
+                  />
+                  <FontField
+                    use="body"
+                    value={draft.bodyFontId}
+                    disabled={!canManage}
+                    onChange={(bodyFontId) => choose('Body font changed', { bodyFontId }, { bodyFontId: draft.bodyFontId })}
+                  />
                 </div>
-                <ShapeField value={draft.shape} disabled={!canManage} onChange={(shape) => set({ shape })} />
+                <ShapeField value={draft.shape} disabled={!canManage} onChange={(shape) => choose('Corners changed', { shape }, { shape: draft.shape })} />
                 <LogoFields
                   draft={draft}
                   colors={colors}
@@ -310,7 +323,11 @@ function KitEditor() {
                   disabled={!canManage}
                   onPick={pickLogo}
                   onChange={(which, assetId) =>
-                    set(which === 'dark' ? { logoOnDarkAssetId: assetId, ...(assetId ? {} : { logoOnLightAssetId: null }) } : { logoOnLightAssetId: assetId })
+                    choose(
+                      assetId ? 'Logo changed' : 'Logo removed',
+                      which === 'dark' ? { logoOnDarkAssetId: assetId, ...(assetId ? {} : { logoOnLightAssetId: null }) } : { logoOnLightAssetId: assetId },
+                      { logoOnDarkAssetId: draft.logoOnDarkAssetId, logoOnLightAssetId: draft.logoOnLightAssetId },
+                    )
                   }
                 />
               </Panel>

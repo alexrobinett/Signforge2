@@ -15,12 +15,17 @@ import type { SpotPreview, SpotView, TemplateView } from '../src/lib/spots';
 import { getSpotPreview } from '../src/server/spots.functions';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '../src/queries/spots';
 import { AUTOSAVE_MS } from '../src/state/versioned-draft';
+import { switchOrganization } from '../src/lib/orgs';
 import { createBrandKitsSlice, previewKey, type BrandKitsSlice } from '../src/state/brand-kits';
+import { createOrgsSlice, type OrgsSlice } from '../src/state/orgs';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
+vi.mock('~/lib/orgs', () => ({ switchOrganization: vi.fn(), createOrganization: vi.fn() }));
+const toasts: { said: string; undo: () => void }[] = [];
+vi.mock('sonner', () => ({ toast: (said: string, opts: { action: { onClick: () => void } }) => toasts.push({ said, undo: opts.action.onClick }) }));
 
 const ORG = 'org_1';
 const manifest = clock as unknown as TemplateManifest;
@@ -125,6 +130,7 @@ beforeEach(() => {
   vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
   vi.stubGlobal('location', { origin: 'http://cms.test' });
   held.clear();
+  toasts.length = 0;
   router.state.location.href = '/brand-kits';
   router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }];
   router.navigate.mockClear();
@@ -138,6 +144,8 @@ beforeEach(() => {
   vi.mocked(getSpotPreview).mockImplementation(async ({ data }: { data: { brandKitId?: string } }) => preview(data.brandKitId ?? '')) as never;
 });
 afterEach(() => {
+  // A save a test left waiting would wait for every later test: the leaving test counts what waits, across stores.
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -410,7 +418,7 @@ describe('kit actions run one at a time (review of #143)', () => {
     expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
   });
 
-  it('a kit the server would refuse as it is (no name) is marked, not sent', async () => {
+  it('a kit the server would refuse as it is (no name, a font not in the catalogue) is marked, not sent', async () => {
     const { calls } = heldTools();
     const a = kit('bk_a', '#2563eb');
     const { store } = page([a]);
@@ -418,6 +426,25 @@ describe('kit actions run one at a time (review of #143)', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     expect(calls).toEqual([]);
     expect(store.getState().brandKits.drafts.bk_a?.status).toBe('invalid');
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, name: 'Spring', displayFontId: 'base/withdrawn' }));
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    expect(calls).toEqual([]);
+    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('invalid');
+  });
+
+  it("a contrast fix says so with Undo, which puts the colour back and saves that, as the editors' Undo does (review of #461)", async () => {
+    const { calls, called } = heldTools();
+    // Text too dim on the surface: the fix moves it.
+    const a = { ...kit('bk_a', '#2563eb'), colors: { ...kit('bk_a', '#2563eb').colors, muted: '#2a3140' } };
+    const { store } = page([a]);
+    store.getState().fixKitPair(ORG, a.id, 'muted', 'surface');
+    expect(store.getState().brandKits.drafts.bk_a?.edit.colors.muted).not.toBe('#2a3140');
+    expect(toasts.map((t) => t.said)).toEqual(['Contrast fixed']);
+    toasts[0]!.undo();
+    expect(store.getState().brandKits.drafts.bk_a?.edit.colors.muted).toBe('#2a3140');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    await called(1);
+    expect(calls[0]).toMatchObject({ name: 'update_brand_kit', input: { colors: { muted: '#2a3140' } } });
   });
 
   it('a request that gets no answer releases the action, with its message', async () => {
@@ -463,5 +490,41 @@ describe('kit actions run one at a time (review of #143)', () => {
     await duplicating;
     expect(router.navigate).not.toHaveBeenCalled();
     expect(store.getState().brandKits.pending).toBeNull();
+  });
+});
+
+describe('an edit still waiting when the member leaves the org (review of #461)', () => {
+  it('is saved in its own org before the switch, and the switch waits for the answer', async () => {
+    const calls: { name: string; answer: () => void }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      (url: string) =>
+        new Promise<Response>((resolve) =>
+          calls.push({ name: url.split('/').at(-1) ?? '', answer: () => resolve(new Response(JSON.stringify({ brandKit: { version: 2 } }))) }),
+        ),
+    );
+    const a = kit('bk_a', '#2563eb');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(brandKitsQuery(ORG).queryKey, { brandKits: [a] });
+    const store = createStore<BrandKitsSlice & OrgsSlice>()((set, get) => ({
+      ...createBrandKitsSlice(set as never, get as never, { router, queryClient } as never),
+      ...createOrgsSlice(set as never, get as never, { router, queryClient } as never),
+      forgetAgentDrawer: () => {},
+      cancelPublishAll: () => {},
+      forgetOrgSettings: () => {},
+    }));
+    vi.mocked(switchOrganization).mockImplementation(async () => {
+      router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_2' } } }];
+    });
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const switching = store.getState().switchOrg({ id: 'org_2', name: 'Other' } as never, 'switcher');
+    await settle();
+    // Sent at once, in the org it was made in; the switch has not happened yet.
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(switchOrganization).not.toHaveBeenCalled();
+    calls[0]!.answer();
+    await switching;
+    expect(switchOrganization).toHaveBeenCalled();
+    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('saved');
   });
 });

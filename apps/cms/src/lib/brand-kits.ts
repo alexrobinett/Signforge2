@@ -4,7 +4,7 @@
  * duplicating sends, the contrast of each pair a template draws text with, in words, and a fix for
  * one that fails. The contrast maths is the compiler's, so the page says what the tools say.
  */
-import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
+import { BRAND_PAIRS, brandFont, contrastRatio, fontById, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
 import { assetFile } from '@signforge/compiler/draft';
 import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
@@ -39,6 +39,9 @@ export const kitDraftOf = (k: BrandKitView): KitDraft => ({
   logoOnDarkAssetId: k.logo?.onDarkAssetId ?? null,
   logoOnLightAssetId: k.logo?.onLightAssetId ?? null,
 });
+
+/** Whether a kit may name this font: none, or one in the catalogue (the server's rule). */
+export const knownFont = (id: string | null) => id === null || fontById(id) !== undefined;
 
 /** The draft's colours as screens would get them, or null while one is not a hex colour yet. */
 export function draftColors(d: KitDraft): BrandColors | null {
