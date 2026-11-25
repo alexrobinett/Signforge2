@@ -188,12 +188,16 @@ export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, n
   const open = useAppStore((s) => s.commandMenu.open);
   const openMenu = useAppStore((s) => s.openCommandMenu);
   const close = useAppStore((s) => s.closeCommandMenu);
+  const focusBack = useAppStore((s) => s.menuFocusBack);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => (o ? openMenu() : close())}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
-        <DialogPrimitive.Content className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong">
+        <DialogPrimitive.Content
+          onCloseAutoFocus={focusBack}
+          className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong"
+        >
           <DialogPrimitive.Title className="sr-only">Command menu</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">
             Run an action for this page, ask the agent, or type to find a page, a screen or another action. Enter runs the selected one.

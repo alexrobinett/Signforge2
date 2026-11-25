@@ -36,6 +36,12 @@ export interface CommandMenuSlice {
   commandMenu: CommandMenuState;
   openCommandMenu: () => void;
   closeCommandMenu: () => void;
+  /**
+   * The menu closed (its `onCloseAutoFocus`): focus goes back to what had it as the menu opened, while that
+   * is still on the page and is not in a menu or something since closed (a menu's content, which focus would
+   * open again); else to the page's main region.
+   */
+  menuFocusBack: (e: Event) => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
   /**
    * Asks the agent `question` (#270): the drawer opens with it, on the page shown, and the menu closes,
@@ -72,6 +78,8 @@ const CLOSED: CommandMenuState = {
 const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening });
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
+  /** What had focus as the menu opened: outside state, nothing renders it. */
+  let opener: Element | null = null;
   /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
   const start = () => {
     if (get().commandMenu.running) return null;
@@ -119,11 +127,21 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
   return {
     commandMenu: CLOSED,
     // The phone drawer has the menu's button: the menu takes its place.
-    openCommandMenu: () =>
+    openCommandMenu: () => {
+      opener = typeof document === 'undefined' ? null : document.activeElement;
       set((s) => ({
         commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1, openedAt: Date.now() },
         ui: { ...s.ui, drawerOpen: false },
-      })),
+      }));
+    },
+    menuFocusBack(e) {
+      e.preventDefault();
+      const back =
+        opener instanceof HTMLElement && opener.isConnected && opener !== document.body && !opener.closest('[role="menu"], [data-state="closed"]')
+          ? opener
+          : null;
+      (back ?? document.getElementById('main'))?.focus();
+    },
     closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {
       switch (entry.kind) {
