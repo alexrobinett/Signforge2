@@ -7,7 +7,10 @@ import { axe, createOrg, hydrated, joinAsEditor, shots, signInAs, tool } from '.
 
 const ADDRESS = { owner: '192.0.2.242', editor: '192.0.2.243' };
 
-test("an editor where only owners publish sees a feed's address and photos unavailable, with why, and the API refuses them (#424)", async ({ page, browser }) => {
+test("an editor where only owners publish sees a feed's address and photos unavailable, with why, and the API refuses them (#424)", async ({
+  page,
+  browser,
+}) => {
   await signInAs(page, `e2e-source-rights-${Date.now()}@example.com`, ADDRESS.owner);
   await createOrg(page, 'Quayside Bakery', ADDRESS.owner);
   const { dataSource } = await tool(page, 'create_data_source', {

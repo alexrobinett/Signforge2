@@ -401,7 +401,6 @@ describe("an agent's change that reaches screens with no publish (#122, review o
       ok: true,
     });
   });
-
 });
 
 describe("a person's change that reaches screens with no publish (owner decision on #424)", () => {
@@ -419,10 +418,23 @@ describe("a person's change that reaches screens with no publish (owner decision
     p = await seedOrg(env.DB, 'feeds-people');
     const now = new Date(0).toISOString();
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(editorId(), 'Ed', `${editorId()}@signforge.test`, now, now),
-      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(`${editorId()}-m`, p.orgId, editorId(), now),
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        editorId(),
+        'Ed',
+        `${editorId()}@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(
+        `${editorId()}-m`,
+        p.orgId,
+        editorId(),
+        now,
+      ),
     ]);
-    expect(await dispatch(registry, 'create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json' }, editor())).toMatchObject({
+    expect(
+      await dispatch(registry, 'create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json' }, editor()),
+    ).toMatchObject({
       ok: true,
     });
   });
