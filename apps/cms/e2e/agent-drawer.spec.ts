@@ -100,16 +100,18 @@ test("nothing is asked while the org changes: a question then would be the last 
   const switcher = orgSwitcher(page);
   await expect(switcher).toContainText('Wharf Street Bakery');
   // The switch held on its way, as on a slow network.
-  const requested = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
+  let arrived = () => {};
+  const requested = new Promise<void>((r) => (arrived = r));
+  let release = () => {};
+  const released = new Promise<void>((r) => (release = r));
   await page.route('**/api/auth/organization/set-active', async (route) => {
-    requested.resolve();
-    await release.promise;
+    arrived();
+    await released;
     await route.continue();
   });
   await switcher.click();
   await page.getByRole('menuitemradio', { name: 'Wharf Street Deli' }).click();
-  await requested.promise;
+  await requested;
   const drawer = page.getByRole('dialog', { name: 'Agent' });
   let asked = 0;
   page.on('request', (r) => void (r.url().endsWith('/api/agent/chat') && asked++));
@@ -119,7 +121,7 @@ test("nothing is asked while the org changes: a question then would be the last 
     await expect(drawer.getByRole('button', { name: 'Ask', exact: true })).toBeDisabled();
     await drawer.getByLabel('Ask about your screens and content').press('Enter');
   } finally {
-    release.resolve();
+    release();
   }
   await expect(page.getByText('Switched to Wharf Street Deli.', { exact: true })).toBeAttached();
   await expect(drawer.getByRole('article')).toHaveCount(0);
