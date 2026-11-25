@@ -24,6 +24,17 @@ const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
 /** How long the list's marker takes to slide to the next story, ending as that story comes on. */
 const MARKER_MS = 600;
 
+/** How long before its turn a later story's photo starts to load. */
+const LOAD_AHEAD_MS = 3000;
+
+/**
+ * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
+ * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
+ * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
+ */
+let later: { img: HTMLImageElement; src: string; at: number }[] = [];
+let timers: number[] = [];
+
 /** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
 function ago(iso: string, now: Date, locale: string): string {
   const t = new Date(iso).getTime();
@@ -45,6 +56,9 @@ function clone(id: string): HTMLElement {
 defineTemplate({
   async prepare(ctx) {
     const { data } = ctx;
+    for (const t of timers) clearTimeout(t);
+    timers = [];
+    later = [];
     const look = LOOKS.find((l) => l === data.look)!;
     // Unpainted until play: a frame that paints a photo while prepare runs has it decoded for the
     // screen first, and the SDK's decode before ready waits behind that one (photo-promo, #168).
@@ -91,11 +105,14 @@ defineTemplate({
         for (const part of el.querySelectorAll('.media, .meta, .summary')) part.remove();
         return;
       }
+      const photo = el.querySelector<HTMLImageElement>('.photo');
+      if (i > 0) photo?.removeAttribute('data-sf-src');
       bindRow(el, ctx, 'items', i);
-      if (!photos || !rowImage(ctx, 'items', i, 'image')) {
+      const src = rowImage(ctx, 'items', i, 'image');
+      if (!photos || !src) {
         el.classList.add('no-photo');
         el.querySelector('.media')?.remove();
-      }
+      } else if (photo && i > 0) later.push({ img: photo, src, at: i * slot - LOAD_AHEAD_MS });
       const story = listed[i]!;
       const meta = el.querySelector('.meta');
       if (meta) {
@@ -133,6 +150,7 @@ defineTemplate({
   },
   play() {
     document.getElementById('leads')!.style.visibility = '';
+    for (const { img, src, at } of later) timers.push(window.setTimeout(() => (img.src = src), Math.max(0, at)));
   },
 });
 

@@ -147,6 +147,10 @@ ol {
   border-left: var(--nw-card-bar, 0) solid var(--lk-accent);
   background: var(--lk-bg);
 }
+/* A story without a photo: its headline a step larger, in the middle of the lead's space. */
+.story.no-photo {
+  justify-content: center;
+}
 .no-photo .card {
   --nw-card-rule: 0;
   max-width: none;

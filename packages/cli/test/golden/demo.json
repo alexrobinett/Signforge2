@@ -121,6 +121,10 @@
       "size": 12704,
       "type": "font/woff2"
     },
+    "5839cdb71fc2f0097fef68045401ecf61d917727fb416a4d0a9899ba70fbe646": {
+      "size": 385174,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
@@ -887,6 +891,130 @@
       },
       "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
     },
+    "base/news@2.0.0": {
+      "manifest": {
+        "id": "news",
+        "version": "2.0.0",
+        "name": "News",
+        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Latest news",
+            "maxLength": 32
+          },
+          "source": {
+            "type": "text",
+            "label": "Source credit",
+            "default": "",
+            "maxLength": 40
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              },
+              "summary": {
+                "type": "text",
+                "label": "Summary",
+                "default": "",
+                "maxLength": 240
+              },
+              "image": {
+                "type": "image",
+                "label": "Photo"
+              }
+            }
+          },
+          "language": {
+            "type": "text",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "default": "",
+            "maxLength": 35
+          },
+          "rotationSeconds": {
+            "type": "number",
+            "label": "Seconds per lead story",
+            "default": 8,
+            "min": 4,
+            "max": 30
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "default": "pop"
+          },
+          "showImages": {
+            "type": "boolean",
+            "label": "Show photos",
+            "default": true
+          },
+          "showSummary": {
+            "type": "boolean",
+            "label": "Show the summary",
+            "default": true
+          },
+          "showList": {
+            "type": "boolean",
+            "label": "Show the story list",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show the source and age",
+            "default": true
+          },
+          "showCrawl": {
+            "type": "boolean",
+            "label": "Show the crawl",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 32000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "source": "rss",
+          "fields": {
+            "items": "items",
+            "language": "language"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "5839cdb71fc2f0097fef68045401ecf61d917727fb416a4d0a9899ba70fbe646"
+    },
     "base/room-status@1.0.2": {
       "manifest": {
         "id": "room-status",
@@ -1182,6 +1310,58 @@
       },
       "durationMs": 15000
     },
+    "news": {
+      "id": "news",
+      "name": "Harbor news",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Harbor news",
+        "source": "Harbor Times",
+        "items": [
+          {
+            "title": "Council approves the riverside park after a two-year fight",
+            "published": "",
+            "source": "Metro Desk",
+            "summary": "The 12-acre park opens in phases from next spring, with a boardwalk, playgrounds and a new ferry stop."
+          },
+          {
+            "title": "Farmers market moves to Sundays for the winter",
+            "published": "",
+            "source": "Metro Desk",
+            "summary": "Stalls stay open from 9 to 2 at the old depot, under heated tents."
+          },
+          {
+            "title": "Storm warning for the coast tonight",
+            "published": "",
+            "source": "Weather",
+            "summary": "Gusts up to 60 mph are expected after 8 p.m."
+          },
+          {
+            "title": "Harbor Hawks clinch a playoff spot",
+            "published": "",
+            "source": "Sports",
+            "summary": ""
+          },
+          {
+            "title": "Library extends its weekend hours",
+            "published": "",
+            "source": "Culture",
+            "summary": "Doors stay open until 8 p.m. on Saturdays."
+          }
+        ],
+        "language": "",
+        "rotationSeconds": 6,
+        "look": "night",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 24000
+    },
     "room-status": {
       "id": "room-status",
       "name": "Harbour Room status",
@@ -1257,6 +1437,9 @@
           "spot": "info-frame"
         },
         {
+          "spot": "news"
+        },
+        {
           "spot": "fire-drill"
         }
       ]
@@ -1289,5 +1472,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "85824c05db3b2d2870c92b6bae35692e6bfd44ac528ccf4d155a1f81013285eb"
+  "id": "acc4d110d50bca8d18755e45759c2adfb04e503f8024ddc2bb06a20aafd7100c"
 }

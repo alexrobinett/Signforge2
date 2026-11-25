@@ -272,6 +272,28 @@ describe('news 2.0 (#202)', () => {
     await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
   });
 
+  it("decodes only the first story's photo before ready, and loads each later one in play, three seconds before its turn", async () => {
+    const hst = await host('landscape', true);
+    // The frame's clock is Playwright's, stepped by hand: no test time passes on its own.
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    await hst.init('fresh', spotData(t().manifest, { items: [0, 1, 2, 3, 4].map((i) => story(i)), rotationSeconds: 8 }), photos(5), NOW, demo, false, 40_000);
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    const loaded = () => f.evaluate(() => [...document.querySelectorAll('.story .photo')].map((img) => img.hasAttribute('src')));
+    expect(await loaded()).toEqual([true, false, false, false, false]);
+    await hst.post('fresh', 'play');
+    // 8 s a story: the second comes on at 8 s, so its photo loads at 5 s; the third's at 13 s.
+    await hst.page.clock.runFor(4_900);
+    expect(await loaded()).toEqual([true, false, false, false, false]);
+    await hst.page.clock.runFor(200);
+    expect(await loaded()).toEqual([true, true, false, false, false]);
+    await hst.page.clock.runFor(8_000);
+    expect(await loaded()).toEqual([true, true, true, false, false]);
+  });
+
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`moves only transform and opacity, within the cap; each story's parts end as the story does, and the rest as the play does, ${orientation}`, async () => {
       const r = await frame(orientation);

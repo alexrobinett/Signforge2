@@ -1,0 +1,29 @@
+{
+  "name": "Harbor news",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 24000,
+  "data": {
+    "look": "night",
+    "title": "Harbor news",
+    "source": "Harbor Times",
+    "rotationSeconds": 6,
+    "items": [
+      {
+        "title": "Council approves the riverside park after a two-year fight",
+        "published": "",
+        "source": "Metro Desk",
+        "summary": "The 12-acre park opens in phases from next spring, with a boardwalk, playgrounds and a new ferry stop."
+      },
+      {
+        "title": "Farmers market moves to Sundays for the winter",
+        "published": "",
+        "source": "Metro Desk",
+        "summary": "Stalls stay open from 9 to 2 at the old depot, under heated tents."
+      },
+      { "title": "Storm warning for the coast tonight", "published": "", "source": "Weather", "summary": "Gusts up to 60 mph are expected after 8 p.m." },
+      { "title": "Harbor Hawks clinch a playoff spot", "published": "", "source": "Sports", "summary": "" },
+      { "title": "Library extends its weekend hours", "published": "", "source": "Culture", "summary": "Doors stay open until 8 p.m. on Saturdays." }
+    ]
+  }
+}
