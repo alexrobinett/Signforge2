@@ -1211,3 +1211,27 @@ In portrait the kit holds `.lk-drift` still but kept its `will-change: transform
 - **Fewer frames dropped while playing**, in both looks: Pop 0.18-0.29% against 0.35-0.65%, Night 0.00-0.12% against 0.12-0.29%. Pop's overall fell from 0.72-1.11% (three of eight runs over 1%) to 0.56-0.89%.
 - **Over budget in both builds.** Pop's prepare medians are 548 ms (A) and 543 ms (B) against the 500 ms budget, and every Pop run's worst frame was 67 ms (one A run 50 ms) against 50 ms. Night's prepares (405 to 440 ms) and worst frames (33 to 50 ms) are within it.
 - **Prepares:** the same median, but Pop's fell into the slower of its two modes (about 700 ms against about 530) more often with B: 11 of 24 against 5 of 24. That difference is not significant (p ≈ 0.12, Fisher's exact test, two-sided). The two modes are the kit's (The look kit, above), and A has them too.
+
+## News 2.0 (issue #202, 2026-11-25)
+
+The new News template in each look, its lead turning every 6 s through four stories in a 24 s play (`rotationSeconds` 6), over ten stories from a snapshot: eight with a 1920x1080 photo and a 480x270 thumbnail (generated JPEGs, as `packages/cli/bench/feed-images/make.ts` makes them), two without, most with a summary. Each spec is `isolate.py 75 <transition>`, started cold, so its first prepare is the first after a page load (the look kit's, #232) and the others are warm. `-still` is the same spot held to one story (`rotationSeconds` 30). Memory is Chromium's summed RSS and the kernel's CmaFree, sampled every 2 s while the spec ran. The supervisor was stopped and the panel turned with `wlr-randr` for portrait.
+
+| Look | Orientation | Cut: all%, play% | Fade: all%, play%, trans% | Worst frame | Prepares, cut / fade (ms) | Still (one story), prepares | RSS max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Pop | landscape | 0.13, 0.02 | 0.16, 0.02, 1.11 | 50 ms | 415, 445, 427 / 413, 417, 427 | 396, 395, 377 | 1.36 GB |
+| Poster | landscape | 0.13, 0.02 | 0.27, 0.00, 6.59 | 50 ms | 434, 463, 446 / 449, 462, 430 | 365, 364, 377 | 1.38 GB |
+| Night | landscape | 0.18, 0.05 | 0.16, 0.05, 0.00 | 50 ms | 448, 448, 462 / 447, 452, 462 | 379, 395, 361 | 1.36 GB |
+| Corporate | landscape | 0.20, 0.07 | 0.13, 0.00, 0.00 | 50 ms | 413, 412, 411 / 413, 395, 380 | 363, 344, 361 | 1.36 GB |
+| Pop | portrait | 0.27, 0.07 | 0.64, 0.12, 20.88 | 67 ms | 499, 530, 509 / 512, 499, 496 | 482, 481, 463 | 1.38 GB |
+| Poster | portrait | 0.27, 0.07 | 0.80, 0.16, 22.58 | 67 ms | 518, 518, 516 / 514, 515, 508 | 465, 484, 482 | 1.39 GB |
+| Night | portrait | 0.18, 0.02 | 0.67, 0.07, 20.43 | 67 ms | 495, 527, 492 / 510, 511, 505 | 477, 454, 472 | 1.36 GB |
+| Corporate | portrait | 0.18, 0.05 | 0.58, 0.07, 17.58 | 67 ms | 496, 528, 478 / 498, 480, 493 | 448, 478, 445 | 1.37 GB |
+
+- **Dropped frames are within 1% in every spec**, 0.13 to 0.80% overall and at most 0.16% while playing. A portrait fade drops 17 to 23% of its own frames, as every template's portrait fade does.
+- **Landscape is within the prepare budget**, 380 to 463 ms. **Portrait is at its edge**: 478 to 530 ms, up to 30 ms over 500, where the same spot held to one story takes 445 to 484.
+- **Worst frames** are 50 ms in landscape and 67 ms in portrait, against 50, in the load and fade phases, never while playing.
+- **The stacked stories cost little memory**: 5 to 35 MB more Chromium RSS than one story, and no CMA (CmaFree's low point is the same, 447 MB, for one story and four).
+- **Each later story's photo loads in play.** With every story's photo set in prepare, the SDK decoded all four before ready: portrait prepares took 546 to 602 ms (one cold run per spec), against 499 to 531 with only the first photo. Loading each later one 3 s before its turn costs no frames while playing (0.02 to 0.16%).
+- Portrait is the template as shipped. Landscape was measured just before one change: a story without a photo then sat at the foot of the lead, not in its middle (layout only).
+
+**The N100 at 4K60, a second check** (Proxmox host `pve`, LXC 105, a virtual 4K60 HDMI display, real DRM scan-out; `isolate.py 45`, landscape, each look cut and fade): 0.00 to 0.15% of frames dropped, worst frames 17 to 50 ms, prepares 115 to 167 ms. At 4K the N100 has room to spare; the Pi sets the budget.
