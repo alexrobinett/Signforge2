@@ -212,8 +212,9 @@ function ScreenPage() {
           )}
         </div>
         <p className="text-md text-muted-foreground">
-          {screen.orientation === 'portrait' ? 'Portrait 1080 × 1920' : 'Landscape 1920 × 1080'} ·{' '}
-          {inGroups.length ? `group ${inGroups.map((g) => g.name).join(', ')}` : 'No group'} · {screen.timezone.replaceAll('_', ' ')}
+          {/* No pixel size: templates fit any resolution (#463). */}
+          {screen.orientation === 'portrait' ? 'Portrait' : 'Landscape'} · {inGroups.length ? `group ${inGroups.map((g) => g.name).join(', ')}` : 'No group'} ·{' '}
+          {screen.timezone.replaceAll('_', ' ')}
           {plays?.playlist && (
             <>
               {' · '}

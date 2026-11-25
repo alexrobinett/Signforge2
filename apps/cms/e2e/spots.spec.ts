@@ -160,7 +160,10 @@ test('make a spot from a template, see it on the real player as you type, and ke
   // What the stage is doing, said politely as it changes.
   await expect(stage.getByRole('status')).toHaveText(/^(Drawing…|Preview ready)$/);
   await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
-  await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
+  // The orientation and the scale, never a pixel size: templates fit any resolution (#463).
+  await expect(stage.getByRole('button', { name: 'Landscape' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(stage.getByText(/^Shown at \d+%$/)).toBeVisible();
+  await expect(stage.getByText(/\d+ × \d+/)).toHaveCount(0);
 
   // A keystroke reaches the player's frame without a round trip: no request but the autosave's goes
   // out before the stage shows it. The time is logged, not asserted.
@@ -195,7 +198,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   // Portrait, carried in the URL.
   await stage.getByRole('button', { name: 'Portrait' }).click();
   await expect(page).toHaveURL(/[?&]o=portrait/);
-  await expect(stage.getByText('1080 × 1920 ·', { exact: false })).toBeVisible();
+  await expect(stage.getByRole('button', { name: 'Portrait' })).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => stageShows(page, 'Good to see you'), { timeout: 30_000 }).toBe(true);
   await axe(page);
   await shots(page, '32-spot-editor-portrait');
