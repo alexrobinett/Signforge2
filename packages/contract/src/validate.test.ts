@@ -1420,12 +1420,95 @@ describe('network check', () => {
 
     it('passes a path, and a backslash that is not at a string’s start', () => {
       for (const css of [
-        String.raw`.b{background-image:image-set("p.png" 1x)}`,
-        String.raw`.b{background-image:image-set("/p.png" 1x)}`,
+        '.b{background-image:image-set("p.png" 1x)}',
+        '.b{background-image:image-set("/p.png" 1x)}',
         String.raw`.b{content:"a\\b"}`,
         String.raw`.b{content:"\201C"}`,
       ])
         expect(problems(`<style>${css}</style>`), css).toEqual([]);
+    });
+  });
+
+  // The review of #438: each a whole bundle, exactly as given, that the lint passed and Chromium would fetch from. The
+  // lint now reads CSS as the browser does too (`readCss`): escapes, comments, line continuations and the markup of an
+  // SVG's <style> undone, and a <style> read to its real end (#326).
+  describe('CSS as the browser reads it (review of #438)', () => {
+    const LF = '\n';
+    const fetched = [
+      // url() with backslashes, unquoted or in a style= attribute.
+      String.raw`<style>.b{background:url(\\\\t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(/\\t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(\\/t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(https:\\\\t.example/p.gif)}</style>`,
+      String.raw`<style>@font-face{font-family:f;src:url(\\\\t.example/f.woff2)}</style>`,
+      String.raw`<svg><foreignObject><style>.b{background:url(\\\\t.example/p.gif)}</style></foreignObject></svg>`,
+      String.raw`<div style='background:url("\\\\t.example/p.gif")'></div>`,
+      // A <style> to its real end: space before the end tag's >, none at all, or past one in an SVG's CDATA or comment.
+      '<style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style >',
+      '<svg><foreignObject><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style ></foreignObject></svg>',
+      '<style>.b{background-image:image-set("//t.example/p.gif" 1x)}',
+      '<svg><style><![CDATA[/*</style>*/]]>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></svg>',
+      '<svg><style><!--</style>-->.b{background-image:image-set("//t.example/p.gif" 1x)}</style></svg>',
+      // A line continuation in a string, and a comment in a style= attribute's url().
+      `<style>.b{background-image:image-set("\\${LF}//t.example/p.gif" 1x)}</style>`,
+      `<style>.b{background-image:image-set("h\\${LF}ttps://t.example/p.gif" 1x)}</style>`,
+      `<style>.b{background:url("\\${LF}//t.example/p.gif")}</style>`,
+      `<div style='background:url(/*x*/"//t.example/p.gif")'></div>`,
+      // Hex escapes for the slashes, in strings and unquoted.
+      String.raw`<style>.b{background:url("\5c\5c t.example/p.gif")}</style>`,
+      String.raw`<style>.b{background:url("\2f\2f t.example/p.gif")}</style>`,
+      String.raw`<style>.b{background:url("\5c /t.example/p.gif")}</style>`,
+      String.raw`<style>.b{background:url("\2f /t.example/p.gif")}</style>`,
+      String.raw`<style>.b{background:url("https:\5c\5c t.example/p.gif")}</style>`,
+      String.raw`<style>.b{background:url(\5c\5c t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(\2f\2f t.example/p.gif)}</style>`,
+      // Escaped letters in url, and in @import.
+      String.raw`<style>.b{background:u\72l(//t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:\75rl(https://t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:ur\6c (//t.example/p.gif)}</style>`,
+      String.raw`<style>@\69mport "\5c\5c t.example/a.css";</style>`,
+      String.raw`<style>@\69mport "\2f\2f t.example/a.css";</style>`,
+      String.raw`<style>@\69mport u\72l(//t.example/a.css);</style>`,
+      // image-set() escaped and in a style= attribute; @font-face; src().
+      String.raw`<style>.b{background-image:image-set("\5c\5c t.example/p.gif" 1x)}</style>`,
+      String.raw`<style>.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style>`,
+      `<div style='background-image:image-set("//t.example/p.gif" 1x)'></div>`,
+      String.raw`<style>@font-face{font-family:f;src:url("\5c\5c t.example/f.woff2")}</style>`,
+      String.raw`<style>@font-face{font-family:f;src:url("\2f\2f t.example/f.woff2")}</style>`,
+      String.raw`<style>@font-face{font-family:f;src:u\72l(//t.example/f.woff2)}</style>`,
+      String.raw`<style>.b{background-image:src("\2f\2f t.example/p.gif")}</style>`,
+      // Control characters the URL parser drops: a tab inside, or a control character before, raw or escaped.
+      '<style>.b{background-image:image-set("/\t/t.example/p.gif" 1x)}</style>',
+      String.raw`<style>.b{background-image:image-set("/\9 /t.example/p.gif" 1x)}</style>`,
+      String.raw`<style>.b{background-image:image-set("\1 //t.example/p.gif" 1x)}</style>`,
+      // CDATA splitting an address in an SVG's <style>.
+      '<svg><style>.b{background-image:image-set("/<![CDATA[/]]>t.example/p.gif" 1x)}</style></svg>',
+      '<svg><style>.b{background-image:image-set("<![CDATA[//]]>t.example/p.gif" 1x)}</style></svg>',
+      '<svg><style>.b{background:url(<![CDATA[//t.example/p.gif]]>)}</style></svg>',
+    ];
+
+    it('refuses each', () => {
+      for (const html of fetched) expect(problems(html), html).toEqual(refused);
+    });
+
+    it('refuses an @import whose letters are escaped as forbidden CSS too', () => {
+      const forbidden = (html: string) =>
+        checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
+      expect(forbidden(String.raw`<style>@\69mport "a.css";</style>`)).toEqual(['stylesheets must be bundled, not imported at run time']);
+    });
+
+    // What base templates write, read the same way: nothing here is an address elsewhere.
+    it('passes what templates write: paths, data: URLs, escaped quotes and glyphs, comments, style= attributes', () => {
+      for (const html of [
+        String.raw`<style>.q::before{content:"\201C"}.q::after{content:"\201D"}.d{content:"\2014"}</style>`,
+        String.raw`<style>.n{white-space:pre;content:"a\A b"}.s{content:"\"quoted\""}</style>`,
+        '<style>@font-face{font-family:Inter;src:url("fonts/inter.woff2") format("woff2")}</style>',
+        '<style>.b{background:url(img/a.png)}.c{background:url( "./b.png" )}.d{background:url(data:image/png;base64,AA==)}</style>',
+        '<style>/*! Licence: https://example.com/licence */.a{color:var(--sf-accent, #fff)}</style>',
+        '<style>.a{font-family:"Inter", system-ui}</style><svg><style><![CDATA[.c{fill:currentColor}]]></style></svg>',
+        `<div style="--sf-x:1;width:50%;font-family:&quot;Inter&quot;"></div><p style='color:var(--sf-ink)'>`,
+      ])
+        expect(problems(html), html).toEqual([]);
     });
   });
 });
