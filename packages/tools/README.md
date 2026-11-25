@@ -1,6 +1,6 @@
 # @signforge/tools
 
-One registry of operations on an org's data. The CMS calls it over `/api/tools`, and agents over `/mcp` (M4-06); WebMCP will too. Each is a thin adapter. Nothing else on `/api` changes data, and `apps/api/test/routes.test.ts` fails if a route tries.
+One registry of operations on an org's data. The CMS calls it over `/api/tools`, and agents over `/mcp` (M4-06); WebMCP may in Milestone 5 (docs/research/webmcp.md). Each is a thin adapter. Nothing else on `/api` changes data, and `apps/api/test/routes.test.ts` fails if a route tries.
 
 ## For the CMS: the route
 

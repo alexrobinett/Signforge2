@@ -213,8 +213,7 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 ## Agents
 
 - A remote MCP server is the primary agent interface, with OAuth and per-org scopes.
-- WebMCP in the CMS exposes the same tools to an agent in a logged-in user's browser.
-- Both are generated from one set of tool definitions.
+- WebMCP, the same tools offered to an agent in a signed-in member's browser, is moved to Milestone 5: no stable browser ships it on by default yet (`docs/research/webmcp.md`, 2026-11-25).
 - Agents can create and edit drafts by default. Publishing to live screens is a separate scope granted explicitly.
 - Every agent action is written to an audit log.
 - A built-in agent in the CMS (#244, `docs/proposals/cms-agent.md`) calls the same tools as the signed-in member (`clientId: 'cms-agent'`), with its own turn quota and no grant: it fills spots from a flyer, photo or link, and later answers and drafts from a drawer. Publish, takeover, revoke and delete stop at a confirmation the person presses. The model is the org's own key or SignForge's demo model.
@@ -244,8 +243,8 @@ pnpm and Turborepo, with packages for:
 1. **Pi spike**: the old promo rebuilt under the template contract, measured on a Pi 4 at 1080p and 4K. Output: budget numbers and the fastest kiosk configuration. Throwaway code.
 2. **Player core**: template SDK, the C-Store template, manifest loading, offline cache, two-slot playback.
 3. **CMS and API**: orgs, assets, spots, playlists, schedules, publish, screen pairing.
-4. **Agents**: MCP server, WebMCP, the template submission and review pipeline.
-5. **Polish**: the public demo (a sandbox org per visitor), Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
+4. **Agents**: MCP server, the template submission and review pipeline.
+5. **Polish**: the public demo (a sandbox org per visitor), Pi image, more base templates, archive the four SignForge 1 repos with a pointer here, and WebMCP once a stable browser ships it (`docs/research/webmcp.md`).
 
 ### Milestone 3 so far
 
@@ -287,5 +286,4 @@ Next: the playlist editor, publishing and rollout from the CMS, schedules and ti
 ## Open items
 
 - Which hardware, if any, v1 supports for 4K. A Pi 5 is the obvious candidate and is untested.
-- Current browser support for WebMCP has not been checked.
 - Replacement artwork and fonts for the C-Store template: the SignForge 1 repo contains Petro-Points artwork and Gibson and Minion font files that should not be reused without a licence.
