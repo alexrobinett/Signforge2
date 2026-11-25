@@ -63,7 +63,7 @@ export function EditorHeader({
         {back.label}
       </Link>
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h1 className="truncate text-lg font-semibold">{title}</h1>
+        <h1 className="line-clamp-2 text-lg font-semibold wrap-anywhere">{title}</h1>
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {about}
         </p>

@@ -242,7 +242,7 @@ function KitEditor() {
           <Link to="/settings/brand-kits" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ChevronLeftIcon className="size-4" aria-hidden /> Brand kits
           </Link>
-          <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{draft.name || kit.name}</h1>
+          <h1 className="line-clamp-2 text-2xl font-semibold tracking-tight wrap-anywhere sm:text-3xl">{draft.name || kit.name}</h1>
           <p className="text-sm text-muted-foreground" aria-live="polite">
             {kit.isDefault ? 'Default kit' : 'Brand kit'} · {statusWord}
           </p>

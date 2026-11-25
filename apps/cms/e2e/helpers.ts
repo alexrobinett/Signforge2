@@ -412,6 +412,25 @@ export async function createOrg(page: Page, name: string, address: string) {
   await hydrated(page);
 }
 
+/**
+ * A page's title as laid out (#382): the lines shown, the lines its text would take unclamped (`full`),
+ * whether they are balanced, and whether any of it spills sideways. Measured in Geist, once its face has
+ * loaded: in the fallback face the lines break elsewhere.
+ */
+export async function titleLayout(page: Page) {
+  return page.getByRole('heading', { level: 1 }).evaluate(async (h) => {
+    const style = getComputedStyle(h);
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} "Geist Variable"`);
+    const line = Number.parseFloat(style.lineHeight);
+    return {
+      lines: Math.round(h.getBoundingClientRect().height / line),
+      full: Math.round(h.scrollHeight / line),
+      balanced: style.textWrapStyle === 'balance',
+      spills: h.scrollWidth > h.clientWidth,
+    };
+  });
+}
+
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
 export const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotId}')`;
 

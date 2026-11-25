@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs, titleLayout, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -173,6 +173,24 @@ test('a change someone else made while the kit was open is not overwritten, even
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
   await expect(page.getByRole('radio', { name: 'Round' })).toBeChecked();
+});
+
+test("a kit's long name wraps in its title, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
+  // At a phone's width it would take four lines: two are shown.
+  const { brandKit } = await tool(page, 'create_brand_kit', {
+    name: 'Northside Bakery winter menu boards, the café counter screens and the window displays on Main St',
+    colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
+    idempotencyKey: `long-kit-${Date.now()}`,
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/settings/brand-kits/${brandKit.id}`);
+  await hydrated(page);
+  expect(await titleLayout(page)).toEqual({ lines: 2, full: 2, balanced: true, spills: false });
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await titleLayout(page)).toEqual({ lines: 2, full: 4, balanced: true, spills: false });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 });
 
 test("the kit's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
