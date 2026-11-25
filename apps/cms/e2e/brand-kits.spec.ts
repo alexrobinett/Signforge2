@@ -37,9 +37,14 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('make a kit, see it on the real player as you pick colours, fix a pair that fails, and save it', async () => {
-  await page.goto('/settings/general');
-  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Brand kits' }).click();
+  // A section of its own in the sidebar, beside the content it dresses: the sidebar marks it, not Settings (#381).
+  await page.goto('/');
+  const main = page.getByRole('navigation', { name: 'Main' });
+  await main.getByRole('link', { name: 'Brand kits' }).click();
   await hydrated(page);
+  await expect(page).toHaveURL(/\/brand-kits$/);
+  await expect(main.getByRole('link', { name: 'Brand kits' })).toHaveAttribute('aria-current', 'page');
+  await expect(main.getByRole('link', { name: 'Settings' })).not.toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'No brand kits yet' })).toBeVisible();
   await axe(page);
   await shots(page, '50-brand-kits-empty');
@@ -47,7 +52,7 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await page.getByRole('button', { name: 'New kit' }).click();
   await page.getByLabel('Name').fill('Hearth Café');
   await page.getByRole('button', { name: 'Create kit' }).click();
-  await expect(page).toHaveURL(/\/settings\/brand-kits\/bk_/);
+  await expect(page).toHaveURL(/\/brand-kits\/bk_/);
   await expect(page.getByRole('heading', { name: 'Hearth Café', level: 1 })).toBeVisible();
   await hydrated(page);
   // The org's first kit is its default, so it reaches every screen.
@@ -150,7 +155,7 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
 
 test('a change someone else made while the kit was open is not overwritten, even after the page reads the kits again', async () => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/settings/brand-kits');
+  await page.goto('/brand-kits');
   await hydrated(page);
   await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Hearth Café', level: 1 })).toBeVisible();
@@ -183,7 +188,7 @@ test("a kit's long name wraps in its title, balanced, to two lines at most, at d
     idempotencyKey: `long-kit-${Date.now()}`,
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`/settings/brand-kits/${brandKit.id}`);
+  await page.goto(`/brand-kits/${brandKit.id}`);
   await hydrated(page);
   expect(await titleLayout(page)).toEqual({ lines: 2, full: 2, balanced: true, spills: false });
   await axe(page);
@@ -201,7 +206,7 @@ test("the kit's fields and actions are disabled in the server's HTML, until the 
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `server-kit-${Date.now()}`,
   });
-  const path = `/settings/brand-kits/${brandKit.id}`;
+  const path = `/brand-kits/${brandKit.id}`;
   const names = ['Name', 'Primary colour picker', 'Display font', 'Duplicate'];
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Rendered by the server, they are enabled once the editor has hydrated.
@@ -219,7 +224,7 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
     colors: { primary: '#2563eb', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `serial-kit-${Date.now()}`,
   });
-  await page.goto(`/settings/brand-kits/${brandKit.id}`);
+  await page.goto(`/brand-kits/${brandKit.id}`);
   await hydrated(page);
   await expect(page.getByLabel('Primary', { exact: true })).toBeEnabled();
   await page.getByLabel('Primary', { exact: true }).fill('#335577');
@@ -252,4 +257,18 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
   await copy.continue();
   await expect(page.getByRole('heading', { name: 'Serial kit copy', level: 1 })).toBeVisible();
   expect(copies.calls()).toBe(1);
+});
+
+test('the old addresses under Settings go to Brand kits, and to the kit (#381)', async () => {
+  const { brandKit } = await tool(page, 'create_brand_kit', {
+    name: 'Moved kit',
+    colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
+    idempotencyKey: `moved-kit-${Date.now()}`,
+  });
+  await page.goto('/settings/brand-kits');
+  await expect(page).toHaveURL(/\/brand-kits$/);
+  await expect(page.getByRole('heading', { name: 'Brand kits', level: 1 })).toBeVisible();
+  await page.goto(`/settings/brand-kits/${brandKit.id}`);
+  await expect(page).toHaveURL(new RegExp(`/brand-kits/${brandKit.id}$`));
+  await expect(page.getByRole('heading', { name: 'Moved kit', level: 1 })).toBeVisible();
 });

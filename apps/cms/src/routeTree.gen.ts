@@ -25,6 +25,8 @@ import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as AppBrandKitsIndexRouteImport } from './routes/_app/brand-kits/index'
+import { Route as AppBrandKitsKitIdRouteImport } from './routes/_app/brand-kits/$kitId'
 import { Route as AppPlaylistsIndexRouteImport } from './routes/_app/playlists/index'
 import { Route as AppPlaylistsPlaylistIdRouteImport } from './routes/_app/playlists/$playlistId'
 import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
@@ -40,7 +42,7 @@ import { Route as AppSpotsSpotIdRouteImport } from './routes/_app/spots/$spotId'
 import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
 import { Route as AppSettingsApiIndexRouteImport } from './routes/_app/settings/api/index'
 import { Route as AppSettingsApiGrantIdRouteImport } from './routes/_app/settings/api/$grantId'
-import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings/brand-kits/index'
+import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings_/brand-kits/index'
 import { Route as AppSettingsBrandKitsKitIdRouteImport } from './routes/_app/settings_/brand-kits/$kitId'
 
 const AppRoute = AppRouteImport.update({
@@ -123,6 +125,16 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppBrandKitsIndexRoute = AppBrandKitsIndexRouteImport.update({
+  id: '/brand-kits/',
+  path: '/brand-kits/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBrandKitsKitIdRoute = AppBrandKitsKitIdRouteImport.update({
+  id: '/brand-kits/$kitId',
+  path: '/brand-kits/$kitId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPlaylistsIndexRoute = AppPlaylistsIndexRouteImport.update({
   id: '/playlists/',
   path: '/playlists/',
@@ -201,9 +213,9 @@ const AppSettingsApiGrantIdRoute = AppSettingsApiGrantIdRouteImport.update({
 } as any)
 const AppSettingsBrandKitsIndexRoute =
   AppSettingsBrandKitsIndexRouteImport.update({
-    id: '/brand-kits/',
-    path: '/brand-kits/',
-    getParentRoute: () => AppSettingsRoute,
+    id: '/settings_/brand-kits/',
+    path: '/settings/brand-kits/',
+    getParentRoute: () => AppRoute,
   } as any)
 const AppSettingsBrandKitsKitIdRoute =
   AppSettingsBrandKitsKitIdRouteImport.update({
@@ -228,6 +240,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
+  '/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
   '/settings/ai': typeof AppSettingsAiRoute
@@ -237,6 +250,7 @@ export interface FileRoutesByFullPath {
   '/settings/screens': typeof AppSettingsScreensRoute
   '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/brand-kits/': typeof AppBrandKitsIndexRoute
   '/playlists/': typeof AppPlaylistsIndexRoute
   '/screens/': typeof AppScreensIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
@@ -261,6 +275,7 @@ export interface FileRoutesByTo {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
   '/': typeof AppIndexRoute
+  '/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
   '/settings/ai': typeof AppSettingsAiRoute
@@ -270,6 +285,7 @@ export interface FileRoutesByTo {
   '/settings/screens': typeof AppSettingsScreensRoute
   '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/brand-kits': typeof AppBrandKitsIndexRoute
   '/playlists': typeof AppPlaylistsIndexRoute
   '/screens': typeof AppScreensIndexRoute
   '/settings': typeof AppSettingsIndexRoute
@@ -297,6 +313,7 @@ export interface FileRoutesById {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/_app/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
   '/_app/settings/ai': typeof AppSettingsAiRoute
@@ -306,6 +323,7 @@ export interface FileRoutesById {
   '/_app/settings/screens': typeof AppSettingsScreensRoute
   '/_app/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/_app/brand-kits/': typeof AppBrandKitsIndexRoute
   '/_app/playlists/': typeof AppPlaylistsIndexRoute
   '/_app/screens/': typeof AppScreensIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
@@ -313,7 +331,7 @@ export interface FileRoutesById {
   '/_app/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/_app/settings_/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
   '/_app/settings/api/': typeof AppSettingsApiIndexRoute
-  '/_app/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
+  '/_app/settings_/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -333,6 +351,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/accept-invitation/$invitationId'
     | '/api/$'
+    | '/brand-kits/$kitId'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
     | '/settings/ai'
@@ -342,6 +361,7 @@ export interface FileRouteTypes {
     | '/settings/screens'
     | '/spots/$spotId'
     | '/v1/device/$'
+    | '/brand-kits/'
     | '/playlists/'
     | '/screens/'
     | '/settings/'
@@ -366,6 +386,7 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/api/$'
     | '/'
+    | '/brand-kits/$kitId'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
     | '/settings/ai'
@@ -375,6 +396,7 @@ export interface FileRouteTypes {
     | '/settings/screens'
     | '/spots/$spotId'
     | '/v1/device/$'
+    | '/brand-kits'
     | '/playlists'
     | '/screens'
     | '/settings'
@@ -401,6 +423,7 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/api/$'
     | '/_app/'
+    | '/_app/brand-kits/$kitId'
     | '/_app/playlists/$playlistId'
     | '/_app/screens/$screenId'
     | '/_app/settings/ai'
@@ -410,6 +433,7 @@ export interface FileRouteTypes {
     | '/_app/settings/screens'
     | '/_app/spots/$spotId'
     | '/v1/device/$'
+    | '/_app/brand-kits/'
     | '/_app/playlists/'
     | '/_app/screens/'
     | '/_app/settings/'
@@ -417,7 +441,7 @@ export interface FileRouteTypes {
     | '/_app/settings/api/$grantId'
     | '/_app/settings_/brand-kits/$kitId'
     | '/_app/settings/api/'
-    | '/_app/settings/brand-kits/'
+    | '/_app/settings_/brand-kits/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -545,6 +569,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/brand-kits/': {
+      id: '/_app/brand-kits/'
+      path: '/brand-kits'
+      fullPath: '/brand-kits/'
+      preLoaderRoute: typeof AppBrandKitsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/brand-kits/$kitId': {
+      id: '/_app/brand-kits/$kitId'
+      path: '/brand-kits/$kitId'
+      fullPath: '/brand-kits/$kitId'
+      preLoaderRoute: typeof AppBrandKitsKitIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/playlists/': {
       id: '/_app/playlists/'
       path: '/playlists'
@@ -650,12 +688,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsApiGrantIdRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/settings/brand-kits/': {
-      id: '/_app/settings/brand-kits/'
-      path: '/brand-kits'
+    '/_app/settings_/brand-kits/': {
+      id: '/_app/settings_/brand-kits/'
+      path: '/settings/brand-kits'
       fullPath: '/settings/brand-kits/'
       preLoaderRoute: typeof AppSettingsBrandKitsIndexRouteImport
-      parentRoute: typeof AppSettingsRoute
+      parentRoute: typeof AppRoute
     }
     '/_app/settings_/brand-kits/$kitId': {
       id: '/_app/settings_/brand-kits/$kitId'
@@ -676,7 +714,6 @@ interface AppSettingsRouteChildren {
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsApiGrantIdRoute: typeof AppSettingsApiGrantIdRoute
   AppSettingsApiIndexRoute: typeof AppSettingsApiIndexRoute
-  AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
@@ -688,7 +725,6 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsApiGrantIdRoute: AppSettingsApiGrantIdRoute,
   AppSettingsApiIndexRoute: AppSettingsApiIndexRoute,
-  AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
 }
 
 const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
@@ -705,13 +741,16 @@ interface AppRouteChildren {
   AppScheduleRoute: typeof AppScheduleRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
+  AppBrandKitsKitIdRoute: typeof AppBrandKitsKitIdRoute
   AppPlaylistsPlaylistIdRoute: typeof AppPlaylistsPlaylistIdRoute
   AppScreensScreenIdRoute: typeof AppScreensScreenIdRoute
   AppSpotsSpotIdRoute: typeof AppSpotsSpotIdRoute
+  AppBrandKitsIndexRoute: typeof AppBrandKitsIndexRoute
   AppPlaylistsIndexRoute: typeof AppPlaylistsIndexRoute
   AppScreensIndexRoute: typeof AppScreensIndexRoute
   AppSpotsIndexRoute: typeof AppSpotsIndexRoute
   AppSettingsBrandKitsKitIdRoute: typeof AppSettingsBrandKitsKitIdRoute
+  AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -724,13 +763,16 @@ const AppRouteChildren: AppRouteChildren = {
   AppScheduleRoute: AppScheduleRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
+  AppBrandKitsKitIdRoute: AppBrandKitsKitIdRoute,
   AppPlaylistsPlaylistIdRoute: AppPlaylistsPlaylistIdRoute,
   AppScreensScreenIdRoute: AppScreensScreenIdRoute,
   AppSpotsSpotIdRoute: AppSpotsSpotIdRoute,
+  AppBrandKitsIndexRoute: AppBrandKitsIndexRoute,
   AppPlaylistsIndexRoute: AppPlaylistsIndexRoute,
   AppScreensIndexRoute: AppScreensIndexRoute,
   AppSpotsIndexRoute: AppSpotsIndexRoute,
   AppSettingsBrandKitsKitIdRoute: AppSettingsBrandKitsKitIdRoute,
+  AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

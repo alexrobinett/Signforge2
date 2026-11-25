@@ -329,7 +329,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       try {
         const out = await callTool('create_brand_kit', { name: get().brandKits.newKit.name.trim(), colors: NEW_KIT_COLORS, idempotencyKey: key });
         await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-        if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: out.brandKit.id } });
+        if (stillAt(from, orgId)) await router.navigate({ to: '/brand-kits/$kitId', params: { kitId: out.brandKit.id } });
         kits((k) => ({ ...k, newKit: newKit() }));
       } catch (err) {
         kits((k) => ({ ...k, newKit: { ...k.newKit, pending: false, error: toolMessage(err) } }));
@@ -347,7 +347,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       });
       if (!done || !kitId) return;
       duplicateKeys.delete(of);
-      if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
+      if (stillAt(from, orgId)) await router.navigate({ to: '/brand-kits/$kitId', params: { kitId } });
     },
 
     async makeDefaultKit(orgId, brandKitId) {
