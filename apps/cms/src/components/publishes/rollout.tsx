@@ -15,7 +15,8 @@ export function RolloutBar({ publish, screens, now, className }: { publish: Publ
       className={cn('flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-muted', className)}
     >
       {segs.map((s) => (
-        <span key={s.outcome} style={{ flex: s.count, background: OUTCOME_COLOR[s.outcome] }} />
+        // As screens take the publish, each part eases to its new width (#385); under reduced motion it is set at once (styles.css).
+        <span key={s.outcome} className="transition-[flex-grow] duration-300 ease-out" style={{ flex: s.count, background: OUTCOME_COLOR[s.outcome] }} />
       ))}
     </div>
   );

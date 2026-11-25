@@ -12,6 +12,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { ProposalPanel } from '~/components/proposal';
 import {
@@ -43,6 +44,21 @@ import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { shown } from '~/state/versioned-draft';
+
+/**
+ * A move of a spot, shown as one (#385): the rows slide to their new places, as a view transition, and
+ * the moved row, `row`, is ringed a moment: a ring, not a tint, so its text keeps its contrast. Under
+ * reduced motion it is just made.
+ */
+function showMove(row: Element | null, change: () => void) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return change();
+  document.startViewTransition(() => {
+    flushSync(change);
+    if (!(row instanceof HTMLElement)) return;
+    const ring = getComputedStyle(row).getPropertyValue('--ring');
+    row.animate([{ boxShadow: `0 0 0 3px ${ring}` }, { boxShadow: `0 0 0 3px transparent` }], { duration: 1200, easing: 'ease-out' });
+  });
+}
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -224,11 +240,15 @@ function PlaylistEditor() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          drop(orgId, playlist.id, i);
+                          // The dragged row, by the index its drag carries: the move runs in the view transition, after the drag has ended.
+                          const from = Number(e.dataTransfer.getData('text/plain'));
+                          showMove(e.currentTarget.parentElement?.children[from] ?? null, () => drop(orgId, playlist.id, from, i));
                         }}
                         onDragEnd={() => startDrag(null)}
                         // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
                         aria-current={row === `${playingSpot}#0` || undefined}
+                        // Each row is its own part of a move's view transition, so it slides from where it was.
+                        style={{ viewTransitionName: `row-${row.replace(/[^\w-]/g, '_')}` }}
                         className={cn(
                           'flex min-h-12 items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-2',
                           playingSpot === id && 'border-primary bg-accent',
@@ -262,7 +282,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === 0}
                               ref={focusOn('up')}
-                              onClick={() => move(orgId, playlist.id, i, i - 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('li'), () => move(orgId, playlist.id, i, i - 1, name))}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -274,7 +294,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
                               ref={focusOn('down')}
-                              onClick={() => move(orgId, playlist.id, i, i + 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('li'), () => move(orgId, playlist.id, i, i + 1, name))}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />

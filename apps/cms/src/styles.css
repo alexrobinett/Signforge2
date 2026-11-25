@@ -299,6 +299,16 @@
   h3 {
     text-wrap: balance;
   }
+  /* A move of a playlist's spot is a view transition (#385): its rows slide, and the rest of the page stays as it is, not faded. */
+  ::view-transition-old(root) {
+    display: none;
+  }
+  ::view-transition-new(root) {
+    animation: none;
+  }
+  ::view-transition-group(*) {
+    animation-duration: 200ms;
+  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

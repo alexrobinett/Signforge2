@@ -313,3 +313,63 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });
+
+test('a move slides the rows and rings the moved one; under reduced motion it is just made (#385)', async () => {
+  const { playlist } = await tool(page, 'create_playlist', {
+    name: 'Motion loop',
+    spotIds: [spots.Opening, spots.Lunch, spots.Closing],
+    idempotencyKey: `motion-loop-${Date.now()}`,
+  });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const list = page.getByRole('list', { name: 'Spots in play order' });
+  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  // What the editor asked the browser to draw, kept on the page: each view transition, and each row it ringed, by name.
+  await page.evaluate(() => {
+    const log = (entry: string) => void (document.body.dataset.motion = `${document.body.dataset.motion ?? ''}${entry};`);
+    const slide = document.startViewTransition.bind(document);
+    document.startViewTransition = (change) => {
+      log('slide');
+      return slide(change);
+    };
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      if (this instanceof HTMLLIElement) log(`ring ${this.querySelector('.font-medium')?.textContent}`);
+      return animate.call(this, frames, options);
+    };
+  });
+  const motion = () =>
+    page.evaluate(() => {
+      const seen = (document.body.dataset.motion ?? '').split(';').filter(Boolean);
+      document.body.dataset.motion = '';
+      return seen;
+    });
+
+  // The slide over: while it plays, the page is drawn by the transition and a drag finds no row.
+  const slid = () =>
+    expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement
+              .getAnimations({ subtree: true })
+              .filter((a) => a.effect instanceof KeyframeEffect && a.effect.pseudoElement?.startsWith('::view-transition')).length,
+        ),
+      )
+      .toBe(0);
+  await page.getByRole('button', { name: 'Move Closing up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  expect(await motion()).toEqual(['slide', 'ring Closing']);
+  await slid();
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
+  expect(await motion()).toEqual(['slide', 'ring Lunch']);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'Move Lunch down' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
+  expect(await motion()).toEqual([]);
+  await page.emulateMedia({ reducedMotion: null });
+});

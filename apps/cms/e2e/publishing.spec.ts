@@ -107,7 +107,18 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await hydrated(page);
   const latest = page.getByRole('region', { name: 'Latest publish' });
   await expect(latest).toContainText('v4');
-  await expect(latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ })).toBeVisible({ timeout: 30_000 });
+  const rollout = latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ });
+  await expect(rollout).toBeVisible({ timeout: 30_000 });
+  // As screens take a publish, each part of the bar eases to its new width (#385), and under reduced motion it is set at once.
+  const easing = () =>
+    rollout
+      .locator('span')
+      .first()
+      .evaluate((s) => [getComputedStyle(s).transitionProperty, getComputedStyle(s).transitionDuration]);
+  expect(await easing()).toEqual(['flex-grow', '0.3s']);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await easing())[1]).toBe('1e-05s');
+  await page.emulateMedia({ reducedMotion: null });
   // Its tile shows the template the player drew and the template's name, not its key or a hash (#362).
   // It took the publish, so its tile says Playing, not Updating to (#362).
   const thumb = page.getByRole('img', { name: 'Playing: Deal' });
