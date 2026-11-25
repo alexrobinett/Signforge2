@@ -431,7 +431,7 @@ describe('POST /api/agent/inline', () => {
     const none = await setup({ save: null });
     const res = await none.fill({ kind: 'link', url: LINK });
     expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: 'no_model', message: expect.stringContaining('Settings, AI & agents') });
+    expect(await res.json()).toMatchObject({ error: 'no_model', message: expect.stringContaining('Settings, AI model') });
     const unchosen = await setup({ save: { fastModel: null } });
     expect(await (await unchosen.fill({ kind: 'link', url: LINK })).json()).toMatchObject({ error: 'no_model' });
     for (const s of [none, unchosen]) {

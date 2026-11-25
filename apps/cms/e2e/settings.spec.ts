@@ -223,9 +223,9 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
-  // AI & agents (#261): read, with no key form, while the org uses the demo model.
+  // AI model (#261): read, with no key form, while the org uses the demo model.
   await invitee.goto('/settings/ai');
-  await expect(invitee.getByRole('heading', { name: 'AI & agents' })).toBeVisible();
+  await expect(invitee.getByRole('heading', { name: 'AI model' })).toBeVisible();
   await expect(invitee.getByText('Only an owner can add a key.')).toBeVisible();
   await expect(invitee.getByLabel('API key', { exact: true })).toHaveCount(0);
   await invitee.goto('/settings/members');
@@ -239,9 +239,11 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
     await hydrated(invitee);
     await invitee.keyboard.press('ControlOrMeta+k');
     const menu = invitee.getByRole('dialog', { name: 'Command menu' });
-    await expect(menu.getByRole('option', { name: /rename_screen/ })).toHaveCount(1);
-    // Publish itself: the developer tools, publish_manifest_to_screen among them, are an owner's alone (#270).
-    await expect(menu.getByRole('option', { name: /^Publish to screens\s*publish$/ })).toHaveCount(count);
+    await expect(menu.getByRole('combobox', { name: 'Search pages, screens and actions' })).toBeFocused();
+    // A takeover is sent at once, so it is offered only to one who may publish (#253, #358); no raw tool is ever listed.
+    await invitee.keyboard.type('take over');
+    await expect(menu.getByRole('option', { name: 'Take over screens now…' })).toHaveCount(count);
+    await expect(menu.getByRole('option', { name: /rename_screen|publish_manifest_to_screen/ })).toHaveCount(0);
     await invitee.keyboard.press('Escape');
   };
   await publishOption(1);

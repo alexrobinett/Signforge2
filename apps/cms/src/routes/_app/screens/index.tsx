@@ -21,7 +21,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
@@ -59,6 +59,8 @@ interface Search {
   status?: StatusFilter;
   /** Absent: by name. */
   sort?: ScreenSort;
+  /** The Pair a screen dialog is open: ⌘K's Pair a screen comes here (#358). */
+  pair?: true;
 }
 
 const isStatusFilter = (v: unknown): v is StatusFilter => v === 'retired' || isStateKind(v);
@@ -70,6 +72,7 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStatusFilter(s.status) ? { status: s.status } : {}),
     ...(isScreenSort(s.sort) && s.sort !== 'name' ? { sort: s.sort } : {}),
+    ...(s.pair === true ? { pair: true as const } : {}),
   }),
   // The org's settings give the pairing form its defaults for new screens. The list is read again
   // on every load, as after a change (`router.invalidate()` in the store's actions), never from the cache.
@@ -118,13 +121,24 @@ function ScreensPage() {
   });
   const shown = sortScreens(matching, sort);
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  // With no screen yet the page is its own pairing form: ⌘K's Pair a screen focuses its code instead of a dialog (#358).
+  const takePair = useCallback(
+    (form: HTMLDivElement | null) => {
+      if (!form || !search.pair) return;
+      form.querySelector('input')?.focus();
+      void navigate({ search: (prev) => ({ ...prev, pair: undefined }), replace: true });
+    },
+    [search.pair, navigate],
+  );
 
   if (!screens.length) {
     return (
       <div className="space-y-6">
         <PageHeader title="Screens" description="No screens here yet." />
         {/* The player build on this site (vite.config.ts), with the device API on this origin too. */}
-        <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        <div ref={takePair}>
+          <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        </div>
       </div>
     );
   }
@@ -234,9 +248,12 @@ function Summary({ screens }: { screens: ScreenView[] }) {
   );
 }
 
+/** Pair a screen: open while the URL says `pair`, so ⌘K can open it from any page (#358). */
 function PairDialog({ groups }: { groups: GroupView[] }) {
+  const { pair } = Route.useSearch();
+  const navigate = Route.useNavigate();
   return (
-    <Dialog>
+    <Dialog open={pair === true} onOpenChange={(open) => void navigate({ search: (s) => ({ ...s, pair: open ? true : undefined }), replace: true })}>
       <DialogTrigger asChild>
         <Button size="lg">
           <PlusIcon aria-hidden /> Pair a screen

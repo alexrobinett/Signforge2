@@ -376,6 +376,9 @@ export function AgentDrawer() {
             // button shown, then the page (review of #402).
             const opener = d.opener;
             requestAnimationFrame(() => {
+              // Only while nothing has focus: the member may have moved on meanwhile (opened ⌘K and begun typing), and
+              // focus taken from there loses what they type.
+              if (document.activeElement && document.activeElement !== document.body) return;
               const shown = (el: HTMLElement | null) => (el?.checkVisibility() ? el : null);
               const agent = [...document.querySelectorAll<HTMLElement>('[data-agent-opener]')].find((el) => el.checkVisibility());
               (shown(document.querySelector<HTMLElement>(`[data-agent-opener="${opener}"]`)) ?? agent ?? document.getElementById('main'))?.focus();
@@ -418,7 +421,7 @@ export function AgentDrawer() {
                         <>
                           {' '}
                           <Link to="/settings/ai" className="underline underline-offset-4">
-                            Open Settings, AI & agents
+                            Open Settings, AI model
                           </Link>
                         </>
                       )}

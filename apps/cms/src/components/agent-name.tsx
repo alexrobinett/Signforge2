@@ -1,5 +1,5 @@
 /**
- * An agent's OAuth client in words, as `/connect` and Settings › API & agents name it. The API sends
+ * An agent's OAuth client in words, as `/connect` and Settings › Connected agents (MCP) name it. The API sends
  * an unverified client's name only when a page may show it (`shownClient` in `@signforge/tools`):
  * otherwise `name` is null and the client is an unverified app at where its code goes. `<bdi>` keeps
  * a name from reordering the text around it; a long one wraps rather than widen the page.
