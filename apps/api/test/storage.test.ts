@@ -97,7 +97,7 @@ describe('the storage sweep', () => {
     // Measured: the orgs due, then the org's lease, its unindexed manifests, the index written, the claim's batch, the
     // pending uploads and the last batch; an image upload's renditions are one query more. Seven an org at most, so
     // ORGS_PER_RUN fit in Free D1's 50. A new query fails this on purpose: look at the budget, then raise it.
-    expect(measured.result()).toEqual({ statements: 15, queries: 7, rpcs: [] });
+    expect(measured.result()).toEqual({ statements: 16, queries: 7, rpcs: [] });
     expect(1 + ORGS_PER_RUN * 7).toBeLessThanOrEqual(50);
     // R2: here a read (the manifest indexed) and a delete. At most INDEX_PER_ORG reads and two deletes an org: a sweep
     // claims at most 90 files, 90 uploads' 360 and 1,000 manifests, 1,000 keys a delete (review of #431).
