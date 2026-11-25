@@ -133,6 +133,37 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toBeVisible();
   await page.keyboard.press('Escape');
 
+  // Nor by an earlier opening's read, held up until after the change it predates (review of #430): its answer
+  // (1 change) lands while the next opening is open, after the draft was deleted. That read is not joined.
+  const stale: Route[] = [];
+  const counted = new Set<Request>();
+  const settled = new Set<Request>();
+  const onCounts = (r: Request) => void (countsRead(new URL(r.url())) && counted.add(r));
+  const onSettled = (r: Request) => void (countsRead(new URL(r.url())) && settled.add(r));
+  page.on('request', onCounts);
+  page.on('requestfinished', onSettled);
+  page.on('requestfailed', onSettled);
+  await page.route(countsRead, (route) => (stale.length === 0 ? void stale.push(route) : route.continue()));
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => stale.length).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  const { spots: drafts } = await tool(page, 'list_spots', {});
+  await tool(page, 'delete_spot', { spotId: drafts.find((sp: { name: string }) => sp.name === 'Lobby clock').id });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await stale[0]!.continue().catch(() => {});
+  // Every count read sent has come back (or was dropped), and the page has taken their answers.
+  await expect.poll(() => settled.size === counted.size && counted.size >= 2).toBe(true);
+  await page.evaluate(() => new Promise((r) => setTimeout(r)));
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.unroute(countsRead);
+  page.off('request', onCounts);
+  page.off('requestfinished', onSettled);
+  page.off('requestfailed', onSettled);
+
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();

@@ -31,7 +31,6 @@ import { useCanPublish, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
-import { navCountsQuery } from '~/queries/nav-counts';
 import { retryUnlessRedirect } from '~/queries/retry';
 import { playlistsQuery } from '~/queries/playlists';
 import { screensQuery } from '~/queries/screens';
@@ -241,12 +240,8 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   // The spots and playlists the pages have read, from their cache: a name typed in full is found, not asked about.
   const spots = useQuery({ ...spotsQuery(orgId), enabled: false });
   const playlists = useQuery({ ...playlistsQuery(orgId), enabled: false });
-  // Publish all is offered while there is something to publish: the sidebar's own count, read on opening.
-  const counts = useQuery({ ...navCountsQuery(orgId, false, false), enabled: orgId !== '' && canPublish, refetchOnMount: 'always' });
-  // Read again on each opening (this body mounts on each): offered only once this opening's own read has come back
-  // and worked. The cached count is not trusted while that read is on its way, nor after it fails (`isSuccess` is
-  // false then, `isFetchedAfterMount` true).
-  const drafts = counts.isFetchedAfterMount && counts.isSuccess ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
+  // Publish all is offered while there is something to publish, by the count this opening read itself (state/command-menu.ts).
+  const drafts = useAppStore((s) => s.commandMenu.drafts) && canPublish;
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
   const shownSelection = selectedItem(selection, found, moved);
