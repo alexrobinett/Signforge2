@@ -100,7 +100,7 @@ describe('tools/list', () => {
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });
 
-  it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound, which the input still checks', () => {
+  it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound (mcp.test.ts: a call still checks them)', () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
     const listed = listedTools(owner, AGENT);
     expect(listed.find((t) => t.name === 'list_screens')?.title).toBe('List screens');
@@ -111,10 +111,6 @@ describe('tools/list', () => {
       expect(json, t.name).not.toContain(JSON.stringify('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'));
       expect(json, t.name).not.toContain(String(Number.MAX_SAFE_INTEGER));
     }
-    // The dispatcher checks the zod input, which keeps all three.
-    const input = registry.get('rename_screen')?.input;
-    expect(input?.safeParse({ screenId: 'not an id!', name: 'Lobby' }).success).toBe(false);
-    expect(input?.safeParse({ screenId: 'scr_1', name: 'Lobby', ifVersion: Number.MAX_SAFE_INTEGER + 2 }).success).toBe(false);
   });
 
   it('lists nothing that needs content:publish without it, or a role above the grant', () => {

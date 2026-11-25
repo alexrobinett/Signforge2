@@ -979,6 +979,47 @@ describe('confirmation cards (#269)', () => {
     return detail;
   }
 
+  // A card is offered only to who may press it (#345), but a press goes on from the card it was shown: one made before
+  // the member lost the right is refused as the press runs, audited, never lost as a tool the turn no longer has.
+  it('refuses, audited, a press made after editors stopped publishing', async () => {
+    const s = await takeover({ role: 'editor' });
+    const { body } = pressOf(await raw(await s.ask('q')), 'q');
+    expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    await refusedPress(s, body, 'publish_takeover', /content:publish|publish/);
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  it('refuses, audited, a press made after the member was made a viewer', async () => {
+    const s = await takeover({ role: 'editor' });
+    const { body } = pressOf(await raw(await s.ask('q')), 'q');
+    const editor = (await s.member.session()).body.user.id;
+    const row = await env.DB.prepare('SELECT id FROM member WHERE organizationId = ? AND userId = ?').bind(s.org.id, editor).first<{ id: string }>();
+    await s.owner.ok('/api/auth/organization/update-member-role', { memberId: row?.id, role: 'viewer', organizationId: s.org.id });
+    await refusedPress(s, body, 'publish_takeover', /./);
+    expect(await s.scope.scheduleEntries.list()).toEqual([]);
+  });
+
+  it("checks a card's input against its tool's own before showing it: a malformed id is no card (#345)", async () => {
+    const s = await setup({
+      steps: [
+        { calls: [{ name: 'create_data_source', input: { id: 'bad id!', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' } }] },
+      ],
+    });
+    const all = await raw(await s.ask('q'));
+    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)).toBeUndefined();
+    expect(all.at(-1)).toMatchObject({ type: 'RUN_ERROR', code: 'unreadable', message: expect.stringContaining('id:') });
+    expect(await s.scope.dataSources.list()).toEqual([]);
+  });
+
+  it('tells the model what the member may not do here, and who may, in the words a refused card uses', async () => {
+    const s = await setup({ role: 'viewer', steps: [ANSWER] });
+    await raw(await s.ask('Publish everything'));
+    const prompt = JSON.stringify(s.model.asked[0].messages[0].content);
+    expect(prompt).toContain('What they may not do here, and who may:');
+    expect(prompt).toContain('You can view only: ask an editor.');
+    expect(prompt).toMatch(/publish[^:]*: You can view only/);
+  });
+
   it('names the target of every tool a card runs from its input alone: a refused press has no output', () => {
     for (const c of Object.values(CONFIRMABLE))
       for (const name of c.tools) {

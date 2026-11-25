@@ -481,12 +481,13 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       })),
       // Behind a card (#269): the run pauses before it runs (`needsApproval`), and it runs only on the person's press.
       // Offered only to a member who could press it (#345): a card their role cannot run is never worth the model's reading.
+      // A press resumes its own card's call, whatever the member's rights now: the run refuses it, audited, if they lost them.
       ...Object.entries(CONFIRMABLE)
-        .filter(([name]) => pressable(grant, name))
+        .filter(([name]) => pressable(grant, name) || pressed?.name === name)
         .map(([name, confirmable]) => ({
           name,
           description: `${confirmable.description()} From the drawer it stops at a card the person sees, and runs only if they press it.`,
-          inputSchema: confirmable.schema(),
+          inputSchema: inputSchemaOf(confirmable.input()),
           needsApproval: true,
           execute: (input: unknown) =>
             within(async () => {
@@ -519,6 +520,14 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         })),
     ];
 
+    // The cards this member is not offered (#345), each group with who may, so the model can say so instead of failing.
+    const refusals = new Map<string, string[]>();
+    for (const name of Object.keys(CONFIRMABLE).filter((n) => !pressable(grant, n))) {
+      const why = whyNot(grant, name, {}) ?? '';
+      refusals.set(why, [...(refusals.get(why) ?? []), (TOOL_CARDS[name]?.title ?? name).toLowerCase()]);
+    }
+    const cannot = [...refusals].map(([why, titles]) => `${titles.join(', ')}: ${why}`);
+
     // The conversation so far comes back from the browser, each answer its whole card. It may repeat org content (a
     // screen's name, a feed's text), so it reaches the model fenced as data in the person's turn, never as the model's own words (#335).
     const prompt = [
@@ -529,6 +538,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         : []),
       `The person's question now:\n${question}`,
       `Their role: ${c.var.role}${c.var.role === 'viewer' ? ', who may not save changes: your drafts are a request they can copy for an editor' : ''}.`,
+      ...(cannot.length ? [`What they may not do here, and who may: ${cannot.join(' ')}`] : []),
       `Where the person asked it:\n${fenced('page', JSON.stringify(page))}`,
     ].join('\n\n');
     const key = { orgId: org.orgId, provider: provider.provider, baseUrl: provider.baseUrl };
@@ -621,8 +631,9 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       /**
        * The run paused at a tool behind a card (#269): the card, read from the org now, its record kept
        * under a one-use token for this member, then the run's end, without its pause: the press sends the
-       * token, and the API resumes the call here. Only cards the member's role could press are offered (#345); one this input puts
-       * beyond them (a publish where editors do not publish) gets its title and who may,
+       * token, and the API resumes the call here. Only cards the member's role could press are offered (#345); the turn's
+       * prompt names the rest and who may. One whose input needs more than the role (a takeover that publishes a playlist,
+       * where editors do not publish) gets its title and who may,
        * and nothing is read for it: a card can name what their role does not show them, as an invitee's
        * address (review of #414).
        */
@@ -645,6 +656,13 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return;
         }
         const input = Object.fromEntries(Object.entries(called));
+        // Checked against the tool's own input before a card shows it: the offered schema leaves out its patterns and bounds.
+        const valid = confirmable.input().safeParse(input);
+        if (!valid.success) {
+          const why = valid.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
+          yield ended('unreadable', `The agent asked for something it cannot show on a card: ${why}. Ask again.`);
+          return;
+        }
         let made: Awaited<ReturnType<typeof confirmable.make>>;
         try {
           // On the org's scoped repositories, not the turn's counted reading: a publish card's dry run reads the whole org.

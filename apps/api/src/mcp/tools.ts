@@ -8,9 +8,6 @@ import { type DispatchResult, describeTools, type Grant, registry, type ToolServ
 /** Tools that take something away for good: a person should look before an agent runs them. */
 const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
 
-/** A tool's display name, from its own: `list_screens` is "List screens". */
-const titleOf = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1).replaceAll('_', ' ')}`;
-
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Every tool's input is an object (a test holds the registry to it), as MCP wants. */
@@ -32,7 +29,8 @@ export function listedTools(grant: Grant, services: ToolServices): Tool[] {
     return [
       {
         name: described.name,
-        title: titleOf(described.name),
+        // Its display name, from its own: `list_screens` is "List screens".
+        title: `${described.name.charAt(0).toUpperCase()}${described.name.slice(1).replaceAll('_', ' ')}`,
         description: described.description,
         inputSchema: described.inputSchema,
         annotations: {

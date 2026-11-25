@@ -467,9 +467,8 @@ export const TASKS: Task[] = [
     id: 'refused-viewer-publish',
     prompt: 'Publish everything that is waiting to go out.',
     role: 'viewer',
-    // Over /mcp a viewer is offered no publish: the model can only say so. In the drawer it may ask, and the card refuses it.
-    script: { mcp: () => [], drawer: () => [[{ name: 'publish', input: {} }]] },
-    refusals: { drawer: 1 },
+    // Neither arm offers a viewer a publish: the model can only say so, and who may.
+    script: { mcp: () => [], drawer: () => [] },
     async check(o) {
       const publishes = (await o.scope.publishes.list()).length;
       if (publishes !== o.world.publishes) return `the org has ${publishes} publishes`;
