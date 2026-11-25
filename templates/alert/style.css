@@ -227,8 +227,8 @@ body {
 }
 /* The code draws its own white tile and quiet zone (`qrSvg`). */
 .tile {
-  width: 23vmin;
-  height: 23vmin;
+  width: 40vmin;
+  height: 40vmin;
   border-radius: 1.48vmin;
   overflow: hidden;
 }
@@ -335,6 +335,9 @@ body {
     'headline headline'
     'instructions instructions'
     'meta qr';
+  /* The foot row is at least the code's height, so long copy overflows (and `--fit` steps it down) rather than the
+     code rising over it. */
+  grid-template-rows: auto auto minmax(auto, 1fr);
   gap: 4.44vmin 3.7vmin;
   padding: 8.15vmin 6.67vmin 7.4vmin;
 }

@@ -40,6 +40,10 @@
       "size": 44306,
       "type": "image/png"
     },
+    "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26": {
+      "size": 122816,
+      "type": "text/html"
+    },
     "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215": {
       "size": 79453,
       "type": "text/html"
@@ -74,10 +78,6 @@
     },
     "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff": {
       "size": 90095,
-      "type": "text/html"
-    },
-    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
-      "size": 122770,
       "type": "text/html"
     },
     "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
@@ -116,10 +116,10 @@
     }
   },
   "templates": {
-    "base/alert@1.0.1": {
+    "base/alert@1.1.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -199,7 +199,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
+      "html": "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -1440,7 +1440,7 @@
       "id": "alert",
       "name": "Evacuation alert",
       "kind": "template",
-      "template": "base/alert@1.0.1",
+      "template": "base/alert@1.1.0",
       "data": {
         "severity": "emergency",
         "headline": "Evacuate the building now",
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "61cd8a7cf1ec4580a35440f4d5698d13b6f4c072fe105b8ce414972baa2a0b2d"
+  "id": "87402d2fc2080911455fd5c443054c89fdf464f0a42fb9ad45f7d428dcaf2868"
 }

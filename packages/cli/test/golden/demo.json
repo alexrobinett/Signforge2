@@ -121,6 +121,10 @@
       "size": 12704,
       "type": "font/woff2"
     },
+    "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26": {
+      "size": 122816,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
@@ -156,10 +160,6 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
-      "size": 122770,
-      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -507,10 +507,10 @@
       },
       "html": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f"
     },
-    "base/alert@1.0.1": {
+    "base/alert@1.1.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -590,7 +590,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
+      "html": "7614daf59009f6c2f5613a79d35ad98977b227638e3b35937cf71fb13c182d26"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1098,7 +1098,7 @@
       "id": "fire-drill",
       "name": "Fire drill notice",
       "kind": "template",
-      "template": "base/alert@1.0.1",
+      "template": "base/alert@1.1.0",
       "data": {
         "severity": "notice",
         "headline": "Fire drill at 2 PM today",
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "7fb82c960c4427cdcf03a790a4a4abe4808cd5950b62563c51204f5640f5f5ce"
+  "id": "4c8e3132d54fa4a22bae615ec8e86a44162f85bb67f329c24f18b2b63a854efc"
 }

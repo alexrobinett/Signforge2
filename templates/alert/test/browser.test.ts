@@ -1,3 +1,4 @@
+import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { BrandColors, FrameTheme, Orientation } from '@signforge/contract';
@@ -90,6 +91,42 @@ describe('alert (#200)', () => {
           for (const p of problems) found.push(`${copy}, ${state}: ${p}`);
         }
       expect(found).toEqual([]);
+    }, 120_000);
+
+  // A 2 m scan on a 55-inch 1080p panel (#230): the Announcement's code reads there at 30vmin with 41 modules, about 6.6 px
+  // each, so the longest link Alert allows must be drawn at least that large, beside the longest copy, and read back.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`the QR code reads back as the longest link allowed, at 30vmin and 6.6 px a module or more, in every severity, ${orientation}`, async () => {
+      const max = (t().manifest.fields.qrUrl as { maxLength: number }).maxLength;
+      const longest = `https://example.com/${'w'.repeat(max - 'https://example.com/'.length)}`;
+      const k = await alertFrame(orientation);
+      for (const severity of severities) {
+        const f = await k.play({ severity, ...longCopy(), qrUrl: longest });
+        const { fills, clip, vmin, module } = await f.evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 3000;
+          const svg = document.querySelector<SVGSVGElement>('#qr svg')!;
+          const r = svg.getBoundingClientRect();
+          return {
+            fills: [getComputedStyle(svg.querySelector('rect')!).fill, getComputedStyle(svg.querySelector('path')!).fill],
+            clip: { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) },
+            vmin: r.width / (Math.min(innerWidth, innerHeight) / 100),
+            module: (r.width / svg.viewBox.baseVal.width) * (1080 / Math.min(innerWidth, innerHeight)),
+          };
+        });
+        expect(vmin, severity).toBeGreaterThanOrEqual(29.9);
+        expect(module, severity).toBeGreaterThanOrEqual(6.6);
+        expect(fills, severity).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+        const png = (await k.hst.page.screenshot({ clip })).toString('base64');
+        const rgba = await k.hst.page.evaluate(async (png) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${png}`;
+          await img.decode();
+          const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+          g.drawImage(img, 0, 0);
+          return [...g.getImageData(0, 0, img.width, img.height).data];
+        }, png);
+        expect(jsQR(Uint8ClampedArray.from(rgba), clip.width, clip.height)?.data, severity).toBe(longest);
+      }
     }, 120_000);
 
   it('marks each toggle on the root and removes what is off; without the QR code the type steps up', async () => {
