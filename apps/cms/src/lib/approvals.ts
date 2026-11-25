@@ -45,6 +45,19 @@ export function askerName(r: RequestView): string {
   return gone ? 'An agent no longer connected' : 'An agent';
 }
 
+/**
+ * The approval stage's second column, as its caption and its player's title say it: the pinned draft as approving would
+ * publish it, or a draft changed since it was asked for, which approving would not publish (#411).
+ */
+export function afterStage({ after, pinned }: { after: Pick<SpotView, 'name' | 'version'>; pinned: number }): { caption: string; title: string } {
+  return after.version === pinned
+    ? { caption: `After approval · Draft ${after.version}`, title: `${after.name} as approving would publish it` }
+    : {
+        caption: `Draft ${after.version} · changed since it was asked for (Draft ${pinned})`,
+        title: `${after.name} at Draft ${after.version}, changed since it was asked for (Draft ${pinned})`,
+      };
+}
+
 /** What asked: "agent via MCP", or "member". */
 export const askerKind = (r: RequestView) => (r.requestedBy.kind === 'agent' ? 'agent via MCP' : 'member');
 

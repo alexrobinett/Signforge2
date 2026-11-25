@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, createOrg, d1, disabledOnServer, hydrated, publishImage, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -248,7 +248,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
 
   // The page's own session stands in for an agent: what matters is that its changes land in between.
   const tool = async (name: string, input: unknown) => {
-    const res = await page.request.post(`/api/tools/${name}`, { data: input });
+    const res = await toolResponse(page, name, input);
     expect(res.status(), `${name}: ${await res.text()}`).toBe(200);
     return (await res.json()) as { screen?: { id: string }; group?: { id: string; screenIds: string[] } };
   };
@@ -275,7 +275,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await tool('add_group_members', { groupId: group.id, screenIds: [hall] });
   await settings.getByRole('button', { name: 'Save' }).click();
   await expect(settings).toBeHidden();
-  const { groups } = (await (await page.request.post('/api/tools/list_groups', { data: {} })).json()) as { groups: { id: string; screenIds: string[] }[] };
+  const { groups } = (await (await toolResponse(page, 'list_groups', {})).json()) as { groups: { id: string; screenIds: string[] }[] };
   expect(groups.find((g) => g.id === group.id)?.screenIds).toEqual([hall, lobby].sort());
 
   // An agent renames the screen while the form is open; the person's rename is refused, not written over it.
@@ -309,9 +309,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
 
   // A screen paired, published to and playing it.
   const pairing = await startPairing(request);
-  const claimed = await page.request.post('/api/tools/claim_screen', {
-    data: { code: pairing.code, name: 'Window', timezone: 'UTC', orientation: 'landscape' },
-  });
+  const claimed = await toolResponse(page, 'claim_screen', { code: pairing.code, name: 'Window', timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   const screenId = ((await claimed.json()) as { screen: { id: string } }).screen.id;
   const credential = await pairing.credential();
@@ -351,9 +349,7 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await signInAs(page, `e2e-poll-${Date.now()}@example.com`, '192.0.2.15');
   await createOrg(page, 'Eastside Deli', '192.0.2.15');
   const pairing = await startPairing(request);
-  const claimed = await page.request.post('/api/tools/claim_screen', {
-    data: { code: pairing.code, name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
-  });
+  const claimed = await toolResponse(page, 'claim_screen', { code: pairing.code, name: 'Counter', timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   await sync(request, await pairing.credential());
 

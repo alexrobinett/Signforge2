@@ -177,11 +177,39 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 
   await row.click();
   await hydrated(page);
-  await page.getByRole('button', { name: 'Delete' }).click();
+  // From the editor's ⋯ menu (#378), not between Save draft and Publish.
+  await page.getByRole('button', { name: 'More actions: delete' }).click();
+  await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/playlists$/);
   await expect(page.getByRole('heading', { name: 'Put your spots in a playlist' })).toBeVisible();
+});
+
+test('the delete question, opened from ⋯ by keyboard, gives focus back to ⋯ on Escape and on Cancel (#378)', async () => {
+  // Radix gave it back once the question's closing had played, the page's body focused until then.
+  const { playlist } = await tool(page, 'create_playlist', { name: 'Keyboard loop', spotIds: [spots.Opening], idempotencyKey: `keyboard-loop-${Date.now()}` });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const more = page.getByRole('button', { name: 'More actions: delete' });
+  const question = page.getByRole('alertdialog');
+  for (const close of ['Escape', 'Cancel'] as const) {
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question).toBeVisible();
+    // Read, as a person would: the menu has gone by then, and its Delete… item with it.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    if (close === 'Cancel') {
+      await question.getByRole('button', { name: 'Cancel' }).focus();
+      await page.keyboard.press('Enter');
+    } else await page.keyboard.press('Escape');
+    // At once, in the key's own event: not after the question's closing has played, with the body focused meanwhile.
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), close).toBe('More actions: delete');
+    await expect(question).toBeHidden();
+    await expect(more, close).toBeFocused();
+  }
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
@@ -277,7 +305,7 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
   // back by React, and the old value autosaved.
   const { playlist } = await tool(page, 'create_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
   const path = `/playlists/${playlist.id}`;
-  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Save draft', 'Delete', 'Publish'];
+  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Save draft', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Rendered by the server, they are enabled once the editor has hydrated (Save draft waits for a change).
   await page.goto(path);

@@ -7,7 +7,7 @@
 // sees the queue without its actions. Light and dark, desktop and phone, with axe at each.
 import { expect, test, type Page } from '@playwright/test';
 import { connectStub } from './agent-stub';
-import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, stageShows, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client addresses, so its sign-ins, pairing and registration have their own rate limits. */
@@ -20,10 +20,7 @@ async function pairScreen(page: Page, name: string) {
   const start = await page.request.post(`${DEVICE}/pair/start`, { headers });
   expect(start.status()).toBe(200);
   const { code } = (await start.json()) as { code: string };
-  const claimed = await page.request.post('/api/tools/claim_screen', {
-    headers: { 'cf-connecting-ip': ADDRESS.owner },
-    data: { code, name, timezone: 'UTC', orientation: 'landscape' },
-  });
+  const claimed = await toolResponse(page, 'claim_screen', { code, name, timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   return ((await claimed.json()) as { screen: { id: string } }).screen.id;
 }

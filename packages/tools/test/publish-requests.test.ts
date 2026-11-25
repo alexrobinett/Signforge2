@@ -669,6 +669,40 @@ describe('putting a declined request back (#115)', () => {
     expect((await scope().publishRequests.get(id))!.status).toBe('declined');
   });
 
+  it('says expired, in its message and its details alike, when it expires between its read and its batch (#411)', async () => {
+    const id = await declined(person('owner'));
+    // Its expiry passes as the batch is about to run.
+    const raced = racing(person('owner'), () => env.DB.prepare('UPDATE publish_requests SET expires_at = ? WHERE id = ?').bind(Date.now(), id).run());
+    expect(await reopen(raced, id)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringMatching(/ is expired$/),
+      details: { status: 'expired' },
+    });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
+  it('refuses when the same drafts are asked for again, or the asker reaches its cap, between its read and its batch (#411)', async () => {
+    const id = await declined(person('owner'));
+    const pin = JSON.parse((await scope().publishRequests.get(id))!.draftsJson);
+    const asked: string[] = [];
+    const again = racing(person('owner'), async () => asked.push((await ask(agent(), pin)).request.id));
+    expect(await reopen(again, id)).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('asked for again since it was declined') });
+    expect(asked).toHaveLength(1);
+    expect(await reopen(person('owner'), id)).toMatchObject({ ok: false, details: { requestId: asked[0] } });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+    // The other declined; the asker fills its cap with other drafts as the batch is about to run.
+    await call(person('owner'), 'decline_publish_request', { publishRequestId: asked[0] });
+    const capped = racing(person('owner'), async () => {
+      for (let i = (await scope().publishRequests.pendingBy(o.agentGrant, Date.now())).length; i < MAX_PENDING; i++) {
+        const s = await otherSpotNamed(`raced-cap-${i}`);
+        await ask(agent(), [{ kind: 'spot', id: s.id, version: s.rowVersion }], `Raced cap ${i}`);
+      }
+    });
+    expect(await reopen(capped, id)).toMatchObject({ ok: false, error: 'conflict', details: { pending: MAX_PENDING } });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
   it('commits one of two put back from one read, and none once it is decided again between its read and its batch', async () => {
     const id = await declined(person('owner'));
     const row = (await scope().publishRequests.get(id))!;
@@ -685,16 +719,35 @@ describe('putting a declined request back (#115)', () => {
   });
 });
 
+describe('who asked, as a page may name them (#411)', () => {
+  it('names a connected agent whose name a page may not show as no name, not as gone: the CMS reads "An agent"', async () => {
+    const named = (name: string) => env.DB.prepare('UPDATE agent_grants SET client_name = ? WHERE id = ?').bind(name, o.agentGrant).run();
+    // A name with a bidi control is not plain (plainName): withheld, though the agent is still connected.
+    await named('Agent \u202Eevil');
+    try {
+      const { request } = await call(person('viewer'), 'get_publish_request', { publishRequestId: o.publishRequest });
+      expect(request.requestedBy).toMatchObject({ kind: 'agent', name: null, gone: false });
+    } finally {
+      await named('Seeded agent');
+    }
+  });
+});
+
 describe('checking what approving would do (#115)', () => {
-  it('says the default it read and the one approving would make, and how many screens play each pinned spot now', async () => {
-    // Nothing is published, and the org has no default: an entry on every screen at all hours makes its playlist the first one (#243).
+  /** With no default yet, an entry on every screen at all hours and the pins of a request that would make its playlist the first default (#243). */
+  const firstDefaultPins = async () => {
     const entry = await scope().scheduleEntries.insert({ playlistId: o.playlist, priority: 1, target: 'org' });
-    const pins = [
+    return [
       { kind: 'schedule_entry', id: entry.id, version: entry.rowVersion },
       { kind: 'playlist', id: o.playlist, version: (await scope().playlists.get(o.playlist))!.rowVersion },
       { kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) },
       { kind: 'spot', id: o.imageSpot, version: await spotVersion(o.imageSpot) },
     ];
+  };
+
+  it('says the default it read and the one approving would make, and how many screens play each pinned spot now', async () => {
+    // Nothing is published, and the org has no default: an entry on every screen at all hours makes its playlist the first one (#243).
+    const pins = await firstDefaultPins();
     const { request } = await ask(agent(), pins, 'Opening week');
     const seen = await check(request.id);
     expect(seen).toMatchObject({ refused: null, defaultPlaylistId: null, madeDefault: { id: o.playlist } });
@@ -728,6 +781,17 @@ describe('checking what approving would do (#115)', () => {
     // As checked again: approved.
     await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
     expect(await approveAs()).toMatchObject({ ok: true });
+  });
+
+  it('approves a request that makes the first default as the CMS sends it: ifDefault null, as checked (#411)', async () => {
+    // No default yet: an entry on every screen at all hours makes the request's playlist the first one (#243).
+    const pins = await firstDefaultPins();
+    const { request } = await ask(agent(), pins, 'First default');
+    const seen = await check(request.id);
+    expect(seen).toMatchObject({ defaultPlaylistId: null, madeDefault: { id: o.playlist } });
+    const held = { ifScreens: seen.screens.map((x: { id: string }) => x.id), ifDefault: seen.defaultPlaylistId };
+    expect(await dispatch(registry, 'approve_publish_request', { publishRequestId: request.id, ...held }, person('owner'))).toMatchObject({ ok: true });
+    expect((await scope().settings.get())?.defaultPlaylistId).toBe(o.playlist);
   });
 
   const check = (publishRequestId: string) => call(person('viewer'), 'check_publish_request', { publishRequestId });

@@ -106,7 +106,8 @@ interface SpotEditorState {
    */
   checks: Record<string, { touched: string[]; all: boolean }>;
   /** Delete's confirmation: open, deleting, or refused, with the playlists that play the spot when that is why. */
-  deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[] };
+  /** `savedSince`: refused because someone else saved the spot since it was read. */
+  deleting: { open: boolean; pending: boolean; error: string | null; playlists: { id: string; name: string }[]; savedSince: boolean };
 }
 
 export interface SpotEditorSlice {
@@ -144,12 +145,13 @@ export interface SpotEditorSlice {
   askDeleteSpot: (open: boolean) => void;
   /**
    * Deletes the spot, at the version the editor holds (as loaded, or as its own save left it), and goes
-   * to the spot library; refused while a playlist plays it, or once someone else saved it. Says whether it went.
+   * to the spot library; refused while a playlist plays it, or once someone else saved it. The person's own edit, waiting
+   * or on its way, is saved first, so the delete names the version it made (#355). Says whether it went.
    */
   deleteSpot: (orgId: string, spotId: string) => Promise<boolean>;
 }
 
-const closedDelete = (): SpotEditorState['deleting'] => ({ open: false, pending: false, error: null, playlists: [] });
+const closedDelete = (): SpotEditorState['deleting'] => ({ open: false, pending: false, error: null, playlists: [], savedSince: false });
 
 /** The playlists a refused delete names (`details.playlists`), as the API gave them. */
 function blocking(err: unknown): { id: string; name: string }[] {
@@ -471,9 +473,15 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     askDeleteSpot: (open) => editor((e) => ({ ...e, deleting: { ...closedDelete(), open } })),
 
     async deleteSpot(orgId, spotId) {
-      editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null, playlists: [] } }));
+      editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null, playlists: [], savedSince: false } }));
       try {
-        await callTool('delete_spot', { spotId, ifVersion: savedSpot(orgId, spotId)?.version });
+        // An edit of theirs not saved yet goes first: deleting at the version before it would be refused as someone
+        // else's save (#355). One that cannot save (refused, or not sendable) leaves the version as it was.
+        await drafts.save(spotId);
+        const version = savedSpot(orgId, spotId)?.version;
+        // Never a delete without a version: the spot is read before it can be deleted.
+        if (version === undefined) throw new Refusal('not_found', 'This spot is not loaded here: reload the page and try again.');
+        await callTool('delete_spot', { spotId, ifVersion: version });
         // Only once it is gone: a refused delete leaves the waiting save to run.
         drafts.drop(spotId);
         await router.navigate({ to: '/spots' });
@@ -484,12 +492,13 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         return true;
       } catch (err) {
         const playlists = blocking(err);
+        const savedSince = !playlists.length && err instanceof Refusal && err.code === 'conflict';
         const error = playlists.length
           ? `Playlists play this spot, so it cannot be deleted. Take it out of ${playlists.length === 1 ? 'this one' : 'these'} first, and publish ${playlists.length === 1 ? 'it' : 'them'} if screens play ${playlists.length === 1 ? 'it' : 'them'}:`
           : err instanceof Refusal && err.code === 'conflict'
             ? 'Someone saved this spot since you opened it, so it was not deleted. Reload it to see their change.'
             : toolMessage(err);
-        editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error, playlists } }));
+        editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error, playlists, savedSince } }));
         return false;
       }
     },
