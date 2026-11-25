@@ -128,8 +128,7 @@
         "packages/tools/src/upload.ts",
         "scripts/spot-shots.ts",
         "templates/agenda/main.ts",
-        "templates/menu-board/main.ts",
-        "templates/news/main.ts"
+        "templates/menu-board/main.ts"
       ],
       "linter": { "rules": { "nursery": { "noUnsafeTypeAssertion": "off" } } }
     }

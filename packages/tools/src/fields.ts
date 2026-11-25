@@ -16,23 +16,14 @@ export const idempotencyKey = z
   .max(128)
   .regex(/^[\x21-\x7e]+$/, 'printable ASCII, no spaces')
   .optional()
-  .describe(
-    'A key you choose for this one creation, such as a UUID. Retrying with the same key and input returns the first result and creates nothing more; reusing it for another input is refused',
-  );
+  .describe('A key for this one creation, such as a UUID: a retry with it creates nothing more');
 
 /**
  * On an update tool: the `version` of the row as the caller read it. The dispatcher refuses the
  * call with `conflict`, details `{ id, version }` (the version now), if the row has changed since,
  * and writes nothing. The check runs in the batch that writes the change.
  */
-export const ifVersion = z
-  .number()
-  .int()
-  .positive()
-  .optional()
-  .describe(
-    'The version you read. If the row has changed since, nothing is written and the call is refused with conflict, details { id, version }: read it again and redo the change. Omit to change it whatever its version',
-  );
+export const ifVersion = z.number().int().positive().optional().describe('The version you read; a conflict means it changed since: read it again');
 
 /** A row's version, on the view of every row an update tool changes. */
 export const version = z.number().int().describe('Moves on with every change; pass it as ifVersion to update only what you read');

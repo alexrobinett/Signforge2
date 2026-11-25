@@ -1,13 +1,47 @@
-import { defineTemplate, fitWords, formatter, now as clockNow } from '@signforge/template-sdk';
-import { readableOn } from '@signforge/template-sdk/contrast';
+import { applyLook, crawl, LOOKS } from '@signforge/template-looks';
+import { now as clockNow, defineTemplate, formatter, type TemplateContext } from '@signforge/template-sdk';
+import { bindRow, rowImage } from '@signforge/template-sdk/rows';
 
-interface Item {
+type Look = (typeof LOOKS)[number];
+
+/** A row of the `items` field, as the news feed (`NewsFeed`) writes it. */
+interface Story {
   title: string;
   published: string;
   source: string;
+  summary: string;
 }
 
-/** "33 minutes ago", "il y a 2 heures": the item's age in the feed's language. */
+/** A story with a headline, and its row in `items`, which `bindRow` and `rowImage` read by. */
+interface Listed {
+  story: Story;
+  row: number;
+}
+
+/** Between headlines in the crawl. */
+const SEPARATORS: Record<Look, string> = { pop: '  ·  ', poster: '  —  ', night: '  /  ', corporate: '   ·   ' };
+
+/** Stories in the list, which the lead rotates through: as many as fit each orientation's column at the look's row height. */
+const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
+
+/** The lead headline at each step, from the look's own size down to where 200 characters fit its lines. */
+const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
+
+/** How long the list's marker takes to slide to the next story, ending as that story comes on. */
+const MARKER_MS = 600;
+
+/** How long before its turn a later story's photo starts to load. */
+const LOAD_AHEAD_MS = 3000;
+
+/**
+ * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
+ * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
+ * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
+ */
+let later: { img: HTMLImageElement; row: number; at: number }[] = [];
+let timers: number[] = [];
+
+/** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
 function ago(iso: string, now: Date, locale: string): string {
   const t = new Date(iso).getTime();
   if (!iso || Number.isNaN(t)) return '';
@@ -18,72 +52,167 @@ function ago(iso: string, now: Date, locale: string): string {
   return hrs < 24 ? rtf.format(-hrs, 'hour') : rtf.format(-Math.round(hrs / 24), 'day');
 }
 
-/** Shorten an element's text to whole words that fit its box. Only text that overflows costs layouts. */
-function ellipsize(el: HTMLElement): void {
-  const text = el.textContent ?? '';
-  if (!text) return;
-  // Glyphs overhang a tight line-height by a few pixels; text cut by a line clamp overflows by a
-  // whole line. Half a line tells them apart.
-  const slack = parseFloat(getComputedStyle(el).fontSize) / 2;
-  el.textContent = fitWords(text, (s) => {
-    el.textContent = s;
-    return el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + slack;
-  });
+/** A copy of a `<template>`'s element: a story layer or a list row. */
+function clone(id: string): HTMLElement {
+  const el = document.querySelector<HTMLTemplateElement>(`#${id}`)!.content.firstElementChild!.cloneNode(true);
+  if (!(el instanceof HTMLElement)) throw new Error(`#${id} holds no element`);
+  return el;
 }
 
 defineTemplate({
-  prepare(ctx) {
-    const root = document.documentElement;
-    const accent = String(ctx.data.accent);
-    root.style.setProperty('--accent', accent);
-    // The badge is the spot's accent, which need not be the kit's (with no kit it is the default
-    // palette's amber, where the template's white text read at 2.14:1): its text is chosen against it.
-    const style = getComputedStyle(root);
-    root.style.setProperty('--on-accent', readableOn(accent, style.getPropertyValue('--on-accent')));
-    // The age line is the accent on the background: amber, for one, does not read on a light kit.
-    // It is large text at 1080p (3.2vmin, 35 px), where 3:1 reads.
-    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--bg'), accent, { large: true }));
-    const now = clockNow();
-    const items = ((ctx.data.items as Item[]) ?? []).filter((i) => i.title);
-    const [lead, ...rest] = items;
-    document.getElementById('clock')!.textContent = formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(now);
-    const credit = String(ctx.data.source || lead?.source || '');
-    document.getElementById('credit')!.textContent = credit;
-    if (lead) {
-      document.getElementById('lead')!.textContent = lead.title;
-      // The age sits under the feed's own words, so it is in the feed's language; the screen's when the feed declares none.
-      document.getElementById('age')!.textContent = ago(lead.published, now, String(ctx.data.language || ctx.locale));
-    }
-    // Portrait has the height for more secondary headlines; drop any that do not fit.
-    const more = document.getElementById('more')!;
-    for (const item of rest.slice(0, ctx.orientation === 'portrait' ? 5 : 4)) {
-      const li = document.createElement('li');
-      li.textContent = item.title;
-      more.appendChild(li);
-    }
-    const main = document.querySelector('main')!;
-    while (more.children.length && main.scrollHeight > main.clientHeight + 1) more.lastElementChild!.remove();
-    // Text that does not fit ends on a whole word ("rain…"), not after a space as CSS cuts it ("rain …").
-    for (const el of [document.getElementById('lead')!, document.getElementById('credit')!, ...more.children]) ellipsize(el as HTMLElement);
+  async prepare(ctx) {
+    const { data } = ctx;
+    for (const t of timers) clearTimeout(t);
+    timers = [];
+    later = [];
+    const look = LOOKS.find((l) => l === data.look)!;
+    // Unpainted until play: a frame that paints a photo while prepare runs has it decoded for the
+    // screen first, and the SDK's decode before ready waits behind that one (photo-promo, #168).
+    const leads = document.getElementById('leads')!;
+    leads.style.visibility = 'hidden';
 
-    // The crawl holds the headlines twice and slides by exactly one copy, so it loops seamlessly.
-    const crawl = document.getElementById('crawl')!;
-    // With no headlines (a feed that failed or has not loaded yet) there is no crawl: hide the bar
-    // rather than show an empty white strip.
-    if (!items.length) {
-      document.querySelector('footer')!.hidden = true;
-      return;
-    }
-    for (let copy = 0; copy < 2; copy++) {
-      for (const item of items) {
-        const span = document.createElement('span');
-        span.textContent = item.title;
-        crawl.appendChild(span);
+    // The contract has checked the list against the field before a template sees it: the check here only tells TypeScript.
+    const items: Story[] = Array.isArray(data.items) ? data.items : [];
+    // A row without a headline is left out, and every story keeps its own row's photo.
+    const all: Listed[] = items.flatMap((story, row) => (story.title.trim() ? [{ story, row }] : []));
+    const listed = all.slice(0, LIST_ROWS[ctx.orientation]);
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // The lead turns every `rotationSeconds`, through the listed stories, each for an equal share of the play. Held still, it shows the first.
+    const turns = reduced
+      ? Math.min(1, listed.length)
+      : Math.min(listed.length, Math.max(1, Math.round(ctx.durationMs / (Number(data.rotationSeconds) * 1000))));
+    const photos = data.showImages === true && listed.some(({ row }) => rowImage(ctx, 'items', row, 'image'));
+
+    const stories = Array.from({ length: Math.max(1, turns) }, () => clone('story'));
+    leads.append(...stories);
+    const rows = document.getElementById('rows')!;
+    if (listed.length > 1) rows.append(...listed.map(() => clone('row')));
+    // An element with nothing to show is off, as if switched off, so the layout closes up around it.
+    await applyLook({
+      ...ctx,
+      data: { ...data, showImages: photos, showList: data.showList === true && listed.length > 1, showCrawl: data.showCrawl === true && all.length > 0 },
+    });
+
+    const credit = String(data.source || listed[0]?.story.source || '').trim();
+    const creditEl = document.getElementById('credit')!;
+    if (credit) creditEl.textContent = credit;
+    else creditEl.remove();
+    const now = clockNow();
+    document.getElementById('clock')!.textContent = formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(now);
+    const lang = String(data.language || ctx.locale);
+
+    const slot = ctx.durationMs / stories.length;
+    stories.forEach((el, i) => {
+      // Each story comes on as the last goes, over it, and goes as the next comes; the last stays to the end of the play.
+      el.style.zIndex = String(i);
+      el.style.setProperty('--at', i ? `calc(${Math.round(i * slot)}ms - var(--lk-out))` : '0ms');
+      if (i < stories.length - 1) el.style.setProperty('--until', `${Math.round((i + 1) * slot)}ms`);
+      const entry = listed[i];
+      if (!entry) {
+        el.classList.add('empty', 'no-photo');
+        el.querySelector('.headline')!.textContent = 'No headlines yet';
+        for (const part of el.querySelectorAll('.media, .meta, .summary')) part.remove();
+        return;
       }
+      const { story, row } = entry;
+      const photo = el.querySelector<HTMLImageElement>('.photo');
+      if (i > 0) photo?.removeAttribute('data-sf-src');
+      bindRow(el, ctx, 'items', row);
+      const bare = () => {
+        el.classList.add('no-photo');
+        el.querySelector('.media')?.remove();
+      };
+      if (!photos || !photo || !rowImage(ctx, 'items', row, 'image')) bare();
+      else {
+        // A photo the browser cannot decode: bindRow hides it, and the story goes without a frame rather than show an empty one.
+        const watch = new MutationObserver(() => {
+          if (!photo.hidden) return;
+          watch.disconnect();
+          bare();
+        });
+        watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
+        if (i > 0) later.push({ img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+      }
+      const meta = el.querySelector('.meta');
+      if (meta) {
+        const src = story.source || credit;
+        const age = ago(story.published, now, lang);
+        if (src) meta.querySelector('.src')!.textContent = src;
+        else meta.querySelector('.src')!.remove();
+        if (age) meta.querySelector('.age')!.textContent = age;
+        else meta.querySelector('.age')!.remove();
+        if (!src && !age) meta.remove();
+      }
+      if (!story.summary) el.querySelector('.summary')?.remove();
+    });
+
+    const listRows = [...rows.querySelectorAll<HTMLElement>(':scope > .row')];
+    listRows.forEach((el, i) => {
+      const { story, row } = listed[i]!;
+      bindRow(el, ctx, 'items', row);
+      const thumb = el.querySelector('.thumb');
+      if (thumb && !rowImage(ctx, 'items', row, 'image', 'thumb')) {
+        // Never an empty frame: the story's source, or the feed's, by its first letter.
+        thumb.classList.add('none');
+        thumb.querySelector('img')!.remove();
+        const name = [story.source, credit, story.title].map((s) => s.trim()).find(Boolean)!;
+        thumb.querySelector('.initial')!.textContent = [...name][0]!.toUpperCase();
+      }
+    });
+
+    const strip = document.getElementById('crawl');
+    if (strip) {
+      strip.textContent = all.map(({ story }) => story.title.trim()).join(SEPARATORS[look]);
+      crawl(strip, ctx);
     }
-    const copyWidth = crawl.scrollWidth / 2;
-    const pxPerSec = (ctx.viewport.width * Number(ctx.data.crawlSpeed || 6)) / 60;
-    root.style.setProperty('--crawl-shift', `${-copyWidth}px`);
-    root.style.setProperty('--crawl-s', `${copyWidth / pxPerSec}s`);
+
+    fitHeadlines(stories);
+    if (rows.isConnected && listRows.length) mark(ctx, listRows, stories.length, slot);
+  },
+  play(ctx) {
+    document.getElementById('leads')!.style.visibility = '';
+    for (const { img, row, at } of later)
+      timers.push(
+        window.setTimeout(() => {
+          img.dataset.sfSrc = 'image';
+          bindRow(img, ctx, 'items', row);
+        }, at),
+      );
   },
 });
+
+/**
+ * Each lead headline at the largest step whose lines hold it: its clamp's ellipsis comes only at the smallest. Every
+ * headline is read before any is stepped, so stories that fit cost one layout between them.
+ */
+function fitHeadlines(stories: HTMLElement[]): void {
+  const over = (el: HTMLElement) => {
+    const h = el.querySelector<HTMLElement>('.headline')!;
+    return h.scrollHeight > h.clientHeight + Number.parseFloat(getComputedStyle(h).fontSize) / 2 || h.scrollWidth > h.clientWidth + 1;
+  };
+  for (const story of stories.filter(over))
+    for (const step of HEADLINE_STEPS.slice(1)) {
+      story.style.setProperty('--fit', String(step));
+      if (!over(story)) break;
+    }
+}
+
+/**
+ * The list's marker on the story the lead shows: at the first story from the start, sliding to each next one so that
+ * it arrives as that story comes on. One transform animation the length of the play, which the SDK starts with the rest.
+ */
+function mark(ctx: TemplateContext, rows: HTMLElement[], turns: number, slot: number): void {
+  const marker = document.querySelector<HTMLElement>('.marker')!;
+  const at = (i: number) => `translateY(${rows[i]!.offsetTop}px)`;
+  marker.style.height = `${rows[0]!.offsetHeight}px`;
+  marker.style.transform = at(0);
+  if (turns < 2) return;
+  const d = ctx.durationMs;
+  const frames: Keyframe[] = [{ offset: 0, transform: at(0) }];
+  for (let i = 1; i < turns; i++) {
+    const arrive = i * slot;
+    frames.push({ offset: (arrive - MARKER_MS) / d, transform: at(i - 1), easing: 'cubic-bezier(0.3, 0, 0.2, 1)' }, { offset: arrive / d, transform: at(i) });
+  }
+  frames.push({ offset: 1, transform: at(turns - 1) });
+  marker.animate(frames, { duration: d, fill: 'both' });
+}

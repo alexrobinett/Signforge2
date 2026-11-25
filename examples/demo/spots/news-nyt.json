@@ -1,0 +1,23 @@
+{
+  "name": "New York Times (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 32000,
+  "data": {
+    "look": "poster",
+    "title": "Latest news",
+    "source": "The New York Times",
+    "rotationSeconds": 8,
+    "showImages": true
+  },
+  "bindings": {
+    "items": {
+      "source": "news-nyt",
+      "path": "items"
+    },
+    "language": {
+      "source": "news-nyt",
+      "path": "language"
+    }
+  }
+}
