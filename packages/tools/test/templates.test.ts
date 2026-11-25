@@ -1,9 +1,9 @@
 // Template tools: the server's lint on register, immutable versions, status, and base templates
 // registered through the platform registry and read by every org.
 import { platform, scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Caller, type TemplateChecker } from '../src';
 import type { PlatformScope } from '@signforge/db';
 import type { TemplateRuntimeReport } from '@signforge/contract';
@@ -94,6 +94,35 @@ describe('register_template_version', () => {
     const again = await call('register_template_version', { manifest: manifest(), ...ids });
     expect(again).toMatchObject({ changed: false, version: { id: first.version.id } });
     expect(await scoped(env.DB, o.orgId).templates.versions.forTemplate(first.template.id)).toHaveLength(1);
+  });
+
+  it('refuses a new version while the storage sweep claims its bundle; one already registered changes nothing (#235)', async () => {
+    const at = Date.UTC(2026, 4, 1);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    try {
+      const ids = await orgUpload(html('h1{color:blue}'));
+      const registered = await call('register_template_version', { manifest: manifest({ id: 'swept' }), ...ids });
+      await claimFileForSweep(env.DB, o.orgId, ids.bundleId, at + 60_000);
+      const audited = async () => (await scoped(env.DB, o.orgId).auditLog.list({ limit: 100 })).filter((e) => e.action === 'register_template_version').length;
+      const before = await audited();
+      // Registered already: returned as it is, with nothing written, audit row included (review of #429, round 2, 4).
+      expect(await call('register_template_version', { manifest: manifest({ id: 'swept' }), ...ids })).toMatchObject({
+        changed: false,
+        version: { id: registered.version.id },
+      });
+      expect(await audited()).toBe(before);
+      // A new version of the same bytes is refused while the claim holds.
+      expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'swept', version: '1.0.1' }), ...ids }, owner)).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+      vi.setSystemTime(at + 60_000);
+      expect((await call('register_template_version', { manifest: manifest({ id: 'swept', version: '1.0.1' }), ...ids })).changed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses an existing version with different bytes', async () => {

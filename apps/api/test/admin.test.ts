@@ -4,9 +4,9 @@
 import { MANIFEST_SCHEMA, manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
@@ -221,6 +221,49 @@ describe('blob upload', () => {
     const c = client(b, org.screen, { readBlob: (sha) => encoder.encode(`not ${sha}`) });
     await expect(c.run()).rejects.toThrow(PushError);
     expect((await org.scope.screens.get(org.screen))?.desiredManifestId).not.toBe(b.manifest.id);
+  });
+});
+
+describe('the storage sweep (#235, review of #429, round 2)', () => {
+  // On a fixed clock (review of #429, round 3): the API reads the same one.
+  const AT = Date.UTC(2026, 4, 1, 9);
+  beforeEach(() => void vi.useFakeTimers({ toFake: ['Date'], now: AT }));
+  afterEach(() => vi.useRealTimers());
+  /** The sweep's claim on an org's hash: held for an hour, or run out. */
+  const claimFile = (orgId: string, sha: string, held: boolean) => claimFileForSweep(env.DB, orgId, sha, held ? AT + 3_600_000 : 0);
+
+  it("refuses an org's blob while the sweep claims its hash, and stores it once the claim has run out", async () => {
+    const bytes = 'bytes the sweep is deleting';
+    const sha = await sha256(bytes);
+    await claimFile(org.orgId, sha, true);
+    for (const path of [`/screens/${org.screen}/blobs/${sha}`, `/orgs/${org.orgId}/blobs/${sha}`]) {
+      const res = await admin('PUT', path, bytes, { 'content-type': 'image/png' });
+      expect(res.status, path).toBe(409);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining('storage clean-up') });
+    }
+    expect(await env.BLOBS.head(orgBlobKey(org.orgId, sha))).toBeNull();
+    await claimFile(org.orgId, sha, false);
+    expect((await admin('PUT', `/orgs/${org.orgId}/blobs/${sha}`, bytes, { 'content-type': 'image/png' })).status).toBe(200);
+  });
+
+  it('refuses a push whose files the sweep claims after they were uploaded, and indexes the manifest of one it makes desired', async () => {
+    const b = await build('swept');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    // The files land, then the sweep claims the image before the manifest is pushed.
+    const raced = client(b, org.screen, {
+      fetch: async (url, init) => {
+        if (init?.method === 'PUT' && url.endsWith('/manifest')) await claimFile(org.orgId, image, true);
+        return exports.default.fetch(url, init);
+      },
+    });
+    await expect(raced.run()).rejects.toThrow(/storage clean-up/);
+    expect((await org.scope.screens.get(org.screen))?.desiredManifestId).not.toBe(b.manifest.id);
+    await claimFile(org.orgId, image, false);
+    expect(await client(b, org.screen).run()).toMatchObject({ manifestId: b.manifest.id, changed: true });
+    const row = await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ? AND screen_id = ? AND manifest_id = ?')
+      .bind(org.orgId, org.screen, b.manifest.id)
+      .first<{ f: string }>();
+    expect(JSON.parse(row!.f)).toEqual(Object.keys(b.manifest.files).sort());
   });
 });
 

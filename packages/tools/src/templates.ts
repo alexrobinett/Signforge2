@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { id } from './fields';
 import { page, pageInput, type SortKey } from './paging';
 import { baseBlobKey, orgBlobKey } from './r2';
+import { clearOfSweep } from './assets';
 import { defineSharedTool, defineTool, notFound, ToolError, type DataScope } from './tool';
 import { outputs, TEMPLATE_STATUSES, type TemplateVersionView, type TemplateView } from './outputs';
 
@@ -189,6 +190,9 @@ const registerTemplateVersion = defineSharedTool({
         return { template: templateView(existing, [prior]), version: versionView(prior), changed: false };
       }
     }
+    // An org's bundle and sources are content-addressed in its own prefix, as uploads are: not while a sweep deletes them.
+    // After the version already registered returns, which writes nothing (review of #429, round 2).
+    if ('storage' in org) await clearOfSweep(org, write, [input.bundleId, input.sourcesId]);
 
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {

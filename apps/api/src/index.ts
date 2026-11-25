@@ -8,7 +8,7 @@
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
  * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's 01:00 UTC run
- * sweeps unneeded feed photos (src/data/feed-photos.ts).
+ * sweeps unneeded feed photos (src/data/feed-photos.ts), and at 02:00 UTC what an org stores that nothing needs (src/storage.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -30,6 +30,7 @@ import {
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
 import { type FeedImageJob, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
+import { sweepStorage } from './storage';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -55,11 +56,18 @@ app.route('/', mcp);
 const FIVE_MIN_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 const FEED_IMAGE_CLEANUP_MS = 60 * 60_000;
+/** The storage sweep's minute (#235): 02:00 UTC, its own invocation as the feed photos' is. */
+const STORAGE_SWEEP_MS = 2 * 60 * 60_000;
 
 /** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
-  '* * * * *': (env, now) => (now % DAY_MS === FEED_IMAGE_CLEANUP_MS ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now) : pollDataSources(env, { now })),
+  '* * * * *': (env, now) =>
+    now % DAY_MS === FEED_IMAGE_CLEANUP_MS
+      ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now)
+      : now % DAY_MS === STORAGE_SWEEP_MS
+        ? sweepStorage(env.DB, env.BLOBS, () => Date.now())
+        : pollDataSources(env, { now }),
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.

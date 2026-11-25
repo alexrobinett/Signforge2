@@ -100,6 +100,16 @@ async function putBlob(c: Context<AdminEnv>, key: string, sha: string) {
   return c.json({ stored: sha, size: body.byteLength });
 }
 
+/**
+ * An org's blob, refused while the storage sweep claims its hash (#235, review of #429, round 2): stored then, it could
+ * be deleted under the manifest that is to name it. The push that names it is fenced too (`publish_manifest_to_screen`).
+ */
+async function putOrgBlob(c: Context<AdminEnv>, orgId: string, sha: string) {
+  if (await scoped(c.env.DB, orgId).storage.claimed([sha], Date.now()))
+    return fail(c, 409, 'the storage clean-up is deleting an earlier copy of these bytes: try again in a few minutes');
+  return putBlob(c, orgBlobKey(orgId, sha), sha);
+}
+
 export const admin = new Hono<AdminEnv>();
 admin.use('*', adminAuth);
 
@@ -116,7 +126,7 @@ admin.put('/screens/:screen/blobs/:sha256', async (c) => {
   if (!SHA256.test(sha)) return fail(c, 400, 'not a sha256');
   const screen = await findDeviceScreen(c.env.DB, c.req.param('screen'));
   if (!screen) return fail(c, 404, 'screen not found');
-  return putBlob(c, orgBlobKey(screen.orgId, sha), sha);
+  return putOrgBlob(c, screen.orgId, sha);
 });
 
 admin.put('/base/blobs/:sha256', async (c) => {
@@ -162,7 +172,7 @@ admin.put('/orgs/:org/blobs/:sha256', async (c) => {
   if (!SHA256.test(sha)) return fail(c, 400, 'not a sha256');
   const org = c.req.param('org');
   if (!isId(org) || !(await organizationExists(c.env.DB, org))) return fail(c, 404, 'organization not found');
-  return putBlob(c, orgBlobKey(org, sha), sha);
+  return putOrgBlob(c, org, sha);
 });
 
 /** The system actor `sf-push`, with the owner's role and a grant for drafting and approving templates. Org templates get the runtime check. */

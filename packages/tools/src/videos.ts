@@ -11,7 +11,7 @@
 import { VIDEO_SPEC } from '@signforge/contract';
 import { checkVideo, EXPORT_ADVICE } from '@signforge/media-check';
 import { z } from 'zod';
-import { assetView, requireAsset, SHA256 } from './assets';
+import { assetView, clearOfSweep, requireAsset, SHA256 } from './assets';
 import { id, idempotencyKey, name } from './fields';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, ToolError } from './tool';
@@ -47,6 +47,7 @@ const createVideoUpload = defineTool({
   example: { name: 'Summer promo', sha256: '1'.repeat(64), type: 'video/mp4', size: 48_000_000 },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, input, write, services: { uploads } }) => {
+    await clearOfSweep(org, write, [input.sha256]);
     const asset = write(
       org.assets.stage.insert({
         kind: 'video',
@@ -114,6 +115,7 @@ const finalizeVideoUpload = defineTool({
     if (asset.kind !== 'video') throw new ToolError('conflict', `asset ${asset.id} is an image; finish it with finalize_asset`);
     if (asset.status === 'verified') return { asset: assetView(asset, []), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the video again`);
+    await clearOfSweep(org, write, [asset.sha256]);
 
     const staged = uploadKey(org.orgId, asset.id, asset.sha256);
     const stored = orgBlobKey(org.orgId, asset.sha256);

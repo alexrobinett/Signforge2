@@ -245,6 +245,7 @@ export const publishOutput = z.object({
     name: z.string().nullable().describe("A member's name, else their address before the @ (never the whole address); null for an agent or the system"),
   }),
   createdAt: z.number(),
+  rollBackUntil: z.number().describe('Until when it may be rolled back to: 90 days after it was made, as long as the storage clean-up keeps its files'),
   finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
   reached: z
     .number()

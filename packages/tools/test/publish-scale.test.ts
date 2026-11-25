@@ -105,6 +105,14 @@ describe('a 1,000-screen org', () => {
     expect(d1.n.queries + r2.n.calls).toBeLessThan(SUBREQUESTS_PAID);
     // One notice for all: the API turns it into queue messages of 50 screens (apps/api src/publish.ts).
     expect(told).toEqual([SCREENS]);
+    // Every manifest it stored is in the storage sweep's index (#235), one row a screen as R2 keys them, written in the
+    // same batch: no query more.
+    const indexed = await env.DB.prepare(
+      'SELECT count(*) AS n FROM stored_manifests m JOIN screens s ON s.org_id = m.org_id AND s.id = m.screen_id AND s.desired_manifest_id = m.manifest_id WHERE m.org_id = ? AND m.files_json IS NOT NULL',
+    )
+      .bind(orgId)
+      .first<{ n: number }>();
+    expect(indexed?.n).toBe(SCREENS);
     console.log(
       `[scale] ${SCREENS} screens: ${d1.n.queries} D1 queries (one batch of ${d1.n.batchStatements} statements), ${r2.n.calls} R2 calls, ${Math.round(ms)} ms wall in workerd`,
     );

@@ -108,8 +108,8 @@ describe('publish_manifest_to_screen', () => {
   it('makes an uploaded manifest desired, keeping the one it replaces', async () => {
     const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
     expect(await refusal('publish_manifest_to_screen', { screenId: o.screen, manifestId: m1 })).toMatchObject({ ok: false, error: 'not_found' });
-    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m1), '{}');
-    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m2), '{}');
+    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m1), JSON.stringify({ files: {} }));
+    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m2), JSON.stringify({ files: {} }));
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m1 })).toEqual({ screenId: o.screen, manifestId: m1, changed: true });
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: true });
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: false });

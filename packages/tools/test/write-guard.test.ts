@@ -216,7 +216,7 @@ const STOPS_SHORT = new Set(['register_template_version']);
 let n = 0;
 async function runRecorded(tool: AnyTool, input: unknown) {
   const o = await seedOrg(env.DB, `guard-${++n}`);
-  await env.BLOBS.put(manifestKey(o.orgId, o.screen, 'a'.repeat(64)), '{}');
+  await env.BLOBS.put(manifestKey(o.orgId, o.screen, 'a'.repeat(64)), JSON.stringify({ files: {} }));
   await PREPARE[tool.name]?.(o);
   const { db, outside, batches, handling } = recordingD1(env.DB);
   const caller: Caller = {

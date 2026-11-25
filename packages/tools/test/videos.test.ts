@@ -2,7 +2,7 @@
 // The clips are media-check's, made by ffmpeg. Parts are uploaded through the R2 binding here; the
 // browser's presigned PUTs to the S3 API are in test/e2e/upload.test.ts.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { EXPORT_ADVICE } from '@signforge/media-check';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -88,6 +88,23 @@ describe('create_video_upload', () => {
   it('refuses a file over the size cap before anything is stored', async () => {
     const r = await run('create_video_upload', { name: 'Huge', sha256: 'a'.repeat(64), type: 'video/mp4', size: 500_000_001 });
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'size', message: 'a video may be at most 500 MB' }] });
+  });
+
+  it('refuses a file the storage sweep has claimed for deletion (#235)', async () => {
+    const sha = 'c'.repeat(64);
+    const at = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    try {
+      await claimFileForSweep(env.DB, o.orgId, sha, at + 60_000);
+      expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
