@@ -805,7 +805,7 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
   const ceiling = page.waitForRequest((r) => r.url().endsWith('/api/tools/save_ai_provider') && r.postDataJSON().dailyTurnCeiling === 300);
   await page.getByLabel('Daily ceiling for the whole organization').blur();
   expect((await (await ceiling).response())?.status()).toBe(200);
-  await expect(page.getByText('Changes save as you make them.')).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   // Kept, and the key is in no page, read or audit row.
   await page.reload();
@@ -877,4 +877,35 @@ test('an owner saves an OpenAI-compatible endpoint, its address checked, tests i
   expect(JSON.stringify(await tool(page, 'list_audit_log', {}))).not.toContain(ENDPOINT_STUB_KEY);
   await axe(page);
   await shots(page, '98-settings-ai-endpoint');
+});
+
+test("after someone else's change and Reload, the model choices show what is there now, and the next change keeps it (review of #466)", async ({ page }) => {
+  const [M0, M1] = ANTHROPIC_STUB_MODELS as [string, string];
+  await signInAs(page, `e2e-settings-ai-reload-${Date.now()}@example.com`, '192.0.2.199');
+  await createOrg(page, 'Linden Lane Bakery', '192.0.2.199');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await page.getByLabel('API key', { exact: true }).fill(ANTHROPIC_STUB_KEY);
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText(`••••••••${ANTHROPIC_STUB_KEY.slice(-4)}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await page.getByLabel('Fast model').selectOption(M0);
+  // It says so quietly, where the choices are.
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+
+  // Someone else chooses the other fast model; this tab, on the version it read, chooses a capable model: refused.
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', fastModel: M1 });
+  await page.getByLabel('Capable model').selectOption(M1);
+  const conflict = page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' });
+  await expect(conflict).toBeVisible();
+  await conflict.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Fast model')).toHaveValue(M1);
+
+  // The next change builds on theirs.
+  const next = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_ai_provider'));
+  await page.getByLabel('Daily ceiling for the whole organization').fill('50');
+  await page.getByLabel('Daily ceiling for the whole organization').blur();
+  expect((await next).status()).toBe(200);
+  expect((await tool(page, 'get_ai_provider', {})).provider).toMatchObject({ fastModel: M1, dailyTurnCeiling: 50 });
 });

@@ -4,22 +4,14 @@
  * contract's `displayHoursProblems`, so the CMS refuses what a screen would.
  */
 import { Choice, choiceVariants } from '~/components/ui/choice';
-import { displayHoursProblems } from '@signforge/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { useId } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { DAYS, dayRange } from '~/lib/days';
-import type { DisplayHours } from '~/lib/screen-types';
+import { hoursProblems, type DisplayHours } from '~/lib/screen-types';
 
 const DEFAULT_HOURS: DisplayHours = { weekly: [{ days: [1, 2, 3, 4, 5, 6, 0], from: '07:00', to: '22:00' }] };
-
-export function hoursProblems(hours: DisplayHours | null): string[] {
-  if (!hours) return [];
-  const problems = displayHoursProblems(hours);
-  if (hours.weekly.some((w) => w.days.length === 0)) problems.push('every window needs at least one day');
-  return problems;
-}
 
 /** "Mon–Fri 07:00–19:00 · Sat 09:00–17:00", or "Always on". */
 export function describeHours(hours: DisplayHours | null): string {

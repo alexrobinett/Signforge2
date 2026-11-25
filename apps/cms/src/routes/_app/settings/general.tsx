@@ -5,7 +5,8 @@
  */
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
-import { describeHours, DisplayHoursEditor, hoursProblems } from '~/components/screens/display-hours-editor';
+import { describeHours, DisplayHoursEditor } from '~/components/screens/display-hours-editor';
+import { hoursProblems } from '~/lib/screen-types';
 import { zones } from '~/components/screens/pair-screen-form';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
