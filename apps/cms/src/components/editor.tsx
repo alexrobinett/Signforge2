@@ -4,10 +4,12 @@
  * and EditorFields, which the brand kit, screen, settings, audit log and assets pages and the pairing form use too.
  */
 import { Link } from '@tanstack/react-router';
-import { ChevronLeftIcon, Trash2Icon } from 'lucide-react';
+import { ChevronLeftIcon, MoreHorizontalIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
+import { AlertDialog, AlertDialogContent } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { useHydrated } from '~/lib/hydrated';
 
 /** How the save is going, in the header's words. */
@@ -102,13 +104,46 @@ export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<
   );
 }
 
-/** Asks to delete what the editor has open (a playlist, a spot): its confirmation does the rest. */
-export function DeleteButton({ onAsk }: { onAsk: () => void }) {
+const MORE_ID = 'editor-more';
+
+/**
+ * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Save draft and Publish, where
+ * a slip would hit it. It asks first (`EditorDeleteQuestion`), which gives focus back to ⋯.
+ */
+export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {
   return (
-    <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={onAsk}>
-      <Trash2Icon aria-hidden />
-      Delete
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button id={MORE_ID} variant="outline" size="icon" aria-label="More actions: delete">
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}>
+          Delete…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The question Delete… asks. Closed (Escape, Cancel), it gives focus to ⋯ at once. Radix gives it back
+ * once the closing has played, to what had it as the question opened: the menu's Delete… item, gone by
+ * then, so focus was on the page's body.
+ */
+export function EditorDeleteQuestion({ open, onOpenChange, children }: { open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        // Once React has closed it: until then its focus trap takes focus back.
+        if (!next) queueMicrotask(() => document.getElementById(MORE_ID)?.focus());
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={(e) => e.preventDefault()}>{children}</AlertDialogContent>
+    </AlertDialog>
   );
 }
 
