@@ -87,7 +87,10 @@ describe('alert (#200)', () => {
         for (const [state, over] of toggles) {
           const f = await k.play({ ...text, ...over });
           const problems = await f.evaluate(() => {
-            for (const a of document.getAnimations()) a.currentTime = 2000;
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = 2000;
+            }
             const body = document.querySelector('.body')!;
             const out: string[] = [];
             if (body.scrollHeight > body.clientHeight || body.scrollWidth > body.clientWidth) out.push('the copy overflows');
@@ -133,7 +136,10 @@ describe('alert (#200)', () => {
           for (const copy of [longCopy(), worstCopy('W')]) {
             const f = await k.play({ severity, ...copy, qrUrl: longest });
             const { fills, clip, vmin, module } = await f.evaluate(() => {
-              for (const a of document.getAnimations()) a.currentTime = 3000;
+              for (const a of document.getAnimations()) {
+                a.pause();
+                a.currentTime = 3000;
+              }
               const svg = document.querySelector<SVGSVGElement>('#qr svg')!;
               const r = svg.getBoundingClientRect();
               return {
@@ -210,7 +216,10 @@ describe('alert (#200)', () => {
         for (const [name, text] of cases) {
           const f = await k.play({ severity, ...text, qrUrl: longestLinks[0] });
           const problems = await f.evaluate(() => {
-            for (const a of document.getAnimations()) a.currentTime = 3000;
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = 3000;
+            }
             const out: string[] = [];
             const view = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
             const inside = (r: DOMRect, b: { left: number; top: number; right: number; bottom: number }) =>
@@ -258,7 +267,11 @@ describe('alert (#200)', () => {
     /** A screenshot of `selector`'s box in the frame, as PNG bytes. */
     const shot = async (k: { hst: { page: Page } }, f: Frame, selector: string) => {
       const clip = await f.evaluate((sel) => {
-        for (const a of document.getAnimations()) a.currentTime = 3000;
+        for (const a of document.getAnimations()) {
+          a.pause();
+          a.currentTime = 3000;
+        }
+        if (document.getAnimations().some((a) => a.playState === 'running')) throw new Error('an animation is still running');
         const r = document.querySelector(sel)!.getBoundingClientRect();
         return { x: r.x, y: r.y, width: r.width, height: r.height };
       }, selector);
@@ -333,78 +346,6 @@ describe('alert (#200)', () => {
         }
         expect(cut).toEqual([]);
       });
-
-    // A wrapped headline's marks stay off the line above (review of #448, round 6: at line-height 1.02 a Thai tone mark
-    // ran into the line above). Each line in a span of its own, painted alone; no pixel is painted by two lines.
-    const twoLines: [string, string][] = [
-      ['Thai', 'เกิดไฟไหม้ โปรดออกทางนี้'],
-      ['Thai', 'โปรดใช้ทางออกนี้ หนีไฟไปทางนี้'],
-      ['Arabic', 'غَادِرُوا الْمَبْنَى فَوْرًا مِنْ هُنَا'],
-      ['Hebrew', 'צְאוּ מִיָּד שְּׁ֑לֹמֹ֖ה֙ וְשָׁל֑וֹם'],
-      ['Vietnamese', 'ẾỂ ỄỆ ỘỚ ỜỞ ỠỢ ỨỪ ỬỮ ỰẤ'],
-    ];
-    it('keeps the marks of each line of a wrapped headline off the other lines, in either orientation', async () => {
-      const wrapped = new Set<string>();
-      const shared: string[] = [];
-      for (const orientation of ['landscape', 'portrait'] as const) {
-        const k = await alertFrame(orientation);
-        for (const [name, headline] of twoLines) {
-          const f = await k.play({ severity: 'emergency', headline });
-          const clip = await f.evaluate(() => {
-            for (const a of document.getAnimations()) a.currentTime = 3000;
-            const h = document.querySelector('.headline')!;
-            const text = h.firstChild!;
-            const range = document.createRange();
-            const lines: string[] = [''];
-            let top: number | undefined;
-            for (const { segment, index } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text.textContent!)) {
-              range.setStart(text, index);
-              range.setEnd(text, index + segment.length);
-              const r = [...range.getClientRects()].find((x) => x.width > 0);
-              if (r && top !== undefined && r.top - top > r.height / 2) lines.push('');
-              if (r) top = r.top;
-              lines[lines.length - 1] += segment;
-            }
-            h.replaceChildren(...lines.map((l) => Object.assign(document.createElement('span'), { textContent: l })));
-            const r = h.getBoundingClientRect();
-            const pad = Math.min(innerWidth, innerHeight) * 0.05;
-            return { x: Math.max(0, r.x - pad), y: Math.max(0, r.y - pad), width: r.width + 2 * pad, height: r.height + 2 * pad };
-          });
-          // The ground with no line painted, then each line alone.
-          const shots: string[] = [];
-          const lines = await f.evaluate(() => document.querySelectorAll('.headline span').length);
-          for (let only = -1; only < lines; only++) {
-            await f.evaluate((only) => {
-              for (const [i, s] of document.querySelectorAll<HTMLElement>('.headline span').entries()) s.style.color = i === only ? '' : 'transparent';
-            }, only);
-            shots.push((await k.hst.page.screenshot({ clip })).toString('base64'));
-          }
-          const both = await k.hst.page.evaluate(async (shots) => {
-            const [ground, ...each] = await Promise.all(
-              shots.map(async (png) => {
-                const img = new Image();
-                img.src = `data:image/png;base64,${png}`;
-                await img.decode();
-                const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
-                g.drawImage(img, 0, 0);
-                return g.getImageData(0, 0, img.width, img.height).data;
-              }),
-            );
-            let n = 0;
-            for (let p = 0; p < ground!.length; p += 4) {
-              const painted = each.filter((d) => Math.abs(d[p]! - ground![p]!) + Math.abs(d[p + 1]! - ground![p + 1]!) + Math.abs(d[p + 2]! - ground![p + 2]!) > 24);
-              if (painted.length > 1) n++;
-            }
-            return n;
-          }, shots);
-          if (lines > 1) wrapped.add(headline);
-          if (both > 0) shared.push(`${name}, ${orientation}: ${both} pixels painted by two lines`);
-        }
-      }
-      expect(shared).toEqual([]);
-      // Each headline wraps in at least one orientation, or the test proves nothing.
-      expect([...wrapped].sort()).toEqual(twoLines.map(([, h]) => h).sort());
-    }, 120_000);
   });
 
   // The search finds each scale within 1/64 (review of #448, round 5: `﷽⁠` seven times stopped at 0.7557 where 0.7905 fit).

@@ -211,9 +211,7 @@ body {
   font-family: 'alert-display', sans-serif;
   font-weight: 700;
   font-size: calc(11.1vmin * var(--scale) * var(--fit));
-  /* Keeps one line's stacked marks off the line above in Thai, Arabic, pointed Hebrew and Vietnamese (review of #448,
-     round 6). macOS's fonts need 1.27 and Noto and TLWG 1.1; 1.3 leaves a little over. */
-  line-height: 1.3;
+  line-height: 1.02;
   text-wrap: balance;
   overflow-wrap: anywhere;
 }
@@ -289,9 +287,9 @@ body {
   overflow: clip;
   overflow-clip-margin: 1.8vmin;
 }
-/* A script's marks stand past the headline's line (Thai tone marks, Arabic and Hebrew points; review of #448, round 5).
-   Below, towards what to do, it keeps room for them in its own box, which the fit counts, and clips 1.8vmin past that;
-   above, where only the body's padding is (7.4vmin), and at the sides, it clips further out. */
+/* The headline's line is tight (1.02), so a script's marks stand well past it (Thai tone marks, Arabic and Hebrew points;
+   review of #448, round 5). Below, towards what to do, it keeps room for them in its own box, which the fit counts, and
+   clips 1.8vmin past that; above, where only the body's padding is (7.4vmin), and at the sides, it clips further out. */
 .headline {
   padding-bottom: 0.25em;
   clip-path: inset(-6vmin -3vmin -1.8vmin -3vmin);

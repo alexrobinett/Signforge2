@@ -1021,6 +1021,7 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 
 - **Within the accepted exception:** the first prepare after a restart is 502 ms in both orientations (543 and 516 ms before), and every other cold prepare is under 500 ms.
 - No slower than at 1.02. With one restart per orientation, read the lower first prepare as no cost, not as a gain.
+- **Reverted** after the review's round 7: the headline is back at 1.02 (the owner put the demo's English look first and left other scripts' line spacing for a follow-up), so the section above holds for what ships.
 
 ## Feed images on sync and prepare (issue #196, 2026-11-25)
 
