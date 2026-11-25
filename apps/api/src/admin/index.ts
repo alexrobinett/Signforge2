@@ -31,7 +31,7 @@
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
 import { baseTemplateHtml, isId, manifestIdInput, parseManifest, type ScreenManifest } from '@signforge/contract';
-import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
+import { findDeviceScreen, organizationExists, platform, scoped, StaleVersionError } from '@signforge/db';
 import {
   dispatch,
   platformRegistry,
@@ -90,7 +90,10 @@ async function missingFiles(c: Context<AdminEnv>, m: ScreenManifest, orgId: stri
   // One the storage sweep deleted is uploaded again, even if a copy is back: the upload clears its tombstone (#432).
   const [held, deleted] = await Promise.all([
     Promise.all(files.map((f) => c.env.BLOBS.head(f.key))),
-    scoped(c.env.DB, orgId).storage.deleted(files.filter((f) => f.scope === 'org').map((f) => f.sha256)),
+    scoped(c.env.DB, orgId).storage.deleted(
+      files.filter((f) => f.scope === 'org').map((f) => f.sha256),
+      Date.now(),
+    ),
   ]);
   return files.filter((f, i) => !held[i] || (f.scope === 'org' && deleted.includes(f.sha256))).map(({ sha256, scope }) => ({ sha256, scope }));
 }
@@ -112,9 +115,17 @@ async function putOrgBlob(c: Context<AdminEnv>, orgId: string, sha: string) {
   const org = scoped(c.env.DB, orgId);
   if (await org.storage.claimed([sha], Date.now()))
     return fail(c, 409, 'the storage clean-up is deleting an earlier copy of these bytes: try again in a few minutes');
+  const since = Date.now();
   const stored = await putBlob(c, orgBlobKey(orgId, sha), sha);
-  // Stored again: a tombstone the sweep left for these bytes goes (#432).
-  if (stored.ok) await org.commit(org.storage.stage.restored([sha]).writes);
+  if (!stored.ok) return stored;
+  // Stored again: a tombstone the sweep left for these bytes before goes (#432). Not if it claims them, or deleted them
+  // after `since`: this copy may be the one gone (review of #434).
+  try {
+    await org.commit(org.storage.stage.restored([sha], Date.now(), since));
+  } catch (err) {
+    if (!(err instanceof StaleVersionError)) throw err;
+    return fail(c, 409, 'the storage clean-up deleted these bytes as they were stored: upload them again');
+  }
   return stored;
 }
 

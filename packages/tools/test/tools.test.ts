@@ -148,7 +148,7 @@ describe('publish_manifest_to_screen', () => {
       // Pushed again, its read finds the deletion and says so.
       expect(await refusal('publish_manifest_to_screen', input)).toMatchObject({ ok: false, error: 'conflict', details: { deleted: [file] } });
       // Uploaded again (/admin clears the tombstone as it stores the bytes): published.
-      await sweep.commit(sweep.storage.stage.restored([file]).writes);
+      await sweep.commit(sweep.storage.stage.restored([file], AT + 1, AT + 1));
       expect(await call('publish_manifest_to_screen', input)).toMatchObject({ changed: true });
     } finally {
       vi.useRealTimers();

@@ -192,7 +192,15 @@ const registerTemplateVersion = defineSharedTool({
     }
     // An org's bundle and sources are content-addressed in its own prefix, as uploads are: not while a sweep deletes them.
     // After the version already registered returns, which writes nothing (review of #429, round 2).
-    if ('storage' in org) await clearOfSweep(org, write, [input.bundleId, input.sourcesId]);
+    if ('storage' in org) {
+      await clearOfSweep(org, write, [input.bundleId, input.sourcesId]);
+      // Read above, and held across the runtime check below, which takes seconds: refused if the sweep has deleted
+      // either, from here or at the commit (review of #434, 2).
+      const now = Date.now();
+      const deleted = await org.storage.deleted([input.bundleId, input.sourcesId], now);
+      if (deleted.length) throw new ToolError('conflict', 'the storage clean-up deleted files this version names: upload them again', { deleted });
+      write({ row: undefined, writes: org.storage.stage.notDeleted([input.bundleId, input.sourcesId], now) });
+    }
 
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {

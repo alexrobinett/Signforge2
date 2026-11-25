@@ -212,7 +212,13 @@ const createAssetUpload = defineTool({
         }),
       );
     });
-    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, false) };
+    // A file held already is not uploaded again: refused at the commit if the sweep deletes it meanwhile, and one it deleted
+    // is not held (review of #434).
+    const now = Date.now();
+    const deleted = await org.storage.deleted([...claimedFiles(renditions).keys()], now);
+    const { targets, reused } = await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, false, deleted);
+    write({ row: undefined, writes: org.storage.stage.notDeleted(reused, now) });
+    return { asset: assetView(asset, renditions), uploads: targets };
   },
 });
 
@@ -255,11 +261,17 @@ async function uploadTargets(
   blobs: R2Bucket,
   uploads: UploadSigner,
   skipUploaded: boolean,
+  deleted: readonly string[],
 ) {
   const files = new Map([...claimedFiles(renditions)].map(([sha, [first]]) => [sha, { sha256: sha, type: first!.type, size: first!.size }]));
   const targets = [];
+  const reused: string[] = [];
   for (const r of files.values()) {
-    if (await blobs.head(orgBlobKey(orgId, r.sha256))) continue;
+    // A copy back under a key the sweep deleted is uploaded again all the same: the upload clears its tombstone.
+    if (!deleted.includes(r.sha256) && (await blobs.head(orgBlobKey(orgId, r.sha256)))) {
+      reused.push(r.sha256);
+      continue;
+    }
     if (skipUploaded && (await blobs.head(uploadKey(orgId, assetId, r.sha256)))) continue;
     const signed = await uploads.presignPut(uploadKey(orgId, assetId, r.sha256), {
       contentType: r.type,
@@ -268,7 +280,7 @@ async function uploadTargets(
     });
     targets.push({ sha256: r.sha256, method: 'PUT' as const, url: signed.url, headers: { 'content-type': r.type }, expiresAt: signed.expiresAt });
   }
-  return targets;
+  return { targets, reused };
 }
 
 const renewAssetUpload = defineTool({
@@ -288,7 +300,8 @@ const renewAssetUpload = defineTool({
     if (asset.kind === 'video') throw new ToolError('conflict', `asset ${asset.id} is a video; it has no image renditions to renew`);
     if (asset.status !== 'pending') throw new ToolError('conflict', `asset ${asset.id} is ${asset.status}, not waiting for its upload`);
     const renditions = await org.assets.renditions.forAsset(asset.id);
-    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, true) };
+    const deleted = await org.storage.deleted([...claimedFiles(renditions).keys()], Date.now());
+    return { asset: assetView(asset, renditions), uploads: (await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, true, deleted)).targets };
   },
 });
 
@@ -314,6 +327,8 @@ const finalizeAsset = defineTool({
     const renditions = await org.assets.renditions.forAsset(asset.id);
     if (asset.status === 'verified') return { asset: assetView(asset, renditions), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the image again`);
+    // Before any file is read: what the sweep deletes from here on refuses the commit (review of #434).
+    const since = Date.now();
     await clearOfSweep(org, write, [...claimedFiles(renditions).keys()]);
     // Both renditions, or the asset cannot be verified: a screen of either orientation needs its own.
     const absent = ORIENTATIONS.filter((o) => !renditions.some((r) => r.orientation === o));
@@ -387,6 +402,8 @@ const finalizeAsset = defineTool({
       }
     }
     await blobs.delete(staged);
+    // Each file read or stored since `since`: a tombstone from before goes (review of #434, 3).
+    write({ row: undefined, writes: org.storage.stage.restored([...bySha.keys()], Date.now(), since) });
     const verified = write(org.assets.stage.update(asset, { status: 'verified' }));
     return { asset: assetView(verified, renditions), changed: true };
   },

@@ -49,6 +49,8 @@ export const STORAGE_GRACE_MS = 90 * DAY_MS;
 export const STORAGE_LEASE_MS = 10 * 60_000;
 /** How long a deleted file's tombstone is kept (#432): longer than any push takes from its missing-files check to its commit. */
 const TOMBSTONE_MS = 7 * DAY_MS;
+/** Tombstones past TOMBSTONE_MS one sweep of an org prunes at most: the rest go on its next (review of #434). */
+const PRUNE_PER_SWEEP = 500;
 /** D1 binds at most 100 values a statement: lists go in chunks under it. */
 const CHUNK = 90;
 /** A manifest index written in a publish's batch: its JSON in parts of at most this many characters, each one statement. */
@@ -141,6 +143,10 @@ const gone = (now: number, since: number) => sql`(${sm.claimUntil} > ${now} OR c
 const storedAs = (stored: readonly StoredManifest[]) =>
   sql`(${sm.screenId}, ${sm.manifestId}) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(${JSON.stringify(stored.map((x) => [x.screenId, x.manifestId]))}))`;
 
+/** A tombstone of one of these hashes younger than TOMBSTONE_MS at `now`: an older one says nothing (review of #434). */
+const liveTombstone = (orgId: string, shas: readonly string[], now: number) =>
+  sql`${bd.orgId} = ${orgId} AND ${bd.sha256} IN ${anyOf(shas)} AND ${bd.deletedAt} IS NOT NULL AND ${bd.deletedAt} > ${now - TOMBSTONE_MS}`;
+
 /** A list of hashes as one bound value: `IN (SELECT value FROM json_each(?))`. */
 const anyOf = (shas: readonly string[]) => sql`(SELECT value FROM json_each(${JSON.stringify([...new Set(shas)])}))`;
 
@@ -177,6 +183,7 @@ export async function orgsWithStorageDue(d1: D1Database, now: number, limit: num
     SELECT o.id AS orgId FROM organization o LEFT JOIN storage_sweeps w ON w.org_id = o.id
     WHERE coalesce(w.lease_until, 0) <= ${now} AND (
       EXISTS (SELECT 1 FROM blob_deletes b WHERE b.org_id = o.id AND b.queued_at <= ${cutoff} AND b.claim_until <= ${now} AND b.deleted_at IS NULL)
+      OR EXISTS (SELECT 1 FROM blob_deletes t WHERE t.org_id = o.id AND t.deleted_at IS NOT NULL AND t.deleted_at <= ${now - TOMBSTONE_MS})
       OR EXISTS (SELECT 1 FROM assets a WHERE a.org_id = o.id AND a.status = 'pending' AND a.created_at <= ${cutoff})
       OR (coalesce(w.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
         AND EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = o.id AND m.files_json IS NOT NULL AND m.deleted_at IS NULL
@@ -299,16 +306,16 @@ export function storage(db: Db, orgId: string) {
             .all()
         : [],
     /**
-     * Of these hashes, the ones whose objects the sweep deleted and no writer has stored again since (tombstones, #432): a
-     * push that names one uploads it again first.
+     * Of these hashes, the ones whose objects the sweep deleted in the last TOMBSTONE_MS before `now` and no writer has
+     * stored again since (tombstones, #432): a writer that names one stores it again first.
      */
-    deleted: async (shas: readonly string[]): Promise<string[]> =>
+    deleted: async (shas: readonly string[], now: number): Promise<string[]> =>
       shas.length
         ? (
             await db
               .select({ sha256: bd.sha256 })
               .from(bd)
-              .where(and(eq(bd.orgId, orgId), sql`${bd.sha256} IN ${anyOf(shas)}`, sql`${bd.deletedAt} IS NOT NULL`))
+              .where(liveTombstone(orgId, shas, now))
               .all()
           ).map((row) => row.sha256)
         : [],
@@ -364,25 +371,34 @@ export function storage(db: Db, orgId: string) {
             ]
           : [],
       /**
-       * Refuses the batch if the sweep deleted any of these hashes' objects and no writer has stored them again (#432): a
-       * push that checked its files were there before the sweep removed one never makes a screen want it.
+       * Refuses the batch if the sweep deleted any of these hashes' objects (a tombstone at `now`, `deleted`) and no writer
+       * has stored them again (#432): a writer that checked its files were there before the sweep removed one never makes
+       * anything name it.
        */
-      notDeleted: (shas: readonly string[]): Write[] =>
+      notDeleted: (shas: readonly string[], now: number): Write[] =>
+        shas.length
+          ? [staleGuard(db, orgId, 'deleted file', 0, sql`NOT EXISTS (SELECT 1 FROM ${bd} WHERE ${liveTombstone(orgId, shas, now)})`, async () => 0)]
+          : [],
+      /**
+       * These hashes' objects stored again by a writer that started at `since` (`/admin`, a finished upload): their
+       * tombstones from before `since` go. Refused if a sweep claims one at `now`, or deleted one at or after `since`: its
+       * fresh copy may be gone, and its tombstone must stay (review of #434).
+       */
+      restored: (shas: readonly string[], now: number, since: number): Write[] =>
         shas.length
           ? [
               staleGuard(
                 db,
                 orgId,
-                'deleted file',
+                'storage clean-up',
                 0,
-                sql`NOT EXISTS (SELECT 1 FROM ${bd} WHERE ${bd.orgId} = ${orgId} AND ${bd.sha256} IN ${anyOf(shas)} AND ${bd.deletedAt} IS NOT NULL)`,
+                sql`NOT EXISTS (SELECT 1 FROM ${bd} WHERE ${bd.orgId} = ${orgId} AND ${bd.sha256} IN ${anyOf(shas)}
+                  AND (${bd.claimUntil} > ${now} OR ${bd.deletedAt} >= ${since}))`,
                 async () => 0,
               ),
+              ...staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), sql`${bd.sha256} IN ${anyOf(shas)}`, sql`${bd.deletedAt} < ${since}`))).writes,
             ]
           : [],
-      /** These hashes' objects stored again (`/admin`): their tombstones go. */
-      restored: (shas: readonly string[]): Staged =>
-        staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), sql`${bd.sha256} IN ${anyOf(shas)}`, sql`${bd.deletedAt} IS NOT NULL`))),
       /**
        * Refuses a publish whose manifests name a deleted asset's file that nothing of the org names (review of #429): the
        * asset was deleted while it compiled. It runs again from a fresh read.
@@ -490,7 +506,6 @@ export function storage(db: Db, orgId: string) {
               .set({ claimOwner: null, claimUntil: 0, deletedAt: now })
               .where(and(eq(bd.orgId, orgId), eq(bd.claimOwner, owner))),
           ).writes,
-          ...staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), lte(bd.deletedAt, now - TOMBSTONE_MS)))).writes,
           // Its manifests marked deleted, at a time after their objects went: a writer that started since stores them afresh.
           ...staged(undefined, db.update(sm).set({ claimOwner: null, claimUntil: 0, deletedAt: now }).where(mine)).writes,
           ...chunks(uploads).flatMap(
@@ -517,12 +532,17 @@ export function storage(db: Db, orgId: string) {
       },
       /**
        * The org's lease let go by `owner`, and the org marked swept at `now`: its manifests looked at too, once none is
-       * left due; with more due than a sweep claims, it is listed again the next day.
+       * left due; with more due than a sweep claims, it is listed again the next day. Its old tombstones pruned.
        */
       release: (owner: string, now: number): Staged => {
         const cutoff = now - STORAGE_GRACE_MS;
         return staged(
           undefined,
+          // Tombstones past TOMBSTONE_MS pruned, a bounded number a sweep (`orgsWithStorageDue` lists an org with any).
+          db.delete(bd).where(
+            sql`(${bd.orgId}, ${bd.sha256}) IN (SELECT org_id, sha256 FROM blob_deletes WHERE org_id = ${orgId}
+                AND deleted_at IS NOT NULL AND deleted_at <= ${now - TOMBSTONE_MS} LIMIT ${PRUNE_PER_SWEEP})`,
+          ),
           db
             .update(sw)
             .set({

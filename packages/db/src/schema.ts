@@ -1283,13 +1283,9 @@ export const blobDeletes = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.orgId, t.sha256] }),
     // The storage sweep's due files, by age (#433): queued rows only, tombstones outside (#432).
-    index('blob_deletes_due_idx')
-      .on(t.orgId, t.queuedAt, t.claimUntil)
-      .where(sql`deleted_at IS NULL`),
+    index('blob_deletes_due_idx').on(t.orgId, t.queuedAt, t.claimUntil).where(sql`deleted_at IS NULL`),
     // The tombstones, by age: what is pruned, and what a writer may be refused by (#432).
-    index('blob_deletes_tombstone_idx')
-      .on(t.orgId, t.deletedAt)
-      .where(sql`deleted_at IS NOT NULL`),
+    index('blob_deletes_tombstone_idx').on(t.orgId, t.deletedAt).where(sql`deleted_at IS NOT NULL`),
   ],
 );
 
