@@ -1,7 +1,7 @@
 // Template tools: the server's lint on register, immutable versions, status, and base templates
 // registered through the platform registry and read by every org.
 import { platform, scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Caller, type TemplateChecker } from '../src';
@@ -103,11 +103,7 @@ describe('register_template_version', () => {
     try {
       const ids = await orgUpload(html('h1{color:blue}'));
       const registered = await call('register_template_version', { manifest: manifest({ id: 'swept' }), ...ids });
-      const claim = (sha: string) =>
-        env.DB.prepare("INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)")
-          .bind(o.orgId, sha, at + 60_000)
-          .run();
-      await claim(ids.bundleId);
+      await claimFileForSweep(env.DB, o.orgId, ids.bundleId, at + 60_000);
       const audited = async () => (await scoped(env.DB, o.orgId).auditLog.list({ limit: 100 })).filter((e) => e.action === 'register_template_version').length;
       const before = await audited();
       // Registered already: returned as it is, with nothing written, audit row included (review of #429, round 2, 4).

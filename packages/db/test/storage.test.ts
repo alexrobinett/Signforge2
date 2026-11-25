@@ -7,7 +7,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { orgsWithStorageDue, scoped, STORAGE_GRACE_MS, STORAGE_LEASE_MS, StaleVersionError } from '../src/index';
-import { queueDeletedFiles, seedOrganization, testScope } from '../src/testing';
+import { queueDeletedFiles, runSql, seedOrganization, testScope } from '../src/testing';
 
 const T0 = Date.UTC(2026, 0, 1);
 const DAY = 24 * 60 * 60_000;
@@ -15,10 +15,7 @@ const DAY = 24 * 60 * 60_000;
 const DUE = T0 + STORAGE_GRACE_MS;
 const sha = (c: string) => c.repeat(64);
 
-const run = (query: string, ...binds: unknown[]) =>
-  env.DB.prepare(query)
-    .bind(...binds)
-    .run();
+const run = (query: string, ...binds: unknown[]) => runSql(env.DB, query, ...binds);
 let orgs = 0;
 /** An org of its own, with `screens` screens. */
 async function fresh(screens = 0) {

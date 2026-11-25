@@ -3,7 +3,7 @@
 // first), one the org names again, another org's and the base templates'; deletes nothing once its lease is nearly out,
 // nor while another run holds the org; takes up a run that failed; and a run after deletes nothing. Its cost is measured.
 import { scoped, STORAGE_GRACE_MS, STORAGE_LEASE_MS } from '@signforge/db';
-import { queueDeletedFiles, seedOrganization, testScope } from '@signforge/db/testing';
+import { queueDeletedFiles, runSql, seedOrganization, testScope } from '@signforge/db/testing';
 import { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -14,10 +14,7 @@ const T0 = Date.UTC(2026, 2, 1);
 const DAY = 24 * 60 * 60_000;
 const DUE = T0 + STORAGE_GRACE_MS;
 const sha = (c: string) => c.repeat(64);
-const run = (query: string, ...binds: unknown[]) =>
-  env.DB.prepare(query)
-    .bind(...binds)
-    .run();
+const run = (query: string, ...binds: unknown[]) => runSql(env.DB, query, ...binds);
 const exists = async (key: string) => (await env.BLOBS.head(key)) !== null;
 const at = (t: number) => () => t;
 
@@ -156,8 +153,9 @@ describe('the storage sweep', () => {
     expect(await exists(key)).toBe(true);
     // Looked for on the next run and found in no object: the screen can fetch nothing through it, so the file goes
     // (review of #429, round 3).
-    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + STORAGE_LEASE_MS))).toBe(1);
-    expect(await exists(key)).toBe(false);
+    const next = recorded();
+    await sweepStorage(env.DB, next.blobs, at(DUE + STORAGE_LEASE_MS));
+    expect(next.keys).toEqual([key]);
   });
 
   it('deletes nothing once too little of its lease is left, and the next run takes the claim up', async () => {

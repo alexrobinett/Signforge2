@@ -2,7 +2,7 @@
 // The clips are media-check's, made by ffmpeg. Parts are uploaded through the R2 binding here; the
 // browser's presigned PUTs to the S3 API are in test/e2e/upload.test.ts.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { EXPORT_ADVICE } from '@signforge/media-check';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -96,9 +96,7 @@ describe('create_video_upload', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at);
     try {
-      await env.DB.prepare("INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)")
-        .bind(o.orgId, sha, at + 60_000)
-        .run();
+      await claimFileForSweep(env.DB, o.orgId, sha, at + 60_000);
       expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
         ok: false,
         error: 'conflict',

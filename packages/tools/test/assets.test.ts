@@ -1,7 +1,7 @@
 // Asset tools: upload targets, the server's check of what landed in R2, usage and delete.
 // The files here are image headers only: the server reads type and size from the header and never
 // decodes. Real images through the browser and real presigned PUTs: packages/media/test/upload.test.ts.
-import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
@@ -463,13 +463,7 @@ describe('the storage sweep and uploads (#235, review of #429, 6)', () => {
   });
   afterEach(() => vi.useRealTimers());
   /** The sweep's claim on `sha`, as its claim batch writes it: held for an hour, or run out. */
-  const claimFile = (sha: string, held: boolean) =>
-    env.DB.prepare(
-      `INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)
-       ON CONFLICT (org_id, sha256) DO UPDATE SET claim_owner = excluded.claim_owner, claim_until = excluded.claim_until`,
-    )
-      .bind(o.orgId, sha, held ? AT + 3_600_000 : 0)
-      .run();
+  const claimFile = (sha: string, held: boolean) => claimFileForSweep(env.DB, o.orgId, sha, held ? AT + 3_600_000 : 0);
   const pair = (seed: number) => {
     const l = png(1920, 1080, seed),
       p = png(1080, 1920, seed + 1);

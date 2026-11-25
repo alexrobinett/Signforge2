@@ -434,3 +434,20 @@ export async function queueDeletedFiles(db: D1Database, orgId: string, shas: str
   const org = scoped(db, orgId);
   await org.commit(org.storage.stage.queue(shas, at).writes);
 }
+
+/** Runs one SQL statement on `db` with its bound values: for fixtures no repository writes. */
+export const runSql = (db: D1Database, query: string, ...binds: unknown[]) =>
+  db
+    .prepare(query)
+    .bind(...binds)
+    .run();
+
+/** The storage sweep's claim on an org's file until `until` (0: run out), as its claim batch writes it: for a writer's test. */
+export async function claimFileForSweep(db: D1Database, orgId: string, sha256: string, until: number) {
+  const claim = { claimOwner: 'sweep', claimUntil: until };
+  await drizzle(db)
+    .insert(schema.blobDeletes)
+    .values({ orgId, sha256, queuedAt: 0, ...claim })
+    .onConflictDoUpdate({ target: [schema.blobDeletes.orgId, schema.blobDeletes.sha256], set: claim })
+    .run();
+}
