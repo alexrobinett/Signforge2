@@ -2,6 +2,8 @@
 
 Status: done (branch m3-43-command-menu)  ·  Size: S  ·  Depends on: M3-11
 
+Since #358, ⌘K no longer lists the tool registry or its schema forms: it offers people's actions, each the page's own dialog, and the pages when typed (`docs/proposals/cms-ui.md`, `⌘K`). The registry stays the agents' and the API's.
+
 ## Goal
 
 ⌘K over every CMS page, built from the same tool registry agents use, so people and agents share one set of actions.

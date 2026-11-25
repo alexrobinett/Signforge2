@@ -363,6 +363,14 @@ test("a viewer reads the sources and changes nothing; another org's sources neve
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(viewer.getByRole('button', { name: /^Connect / })).toHaveCount(0);
   await expect(filled(viewer)).toHaveCount(0);
+  // ⌘K: a viewer has no action to run, but may still ask the agent (#358).
+  await viewer.keyboard.press('ControlOrMeta+k');
+  const menu = viewer.getByRole('dialog', { name: 'Command menu' });
+  await expect(menu.getByRole('combobox', { name: 'Search pages, screens and actions' })).toBeFocused();
+  await viewer.keyboard.type('agent');
+  await expect(menu.getByRole('option', { name: 'Ask the agent…' })).toBeVisible();
+  await expect(menu.getByRole('group', { name: 'For this page' })).toHaveCount(0);
+  await viewer.keyboard.press('Escape');
   await viewer.getByRole('button', { name: 'View iCal URL' }).click();
   const dialog = viewer.getByRole('dialog', { name: 'iCal calendars' });
   await expect(dialog.getByText('Used by Break room agenda.')).toBeVisible();
