@@ -151,6 +151,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
     case 'text':
       if (!isStr(v)) return `field "${name}" must be text`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      if (def.maxMarks && new RegExp(`\\p{M}{${def.maxMarks + 1}}`, 'u').test(v))
+        return `field "${name}" stacks more than ${def.maxMarks} accents or marks on one character`;
       return undefined;
     case 'number':
       if (!isNum(v)) return `field "${name}" must be a number`;
@@ -208,6 +210,7 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   switch (def.type) {
     case 'text':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      optional('maxMarks', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
       break;
     case 'url':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');

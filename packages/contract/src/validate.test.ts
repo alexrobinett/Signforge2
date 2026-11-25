@@ -187,6 +187,18 @@ describe('validateSpotData', () => {
     expect(validateSpotData(qr, { qrUrl: `https://example.com/${'避難案内'.repeat(45)}` }, {})).toEqual([long]);
   });
 
+  // Zalgo text stacks dozens of marks on a character, whose ink stands far past its line (#230).
+  it('holds a text to its maxMarks accents or marks on any one character', () => {
+    const t: Record<string, FieldDef> = { t: { type: 'text', label: 'T', maxMarks: 4 } };
+    const many = 'field "t" stacks more than 4 accents or marks on one character';
+    // Vietnamese stacks two, Thai up to three.
+    for (const ok of ['Ế Ộ Ở', 'น้ำใจผู้ใหญ่', `U${'\u030d'.repeat(4)}se`]) expect(validateSpotData(t, { t: ok }, {}), ok).toEqual([]);
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(5)}se` }, {})).toEqual([many]);
+    expect(validateSpotData(t, { t: `U${'\u030d'.repeat(160)}se the stairs` }, {})).toEqual([many]);
+    expect(validateSpotData(t, { t: `WW${'\u0346'.repeat(16)}${'W'.repeat(14)}` }, {})).toEqual([many]);
+    expect(validateSpotData({ t: { type: 'text', label: 'T' } }, { t: `U${'\u030d'.repeat(160)}` }, {})).toEqual([]);
+  });
+
   it('refuses a url that is not well-formed Unicode, which cannot be written as UTF-8, and keeps a surrogate pair', () => {
     const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
     for (const lone of ['https://example.com/\uD800', 'https://example.com/\uDC00x', 'https://example.com/\uDC00\uD800'])
@@ -530,6 +542,7 @@ describe('validateTemplateManifest', () => {
     bad.fields.link = { type: 'url', label: 'Link', maxLength: 0 };
     bad.fields.qr = { type: 'url', label: 'QR', maxBytes: 2049 };
     bad.fields.qr2 = { type: 'url', label: 'QR', maxBytes: 0.5 };
+    bad.fields.zalgo = { type: 'text', label: 'Z', maxMarks: 0 };
     expect(validateTemplateManifest(bad)).toEqual([
       'field "price": step must be a number above 0',
       'field "price": min must not be above max',
@@ -539,6 +552,7 @@ describe('validateTemplateManifest', () => {
       'field "link": maxLength must be a whole number above 0',
       'field "qr": maxBytes must be a whole number from 1 to 2048',
       'field "qr2": maxBytes must be a whole number from 1 to 2048',
+      'field "zalgo": maxMarks must be a whole number above 0',
     ]);
   });
 
