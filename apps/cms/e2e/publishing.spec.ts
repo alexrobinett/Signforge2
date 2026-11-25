@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, tool, toolResponse } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.51';
@@ -155,7 +155,7 @@ test('a publish made more than 90 days ago can no longer be rolled back to, and 
   // The tool refuses it too, and says why.
   const { publishes } = await tool(page, 'list_publishes', {});
   const v1 = publishes.find((p: { revision: number }) => p.revision === 1);
-  const refused = await page.request.post('/api/tools/roll_back_publish', { data: { publishId: v1.id } });
+  const refused = await toolResponse(page, 'roll_back_publish', { publishId: v1.id });
   expect(refused.status()).toBe(409);
   expect(await refused.json()).toMatchObject({ error: 'conflict', details: { tooOld: true } });
   for (const width of [1440, 390]) {

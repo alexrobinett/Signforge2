@@ -14,17 +14,19 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { ProposalPanel } from '~/components/proposal';
-import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '~/components/ui/alert-dialog';
+  EditorDeleteQuestion,
+  EditorFields,
+  EditorMoreMenu,
+  EditorHeader,
+  EditorSection,
+  PublishButton,
+  SaveAlert,
+  SaveDraftButton,
+  saveWord,
+} from '~/components/editor';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { AlertDialogCancel, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '~/components/ui/alert-dialog';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -153,13 +155,9 @@ function PlaylistEditor() {
         title={draft.name || playlist.name}
         about={`${count} · ${loop} loop · ${saveWord(status, savedAt)} · ${playlistPublishWord(playlist)}`}
       >
-        {canManage && (
-          <>
-            <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
-            <DeleteButton onAsk={() => askDelete(true)} />
-          </>
-        )}
+        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
+        {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
       <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
       {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
@@ -381,26 +379,24 @@ function PlaylistEditor() {
           )}
         </div>
       </div>
-      <AlertDialog open={deleting.open} onOpenChange={askDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {playlist.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its draft and its published version are deleted; its spots stay in the library. A playlist a schedule plays, or the default playlist, cannot be
-              deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-            {deleting.error}
-          </p>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={deleting.pending} onClick={() => void deletePlaylist(orgId, playlist.id)}>
-              {deleting.pending ? 'Deleting…' : 'Delete'}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <EditorDeleteQuestion open={deleting.open} onOpenChange={askDelete}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {playlist.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its draft and its published version are deleted; its spots stay in the library. A playlist a schedule plays, or the default playlist, cannot be
+            deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+          {deleting.error}
+        </p>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={deleting.pending} onClick={() => void deletePlaylist(orgId, playlist.id)}>
+            {deleting.pending ? 'Deleting…' : 'Delete'}
+          </Button>
+        </AlertDialogFooter>
+      </EditorDeleteQuestion>
     </div>
   );
 }

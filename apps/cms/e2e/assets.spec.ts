@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { png, rotatedPhoto } from '@signforge/media/testing';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, toolResponse } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.21';
@@ -56,9 +56,9 @@ test('upload images, search them by name, see which are in use, and delete one n
   await expect(tiles).toHaveCount(2);
 
   // A spot uses the photo: it says so and cannot be deleted; the logo can.
-  const listed = await page.request.post('/api/tools/list_assets', { data: { query: 'raspberries' } });
+  const listed = await toolResponse(page, 'list_assets', { query: 'raspberries' });
   const { assets } = (await listed.json()) as { assets: { id: string }[] };
-  const made = await page.request.post('/api/tools/create_spot', { data: { name: 'Summer menu', kind: 'image', assetId: assets[0]!.id } });
+  const made = await toolResponse(page, 'create_spot', { name: 'Summer menu', kind: 'image', assetId: assets[0]!.id });
   expect(made.status(), await made.text()).toBe(200);
   await page.reload();
   await hydrated(page);

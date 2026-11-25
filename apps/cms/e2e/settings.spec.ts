@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool, toolResponse } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG, ENDPOINT_STUB_KEY, ENDPOINT_STUB_MODELS } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -95,7 +95,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   // An agent changes the threshold while the page is open; the person's save is refused, not
   // written over it, and a reload shows the agent's value. The page's own session stands in for it.
   await hydrated(page);
-  const agent = await page.request.post('/api/tools/update_org_settings', { data: { unreachableAfterMinutes: 45 } });
+  const agent = await toolResponse(page, 'update_org_settings', { unreachableAfterMinutes: 45 });
   expect(agent.status(), await agent.text()).toBe(200);
   await page.getByLabel('Alert after').fill('20');
   await page.getByRole('button', { name: 'Save changes' }).click();
@@ -263,13 +263,13 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '48-settings-who-publishes');
   await publishOption(0);
-  const refused = await invitee.request.post('/api/tools/publish_manifest_to_screen', { data: { screenId: 'scr_none', manifestId: 'f'.repeat(64) } });
+  const refused = await toolResponse(invitee, 'publish_manifest_to_screen', { screenId: 'scr_none', manifestId: 'f'.repeat(64) });
   expect(refused.status()).toBe(403);
   expect(await refused.json()).toMatchObject({ error: 'forbidden', message: 'Only owners publish in this organization' });
   // Choosing what every screen plays goes with publishing (M3-18): no Publish and no Play on every screen.
-  const made = await invitee.request.post('/api/tools/create_playlist', { data: { name: 'Editor loop' } });
+  const made = await toolResponse(invitee, 'create_playlist', { name: 'Editor loop' });
   const { playlist } = await made.json();
-  expect((await invitee.request.post('/api/tools/set_default_playlist', { data: { playlistId: playlist.id } })).status()).toBe(403);
+  expect((await toolResponse(invitee, 'set_default_playlist', { playlistId: playlist.id })).status()).toBe(403);
   await invitee.goto(`/playlists/${playlist.id}`);
   await hydrated(invitee);
   await expect(invitee.getByRole('heading', { name: 'Editor loop', level: 1 })).toBeVisible();

@@ -1,5 +1,5 @@
 import { expect, test, type Request, type Route } from '@playwright/test';
-import { accountMenu, axe, createOrg, hydrated, screenshot, signInAs, tool } from './helpers';
+import { accountMenu, axe, createOrg, hydrated, screenshot, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -309,7 +309,7 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   await tool(page, 'revoke_screen_credential', { screenId: deli, credentialId: credentials[0].id });
   await tool(page, 'create_group', { name: 'Kiosk 9' });
   // The server refuses a command to a revoked screen too.
-  expect((await page.request.post('/api/tools/identify_screen', { data: { screenId: deli } })).status()).toBe(409);
+  expect((await toolResponse(page, 'identify_screen', { screenId: deli })).status()).toBe(409);
   /** Holds the list's reads until `release`. */
   const holdListRead = async () => {
     let release = () => {};
