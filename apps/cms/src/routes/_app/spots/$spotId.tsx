@@ -10,6 +10,7 @@
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
+import { useDeferredValue } from 'react';
 import { startData } from '@signforge/compiler/draft';
 import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
@@ -46,10 +47,10 @@ import { spotShown } from '~/state/spot-editor';
 
 export const Route = createFileRoute('/_app/spots/$spotId')({
   validateSearch: stageSearch,
-  loaderDeps: ({ search }) => ({ o: search.o, kit: search.kit }),
-  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
-  pendingMs: Infinity,
-  loader: async ({ context: { queryClient }, params, deps, parentMatchPromise }) => {
+  // Entering reads the stage's preview in the loader, so the skeleton shows while it comes (#376); the
+  // orientation or kit changed on the page is read by its query, deferred, keeping the editor and its focus.
+  loader: async ({ context: { queryClient }, params, location, parentMatchPromise }) => {
+    const deps = stageSearch(location.search);
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
     const [spot, { templates }] = await Promise.all([
@@ -77,6 +78,8 @@ function SpotEditor() {
   const orgId = useOrgId();
   const { spotId } = Route.useParams();
   const search = Route.useSearch();
+  // The preview read for the orientation and kit shown: deferred, so a change keeps the stage until its own arrives.
+  const previewSearch = useDeferredValue(search);
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
   const canPublish = useCanPublish();
@@ -84,9 +87,10 @@ function SpotEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
-  const orientation = search.o ?? 'landscape';
+  // The stage draws the deferred orientation and kit, with the preview read for them: never one without the other.
+  const orientation = previewSearch.o ?? 'landscape';
   const templateVersionId = spot?.templateVersionId ?? undefined;
-  const preview = useSuspenseQuery(spotPreviewQuery(orgId, { orientation, templateVersionId, brandKitId: search.kit })).data;
+  const preview = useSuspenseQuery(spotPreviewQuery(orgId, { orientation, templateVersionId, brandKitId: previewSearch.kit })).data;
 
   const saved = useAppStore((s) => s.spotEditor.drafts[spotId]);
   const mine = saved?.orgId === orgId ? saved : undefined;
@@ -335,7 +339,7 @@ function SpotEditor() {
         {/* While a review is open, a phone shows the stage playing the change first, the review under it. */}
         <div className={cn(STAGE_COLUMN, reviewing && 'max-sm:order-first')}>
           <PlayerStage
-            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit }}
+            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: previewSearch.kit }}
             kits={brandKits}
             kitId={preview.brandKitId}
             search={search}

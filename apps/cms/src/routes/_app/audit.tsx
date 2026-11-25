@@ -48,33 +48,32 @@ function text(v: unknown, max: number): string | undefined {
   return s && s.length <= max ? s : undefined;
 }
 
+// `q: undefined` drops an old link's `?q=`: the search is never read from a URL.
+const auditSearch = (s: Record<string, unknown>): AuditFilters & { q?: undefined } => {
+  const target = text(s.target, 40);
+  // One target needs its kind: an id alone would say "Only x" over the whole log.
+  // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
+  return {
+    who: text(s.who, 200),
+    what: text(s.what, 64),
+    target,
+    targetId: target && text(s.targetId, 200),
+    when: isWhen(s.when) ? s.when : undefined,
+    q: undefined,
+  };
+};
+
 export const Route = createFileRoute('/_app/audit')({
-  // `q: undefined` drops an old link's `?q=`: the search is never read from a URL.
-  validateSearch: (s: Record<string, unknown>): AuditFilters & { q?: undefined } => {
-    const target = text(s.target, 40);
-    // One target needs its kind: an id alone would say "Only x" over the whole log.
-    // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
-    return {
-      who: text(s.who, 200),
-      what: text(s.what, 64),
-      target,
-      targetId: target && text(s.targetId, 200),
-      when: isWhen(s.when) ? s.when : undefined,
-      q: undefined,
-    };
-  },
+  validateSearch: auditSearch,
   server: { handlers: backToPage },
-  loaderDeps: ({ search }) => search,
-  // Its search feeds its loader: a change of it keeps the page, with the pending bar, not the skeleton (#376).
-  pendingMs: Infinity,
-  // The first page is read again on every load, as after a change elsewhere, never from the cache.
-  // Unsearched: the search is the store's, which a loader can't read; empty in a server render.
-  loader: async ({ context: { queryClient }, parentMatchPromise, deps }) => {
+  // Entering reads the first page here, never from the cache, so the skeleton shows while it comes (#376); a
+  // filter changed on the page is read by its query, deferred. Unsearched: the search is the store's.
+  loader: async ({ context: { queryClient }, parentMatchPromise, location }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     const [settings, people] = await Promise.all([
       getOrgSettings(),
       getMembers(),
-      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, deps, ''), staleTime: 0 }),
+      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, auditSearch(location.search), ''), staleTime: 0 }),
     ]);
     return { settings, members: people.members, at: Date.now() };
   },
@@ -86,7 +85,10 @@ const app = getRouteApi('/_app');
 
 function AuditLogPage() {
   const { settings, members, at } = Route.useLoaderData();
-  const search = Route.useSearch();
+  const shownSearch = Route.useSearch();
+  // Deferred, as the text search below: a changed filter keeps the rows it replaces, and the focus, until its own arrive.
+  const search = useDeferredValue(shownSearch);
+  const updating = search !== shownSearch;
   const orgId = useOrgId();
   const me = app.useLoaderData().user.id;
   const now = useNow(at);
@@ -133,7 +135,7 @@ function AuditLogPage() {
         )}
 
         {entries.length ? (
-          <div className="overflow-x-auto rounded-xl border bg-card">
+          <div aria-busy={updating || undefined} className={cn('overflow-x-auto rounded-xl border bg-card', updating && 'opacity-60')}>
             <table className="w-full border-collapse text-md sm:min-w-[44rem]">
               <thead className="bg-muted/60 text-left text-sm text-muted-foreground">
                 <tr>

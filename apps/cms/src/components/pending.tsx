@@ -31,7 +31,7 @@ export function PendingBar() {
 /** A page's title, its line, and a list of rows, drawn as blocks: most pages are a list. */
 export function PageSkeleton() {
   return (
-    <div aria-busy="true" className="space-y-6">
+    <div data-slot="page-skeleton" aria-busy="true" className="space-y-6">
       <div aria-hidden className="space-y-2">
         <div className="h-8 w-48 motion-safe:animate-pulse rounded-md bg-muted" />
         <div className="h-4 w-full max-w-md motion-safe:animate-pulse rounded-md bg-muted" />
