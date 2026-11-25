@@ -167,18 +167,17 @@ export interface StorageDue {
  */
 export async function orgsWithStorageDue(d1: D1Database, now: number, limit: number): Promise<string[]> {
   const cutoff = now - STORAGE_GRACE_MS;
-  // Manifests: one probe of `stored_manifests_live_idx` an org, its live rows by age, none of its deleted ones (review of #431).
+  // From each org, one probe of an org-led index for each kind (#433): `blob_deletes_due_idx`, `assets_pending_idx` and
+  // `stored_manifests_live_idx`, never a read of every org's rows (review of #431).
   const rows = await drizzle(d1).all<{ orgId: string }>(sql`
-    SELECT d.org_id AS orgId FROM (
-      SELECT org_id FROM blob_deletes WHERE queued_at <= ${cutoff} AND claim_until <= ${now}
-      UNION SELECT org_id FROM assets WHERE status = 'pending' AND created_at <= ${cutoff}
-      UNION SELECT o.id FROM organization o LEFT JOIN storage_sweeps x ON x.org_id = o.id
-        WHERE coalesce(x.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
+    SELECT o.id AS orgId FROM organization o LEFT JOIN storage_sweeps w ON w.org_id = o.id
+    WHERE coalesce(w.lease_until, 0) <= ${now} AND (
+      EXISTS (SELECT 1 FROM blob_deletes b WHERE b.org_id = o.id AND b.queued_at <= ${cutoff} AND b.claim_until <= ${now})
+      OR EXISTS (SELECT 1 FROM assets a WHERE a.org_id = o.id AND a.status = 'pending' AND a.created_at <= ${cutoff})
+      OR (coalesce(w.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
         AND EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = o.id AND m.files_json IS NOT NULL AND m.deleted_at IS NULL
-          AND m.stored_at <= ${cutoff})
-    ) d LEFT JOIN storage_sweeps w ON w.org_id = d.org_id
-    WHERE coalesce(w.lease_until, 0) <= ${now}
-    ORDER BY coalesce(w.swept_at, 0), d.org_id LIMIT ${limit}`);
+          AND m.stored_at <= ${cutoff})))
+    ORDER BY coalesce(w.swept_at, 0), o.id LIMIT ${limit}`);
   return rows.map((row) => row.orgId);
 }
 
