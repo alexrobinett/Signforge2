@@ -1,6 +1,6 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
-import type { Frame } from 'playwright';
+import type { Frame, Page } from 'playwright';
 import type { BrandColors, FrameTheme, Orientation } from '@signforge/contract';
 import { validateSpotData } from '@signforge/contract';
 import { DEMO_KIT, host, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
@@ -159,53 +159,93 @@ describe('alert (#200)', () => {
           }
     }, 120_000);
 
-  // A caption in Japanese, Chinese or Korean at its limit widened the code's column, pushing the code off a portrait
-  // screen (review of #448); copy at its limits in W's grew a landscape grid past the screen, and in Japanese was cut short
-  // in portrait (round 2). Every word stays on screen, nothing overlaps, and the code is whole, its caption no wider.
+  /** A QR code's screenshot, read back by jsQR: what a phone would scan. */
+  async function decoded(k: { hst: { page: Page } }, f: Frame): Promise<string | undefined> {
+    const clip = await f.evaluate(() => {
+      const r = document.querySelector('#qr svg')!.getBoundingClientRect();
+      return { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) };
+    });
+    if (clip.y < 0 || clip.x < 0) return undefined;
+    const png = (await k.hst.page.screenshot({ clip })).toString('base64');
+    const rgba = await k.hst.page.evaluate(async (png) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      return [...g.getImageData(0, 0, img.width, img.height).data];
+    }, png);
+    return jsQR(Uint8ClampedArray.from(rgba), clip.width, clip.height)?.data;
+  }
+
+  // Character limits cannot keep text in place, as the widest glyph can always be wider (review of #448, round 3): the
+  // copy, the meta line and the code with its caption are regions nothing can grow or push, and text that does not fit
+  // its region scales down until it does. Each field filled to its limit with the widest glyphs there are.
+  const glyphs: [string, (n: number) => string][] = [
+    ['W', (n) => 'W'.repeat(n)],
+    ['W words', widest.W],
+    ['CJK', widest.CJK],
+    ['﷽', (n) => '﷽'.repeat(n)],
+    ['ﷺ', (n) => 'ﷺ'.repeat(n)],
+    ['⸻', (n) => '⸻'.repeat(n)],
+    ['⸺', (n) => '⸺'.repeat(n)],
+    ['Thai', (n) => 'ญี่ปุ่นปั้นน้ำใจผู้ใหญ่ที่นี่'.repeat(20).slice(0, n)],
+  ];
+  const filled = (glyph: (n: number) => string) => {
+    const fields = t().manifest.fields;
+    return Object.fromEntries(
+      ['headline', 'instructions', 'issuedBy', 'endsAt', 'qrLabel'].map((f) => [f, glyph((fields[f] as { maxLength: number }).maxLength)]),
+    );
+  };
   for (const orientation of ['landscape', 'portrait'] as const)
-    it(`all the text and the whole code stay on screen, with the widest copy and long CJK captions, in every severity, ${orientation}`, async () => {
-      const captions = [
-        '避難経路と集合場所の最新情報はこのコードをスキャンしてください',
-        '请扫描此二维码获取疏散路线和集合地点的最新信息以及注意事项',
-        '대피경로와집결장소의최신정보는이코드를스캔하여확인하십시오그리고',
-        'Scanforupdatesaboutthisalertnow',
+    it(`keeps every line of the widest text in its region and the code whole and readable, in every severity, ${orientation}`, async () => {
+      const cases: [string, Data][] = [
+        // The round-3 report's own: a caption of 32 ﷽ grew the figure, so the tile started 48 px above the screen.
+        ['﷽ caption', { qrLabel: '﷽'.repeat(32) }],
+        ...glyphs.map(([name, glyph]): [string, Data] => [name, filled(glyph)]),
       ];
-      expect(captions.every((c) => c.length <= 32)).toBe(true);
       const k = await alertFrame(orientation);
       const found: string[] = [];
       for (const severity of severities)
-        for (const qrLabel of captions)
-          for (const [copy, text] of [
-            ['short copy', {}],
-            ['long copy', longCopy()],
-            ['widest W copy', worstCopy('W')],
-            ['widest CJK copy', worstCopy('CJK')],
-          ] as const) {
-            const f = await k.play({ severity, ...text, qrLabel, qrUrl: longestLinks[0] });
-            const problems = await f.evaluate(() => {
-              for (const a of document.getAnimations()) a.currentTime = 3000;
-              const out: string[] = [];
-              const tile = document.querySelector('.tile')!.getBoundingClientRect();
-              const caption = document.querySelector('.qr figcaption')!.getBoundingClientRect();
-              if (tile.top < 0 || tile.left < 0 || tile.bottom > innerHeight || tile.right > innerWidth) out.push('the code is cut off');
-              if (caption.width > tile.width + 0.5) out.push('the caption is wider than the code');
-              // Laid out, not painted: the copy is all within its row (offsets each round, so a pixel's grace).
-              const copy = document.querySelector<HTMLElement>('.copy')!;
-              const last = document.querySelector<HTMLElement>('.instructions')!;
-              if (last.offsetTop + last.offsetHeight > copy.clientHeight + 1) out.push('the copy runs past its row');
-              const body = document.querySelector<HTMLElement>('.body')!;
-              if (body.scrollHeight > body.clientHeight) out.push('the body overflows');
-              const parts = ['.headline', '.instructions', '.issued', '.ends', '.qr figcaption', '.tile'].flatMap((sel) =>
-                [...(document.querySelector(sel)?.getClientRects() ?? [])].map((r) => [sel, r] as const),
-              );
-              for (const [sel, r] of parts) if (r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) out.push(`${sel} is off screen`);
-              for (const [i, [a, ra]] of parts.entries())
-                for (const [b, rb] of parts.slice(i + 1))
-                  if (a !== b && ra.left < rb.right && rb.left < ra.right && ra.top < rb.bottom && rb.top < ra.bottom) out.push(`${a} overlaps ${b}`);
-              return [...new Set(out)];
-            });
-            for (const p of problems) found.push(`${severity}, ${qrLabel.slice(0, 6)}, ${copy}: ${p}`);
-          }
+        for (const [name, text] of cases) {
+          const f = await k.play({ severity, ...text, qrUrl: longestLinks[0] });
+          const problems = await f.evaluate(() => {
+            for (const a of document.getAnimations()) a.currentTime = 3000;
+            const out: string[] = [];
+            const view = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+            const inside = (r: DOMRect, b: { left: number; top: number; right: number; bottom: number }) =>
+              r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.top >= b.top - 0.5 && r.bottom <= b.bottom + 0.5;
+            const meets = (a: DOMRect, b: DOMRect) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+            const tile = document.querySelector('.tile')!.getBoundingClientRect();
+            if (!inside(tile, view)) out.push('the code is not whole on screen');
+            // Each region, and the side its text grows towards: the copy from the top, the meta line from the bottom.
+            const regions = [
+              ['copy', document.querySelector('.copy')!, 'bottom'],
+              ['meta', document.querySelector('.meta')!, 'top'],
+              ['caption', document.querySelector('.qr figcaption')!, 'bottom'],
+            ] as const;
+            const boxes = new Map<string, DOMRect>([...regions.map(([n, el]) => [n, el.getBoundingClientRect()] as const), ['tile', tile]]);
+            for (const [a, ra] of boxes) for (const [b, rb] of boxes) if (a < b && meets(ra, rb)) out.push(`the ${a} and ${b} regions overlap`);
+            const range = document.createRange();
+            for (const [name, el, side] of regions) {
+              const box = boxes.get(name)!;
+              const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                range.selectNodeContents(node);
+                for (const line of range.getClientRects()) {
+                  if (!line.width) continue;
+                  if (!inside(line, view)) out.push(`a ${name} line is off screen`);
+                  if (line.left < box.left - 0.5 || line.right > box.right + 0.5) out.push(`a ${name} line runs out at the side`);
+                  if (side === 'bottom' ? line.bottom > box.bottom + 0.5 : line.top < box.top - 0.5) out.push(`a ${name} line runs out of its region`);
+                  for (const [other, ro] of boxes) if (other !== name && meets(line, ro)) out.push(`a ${name} line enters the ${other}`);
+                }
+              }
+            }
+            return [...new Set(out)];
+          });
+          for (const p of problems) found.push(`${severity}, ${name}: ${p}`);
+          if ((await decoded(k, f)) !== longestLinks[0]) found.push(`${severity}, ${name}: the code does not read back`);
+        }
       expect(found).toEqual([]);
     }, 300_000);
 

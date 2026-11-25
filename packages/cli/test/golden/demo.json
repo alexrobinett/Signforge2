@@ -157,8 +157,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05": {
-      "size": 123078,
+    "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5": {
+      "size": 124028,
       "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
@@ -590,7 +590,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05"
+      "html": "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "e567edfe28bce28c9149222ed448d57c8b044a493ba8195d052fb0e6cae33f0c"
+  "id": "b9e7f7bf07f87b029c51e8a5c03286a0d00b14cb568b3cbb1a8e51d829c676b7"
 }

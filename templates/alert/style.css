@@ -121,14 +121,18 @@ body {
   height: 100%;
   overflow: hidden;
 }
-/* `--scale` steps type up into the room a QR code leaves; `--fit` (main.ts) steps it down until
-   long copy fits. */
+/* `--scale` steps type up into the room a QR code leaves. `--fit` and `--cap-fit` (main.ts) scale the copy and the
+   caption down until each fits its region, with no floor: small text beats hidden or covered text in an emergency. */
 :root {
   --scale: 1;
   --fit: 1;
+  --cap-fit: 1;
   /* The QR code's tile: 6.65 px a module at 1080p for a link of up to 213 bytes (QR version 10), as the Announcement's
      30vmin code that scans from 2 m (#230). */
   --qr: 40vmin;
+  /* Its caption's box, three lines at full size, and the code's whole region: the tile and the caption under it. */
+  --cap: 10.2vmin;
+  --qr-h: calc(var(--qr) + 1.48vmin + var(--cap));
   --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
   --out: 0.5s;
 }
@@ -183,22 +187,22 @@ body {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  /* The copy's row is the flexible one: an item spanning a flexible row does not size the grid, so the code, beside both
-     rows, always has the screen's height, however long the copy (review of #448, round 2). The copy itself never runs
-     past its row: its limits are set so the longest fits at the smallest step (main.ts). */
-  grid-template-rows: minmax(0, 1fr) auto;
+  /* Three regions that nothing can grow or push (review of #448, round 3): the copy, who issued it and when it ends (the
+     meta line), and the code with its caption, of a fixed size. Every track is fixed, flexible or at least 0, so no
+     content sizes the grid; text that does not fit its region scales down instead (main.ts). */
+  grid-template-columns: minmax(0, 1fr) var(--qr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
   grid-template-areas:
     'copy qr'
     'meta qr';
   gap: 3.7vmin 7.4vmin;
   padding: 7.4vmin 8.9vmin 6.67vmin;
 }
-/* The headline and what to do, as one block: the box whose overflow the type steps down for (`--fit`, main.ts). The
-   headline's own box is no measure of that, as its glyphs stand taller than its 1.02 line. */
+/* The headline and what to do: a region, its text from the top. */
 .copy {
   grid-area: copy;
-  position: relative;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 3.7vmin;
@@ -218,12 +222,19 @@ body {
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }
+/* Who issued it and when it ends: a region, its text at the bottom, scaled with the copy. */
 .meta {
   grid-area: meta;
-  align-self: end;
-  font-size: 2.96vmin;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  font-size: calc(2.96vmin * var(--fit));
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+.meta p {
+  min-width: 0;
 }
 .issued + .ends::before {
   content: '·';
@@ -232,9 +243,10 @@ body {
 .qr {
   grid-area: qr;
   align-self: end;
+  width: var(--qr);
+  height: var(--qr-h);
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1.48vmin;
 }
 /* The code draws its own white tile and quiet zone (`qrSvg`). */
@@ -249,18 +261,26 @@ body {
   width: 100%;
   height: 100%;
 }
-/* No wider than the code, so a long caption (31 characters of Japanese is 3 lines) wraps under it and never widens its
-   column (review of #448). */
+/* The caption's own region under the code, as wide as it: text that does not fit scales down (`--cap-fit`, main.ts). */
 .qr figcaption {
-  max-width: var(--qr);
+  height: var(--cap);
   text-align: center;
   overflow-wrap: anywhere;
   text-wrap: balance;
-  font-size: 2.6vmin;
+  font-size: calc(2.6vmin * var(--cap-fit));
+  line-height: 1.3;
 }
 :root[data-qr='off'] .body {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: 'copy' 'meta';
+}
+/* While main.ts measures the text: laid out as it plays, not where the intros' transforms hold it. */
+:root[data-measuring] *,
+:root[data-measuring] *::before,
+:root[data-measuring] *::after {
+  /* biome-ignore-start lint/complexity/noImportantStyles: measuring must see no animation's transform. */
+  animation: none !important;
+  /* biome-ignore-end lint/complexity/noImportantStyles: measuring */
 }
 
 /* Motion. Emergency and warning arrive hard: the band drops in and the copy rises after it.
@@ -352,15 +372,13 @@ body {
   grid-template-areas:
     'copy copy'
     'meta qr';
-  /* The foot row keeps the code's whole height and the copy's row gives way instead, so the code is always fully on
-     screen: copy that overflows its row steps the type down (`--fit`, main.ts), and at the last step it is cut short
-     rather than drawn over the code (review of #448). */
-  grid-template-rows: minmax(0, auto) minmax(auto, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--qr-h);
   gap: 4.44vmin 3.7vmin;
   padding: 8.15vmin 6.67vmin 7.4vmin;
 }
 :root[data-orientation='portrait'][data-qr='off'] .body {
   grid-template-areas: 'copy' 'meta';
+  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
 }
 :root[data-orientation='portrait'] .copy {
   gap: 4.44vmin;

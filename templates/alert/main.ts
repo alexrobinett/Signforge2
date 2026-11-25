@@ -13,8 +13,48 @@ const SEVERITIES: Record<string, { label: string; ground: string; ink: string }>
   notice: { label: 'Notice', ground: '#1e3a8a', ink: '#ffffff' },
 };
 
-/** The type's steps down, tried in turn until the copy fits: copy at every field's `maxLength` fits at the last. */
-const FITS = [1, 0.88, 0.77, 0.68];
+/** Halvings of the search for the largest scale at which text fits its region: within 1/256 of it, nine layouts at most. */
+const STEPS = 8;
+/** A line may stand this far past its region's edge, for sub-pixel layout: never a whole pixel. */
+const SLACK = 0.5;
+
+type Side = 'top' | 'bottom';
+/**
+ * Whether every line of text in `region` lies inside its box on the sides text can run out of: left, right and `side`,
+ * the end it grows towards. Measured line by line (`Range.getClientRects`), as laid out: a line's box is its font's
+ * whole height, which stands out past a tight line on the side the text starts from, so that side is not measured.
+ */
+function linesFit(region: Element, side: Side): boolean {
+  const box = region.getBoundingClientRect();
+  const range = document.createRange();
+  const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    range.selectNodeContents(node);
+    for (const line of range.getClientRects()) {
+      if (line.left < box.left - SLACK || line.right > box.right + SLACK) return false;
+      if (side === 'bottom' ? line.bottom > box.bottom + SLACK : line.top < box.top - SLACK) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Sets `name` on the root to the largest scale, from 1 down with no floor, at which `fits` holds: 1 when the text fits as
+ * it is (one layout, as realistic copy does), else a binary search. Small text beats hidden or covered text in an
+ * emergency (review of #448, round 3).
+ */
+function fitScale(root: HTMLElement, name: string, fits: () => boolean): void {
+  root.style.setProperty(name, '1');
+  if (fits()) return;
+  let [low, high] = [0, 1];
+  for (let i = 0; i < STEPS; i++) {
+    const mid = (low + high) / 2;
+    root.style.setProperty(name, String(mid));
+    if (fits()) low = mid;
+    else high = mid;
+  }
+  root.style.setProperty(name, String(low));
+}
 
 defineTemplate({
   async prepare(ctx) {
@@ -48,14 +88,14 @@ defineTemplate({
     // New data while the faces loaded: the SDK put a fresh copy of the loaded body in place and
     // inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
     if (document.body !== page) throw new Error('new data replaced this prepare');
-    // The copy's row gives way to the QR code's, so the copy can overflow its own row too. Measured by its last box, not
-    // its scroll size, which counts the lines' rise in (a transform) as the play starts; each offset is rounded on its
-    // own, so a box that fits can measure a pixel over.
-    const copy = document.querySelector<HTMLElement>('.copy')!;
-    const last = document.querySelector<HTMLElement>('.instructions')!;
-    for (const fit of FITS) {
-      root.style.setProperty('--fit', String(fit));
-      if (body.scrollHeight <= body.clientHeight && last.offsetTop + last.offsetHeight <= copy.clientHeight + 1) break;
-    }
+    // Each region's text scales until it fits there: the caption under the code on its own, the copy and the meta line
+    // together. Measured with the intros off, as the text lies when it plays.
+    root.dataset.measuring = '';
+    const caption = document.querySelector('.qr figcaption');
+    if (caption) fitScale(root, '--cap-fit', () => linesFit(caption, 'bottom'));
+    const copy = document.querySelector('.copy')!;
+    const meta = document.querySelector('.meta')!;
+    fitScale(root, '--fit', () => linesFit(copy, 'bottom') && linesFit(meta, 'top'));
+    delete root.dataset.measuring;
   },
 });

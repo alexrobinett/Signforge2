@@ -76,6 +76,10 @@
       "size": 90095,
       "type": "text/html"
     },
+    "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5": {
+      "size": 124028,
+      "type": "text/html"
+    },
     "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
       "size": 78257,
       "type": "text/html"
@@ -92,10 +96,6 @@
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
       "size": 43425,
       "type": "image/png"
-    },
-    "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05": {
-      "size": 123078,
-      "type": "text/html"
     },
     "de29f63a8d1386d966af4f67750a68a3498ec14b44d005facc2144f63162c937": {
       "size": 46747,
@@ -199,7 +199,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05"
+      "html": "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "6c3920211953fd53fb67335bd2c413602fd0369e700e95f40a5c53e4b0c32930"
+  "id": "9598db084daea0dcdad14ec0bab4c98ec741bf22a40faac07f619afc1b09c401"
 }
