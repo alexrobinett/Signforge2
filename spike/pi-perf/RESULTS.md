@@ -1006,6 +1006,7 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 | portrait | **516 ms** | 441, 436, 447, 433, 427 ms | 314-363 ms |
 
 - **Every cold prepare is under 500 ms but the first after a kiosk restart, which is 516 to 543 ms.**
+- **A stated exception, accepted for #448:** worst-case input (`﷽` in every field at its limit), and only the first prepare after a kiosk restart, may take up to about 545 ms, well inside the 2 s ready timeout. Realistic copy fits at full size and runs no search, and the 1/64 fit is kept, which needs the two probes.
 - That first prepare without any search (the scale left at 1) is 419 and 423 ms for the same copy, and 410 ms for default copy. So in a freshly started Chromium the search's two probes, each a layout of the reshaped `﷽` text, cost about 100 to 120 ms. The 1/64 guarantee needs at least two probes.
 - An earlier attempt at this measurement is discarded: restarting the kiosk had started the supervisor again, which restarted the kiosk every 50 s for want of the bench page's heartbeat. That cut some runs short and put the panel back to landscape.
 
