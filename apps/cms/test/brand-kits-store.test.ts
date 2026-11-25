@@ -14,12 +14,18 @@ import type { BrandKitView } from '../src/lib/brand-kits';
 import type { SpotPreview, SpotView, TemplateView } from '../src/lib/spots';
 import { getSpotPreview } from '../src/server/spots.functions';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '../src/queries/spots';
+import { AUTOSAVE_MS } from '../src/state/versioned-draft';
+import { switchOrganization } from '../src/lib/orgs';
 import { createBrandKitsSlice, previewKey, type BrandKitsSlice } from '../src/state/brand-kits';
+import { createOrgsSlice, type OrgsSlice } from '../src/state/orgs';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
+vi.mock('~/lib/orgs', () => ({ switchOrganization: vi.fn(), createOrganization: vi.fn() }));
+const toasts: { said: string; undo: () => void }[] = [];
+vi.mock('sonner', () => ({ toast: (said: string, opts: { action: { onClick: () => void } }) => toasts.push({ said, undo: opts.action.onClick }) }));
 
 const ORG = 'org_1';
 const manifest = clock as unknown as TemplateManifest;
@@ -124,6 +130,7 @@ beforeEach(() => {
   vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
   vi.stubGlobal('location', { origin: 'http://cms.test' });
   held.clear();
+  toasts.length = 0;
   router.state.location.href = '/brand-kits';
   router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }];
   router.navigate.mockClear();
@@ -137,6 +144,8 @@ beforeEach(() => {
   vi.mocked(getSpotPreview).mockImplementation(async ({ data }: { data: { brandKitId?: string } }) => preview(data.brandKitId ?? '')) as never;
 });
 afterEach(() => {
+  // A save a test left waiting would wait for every later test: the leaving test counts what waits, across stores.
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -235,8 +244,9 @@ describe('a kit save (re-check of #103)', () => {
     const { store } = page([v1]);
     store.getState().editKit(ORG, v1.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     // Someone else saves; the page reads the kits again (after an assignment, say) and holds v2.
-    const v2 = { ...v1, shape: 'round' as const, version: 2 };
-    await store.getState().saveKit(v2.id);
+    // Saved a second after the edit, as an editor's (#366).
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    await settle();
     expect(calls).toMatchObject([{ name: 'update_brand_kit', input: { brandKitId: 'bk_a', ifVersion: 1 } }]);
     // The page says it in a kit's words (This kit changed since you opened it).
     expect(store.getState().brandKits.drafts.bk_a).toMatchObject({
@@ -252,11 +262,10 @@ describe('a kit save (re-check of #103)', () => {
     const a = kit('bk_a', '#2563eb');
     const { store } = page([a]);
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
-    const saving = store.getState().saveKit(a.id);
-    await settle();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_2' } } }];
     answer(new Response(JSON.stringify({ brandKit: { ...a, version: 2 } }), { status: 200 }));
-    await saving;
+    await settle();
     expect(store.getState().brandKits.drafts.bk_a).toMatchObject({ status: 'unsaved', version: 1, savedAt: null, pending: false });
   });
 });
@@ -362,28 +371,76 @@ describe('kit actions run one at a time (review of #143)', () => {
   }
   const refused = { error: 'error', message: 'Refused' };
 
-  it('a Duplicate, or a new kit, while the kit saves is ignored; so is a save while Duplicate runs', async () => {
+  it('a Duplicate, or a new kit, while the kit saves is ignored; an autosave due while Duplicate runs waits for it', async () => {
     const { calls, called } = heldTools();
     const a = kit('bk_a', '#2563eb');
     const { store } = page([a]);
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
-    const saving = store.getState().saveKit(a.id);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await called(1);
     await store.getState().duplicateKit(ORG, a);
     store.getState().nameNewKit('Spring');
     await store.getState().createKit(ORG);
     expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
     calls[0]!.answer(409, refused);
-    await saving;
+    await settle();
 
+    // Refused (it stays unsaved): Duplicate saves it first, then copies the kit as saved.
+    store.getState().reloadKit(ORG, a.id);
+    await settle();
     const duplicating = store.getState().duplicateKit(ORG, a);
     await called(2);
-    await store.getState().saveKit(a.id);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
+    // An edit while Duplicate runs: its save waits until Duplicate is done.
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#446688' } }));
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await store.getState().createKit(ORG);
     expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
     calls[1]!.answer(409, refused);
     await duplicating;
     expect(store.getState().brandKits.pending).toBeNull();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    await called(3);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit', 'update_brand_kit']);
+  });
+
+  it('Duplicate saves an edit still waiting out its second, then copies the kit as saved (#366)', async () => {
+    const { calls, called } = heldTools();
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const duplicating = store.getState().duplicateKit(ORG, a);
+    await called(1);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    calls[0]!.answer(409, refused);
+    await duplicating;
+    // Its save refused, Duplicate copies nothing: the edit stays, said in place.
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+  });
+
+  it('a kit the server would refuse as it is (no name) is marked, not sent', async () => {
+    const { calls } = heldTools();
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, name: '  ' }));
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    expect(calls).toEqual([]);
+    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('invalid');
+  });
+
+  it("a contrast fix says so with Undo, which puts the colour back and saves that, as the editors' Undo does (review of #461)", async () => {
+    const { calls, called } = heldTools();
+    // Text too dim on the surface: the fix moves it.
+    const a = { ...kit('bk_a', '#2563eb'), colors: { ...kit('bk_a', '#2563eb').colors, muted: '#2a3140' } };
+    const { store } = page([a]);
+    store.getState().fixKitPair(ORG, a.id, 'muted', 'surface');
+    expect(store.getState().brandKits.drafts.bk_a?.edit.colors.muted).not.toBe('#2a3140');
+    expect(toasts.map((t) => t.said)).toEqual(['Contrast fixed']);
+    toasts[0]!.undo();
+    expect(store.getState().brandKits.drafts.bk_a?.edit.colors.muted).toBe('#2a3140');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
+    await called(1);
+    expect(calls[0]).toMatchObject({ name: 'update_brand_kit', input: { colors: { muted: '#2a3140' } } });
   });
 
   it('a request that gets no answer releases the action, with its message', async () => {
@@ -429,5 +486,41 @@ describe('kit actions run one at a time (review of #143)', () => {
     await duplicating;
     expect(router.navigate).not.toHaveBeenCalled();
     expect(store.getState().brandKits.pending).toBeNull();
+  });
+});
+
+describe('an edit still waiting when the member leaves the org (review of #461)', () => {
+  it('is saved in its own org before the switch, and the switch waits for the answer', async () => {
+    const calls: { name: string; answer: () => void }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      (url: string) =>
+        new Promise<Response>((resolve) =>
+          calls.push({ name: url.split('/').at(-1) ?? '', answer: () => resolve(new Response(JSON.stringify({ brandKit: { version: 2 } }))) }),
+        ),
+    );
+    const a = kit('bk_a', '#2563eb');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(brandKitsQuery(ORG).queryKey, { brandKits: [a] });
+    const store = createStore<BrandKitsSlice & OrgsSlice>()((set, get) => ({
+      ...createBrandKitsSlice(set as never, get as never, { router, queryClient } as never),
+      ...createOrgsSlice(set as never, get as never, { router, queryClient } as never),
+      forgetAgentDrawer: () => {},
+      cancelPublishAll: () => {},
+      forgetOrgSettings: () => {},
+    }));
+    vi.mocked(switchOrganization).mockImplementation(async () => {
+      router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_2' } } }];
+    });
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const switching = store.getState().switchOrg({ id: 'org_2', name: 'Other' } as never, 'switcher');
+    await settle();
+    // Sent at once, in the org it was made in; the switch has not happened yet.
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(switchOrganization).not.toHaveBeenCalled();
+    calls[0]!.answer();
+    await switching;
+    expect(switchOrganization).toHaveBeenCalled();
+    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('saved');
   });
 });

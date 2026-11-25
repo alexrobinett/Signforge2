@@ -23,9 +23,7 @@ import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
 import type { SliceCreator } from './store';
-import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
-
-const SAVE_DELAY_MS = 1000;
+import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 interface PlaylistEditorState {
   /** Each playlist's draft, by playlist id. A saved one is shown while the playlist is at the version it saved. */
@@ -146,7 +144,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
   });
-  const saveSoon = autosave(realClock, SAVE_DELAY_MS, (playlistId) => drafts.save(playlistId));
+  const saveSoon = autosave(realClock, AUTOSAVE_MS, (playlistId) => drafts.save(playlistId));
 
   /** The draft of `playlist` as it stands: the one edited here, else the saved one. */
   const current = (playlist: PlaylistView) => shown(get().playlistEditor.drafts[playlist.id], playlist.version) ?? playlistDraftOf(playlist);

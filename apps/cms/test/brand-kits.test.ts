@@ -7,6 +7,7 @@ import {
   duplicateInput,
   kitDraftOf,
   kitPairs,
+  logoChoice,
   pairFix,
   screensText,
   shownColors,
@@ -82,6 +83,19 @@ describe('a kit draft', () => {
     const d = kitDraftOf(view);
     expect(d.colors.onAccent).toBeNull();
     expect(draftColors({ ...d, colors: { ...d.colors, accent: '#1f3fbf' } })?.onAccent).toBe('#ffffff');
+  });
+
+  it("a logo choice's Undo puts back only what it changed: a dark logo chosen leaves a light one changed since (review of #461)", () => {
+    const d = { ...kitDraftOf(view), logoOnDarkAssetId: 'ast_dark', logoOnLightAssetId: 'ast_light' };
+    const dark = logoChoice(d, 'dark', 'ast_dark2');
+    expect(dark).toEqual({ said: 'Logo changed', patch: { logoOnDarkAssetId: 'ast_dark2' }, was: { logoOnDarkAssetId: 'ast_dark' } });
+    // Removing the dark logo removes the light one too, and its Undo puts both back.
+    expect(logoChoice(d, 'dark', null)).toEqual({
+      said: 'Logo removed',
+      patch: { logoOnDarkAssetId: null, logoOnLightAssetId: null },
+      was: { logoOnDarkAssetId: 'ast_dark', logoOnLightAssetId: 'ast_light' },
+    });
+    expect(logoChoice(d, 'light', null).was).toEqual({ logoOnLightAssetId: 'ast_light' });
   });
 
   it('has no colours to draw while a hex is half typed', () => {
