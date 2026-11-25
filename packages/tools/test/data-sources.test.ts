@@ -402,7 +402,68 @@ describe("an agent's change that reaches screens with no publish (#122, review o
     });
   });
 
-  it('leaves people as they were: an editor changes the address in the CMS', async () => {
-    expect(await change('update_data_source', { dataSourceId: 'live', feedUrl: 'https://cms.example.com/feed.json' })).toMatchObject({ ok: true });
+});
+
+describe("a person's change that reaches screens with no publish (owner decision on #424)", () => {
+  // An org of its own, with an editor who is a member: their right is read in the batch as it runs.
+  let p: SeededOrg;
+  const editorId = () => `${p.orgId}-editor-user`;
+  const editor = (): Caller => ({ ...memberOf(testScope(env.DB, p.orgId), 'editor', { feedUrls: sealer }), member: editorId() });
+  const setPublish = async (on: boolean) => {
+    const org = testScope(env.DB, p.orgId);
+    await org.commit((await org.settings.stage.set({ editorsPublish: on })).writes);
+  };
+  const sealedOf = async (id: string) => (await testScope(env.DB, p.orgId).dataSources.get(id))?.urlEncrypted;
+
+  beforeAll(async () => {
+    p = await seedOrg(env.DB, 'feeds-people');
+    const now = new Date(0).toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(editorId(), 'Ed', `${editorId()}@signforge.test`, now, now),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(`${editorId()}-m`, p.orgId, editorId(), now),
+    ]);
+    expect(await dispatch(registry, 'create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json' }, editor())).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('refuses an editor anything but the name while only owners publish, and a provider source; allows them while editors publish', async () => {
+    await setPublish(false);
+    try {
+      const before = await sealedOf('menu');
+      for (const input of [{ feedUrl: 'https://menu.example.com/b.json' }, { refreshS: 900 }])
+        expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', ...input }, editor()), JSON.stringify(input)).toMatchObject({
+          ok: false,
+          error: 'forbidden',
+          message: expect.stringContaining('needs the right to publish'),
+        });
+      expect(await sealedOf('menu')).toBe(before);
+      expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', name: 'Menu board' }, editor())).toMatchObject({ ok: true });
+      expect(
+        await dispatch(registry, 'create_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Menu!A1:B9' }, editor()),
+      ).toMatchObject({ ok: false, error: 'forbidden' });
+      // A feed of its own an editor may still add: nothing shows it until a spot binding it is published.
+      expect(await dispatch(registry, 'create_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, editor())).toMatchObject({
+        ok: true,
+      });
+    } finally {
+      await setPublish(true);
+    }
+    expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', refreshS: 900 }, editor())).toMatchObject({ ok: true });
+  });
+
+  it('holds the right to the commit: editors stopped from publishing between the read and the batch are refused', async () => {
+    const before = await sealedOf('menu');
+    const raced = racing(editor(), () => setPublish(false));
+    try {
+      expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/c.json' }, raced)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'Only owners publish in this organization',
+      });
+    } finally {
+      await setPublish(true);
+    }
+    expect(await sealedOf('menu')).toBe(before);
   });
 });
