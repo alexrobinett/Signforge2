@@ -212,7 +212,7 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - **Toggles**: `showImages`, `showSummary`, `showList`, `showMeta` (source and age), `showCrawl`. What is empty is off too: one story is no list, no stories no crawl, and a story with no summary or no source and age has neither. Without the list the lead's type steps up (`--lk-step`).
 - **Text** sits on the look's ground, a card over the photo's foot, and the crawl on a band of the text's colour: no text on a photo. Long headlines step down (1, 0.86, 0.74, 0.64) before their clamp's ellipsis; summaries and list titles clamp.
 - **Bundle**: 385,461 bytes with all four looks.
-- **On the Pi** (`spike/pi-perf/RESULTS.md`, News 2.0), the lead turning every 6 s: 0.13 to 0.80% of frames dropped in every look, orientation and transition; prepares 380 to 463 ms in landscape, and 478 to 530 ms in portrait, where 14 of 24 are over the budget by up to 30 ms (one story held still takes 445 to 484); worst frames 50 ms in landscape and 67 ms in portrait, while loading or fading. Four stacked stories cost 5 to 35 MB of Chromium's memory over one.
+- **On the Pi** (`spike/pi-perf/RESULTS.md`, News 2.0), the lead turning every 6 s: 0.13 to 0.80% of frames dropped in every look, orientation and transition; prepares 380 to 463 ms in landscape, and 478 to 530 ms in portrait, where 14 of 24 are over the budget by up to 30 ms, accepted by the owner (one story held still takes 445 to 484); worst frames 50 ms in landscape and 67 ms in portrait, while loading or fading. Four stacked stories cost 5 to 35 MB of Chromium's memory over one.
 
 ## Live data
 
