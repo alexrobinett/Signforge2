@@ -411,6 +411,12 @@ export const screens = sqliteTable(
      */
     heartbeatJson: text('heartbeat_json'),
     /**
+     * When its heartbeat first said it fell back from the manifest it says now (`manifest.fallbackFrom`), kept while it
+     * says the same, null while it says none: the publish it fell back from is the newest of that manifest at or
+     * before then, not one that sent it again later (#367).
+     */
+    fallbackSince: integer('fallback_since'),
+    /**
      * The contract's `DisplayOverride` set from the CMS (wake now, sleep now), or null. Sent to the
      * screen over its socket when set, and in each sync while the screen reports something else.
      * Ends by itself at its `until`.

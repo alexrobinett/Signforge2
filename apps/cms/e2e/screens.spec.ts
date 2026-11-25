@@ -477,6 +477,18 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   // Heard from, with nothing published to it, it needs you: its fix is off in the server's HTML too (review of #458).
   await d1(`UPDATE screens SET last_seen_at = ${Date.now() + 3_600_000} WHERE id = '${screen.id}'`);
   expect(await disabledOnServer(page, path, ['Make a playlist…'])).toEqual({ 'Make a playlist…': [true] });
+  // And a fix that is a link: Pair it again…, for a revoked screen, is off in the server's HTML too (review of #458).
+  // Revoked, as its row says it: no player here ever took this pairing's credential.
+  await d1(`UPDATE screens SET status = 'revoked' WHERE id = '${screen.id}'`);
+  const html = await (await page.request.get(path)).text();
+  const pairAgain = await page.evaluate((h) => {
+    const link = [...new DOMParser().parseFromString(h, 'text/html').querySelectorAll('a')].find((a) => a.textContent.trim() === 'Pair it again…');
+    return link ? { disabled: link.getAttribute('aria-disabled') } : null;
+  }, html);
+  expect(pairAgain).toEqual({ disabled: 'true' });
+  await page.goto(path);
+  await hydrated(page);
+  await expect(page.getByRole('link', { name: 'Pair it again…' })).not.toHaveAttribute('aria-disabled');
 });
 
 test("Take over's notice keeps a name with no break inside the dialog at a phone's width (review of #453)", async ({ page, request }) => {

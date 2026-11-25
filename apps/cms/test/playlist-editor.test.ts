@@ -47,8 +47,9 @@ const org = { id: ORG };
 function setup() {
   const queryClient = new QueryClient();
   const router = {
-    navigate: vi.fn(async () => {}),
+    navigate: vi.fn(async ({ to }: { to: string }) => void (router.state.location.pathname = to)),
     state: {
+      location: { pathname: '/spots' },
       get matches() {
         return [{ routeId: '/_app', loaderData: { organization: { id: org.id } } }];
       },
@@ -59,7 +60,7 @@ function setup() {
     redrawStage: () => {},
   }));
   const open = (p: PlaylistView) => queryClient.setQueryData(playlistKeys.one(ORG, p.id), p);
-  return { store, queryClient, open, editor: () => store.getState().playlistEditor };
+  return { store, router, queryClient, open, editor: () => store.getState().playlistEditor };
 }
 
 /** Let the store's awaits run. */
@@ -252,5 +253,19 @@ describe('New playlist from elsewhere (#367, review of #458)', () => {
     const { store: withSpot } = setup();
     await withSpot.getState().startNewPlaylist(ORG);
     expect(withSpot.getState().playlistEditor.newPlaylist.open).toBe(true);
+  });
+
+  it('asks for nothing when the member went elsewhere before its read came back (review of #458)', async () => {
+    const { getSpots } = await import('../src/server/spots.functions');
+    let answer: (v: unknown) => void = () => {};
+    vi.mocked(getSpots).mockImplementationOnce(() => new Promise((r) => (answer = r)) as never);
+    const { store, router } = setup();
+    const starting = store.getState().startNewPlaylist(ORG);
+    await settle();
+    // Gone elsewhere (a sidebar link) while Playlists' read is on its way.
+    router.state.location.pathname = '/spots';
+    answer({ spots: [{ id: 'spt_1' }] });
+    await starting;
+    expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);
   });
 });

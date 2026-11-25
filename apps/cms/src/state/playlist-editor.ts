@@ -147,6 +147,8 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     clock: realClock,
   });
   const saveSoon = autosave(realClock, SAVE_DELAY_MS, (playlistId) => drafts.save(playlistId));
+  /** Counts New playlist's starts from elsewhere: only the latest may open its dialog. */
+  let newPlaylistStarts = 0;
 
   /** The draft of `playlist` as it stands: the one edited here, else the saved one. */
   const current = (playlist: PlaylistView) => shown(get().playlistEditor.drafts[playlist.id], playlist.version) ?? playlistDraftOf(playlist);
@@ -256,9 +258,13 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
     openNewPlaylist: (open) => editor((e) => ({ ...e, newPlaylist: { ...closedNew(), open } })),
     async startNewPlaylist(orgId) {
+      // Its own: a later start, or the member gone elsewhere before this one's read came back, leaves nothing asked
+      // for, to open on a later visit (review of #458).
+      const token = ++newPlaylistStarts;
       await router.navigate({ to: '/playlists' });
       const { spots } = await queryClient.query(spotsQuery(orgId));
-      if (spots.length && orgOnScreen(router) === orgId) get().openNewPlaylist(true);
+      const still = token === newPlaylistStarts && router.state.location.pathname === '/playlists' && orgOnScreen(router) === orgId;
+      if (still && spots.length) get().openNewPlaylist(true);
     },
     nameNewPlaylist: (name) => editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, name, error: null } })),
 

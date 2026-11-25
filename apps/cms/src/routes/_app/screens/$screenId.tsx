@@ -30,6 +30,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
+import { useHydrated } from '~/lib/hydrated';
 import { useCanManage, useCanPublish, useNow, useOrgId, useRole } from '~/lib/live';
 import { versionName } from '~/lib/publishes';
 import { eventText } from '~/lib/audit';
@@ -67,21 +68,25 @@ function NeedsYouFix({
   onPlay: () => void;
   onMakePlaylist: () => void;
 }) {
+  // Its links, like its buttons, wait for the page to hydrate: one followed before would leave the page half taken
+  // over. `disabled` is the router's own: it marks the link and does not follow it.
+  const hydrated = useHydrated();
+  const linkLook = hydrated ? undefined : 'pointer-events-none opacity-60';
   const fix =
     reason === 'nothing_published'
       ? canFix && (hasPlaylists ? <Button onClick={onPlay}>Play on this screen…</Button> : <Button onClick={onMakePlaylist}>Make a playlist…</Button>)
       : reason === 'fallback'
         ? fellBackFrom && (
-            <Button asChild>
-              <Link to="/publishes" search={{ id: fellBackFrom.id }}>
+            <Button asChild className={linkLook}>
+              <Link to="/publishes" search={{ id: fellBackFrom.id }} disabled={!hydrated}>
                 See {versionName(fellBackFrom)}, which played nothing
               </Link>
             </Button>
           )
         : reason === 'revoked'
           ? canFix && (
-              <Button asChild>
-                <Link to="/screens" search={{ pair: true }}>
+              <Button asChild className={linkLook}>
+                <Link to="/screens" search={{ pair: true }} disabled={!hydrated}>
                   Pair it again…
                 </Link>
               </Button>

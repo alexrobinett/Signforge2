@@ -238,7 +238,9 @@ const getScreen = defineTool({
     ]);
     const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId }, input: inputOf(e.detailJson) }));
     const fellBackFrom = view.heartbeat?.fallbackFrom;
-    const fallbackPublish = (fellBackFrom && (await org.publishes.ofManifest(screen.id, fellBackFrom))) || null;
+    // When it first said so; a screen last synced before that was kept (#367) says so from its last heartbeat.
+    const since = screen.fallbackSince ?? view.heartbeat?.at ?? Date.now();
+    const fallbackPublish = (fellBackFrom && (await org.publishes.ofManifest(screen.id, fellBackFrom, since))) || null;
     return { screen: view, fallbackPublish, groupIds, credentials: credentials.map(credentialView), events };
   },
 });
