@@ -17,22 +17,24 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import { EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import {
+  EditorDeleteQuestion,
+  EditorFields,
+  EditorMoreMenu,
+  EditorHeader,
+  EditorSection,
+  PublishButton,
+  SaveAlert,
+  SaveDraftButton,
+  saveWord,
+} from '~/components/editor';
 import { ProposalPanel } from '~/components/proposal';
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
 import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
 import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '~/components/ui/alert-dialog';
+import { AlertDialogCancel, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { templateThumbnail } from '~/lib/template-thumbnail';
 import { cn } from '~/lib/utils';
@@ -345,37 +347,35 @@ function SpotEditor() {
           />
         </div>
       </div>
-      <AlertDialog open={deleting.open} onOpenChange={askDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {spot.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its draft and its published version are deleted; its images and data sources stay. A spot a playlist plays, in its draft or on screens, cannot be
-              deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div role="alert" className="flex flex-col gap-1 text-sm font-medium text-destructive empty:hidden">
-            {deleting.error && <p>{deleting.error}</p>}
-            {deleting.playlists.length > 0 && (
-              <ul className="list-disc pl-5">
-                {deleting.playlists.map((p) => (
-                  <li key={p.id}>
-                    <Link to="/playlists/$playlistId" params={{ playlistId: p.id }} onClick={() => askDelete(false)} className="underline underline-offset-4">
-                      {p.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={deleting.pending} onClick={() => void deleteSpot(orgId, spot.id)}>
-              {deleting.pending ? 'Deleting…' : 'Delete'}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <EditorDeleteQuestion open={deleting.open} onOpenChange={askDelete}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {spot.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its draft and its published version are deleted; its images and data sources stay. A spot a playlist plays, in its draft or on screens, cannot be
+            deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div role="alert" className="flex flex-col gap-1 text-sm font-medium text-destructive empty:hidden">
+          {deleting.error && <p>{deleting.error}</p>}
+          {deleting.playlists.length > 0 && (
+            <ul className="list-disc pl-5">
+              {deleting.playlists.map((p) => (
+                <li key={p.id}>
+                  <Link to="/playlists/$playlistId" params={{ playlistId: p.id }} onClick={() => askDelete(false)} className="underline underline-offset-4">
+                    {p.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={deleting.pending} onClick={() => void deleteSpot(orgId, spot.id)}>
+            {deleting.pending ? 'Deleting…' : 'Delete'}
+          </Button>
+        </AlertDialogFooter>
+      </EditorDeleteQuestion>
     </div>
   );
 }

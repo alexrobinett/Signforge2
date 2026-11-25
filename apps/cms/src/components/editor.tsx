@@ -7,6 +7,7 @@ import { Link } from '@tanstack/react-router';
 import { ChevronLeftIcon, MoreHorizontalIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
+import { AlertDialog, AlertDialogContent } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { useHydrated } from '~/lib/hydrated';
@@ -103,15 +104,17 @@ export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<
   );
 }
 
+const MORE_ID = 'editor-more';
+
 /**
  * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Save draft and Publish, where
- * a slip would hit it. It asks first; closing the question gives focus back to ⋯.
+ * a slip would hit it. It asks first (`EditorDeleteQuestion`), which gives focus back to ⋯.
  */
 export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" aria-label="More actions: delete">
+        <Button id={MORE_ID} variant="outline" size="icon" aria-label="More actions: delete">
           <MoreHorizontalIcon aria-hidden />
         </Button>
       </DropdownMenuTrigger>
@@ -121,6 +124,26 @@ export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * The question Delete… asks. Closed (Escape, Cancel), it gives focus to ⋯ at once. Radix gives it back
+ * once the closing has played, to what had it as the question opened: the menu's Delete… item, gone by
+ * then, so focus was on the page's body.
+ */
+export function EditorDeleteQuestion({ open, onOpenChange, children }: { open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        // Once React has closed it: until then its focus trap takes focus back.
+        if (!next) queueMicrotask(() => document.getElementById(MORE_ID)?.focus());
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={(e) => e.preventDefault()}>{children}</AlertDialogContent>
+    </AlertDialog>
   );
 }
 
