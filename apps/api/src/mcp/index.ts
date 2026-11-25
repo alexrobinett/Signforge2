@@ -46,6 +46,29 @@ type McpEnv = { Bindings: Env };
 
 /** The largest request read: a tool's input as JSON, far more than a spot's data takes. */
 const BODY_MAX = 256 * 1024;
+/** The JSON-RPC error code the SDK answers a body over its limit with (a server error): one code for either era. */
+const BODY_TOO_LARGE = -32_000;
+
+/** Each request's server, by the request: the 2026-era handler, built once, makes one from it (#323). */
+const servers = new WeakMap<Request, () => Server>();
+/**
+ * Built once: building it logs a warning about `responseMode: 'json'` each time, which buried real errors in the
+ * Worker's logs (#323). Its factory finds the server of the request it serves.
+ */
+const modern = createMcpHandler(
+  ({ requestInfo }) => {
+    const server = requestInfo && servers.get(requestInfo);
+    if (!server) throw new Error('[mcp] no server for this request');
+    return server();
+  },
+  {
+    legacy: 'reject',
+    responseMode: 'json',
+    maxRequestBodySize: BODY_MAX,
+    // The 2026 era's subscription streams are SSE held open: none here, so each is refused in-band.
+    maxSubscriptions: 0,
+  },
+);
 /** A grant's `last_used_at` (and its 90 idle days) moves on at most this often, not on every call. */
 const TOUCH_EVERY_MS = 60 * 60_000;
 /** JSON-RPC's code for a server's own error: a `tools/list` over the grant's limit. */
@@ -91,7 +114,7 @@ async function answering<T>(method: string, run: () => Promise<T>): Promise<T> {
   } catch (err) {
     if (err instanceof ProtocolError) throw err;
     console.error(`[mcp] ${method} failed`, err);
-    // biome-ignore lint/style/useErrorCause: the cause is logged above and must not go to the agent; ProtocolError takes none.
+    // biome-ignore lint/style/useErrorCause: the cause is logged above and must not go to the agent; ProtocolError has nowhere to put one.
     throw new ProtocolError(ProtocolErrorCode.InternalError, 'Internal error');
   }
 }
@@ -221,9 +244,12 @@ mcp.post('/mcp', refuseSession, async (c) => {
     agentLimiter: agentLimiter(c.env),
     member: grant.userId,
   };
-  // One message a request: a batch (which 2025-06-18 took out of the protocol) would run its calls at once.
+  // One message a request: a batch (which 2025-06-18 took out of the protocol) would run its calls at once. The body is
+  // read three times, each under BODY_MAX: here, to tell the era (`isLegacyRequest`), and by the era's transport.
   const body = await readRequestBody(c.req.raw.clone(), BODY_MAX);
-  if (body.tooLarge) return c.json({ error: 'too_large', message: `send at most ${BODY_MAX} bytes` }, 413);
+  if (body.tooLarge) {
+    return c.json({ jsonrpc: '2.0', id: null, error: { code: BODY_TOO_LARGE, message: `the request is over ${BODY_MAX} bytes: send at most that` } }, 413);
+  }
   if (body.text.trimStart().startsWith('[')) {
     return c.json(
       { jsonrpc: '2.0', id: null, error: { code: ProtocolErrorCode.InvalidRequest, message: 'batches are not accepted: send one message a request' } },
@@ -250,12 +276,10 @@ mcp.post('/mcp', refuseSession, async (c) => {
     await server().connect(transport);
     return transport.handleRequest(c.req.raw);
   }
-  const handler = createMcpHandler(server, {
-    legacy: 'reject',
-    responseMode: 'json',
-    maxRequestBodySize: BODY_MAX,
-    // The 2026 era's subscription streams are SSE held open: none here, so each is refused in-band.
-    maxSubscriptions: 0,
-  });
-  return handler.fetch(c.req.raw);
+  servers.set(c.req.raw, server);
+  try {
+    return await modern.fetch(c.req.raw);
+  } finally {
+    servers.delete(c.req.raw);
+  }
 });

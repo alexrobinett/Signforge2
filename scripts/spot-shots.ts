@@ -114,21 +114,28 @@ const evaluate = async <T>(expression: string): Promise<T> =>
   ((await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result as { value: T }).value;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // With `--clock`, every frame's `Date` stands still at that instant, from before the page's own
-// scripts, the template frames' included.
+// scripts, the template frames' included. A function, not a class: `Date()` without `new` gives the
+// time as a string, as the real one does, where a class would throw (#312).
+const frozenDate = (at: number) => `(() => { const R = Date, at = ${at};
+  function D(...a) { return new.target ? (a.length ? new R(...a) : new R(at)) : new R(at).toString(); }
+  Object.setPrototypeOf(D, R); D.prototype = R.prototype; D.now = () => at; globalThis.Date = D; })();`;
 if (clockAt !== undefined) {
   await call('Page.enable');
-  await call('Page.addScriptToEvaluateOnNewDocument', {
-    source: `(() => { const R = Date, at = ${clockAt};
-      globalThis.Date = class extends R { constructor(...a) { a.length ? super(...a) : super(at); } static now() { return at; } }; })();`,
-  });
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: frozenDate(clockAt) });
 }
+/** The frame ids in a `Page.getFrameTree` reply's tree, read from it as it comes. */
+const frameIds = (tree: unknown): string[] => {
+  if (typeof tree !== 'object' || tree === null) return [];
+  const children = 'childFrames' in tree && Array.isArray(tree.childFrames) ? tree.childFrames.flatMap(frameIds) : [];
+  if ('frame' in tree && typeof tree.frame === 'object' && tree.frame !== null && 'id' in tree.frame && typeof tree.frame.id === 'string')
+    return [tree.frame.id, ...children];
+  return children;
+};
 /** Hold every animation in every frame at `at` ms into it, from a world of the script's own in each frame. */
 const pinAnimations = async (at: number) => {
-  type Tree = { frame: { id: string }; childFrames?: Tree[] };
-  const frames = (t: Tree): string[] => [t.frame.id, ...(t.childFrames ?? []).flatMap(frames)];
-  const { frameTree } = (await call('Page.getFrameTree')) as { frameTree: Tree };
-  for (const frameId of frames(frameTree)) {
-    const { executionContextId } = (await call('Page.createIsolatedWorld', { frameId })) as { executionContextId: number };
+  for (const frameId of frameIds((await call('Page.getFrameTree')).frameTree)) {
+    const { executionContextId } = await call('Page.createIsolatedWorld', { frameId });
+    if (typeof executionContextId !== 'number') throw new Error(`no world made in frame ${frameId}`);
     await call('Runtime.evaluate', {
       contextId: executionContextId,
       expression: `for (const a of document.getAnimations()) { a.pause(); a.currentTime = ${at}; }
