@@ -73,8 +73,8 @@ const CHAT_MAX_TOKENS = 2048;
 
 /**
  * Never offered to the drawer, whatever the role (docs/proposals/cms-agent.md, Tools that reach an
- * address). Besides these, no tool that changes data, no `org:manage` tool and no `people` tool is
- * offered: alert channels' and connections' changes, pairing a screen and approving a template are
+ * address). Besides these, no tool that changes data outside a card, no `org:manage` tool but an
+ * owner's `list_invitations` and the `cancel_invitation` card, and no `people` tool is offered: alert channels' and connections' changes, pairing a screen and approving a template are
  * `people` (review of #419).
  */
 export const NEVER_OFFERED: ReadonlySet<string> = new Set([
