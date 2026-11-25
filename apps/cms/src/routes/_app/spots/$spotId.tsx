@@ -95,6 +95,7 @@ function SpotEditor() {
   const picking = useAppStore((s) => s.spotEditor.picking === 'assetId');
   const edit = useAppStore((s) => s.editSpot);
   const reload = useAppStore((s) => s.reloadSpot);
+  const save = useAppStore((s) => s.saveSpotDraft);
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);

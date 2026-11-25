@@ -149,6 +149,7 @@ function PlaylistEditor() {
   const drop = useAppStore((s) => s.dropSpot);
   const openAdd = useAppStore((s) => s.openAddSpots);
   const reload = useAppStore((s) => s.reloadPlaylist);
+  const save = useAppStore((s) => s.savePlaylistDraft);
   const askDelete = useAppStore((s) => s.askDeletePlaylist);
   const deletePlaylist = useAppStore((s) => s.deletePlaylist);
   const publishing = useAppStore((s) => s.publishing.pending);
