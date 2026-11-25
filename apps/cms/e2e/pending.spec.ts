@@ -114,6 +114,11 @@ test("a filter on the same page keeps the page and the filter's focus, its rows 
   // Its rows wait on the held read, marked busy; the page and the select stay.
   await expect(page.locator('table').locator('xpath=..')).toHaveAttribute('aria-busy', 'true');
   await expect(page.getByRole('heading', { name: 'Audit log', level: 1 })).toBeVisible();
+  // Export, while the rows wait, reads the filter the select shows, not the one the rows still show.
+  const exported = page.waitForRequest((r) => r.url().endsWith('/api/tools/list_audit_log'));
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  expect(JSON.parse((await exported).postData() ?? '{}')).toMatchObject({ action: await what.inputValue() });
+  await what.focus();
   await expect(skeleton()).toHaveCount(0);
   await expect(what).toBeFocused();
   release();

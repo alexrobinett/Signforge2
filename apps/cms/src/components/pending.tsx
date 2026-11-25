@@ -2,8 +2,8 @@
  * Between pages (#376): a thin bar at the top while the router waits on a navigation's loaders,
  * invisible until 300 ms have passed (a CSS delay, so a quick page never flashes it or reaches the
  * accessibility tree), and the page's skeleton, which the router shows in place of a page still
- * loading past 300 ms (`defaultPendingMs`). A route whose search feeds its loader opts out
- * (`pendingMs: Infinity`): a filter keeps its page. Under reduced motion nothing slides or pulses.
+ * loading past 300 ms (`defaultPendingMs`). A search changed on a page is read by its query, deferred,
+ * so the page stays (docs/proposals/cms-ui.md). Under reduced motion nothing slides or pulses.
  */
 import { useRouterState } from '@tanstack/react-router';
 

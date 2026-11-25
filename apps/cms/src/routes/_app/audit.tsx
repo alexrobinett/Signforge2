@@ -87,13 +87,15 @@ function AuditLogPage() {
   const { settings, members, at } = Route.useLoaderData();
   const shownSearch = Route.useSearch();
   // Deferred, as the text search below: a changed filter keeps the rows it replaces, and the focus, until its own arrive.
+  // Export reads the filters and search shown, never the deferred ones the rows still show.
   const search = useDeferredValue(shownSearch);
   const updating = search !== shownSearch;
   const orgId = useOrgId();
   const me = app.useLoaderData().user.id;
   const now = useNow(at);
   // Deferred: a new search shows the rows it replaces until its own arrive, not the page's fallback.
-  const query = useDeferredValue(useAppStore((s) => s.audit.query));
+  const shownQuery = useAppStore((s) => s.audit.query);
+  const query = useDeferredValue(shownQuery);
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, error, refetch } = useSuspenseInfiniteQuery(
     auditQuery(orgId, search, query),
   );
@@ -114,7 +116,11 @@ function AuditLogPage() {
       <div className="min-w-0 flex-1 space-y-4">
         <PageHeader title="Audit log" description={`Every change by a person, agent or screen.${kept} Times in ${timezone}.`}>
           <EditorFields>
-            <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, query, Date.now()), (e) => csvRow(e, names))}>
+            <Button
+              variant="outline"
+              disabled={exporting}
+              onClick={() => void exportAuditLog(auditInput(shownSearch, shownQuery, Date.now()), (e) => csvRow(e, names))}
+            >
               {exporting ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <DownloadIcon aria-hidden />} Export CSV
             </Button>
           </EditorFields>
