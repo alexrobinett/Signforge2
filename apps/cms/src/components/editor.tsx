@@ -95,19 +95,10 @@ export function SaveAlert({ error, stale, onReload }: { error: string | null; st
   );
 }
 
-/** Saves the draft now; there is nothing to save while it is saved, saving, or refused. */
-export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<typeof saveWord>[0]; stale: boolean; onSave: () => void }) {
-  return (
-    <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={onSave}>
-      Save draft
-    </Button>
-  );
-}
-
 const MORE_ID = 'editor-more';
 
 /**
- * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Save draft and Publish, where
+ * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Publish, where
  * a slip would hit it. It asks first (`EditorDeleteQuestion`), which gives focus back to ⋯.
  */
 export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {

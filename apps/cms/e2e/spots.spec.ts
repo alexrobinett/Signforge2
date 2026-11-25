@@ -358,7 +358,7 @@ test('every base template can be configured and previewed', async () => {
   // The News spot's actions, its longest row, wrap inside a phone's width: the editor's frame would clip them.
   await page.goto(newsSpot);
   await hydrated(page);
-  for (const name of ['Fill from a flyer', 'Save draft', 'Publish', 'More actions: delete']) {
+  for (const name of ['Fill from a flyer', 'Publish', 'More actions: delete']) {
     const box = await page
       .locator('header')
       .filter({ has: page.getByRole('heading', { level: 1 }) })
@@ -595,7 +595,7 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
 
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
 
-/** Delete…, from the editor's ⋯ menu (#378), away from Save draft and Publish. */
+/** Delete…, from the editor's ⋯ menu (#378), away from Publish. */
 async function chooseDelete() {
   await page.getByRole('button', { name: 'More actions: delete' }).click();
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
@@ -661,7 +661,7 @@ test('a spot no playlist plays is deleted after its confirmation, at desktop and
   await page.evaluate(() => document.documentElement.classList.remove('dark'));
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toBeHidden();
-  // Delete is not between Save draft and Publish: the header's buttons end with Publish, then ⋯ (#378).
+  // Delete is not beside Publish: the header's buttons end with Publish, then ⋯ (#378).
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 
   await chooseDelete();

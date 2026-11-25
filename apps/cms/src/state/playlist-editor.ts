@@ -65,7 +65,7 @@ export interface PlaylistEditorSlice {
   dropSpot: (orgId: string, playlistId: string, index: number) => void;
   openAddSpots: (open: boolean) => void;
   searchAddSpots: (query: string) => void;
-  /** Saves the playlist's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
+  /** Saves the playlist's draft now (Publish): resolves once the save in flight and this one are done. */
   savePlaylistDraft: (playlistId: string) => Promise<void>;
   /** After a refused save: reads the playlist again and drops its draft, to edit what is there now. */
   reloadPlaylist: (orgId: string, playlistId: string) => Promise<void>;
