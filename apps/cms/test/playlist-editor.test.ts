@@ -45,11 +45,13 @@ let calls: Call[] = [];
 const org = { id: ORG };
 
 function setup() {
+  let visits = 0;
   const queryClient = new QueryClient();
   const router = {
-    navigate: vi.fn(async ({ to }: { to: string }) => void (router.state.location.pathname = to)),
+    // Each navigation is a new history entry with its own key, as in the browser.
+    navigate: vi.fn(async ({ to }: { to: string }) => void (router.state.location = { pathname: to, state: { __TSR_key: `k${++visits}` } })),
     state: {
-      location: { pathname: '/spots' },
+      location: { pathname: '/spots', state: { __TSR_key: 'k0' } },
       get matches() {
         return [{ routeId: '/_app', loaderData: { organization: { id: org.id } } }];
       },
@@ -242,28 +244,37 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
 });
 
 describe('New playlist from elsewhere (#367, review of #458)', () => {
-  it('goes to Playlists, and asks for its dialog only when the org has a spot to put in one', async () => {
+  /** Starts New playlist from elsewhere with the org's playlists and spots answered as given. */
+  async function start(playlists: unknown[], spots: unknown[]) {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
     const { getSpots } = await import('../src/server/spots.functions');
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists } as never);
+    vi.mocked(getSpots).mockResolvedValueOnce({ spots } as never);
     const { store } = setup();
-    vi.mocked(getSpots).mockResolvedValueOnce({ spots: [] } as never);
     await store.getState().startNewPlaylist(ORG);
-    // No spot: nothing left asked for, to open on a later visit.
-    expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);
-    vi.mocked(getSpots).mockResolvedValueOnce({ spots: [{ id: 'spt_1' }] } as never);
-    const { store: withSpot } = setup();
-    await withSpot.getState().startNewPlaylist(ORG);
-    expect(withSpot.getState().playlistEditor.newPlaylist.open).toBe(true);
+    return store.getState().playlistEditor.newPlaylist.open;
+  }
+
+  it('goes to Playlists and opens its dialog wherever the page shows New playlist', async () => {
+    // Neither a playlist nor a spot: the page offers New spot instead, and nothing is left asked for.
+    expect(await start([], [])).toBe(false);
+    // An empty playlist and no spot: the page's own button is there, so is ⌘K's.
+    expect(await start([playlist('pls_a', 1, [])], [])).toBe(true);
+    expect(await start([], [{ id: 'spt_1' }])).toBe(true);
   });
 
-  it('asks for nothing when the member went elsewhere before its read came back (review of #458)', async () => {
+  it('asks for nothing once the member has navigated, even back to Playlists, before its reads came back', async () => {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
     const { getSpots } = await import('../src/server/spots.functions');
     let answer: (v: unknown) => void = () => {};
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists: [] } as never);
     vi.mocked(getSpots).mockImplementationOnce(() => new Promise((r) => (answer = r)) as never);
     const { store, router } = setup();
     const starting = store.getState().startNewPlaylist(ORG);
     await settle();
-    // Gone elsewhere (a sidebar link) while Playlists' read is on its way.
-    router.state.location.pathname = '/spots';
+    // Away to Spots and straight back while the read is on its way: the same page, a later visit.
+    await router.navigate({ to: '/spots' });
+    await router.navigate({ to: '/playlists' });
     answer({ spots: [{ id: 'spt_1' }] });
     await starting;
     expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);

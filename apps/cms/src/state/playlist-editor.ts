@@ -19,7 +19,7 @@ import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/sp
 import { orgOnScreen } from '~/lib/live';
 import { callTool, isGone, toolMessage } from '~/lib/tools';
 import { overviewKey } from '~/lib/overview';
-import { playlistKeys, playlistQuery } from '~/queries/playlists';
+import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
 import type { SliceCreator } from './store';
@@ -147,8 +147,6 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     clock: realClock,
   });
   const saveSoon = autosave(realClock, SAVE_DELAY_MS, (playlistId) => drafts.save(playlistId));
-  /** Counts New playlist's starts from elsewhere: only the latest may open its dialog. */
-  let newPlaylistStarts = 0;
 
   /** The draft of `playlist` as it stands: the one edited here, else the saved one. */
   const current = (playlist: PlaylistView) => shown(get().playlistEditor.drafts[playlist.id], playlist.version) ?? playlistDraftOf(playlist);
@@ -258,13 +256,13 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
     openNewPlaylist: (open) => editor((e) => ({ ...e, newPlaylist: { ...closedNew(), open } })),
     async startNewPlaylist(orgId) {
-      // Its own: a later start, or the member gone elsewhere before this one's read came back, leaves nothing asked
-      // for, to open on a later visit (review of #458).
-      const token = ++newPlaylistStarts;
       await router.navigate({ to: '/playlists' });
-      const { spots } = await queryClient.query(spotsQuery(orgId));
-      const still = token === newPlaylistStarts && router.state.location.pathname === '/playlists' && orgOnScreen(router) === orgId;
-      if (still && spots.length) get().openNewPlaylist(true);
+      // Tied to the visit it made: any navigation since, even back to Playlists, leaves nothing asked for (review of #458).
+      const visit = router.state.location.state.__TSR_key;
+      const [{ playlists }, { spots }] = await Promise.all([queryClient.query(playlistsQuery(orgId)), queryClient.query(spotsQuery(orgId))]);
+      const still = router.state.location.state.__TSR_key === visit && orgOnScreen(router) === orgId;
+      // Opens wherever the page shows its New playlist button: there is one unless the org has neither a playlist nor a spot.
+      if (still && (playlists.length || spots.length)) get().openNewPlaylist(true);
     },
     nameNewPlaylist: (name) => editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, name, error: null } })),
 
