@@ -67,10 +67,12 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes to the next.
+      // A switch already on its way: this one changes nothing, so nothing here is dropped (#335).
+      if (changingOrg(get().orgs)) return;
+      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes
+      // to the next. Dropped before the switch, even one that then fails: a turn stops before the tab can be in another org.
       get().forgetAgentDrawer();
       get().cancelPublishAll();
-      if (changingOrg(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {

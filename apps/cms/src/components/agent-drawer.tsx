@@ -19,6 +19,7 @@ import { Button } from '~/components/ui/button';
 import { Label } from '~/components/ui/label';
 import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { screenStatusQuery } from '~/queries/screens';
+import { changingOrg } from '~/state/orgs';
 import { useAppStore } from '~/state/provider';
 
 /**
@@ -198,7 +199,8 @@ function DraftsCard({ index }: { index: number }) {
  */
 function ConfirmCardView({ index }: { index: number }) {
   const m = useAppStore((s) => s.agentDrawer.messages[index]);
-  const asking = useAppStore((s) => s.agentDrawer.asking);
+  // Nothing is asked or pressed while the org changes (review of #469).
+  const asking = useAppStore((s) => s.agentDrawer.asking || changingOrg(s.orgs));
   const press = useAppStore((s) => s.pressConfirm);
   const dismiss = useAppStore((s) => s.dismissConfirm);
   if (m?.role !== 'confirm') return null;
@@ -328,6 +330,7 @@ function AnswerCard({ card }: { card: Card }) {
 
 export function AgentDrawer() {
   const d = useAppStore((s) => s.agentDrawer);
+  const switching = useAppStore((s) => changingOrg(s.orgs));
   const path = useRouterState({ select: (s) => s.location.pathname });
   const wide = useWide();
   const close = useAppStore((s) => s.closeAgentDrawer);
@@ -472,7 +475,7 @@ export function AgentDrawer() {
               }}
               className="w-full resize-none rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             />
-            <Button type="submit" className="self-end" disabled={d.asking || !d.question.trim()}>
+            <Button type="submit" className="self-end" disabled={d.asking || switching || !d.question.trim()}>
               {d.asking ? 'Asking…' : 'Ask'}
             </Button>
           </form>
