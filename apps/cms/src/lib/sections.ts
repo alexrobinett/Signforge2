@@ -113,8 +113,8 @@ export const SECTIONS: Section[] = [
     to: '/integrations',
     label: 'Integrations',
     icon: PlugIcon,
-    description:
-      'Data reaches screens through our server, never directly: each source is fetched and checked there, and screens get the new copy with their next sync. When a source is down, they keep the last good copy for a day.',
+    // One line (#368): what is here, and the fact that matters, that screens never fetch it themselves.
+    description: 'The data your spots show, fetched and checked by our server, never by the screens.',
     empty: { title: 'No data sources yet', body: 'Feeds, calendars and weather your spots read will be listed here with their health.' },
   },
   {
