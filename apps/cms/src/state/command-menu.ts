@@ -131,8 +131,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
         get().openNewSpot(true);
         return;
       case 'new-playlist':
-        await router.navigate({ to: '/playlists' });
-        get().openNewPlaylist(true);
+        if (orgId) await get().startNewPlaylist(orgId);
         return;
       case 'new-entry':
         if (orgId) get().openNewEntry(orgId);

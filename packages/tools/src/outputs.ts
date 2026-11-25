@@ -885,6 +885,10 @@ export const outputs = {
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
   get_screen: z.object({
     screen: screenOutput,
+    fallbackPublish: z
+      .object({ id: z.string(), revision: z.number().int() })
+      .nullable()
+      .describe('The publish whose version it fell back from (heartbeat.fallbackFrom); null when it has not, or no publish gave it that'),
     groupIds: z.array(z.string()),
     credentials: z.array(credentialOutput),
     events: z.array(

@@ -69,6 +69,7 @@ describe('screens.sync', () => {
     at: HOUR + 60_000,
     playerVersion: '1.0.0',
     heartbeatJson: '{"display":{"on":true}}',
+    fallbackFrom: null as string | null,
     epoch: 'ep1',
     seq: 1,
     counts: [
@@ -76,6 +77,26 @@ describe('screens.sync', () => {
       { hour: HOUR, spotId: 'news', plays: 2, ms: 20_000 },
     ],
     ...over,
+  });
+
+  it('keeps when a screen first said it fell back from a manifest, while it says the same (#367)', async () => {
+    const seeded = await seedOrg(env.DB, 'org-fallback-since');
+    const r = seeded.scope;
+    const said = (at: number, fallbackFrom: string | null) =>
+      r.screens.sync(seeded.screen, beat({ at, seq: 0, counts: [], fallbackFrom, heartbeatJson: JSON.stringify({ manifest: { fallbackFrom } }) }));
+    const since = async () => (await r.screens.get(seeded.screen))!.fallbackSince;
+    await said(HOUR, null);
+    expect(await since()).toBeNull();
+    await said(HOUR + 1000, 'm7');
+    expect(await since()).toBe(HOUR + 1000);
+    // Said again, later: kept from the first time.
+    await said(HOUR + 5000, 'm7');
+    expect(await since()).toBe(HOUR + 1000);
+    // Another manifest: from then.
+    await said(HOUR + 9000, 'm8');
+    expect(await since()).toBe(HOUR + 9000);
+    await said(HOUR + 12_000, null);
+    expect(await since()).toBeNull();
   });
 
   it('stores a batch once, records the heartbeat, and keeps the highest seq per epoch', async () => {

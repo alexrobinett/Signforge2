@@ -162,6 +162,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
       at: now,
       playerVersion: req.player.version,
       heartbeatJson: JSON.stringify(heartbeat),
+      fallbackFrom: req.manifest.fallbackFrom ?? null,
       active: req.manifest.active,
       // The heartbeat was built when it read `active`: the screen's clock then, corrected. An untrusted one cannot be compared.
       ...(clock.trusted && { observedAt: Date.parse(req.deviceTime) + clock.offsetMs }),
