@@ -4,7 +4,7 @@
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import type { ApprovalItem } from '../src/lib/approvals';
+import { afterStage, type ApprovalItem, askerName, type RequestView } from '../src/lib/approvals';
 import { callTool, Refusal } from '../src/lib/tools';
 import { type ApprovalsSlice, createApprovalsSlice } from '../src/state/approvals';
 import { ORG, toastTitled, watchedQueries } from './store-kit';
@@ -120,5 +120,28 @@ describe('declining', () => {
     undo.onClick({} as never);
     expect(callTool).toHaveBeenLastCalledWith('reopen_publish_request', { publishRequestId: 'prq_1' });
     expect(s.getState().approvals.deciding).toBe('prq_1');
+  });
+});
+
+describe('how the card names who asked, and the stage (#411)', () => {
+  it('names a connected agent whose name a page may not show "An agent", not one no longer connected', () => {
+    const asked = (by: Partial<RequestView['requestedBy']>) => askerName({ ...request, requestedBy: { ...request.requestedBy, ...by } });
+    expect(asked({ name: null, gone: false })).toBe('An agent');
+    expect(asked({ name: null, gone: true })).toBe('An agent no longer connected');
+    expect(asked({})).toBe('Kestrel agent');
+  });
+
+  it('says what the second player shows: the pinned draft as approving would publish it, or one changed since it was asked for', () => {
+    expect(afterStage({ after: { name: 'Soup board', version: 7 }, pinned: 7 })).toEqual({
+      caption: 'After approval · Draft 7',
+      title: 'Soup board as approving would publish it',
+    });
+    // A draft edited since: not what approving publishes, and the player's title says so too.
+    const changed = afterStage({ after: { name: 'Soup board', version: 9 }, pinned: 7 });
+    expect(changed).toEqual({
+      caption: 'Draft 9 · changed since it was asked for (Draft 7)',
+      title: 'Soup board at Draft 9, changed since it was asked for (Draft 7)',
+    });
+    expect(changed.title).not.toMatch(/approving would publish/);
   });
 });
