@@ -1,6 +1,6 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
-import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, MAX_SYNC_BLOBS, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_RESPONSE_BLOBS, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -370,6 +370,23 @@ describe('commands', () => {
       },
       [5, 6],
     ],
+    [
+      '#196',
+      'an image property in a list item',
+      'base/news@2.0.0',
+      {
+        fields: {
+          items: {
+            type: 'list',
+            label: 'Headlines',
+            default: [],
+            item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } },
+          },
+        },
+        live: { source: 'rss', fields: { items: 'items' } },
+      },
+      [6, 7],
+    ],
   ];
   it.each(bumps)(
     'tell a player from before %s, which refuses %s, to reload for a template with them: a player that knows them is not',
@@ -399,5 +416,135 @@ describe('commands', () => {
       displayOverrideJson: JSON.stringify({ state: 'off', until: new Date(Date.now() - 1000).toISOString() }),
     });
     expect((await sync(s, body())).commands).toEqual([]);
+  });
+});
+
+describe('snapshot feed blobs (#196)', () => {
+  const hash = (n: number) => n.toString(16).padStart(64, '0');
+  const newsTemplate = (withImage: boolean) => ({
+    html: 'a'.repeat(64),
+    manifest: {
+      protocol: 2,
+      fields: {
+        items: {
+          type: 'list',
+          label: 'Headlines',
+          maxItems: 20,
+          default: [],
+          item: {
+            title: { type: 'text', label: 'Title' },
+            ...(withImage ? { image: { type: 'image', label: 'Photo' } } : {}),
+          },
+        },
+      },
+    },
+  });
+
+  it('sends only missing feed image hashes, even when the snapshot version is already held, and omits them once held', async () => {
+    const s = await setUp('sync-feed-blobs');
+    const src = s.seed.dataSource;
+    await publish(s, 'm-news-img', {
+      schema: MANIFEST_SCHEMA,
+      dataSources: { [src]: { id: src, refreshS: 300 } },
+      templates: { 'base/news@2.0.0': newsTemplate(true) },
+      spots: {
+        n: { id: 'n', kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: src, path: 'items' } } },
+      },
+    });
+    const [f1, t1, f2] = [hash(1), hash(2), hash(3)];
+    await s.seed.scope.dataSources.putSnapshot(src, {
+      version: 'v-img',
+      fetchedAt: 5000,
+      checkedAt: 5000,
+      dataJson: JSON.stringify({
+        title: 'Feed',
+        language: 'en',
+        items: [
+          { title: 'Story 1', published: '', source: '', image: { file: f1, thumb: t1 } },
+          // Same file & thumb hash: deduplicated.
+          { title: 'Story 2', published: '', source: '', image: { file: f2, thumb: f2 } },
+          { title: 'Story 3', published: '', source: '' },
+        ],
+      }),
+    });
+
+    const first = await sync(s, body());
+    expect(first.snapshots).toHaveLength(1);
+    expect(first.blobs).toEqual([f1, t1, f2]);
+
+    // Screen holds snapshot and f1, still missing t1 and f2 (e.g. evicted): snapshot not re-sent, missing blobs are.
+    const partial = await sync(s, body({ snapshots: { [src]: 5000 }, blobs: [f1] }));
+    expect(partial.snapshots).toEqual([]);
+    expect(partial.checked).toHaveProperty(src);
+    expect(partial.blobs).toEqual([t1, f2]);
+
+    // Screen holds all three: no blobs sent.
+    const complete = await sync(s, body({ snapshots: { [src]: 5000 }, blobs: [f1, t1, f2] }));
+    expect(complete.snapshots).toEqual([]);
+    expect(complete.blobs).toBeUndefined();
+  });
+
+  it('caps missing blobs per sync at MAX_SYNC_RESPONSE_BLOBS and sends the rest once reported held', async () => {
+    const s = await setUp('sync-feed-blobs-limit');
+    const src1 = s.seed.dataSource;
+    const src2 = (await s.seed.scope.dataSources.insert({ name: 'News 2', format: 'rss', urlEncrypted: 'enc:2', refreshS: 300 })).id;
+    await publish(s, 'm-news-many', {
+      schema: MANIFEST_SCHEMA,
+      dataSources: { [src1]: { id: src1, refreshS: 300 }, [src2]: { id: src2, refreshS: 300 } },
+      templates: { 'base/news@2.0.0': newsTemplate(true) },
+      spots: {
+        n1: { id: 'n1', kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: src1, path: 'items' } } },
+        n2: { id: 'n2', kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: src2, path: 'items' } } },
+      },
+    });
+    const makeItems = (offset: number) =>
+      Array.from({ length: 10 }, (_, i) => ({
+        title: `Story ${offset + i}`,
+        published: '',
+        source: '',
+        image: { file: hash(offset + i * 2 + 1), thumb: hash(offset + i * 2 + 2) },
+      }));
+    await s.seed.scope.dataSources.putSnapshot(src1, { version: 'v1', fetchedAt: 6000, checkedAt: 6000, dataJson: JSON.stringify({ items: makeItems(100) }) });
+    await s.seed.scope.dataSources.putSnapshot(src2, { version: 'v1', fetchedAt: 6000, checkedAt: 6000, dataJson: JSON.stringify({ items: makeItems(200) }) });
+
+    const r1 = await sync(s, body());
+    expect(r1.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
+
+    const r2 = await sync(s, body({ snapshots: { [src1]: 6000, [src2]: 6000 }, blobs: r1.blobs }));
+    expect(r2.blobs).toHaveLength(40 - MAX_SYNC_RESPONSE_BLOBS);
+    expect(new Set([...r1.blobs!, ...r2.blobs!]).size).toBe(40);
+
+    const r3 = await sync(s, body({ snapshots: { [src1]: 6000, [src2]: 6000 }, blobs: [...r1.blobs!, ...r2.blobs!] }));
+    expect(r3.blobs).toBeUndefined();
+  });
+
+  it('sends no feed blobs for a text-only template (news 1.4.1) or an outdated player, and refuses over-limit SyncRequest.blobs', async () => {
+    const s = await setUp('sync-feed-blobs-text');
+    const src = s.seed.dataSource;
+    await publish(s, 'm-news-v1', {
+      schema: MANIFEST_SCHEMA,
+      dataSources: { [src]: { id: src, refreshS: 300 } },
+      templates: { 'base/news@1.4.1': newsTemplate(false) },
+      spots: {
+        n: { id: 'n', kind: 'template', template: 'base/news@1.4.1', data: { items: [] }, bindings: { items: { source: src, path: 'items' } } },
+      },
+    });
+    await s.seed.scope.dataSources.putSnapshot(src, {
+      version: 'v1',
+      fetchedAt: 7000,
+      checkedAt: 7000,
+      dataJson: JSON.stringify({ items: [{ title: 'Story', image: { file: hash(10), thumb: hash(11) } }] }),
+    });
+    const r = await sync(s, body());
+    expect(r.snapshots).toHaveLength(1);
+    expect(r.blobs).toBeUndefined();
+
+    // Over MAX_SYNC_BLOBS in request is rejected with 400.
+    const tooMany = await exports.default.fetch(`${BASE}/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body({ blobs: Array.from({ length: MAX_SYNC_BLOBS + 1 }, (_, i) => hash(i + 1)) })),
+    });
+    expect(tooMany.status).toBe(400);
   });
 });

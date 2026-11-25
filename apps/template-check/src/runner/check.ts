@@ -106,7 +106,11 @@ export function exampleData(fields: Record<string, FieldDef>): { data: Record<st
   for (const [name, def] of Object.entries(fields)) {
     if (def.type === 'image') images.push(name);
     else if (def.type === 'list')
-      data[name] = (def.default ?? []).map((row) => Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, value(d, row[k])])));
+      data[name] = (def.default ?? []).map((row) =>
+        Object.fromEntries(
+          Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? (row[k] !== undefined ? [[k, row[k]]] : []) : [[k, value(d, row[k])]])),
+        ),
+      );
     else data[name] = value(def, undefined);
   }
   return { data, images };

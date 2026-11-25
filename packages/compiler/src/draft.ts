@@ -13,6 +13,7 @@ import {
   type Binding,
   type DataSource,
   type FieldDef,
+  type ListItemFieldDef,
   type Orientation,
   type ScalarFieldDef,
   type Playlist,
@@ -70,7 +71,7 @@ export function draftCheck(
 }
 
 /** A list row with each unpicked date or datetime in it replaced by a value its field takes (its min, else its max, else 1900). */
-function rowChecked(item: Record<string, ScalarFieldDef>, row: unknown): unknown {
+function rowChecked(item: Record<string, ListItemFieldDef>, row: unknown): unknown {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
   const cells: Record<string, unknown> = { ...row };
   for (const [k, d] of Object.entries(item))
