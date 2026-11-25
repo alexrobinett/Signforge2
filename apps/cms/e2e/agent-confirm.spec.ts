@@ -179,10 +179,10 @@ test('⌘K asks the agent a sentence typed into it, by keyboard: Enter opens the
   await page.goto('/screens');
   await hydrated(page);
 
-  // Empty, it suggests three questions for the page.
+  // Empty, it suggests three questions for the page, then the drawer itself.
   await page.keyboard.press('ControlOrMeta+k');
   const menu = page.getByRole('dialog', { name: 'Command menu' });
-  await expect(menu.getByRole('group', { name: 'Ask the agent' }).getByRole('option')).toHaveCount(3);
+  await expect(menu.getByRole('group', { name: 'Ask the agent' }).getByRole('option')).toHaveCount(4);
   await axe(page);
 
   // A sentence: the agent's row first, and Enter asks it.

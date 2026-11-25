@@ -134,7 +134,8 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
                         onChange={() => edit({ templateVersionId: u.version.id })}
                         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
                       />
-                      <TemplateThumb version={u.version} />
+                      {/* Its corner inside the tile's (#383): the tile's radius less its padding. */}
+                      <TemplateThumb version={u.version} className="rounded-[calc(var(--radius-lg)-(--spacing(1.5)))]" />
                       <span className="line-clamp-2 px-0.5">{u.version.manifest.name}</span>
                     </label>
                   ))}
