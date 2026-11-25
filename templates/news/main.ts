@@ -12,6 +12,12 @@ interface Story {
   summary: string;
 }
 
+/** A story with a headline, and its row in `items`, which `bindRow` and `rowImage` read by. */
+interface Listed {
+  story: Story;
+  row: number;
+}
+
 /** Between headlines in the crawl. */
 const SEPARATORS: Record<Look, string> = { pop: '  ·  ', poster: '  —  ', night: '  /  ', corporate: '   ·   ' };
 
@@ -32,7 +38,7 @@ const LOAD_AHEAD_MS = 3000;
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
  * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
  */
-let later: { img: HTMLImageElement; src: string; at: number }[] = [];
+let later: { img: HTMLImageElement; row: number; at: number }[] = [];
 let timers: number[] = [];
 
 /** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
@@ -66,14 +72,16 @@ defineTemplate({
     leads.style.visibility = 'hidden';
 
     // The contract has checked the list against the field before a template sees it: the check here only tells TypeScript.
-    const all: Story[] = (Array.isArray(data.items) ? data.items : []).filter((s: Story) => s.title.trim());
+    const items: Story[] = Array.isArray(data.items) ? data.items : [];
+    // A row without a headline is left out, and every story keeps its own row's photo.
+    const all: Listed[] = items.flatMap((story, row) => (story.title.trim() ? [{ story, row }] : []));
     const listed = all.slice(0, LIST_ROWS[ctx.orientation]);
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     // The lead turns every `rotationSeconds`, through the listed stories, each for an equal share of the play. Held still, it shows the first.
     const turns = reduced
       ? Math.min(1, listed.length)
       : Math.min(listed.length, Math.max(1, Math.round(ctx.durationMs / (Number(data.rotationSeconds) * 1000))));
-    const photos = data.showImages === true && listed.some((_, i) => rowImage(ctx, 'items', i, 'image'));
+    const photos = data.showImages === true && listed.some(({ row }) => rowImage(ctx, 'items', row, 'image'));
 
     const stories = Array.from({ length: Math.max(1, turns) }, () => clone('story'));
     leads.append(...stories);
@@ -85,7 +93,7 @@ defineTemplate({
       data: { ...data, showImages: photos, showList: data.showList === true && listed.length > 1, showCrawl: data.showCrawl === true && all.length > 0 },
     });
 
-    const credit = String(data.source || listed[0]?.source || '');
+    const credit = String(data.source || listed[0]?.story.source || '').trim();
     const creditEl = document.getElementById('credit')!;
     if (credit) creditEl.textContent = credit;
     else creditEl.remove();
@@ -99,21 +107,32 @@ defineTemplate({
       el.style.zIndex = String(i);
       el.style.setProperty('--at', i ? `calc(${Math.round(i * slot)}ms - var(--lk-out))` : '0ms');
       if (i < stories.length - 1) el.style.setProperty('--until', `${Math.round((i + 1) * slot)}ms`);
-      if (!listed[i]) {
+      const entry = listed[i];
+      if (!entry) {
         el.classList.add('empty', 'no-photo');
         el.querySelector('.headline')!.textContent = 'No headlines yet';
         for (const part of el.querySelectorAll('.media, .meta, .summary')) part.remove();
         return;
       }
+      const { story, row } = entry;
       const photo = el.querySelector<HTMLImageElement>('.photo');
       if (i > 0) photo?.removeAttribute('data-sf-src');
-      bindRow(el, ctx, 'items', i);
-      const src = rowImage(ctx, 'items', i, 'image');
-      if (!photos || !src) {
+      bindRow(el, ctx, 'items', row);
+      const bare = () => {
         el.classList.add('no-photo');
         el.querySelector('.media')?.remove();
-      } else if (photo && i > 0) later.push({ img: photo, src, at: i * slot - LOAD_AHEAD_MS });
-      const story = listed[i]!;
+      };
+      if (!photos || !photo || !rowImage(ctx, 'items', row, 'image')) bare();
+      else {
+        // A photo the browser cannot decode: bindRow hides it, and the story goes without a frame rather than show an empty one.
+        const watch = new MutationObserver(() => {
+          if (!photo.hidden) return;
+          watch.disconnect();
+          bare();
+        });
+        watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
+        if (i > 0) later.push({ img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+      }
       const meta = el.querySelector('.meta');
       if (meta) {
         const src = story.source || credit;
@@ -128,29 +147,37 @@ defineTemplate({
     });
 
     const listRows = [...rows.querySelectorAll<HTMLElement>(':scope > .row')];
-    listRows.forEach((row, i) => {
-      bindRow(row, ctx, 'items', i);
-      const thumb = row.querySelector('.thumb');
-      if (thumb && !rowImage(ctx, 'items', i, 'image', 'thumb')) {
+    listRows.forEach((el, i) => {
+      const { story, row } = listed[i]!;
+      bindRow(el, ctx, 'items', row);
+      const thumb = el.querySelector('.thumb');
+      if (thumb && !rowImage(ctx, 'items', row, 'image', 'thumb')) {
         // Never an empty frame: the story's source, or the feed's, by its first letter.
         thumb.classList.add('none');
         thumb.querySelector('img')!.remove();
-        thumb.querySelector('.initial')!.textContent = [...(listed[i]!.source || credit || listed[i]!.title).trim()][0]!.toUpperCase();
+        const name = [story.source, credit, story.title].map((s) => s.trim()).find(Boolean)!;
+        thumb.querySelector('.initial')!.textContent = [...name][0]!.toUpperCase();
       }
     });
 
     const strip = document.getElementById('crawl');
     if (strip) {
-      strip.textContent = all.map((s) => s.title.trim()).join(SEPARATORS[look]);
+      strip.textContent = all.map(({ story }) => story.title.trim()).join(SEPARATORS[look]);
       crawl(strip, ctx);
     }
 
     fitHeadlines(stories);
     if (rows.isConnected && listRows.length) mark(ctx, listRows, stories.length, slot);
   },
-  play() {
+  play(ctx) {
     document.getElementById('leads')!.style.visibility = '';
-    for (const { img, src, at } of later) timers.push(window.setTimeout(() => (img.src = src), Math.max(0, at)));
+    for (const { img, row, at } of later)
+      timers.push(
+        window.setTimeout(() => {
+          img.dataset.sfSrc = 'image';
+          bindRow(img, ctx, 'items', row);
+        }, at),
+      );
   },
 });
 

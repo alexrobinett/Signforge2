@@ -4,5 +4,17 @@
     "type": "fade",
     "ms": 600
   },
-  "items": ["sport-drinks", "energy", "announcement", "room-status", "countdown", "coffee", "info-frame", "news", "fire-drill"]
+  "items": [
+    "sport-drinks",
+    "energy",
+    "announcement",
+    "room-status",
+    "countdown",
+    "coffee",
+    "info-frame",
+    "news-nyt",
+    "news-guardian",
+    "news-verge",
+    "fire-drill"
+  ]
 }

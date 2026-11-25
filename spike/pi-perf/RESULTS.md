@@ -1228,7 +1228,7 @@ The new News template in each look, its lead turning every 6 s through four stor
 | Corporate | portrait | 0.18, 0.05 | 0.58, 0.07, 17.58 | 67 ms | 496, 528, 478 / 498, 480, 493 | 448, 478, 445 | 1.37 GB |
 
 - **Dropped frames are within 1% in every spec**, 0.13 to 0.80% overall and at most 0.16% while playing. A portrait fade drops 17 to 23% of its own frames, as every template's portrait fade does.
-- **Landscape is within the prepare budget**, 380 to 463 ms. **Portrait is at its edge**: 478 to 530 ms, up to 30 ms over 500, where the same spot held to one story takes 445 to 484.
+- **Landscape is within the prepare budget**, 380 to 463 ms. **Portrait is over it in 14 of 24 prepares, by up to 30 ms** (478 to 530 ms), all six Poster runs among them (508 to 518 ms); the worst are warm second prepares (527 to 530 ms), not the first after a page load. The same spot held to one story takes 445 to 484. In line with the other look-kit templates (Room status, Announcement, Info frame).
 - **Worst frames** are 50 ms in landscape and 67 ms in portrait, against 50, in the load and fade phases, never while playing.
 - **The stacked stories cost little memory**: 5 to 35 MB more Chromium RSS than one story, and no CMA (CmaFree's low point is the same, 447 MB, for one story and four).
 - **Each later story's photo loads in play.** With every story's photo set in prepare, the SDK decoded all four before ready: portrait prepares took 546 to 602 ms (one cold run per spec), against 499 to 531 with only the first photo. Loading each later one 3 s before its turn costs no frames while playing (0.02 to 0.16%).

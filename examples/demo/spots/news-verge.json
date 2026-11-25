@@ -1,0 +1,23 @@
+{
+  "name": "The Verge (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 32000,
+  "data": {
+    "look": "night",
+    "title": "Latest news",
+    "source": "The Verge",
+    "rotationSeconds": 8,
+    "showImages": true
+  },
+  "bindings": {
+    "items": {
+      "source": "news-verge",
+      "path": "items"
+    },
+    "language": {
+      "source": "news-verge",
+      "path": "language"
+    }
+  }
+}

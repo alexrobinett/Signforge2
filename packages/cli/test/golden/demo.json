@@ -121,10 +121,6 @@
       "size": 12704,
       "type": "font/woff2"
     },
-    "5839cdb71fc2f0097fef68045401ecf61d917727fb416a4d0a9899ba70fbe646": {
-      "size": 385174,
-      "type": "text/html"
-    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
@@ -164,6 +160,10 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72": {
+      "size": 385461,
+      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -1013,7 +1013,7 @@
         },
         "protocol": 2
       },
-      "html": "5839cdb71fc2f0097fef68045401ecf61d917727fb416a4d0a9899ba70fbe646"
+      "html": "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72"
     },
     "base/room-status@1.0.2": {
       "manifest": {
@@ -1310,48 +1310,79 @@
       },
       "durationMs": 15000
     },
-    "news": {
-      "id": "news",
-      "name": "Harbor news",
+    "news-guardian": {
+      "id": "news-guardian",
+      "name": "The Guardian (live)",
       "kind": "template",
       "template": "base/news@2.0.0",
       "data": {
-        "title": "Harbor news",
-        "source": "Harbor Times",
-        "items": [
-          {
-            "title": "Council approves the riverside park after a two-year fight",
-            "published": "",
-            "source": "Metro Desk",
-            "summary": "The 12-acre park opens in phases from next spring, with a boardwalk, playgrounds and a new ferry stop."
-          },
-          {
-            "title": "Farmers market moves to Sundays for the winter",
-            "published": "",
-            "source": "Metro Desk",
-            "summary": "Stalls stay open from 9 to 2 at the old depot, under heated tents."
-          },
-          {
-            "title": "Storm warning for the coast tonight",
-            "published": "",
-            "source": "Weather",
-            "summary": "Gusts up to 60 mph are expected after 8 p.m."
-          },
-          {
-            "title": "Harbor Hawks clinch a playoff spot",
-            "published": "",
-            "source": "Sports",
-            "summary": ""
-          },
-          {
-            "title": "Library extends its weekend hours",
-            "published": "",
-            "source": "Culture",
-            "summary": "Doors stay open until 8 p.m. on Saturdays."
-          }
-        ],
+        "title": "Latest news",
+        "source": "The Guardian",
+        "items": [],
         "language": "",
-        "rotationSeconds": 6,
+        "rotationSeconds": 8,
+        "look": "corporate",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-guardian",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-guardian",
+          "path": "language"
+        }
+      }
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "name": "New York Times (live)",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The New York Times",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "poster",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true,
+        "showCrawl": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-nyt",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-nyt",
+          "path": "language"
+        }
+      }
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "name": "The Verge (live)",
+      "kind": "template",
+      "template": "base/news@2.0.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The Verge",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
         "look": "night",
         "showImages": true,
         "showSummary": true,
@@ -1360,7 +1391,17 @@
         "showCrawl": true
       },
       "assets": {},
-      "durationMs": 24000
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-verge",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-verge",
+          "path": "language"
+        }
+      }
     },
     "room-status": {
       "id": "room-status",
@@ -1437,7 +1478,13 @@
           "spot": "info-frame"
         },
         {
-          "spot": "news"
+          "spot": "news-nyt"
+        },
+        {
+          "spot": "news-guardian"
+        },
+        {
+          "spot": "news-verge"
         },
         {
           "spot": "fire-drill"
@@ -1460,7 +1507,20 @@
       ]
     }
   },
-  "dataSources": {},
+  "dataSources": {
+    "news-nyt": {
+      "id": "news-nyt",
+      "refreshS": 300
+    },
+    "news-guardian": {
+      "id": "news-guardian",
+      "refreshS": 300
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "refreshS": 300
+    }
+  },
   "schedule": [
     {
       "id": "breakfast",
@@ -1472,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "acc4d110d50bca8d18755e45759c2adfb04e503f8024ddc2bb06a20aafd7100c"
+  "id": "3c1bb63d55456297cbd9d741f48e22a90cdab22d51e156a8d060c96f6d51492a"
 }

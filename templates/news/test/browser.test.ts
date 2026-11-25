@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
-import type { FrameTheme, Orientation } from '@signforge/contract';
+import { type FrameTheme, NEWS_SUMMARY_MAX, type Orientation } from '@signforge/contract';
 import { rowAsset } from '@signforge/template-sdk/rows';
 import {
   at,
@@ -209,6 +209,65 @@ describe('news 2.0 (#202)', () => {
       thumbs: ['none', 'none', 'none', 'none'],
     });
     expect(await read(await r.show({ items, showImages: false, rotationSeconds: 8 }, photos(4), demo, 32_000))).toMatchObject({ images: 'off', srcs: 0 });
+  });
+
+  it("keeps each story with its own row's photo, summary and source when a row without a headline comes first", async () => {
+    const r = await frame();
+    const items = [
+      story(0, { title: '  ', summary: 'Blank row', source: 'Blank desk' }),
+      story(1, { image: undefined, summary: 'First real story', source: 'Metro Desk' }),
+      story(2, { summary: 'Second real story', source: 'Sports' }),
+    ];
+    // The blank row has a photo; the first real story has none.
+    const f = await r.show({ items }, photos(3, [1]));
+    expect(
+      await f.evaluate(() => {
+        const lead = document.querySelector('.story')!;
+        return {
+          headline: lead.querySelector('.headline')!.textContent,
+          summary: lead.querySelector('.summary')!.textContent,
+          src: lead.querySelector('.src')!.textContent,
+          bare: lead.classList.contains('no-photo'),
+          rows: [...document.querySelectorAll('.row')].map((row) => [
+            row.querySelector('.rtitle')!.textContent,
+            row.querySelector('.thumb img') ? 'photo' : row.querySelector('.initial')!.textContent,
+          ]),
+        };
+      }),
+    ).toEqual({
+      headline: items[1]!.title,
+      summary: 'First real story',
+      src: 'Metro Desk',
+      bare: true,
+      rows: [
+        [items[1]!.title, 'M'],
+        [items[2]!.title, 'photo'],
+      ],
+    });
+  });
+
+  it('drops the frame of a lead photo the browser cannot decode, the first in prepare and a later one in play', async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    const assets = { ...photos(3), [rowAsset('items', 0, 'image')]: 'broken', [rowAsset('items', 1, 'image')]: 'broken' };
+    await hst.init('fresh', spotData(t().manifest, { items: [0, 1, 2].map((i) => story(i)), rotationSeconds: 8 }), assets, NOW, demo, false, 24_000);
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    const frames = () => f.evaluate(() => [...document.querySelectorAll('.story')].map((s) => (s.querySelector('.media') ? 'frame' : 'bare')));
+    expect(await frames()).toEqual(['bare', 'frame', 'frame']);
+    await hst.post('fresh', 'play');
+    // The second story's photo loads at 5 s and fails; the third's at 13 s, and draws.
+    for (let i = 0; i < 100; i++) await hst.page.clock.runFor(100);
+    await f.waitForFunction(() => !document.querySelectorAll('.story')[1]!.querySelector('.media'));
+    expect(await frames()).toEqual(['bare', 'bare', 'frame']);
+  });
+
+  it(`takes the feed's summaries at their longest, NEWS_SUMMARY_MAX characters`, () => {
+    const items = t().manifest.fields.items;
+    expect(items?.type === 'list' && items.item.summary).toMatchObject({ maxLength: NEWS_SUMMARY_MAX });
   });
 
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
