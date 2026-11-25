@@ -265,10 +265,15 @@ test('the old addresses under Settings go to Brand kits, and to the kit (#381)',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `moved-kit-${Date.now()}`,
   });
-  await page.goto('/settings/brand-kits');
-  await expect(page).toHaveURL(/\/brand-kits$/);
+  // With what the link carried after the path: its search and its hash (review of #450).
+  await page.goto('/settings/brand-kits?from=bookmark#kits');
+  await expect(page).toHaveURL(/\/brand-kits\?from=bookmark#kits$/);
   await expect(page.getByRole('heading', { name: 'Brand kits', level: 1 })).toBeVisible();
-  await page.goto(`/settings/brand-kits/${brandKit.id}`);
-  await expect(page).toHaveURL(new RegExp(`/brand-kits/${brandKit.id}$`));
+  await page.goto(`/settings/brand-kits/${brandKit.id}?from=bookmark`);
+  await expect(page).toHaveURL(new RegExp(`/brand-kits/${brandKit.id}\\?from=bookmark$`));
   await expect(page.getByRole('heading', { name: 'Moved kit', level: 1 })).toBeVisible();
+  // Open, the kit is Brand kits' page: the sidebar marks Brand kits, not Settings.
+  const main = page.getByRole('navigation', { name: 'Main' });
+  await expect(main.getByRole('link', { name: 'Brand kits' })).toHaveAttribute('aria-current', 'page');
+  await expect(main.getByRole('link', { name: 'Settings' })).not.toHaveAttribute('aria-current', 'page');
 });

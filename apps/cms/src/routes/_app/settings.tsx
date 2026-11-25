@@ -3,7 +3,7 @@ import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { SettingsNav } from '~/components/settings/parts';
 
 export const Route = createFileRoute('/_app/settings')({
-  // The org, for the pages below that key their Query reads by it (the brand kit list), as the app layout reads it.
+  // The org, for the pages below that key their Query reads by it, as the app layout reads it.
   loader: async ({ parentMatchPromise }) => ({ orgId: (await parentMatchPromise).loaderData?.organization?.id }),
   component: SettingsLayout,
 });
