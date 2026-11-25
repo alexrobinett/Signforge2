@@ -33,15 +33,14 @@ const screen = (kind: State['kind'], spot: string | null, over: { reason?: State
 });
 
 describe('setupSteps', () => {
-  const published = { published: true, spotIds: ['s1'] };
+  const published = { publishedSpotCount: 1 };
 
   it('ticks each step only once screens have it', () => {
     const none = { templateSpot: false, defaultPlaylist: null, screens: [] };
     expect(setupSteps(none)).toEqual({ spot: false, default: false, screen: false });
     expect(setupSteps({ ...none, templateSpot: true })).toEqual({ spot: true, default: false, screen: false });
-    // A default that is a draft, or empty, is not one screens play.
-    expect(setupSteps({ ...none, defaultPlaylist: { published: false, spotIds: ['s1'] } }).default).toBe(false);
-    expect(setupSteps({ ...none, defaultPlaylist: { published: true, spotIds: [] } }).default).toBe(false);
+    // A default never published, or published empty, is not one screens play, whatever its draft holds since (#397).
+    expect(setupSteps({ ...none, defaultPlaylist: { publishedSpotCount: 0 } }).default).toBe(false);
     expect(setupSteps({ ...none, defaultPlaylist: published }).default).toBe(true);
     // A screen counts once it has taken a publish, and only with a published default.
     expect(setupSteps({ ...none, defaultPlaylist: published, screens: [screen('online', 's1', { reported: null })] }).screen).toBe(false);
@@ -89,6 +88,8 @@ describe('playingNow', () => {
       screen('updating', 'c', { reported: 'm1' }),
       screen('needs_you', 'c', { reason: 'behind', reported: 'm1' }),
       screen('asleep', 'd', { asleep: true }),
+      // Asleep by its state while what it shows still says awake, as while the screens are read again (#397).
+      screen('asleep', 'f'),
       screen('needs_you', 'e', { reason: 'revoked' }),
       screen('needs_you', null, { reason: 'nothing_published', reported: null }),
     ]);

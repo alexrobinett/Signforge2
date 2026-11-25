@@ -698,6 +698,7 @@ const playlistOutput = z.object({
   spotIds: z.array(z.string()).describe('The spots in play order'),
   version: version.describe('Moves on with every edit of the draft, its spots too; pass it as ifVersion to update only what you read'),
   isDefault: z.boolean().describe('Whether it is the default playlist: what every screen plays when no schedule entry says otherwise'),
+  publishedSpotCount: z.number().int().describe('How many spots the published playlist plays, whatever its draft holds now; 0 when it was never published'),
   ...draftOutput,
 });
 export type PlaylistView = z.infer<typeof playlistOutput>;
