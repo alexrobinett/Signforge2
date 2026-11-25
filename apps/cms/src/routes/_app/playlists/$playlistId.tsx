@@ -53,7 +53,11 @@ import { shown } from '~/state/versioned-draft';
  */
 function showMove(list: Element | null, to: number, change: () => void, moves = true) {
   const rows = list ? [...list.children] : [];
+  // Where each row is drawn now, mid-slide if a move is still sliding: a second move starts from there, not with a
+  // jump. That slide is then stopped, so the place measured after is the row's own.
   const before = new Map(rows.map((r) => [r, r.getBoundingClientRect().top]));
+  for (const r of rows)
+    for (const a of r.getAnimations()) if (a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k)) a.cancel();
   flushSync(change);
   if (!list || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   // Only drawn: the move is made, and a browser that cannot draw this leaves it as made.

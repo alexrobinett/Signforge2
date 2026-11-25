@@ -372,12 +372,32 @@ test('a move is made at once, then the rows slide and the moved one is ringed; u
   expect(await motion()).toEqual(['ring 0 Lunch', 'slide 0 Lunch', 'slide 1 Opening', 'slide 2 Closing']);
   await slid(list);
 
+  // A second move while the first still slides, by keyboard (focus stays on the moved row's button, and a key does
+  // not wait for it to stop): the first slide stops, so no row has two at once (review of #449).
+  await page.getByRole('button', { name: 'Move Lunch down' }).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  expect(
+    await list
+      .getByRole('listitem')
+      .evaluateAll((items) =>
+        Math.max(
+          ...items.map(
+            (li) => li.getAnimations().filter((a) => a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k)).length,
+          ),
+        ),
+      ),
+  ).toBeLessThanOrEqual(1);
+  await motion();
+  await slid(list);
+
   // Under reduced motion it is just made: nothing slides, nothing is ringed.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByRole('button', { name: 'Move Lunch down' }).click();
-  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
-  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await page.getByRole('button', { name: 'Move Opening down' }).click();
   await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Closing', 'Opening']);
   expect(await motion()).toEqual([]);
   await page.emulateMedia({ reducedMotion: null });
 });
