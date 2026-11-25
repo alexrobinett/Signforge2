@@ -66,20 +66,29 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
   await expect(now).toContainText('No data sources yet');
   await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button')).toHaveText(['All 26', 'Connected 0', 'Built 5', 'Planned 17', 'Later 4']);
+  // It opens on what can be used (#368): Built, with nothing planned or later among it.
+  await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Built 5' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(owner.getByRole('main').getByRole('listitem').getByText('Planned', { exact: true })).toHaveCount(0);
+  await expect(owner.getByText('The data your spots show, fetched and checked by our server, never by the screens.')).toBeVisible();
   // Selected without colour (#373): under forced colors the pressed filter's edge is thicker than the rest,
   // and a focused one keeps an outline, which forced colors paints.
   await owner.emulateMedia({ forcedColors: 'active' });
   const show = owner.getByRole('group', { name: 'Show' });
   const edge = (name: string) => show.getByRole('button', { name }).evaluate((b) => getComputedStyle(b).borderTopWidth);
-  expect(await edge('All 26')).not.toBe(await edge('Connected 0'));
+  expect(await edge('Built 5')).not.toBe(await edge('Connected 0'));
   await show.getByRole('button', { name: 'All 26' }).focus();
   await owner.keyboard.press('Tab');
   await expect(show.getByRole('button', { name: 'Connected 0' })).toBeFocused();
   expect(await show.getByRole('button', { name: 'Connected 0' }).evaluate((b) => getComputedStyle(b).outlineStyle)).not.toBe('none');
   await owner.emulateMedia({ forcedColors: 'none' });
-  // Built connectors do not say Built; only what is not built yet says so (#374).
+  // Built connectors do not say Built; only what is not built yet says so (#374), under All.
+  await owner.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All 26' }).click();
+  await expect(owner).toHaveURL(/show=all/);
   await expect(owner.getByRole('main').getByRole('listitem').getByText('Built', { exact: true })).toHaveCount(0);
   await expect(owner.getByRole('main').getByRole('listitem').getByText('Planned', { exact: true }).first()).toBeVisible();
+  // Built again is the page as it opens: no filter in the URL.
+  await owner.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Built 5' }).click();
+  await expect(owner).not.toHaveURL(/show=/);
   // A new org: the first Connect is the page's one filled button.
   await expect(filled(owner)).toHaveAccessibleName('Connect RSS / Atom');
 

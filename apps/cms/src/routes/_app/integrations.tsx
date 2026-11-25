@@ -1,7 +1,7 @@
 /**
  * Integrations (issue #80, canvas board Integrations): the org's data sources and their health,
  * a failing one in words with its fix, the accounts connected at providers, and the catalogue of
- * connectors with what is built and what is planned. Filter and search are in the URL, and so is
+ * connectors with what is built and what is planned. Filter (Built unless another is chosen, #368) and search are in the URL, and so is
  * what the API's connection callback sends back (`?connected=` or `?connectionError=`).
  */
 import { Choice } from '~/components/ui/choice';
@@ -57,7 +57,8 @@ import { useAppStore } from '~/state/provider';
 const section = sectionFor('/integrations');
 
 interface Search {
-  show?: Exclude<Show, 'all'>;
+  /** Built when absent (#368): the page opens on what can be used. */
+  show?: Exclude<Show, 'built'>;
   q?: string;
   connected?: string;
   connectionError?: string;
@@ -68,7 +69,7 @@ const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 export const Route = createFileRoute('/_app/integrations')({
   validateSearch: (s: Record<string, unknown>): Search => {
     const out: Search = {};
-    if (isShow(s.show) && s.show !== 'all') out.show = s.show;
+    if (isShow(s.show) && s.show !== 'built') out.show = s.show;
     const q = text(s.q);
     const connected = text(s.connected);
     const connectionError = text(s.connectionError);
@@ -116,7 +117,7 @@ function IntegrationsPage() {
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;
   const sources = data.dataSources;
   const clock: Clock = { timezone, locale, now: useNow(dataUpdatedAt) };
-  const show: Show = search.show ?? 'all';
+  const show: Show = search.show ?? 'built';
   const q = search.q ?? '';
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const all = CATALOGUE.flatMap((g) => g.items);
@@ -164,7 +165,7 @@ function IntegrationsPage() {
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
             <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md tabular-nums">
               {SHOW.map((s) => (
-                <Choice key={s} selected={show === s} onClick={() => set({ show: s === 'all' ? undefined : s })} className="min-h-10 rounded-full px-3.5">
+                <Choice key={s} selected={show === s} onClick={() => set({ show: s === 'built' ? undefined : s })} className="min-h-10 rounded-full px-3.5">
                   {SHOW_WORD[s]} {all.filter((c) => shows(c, s, '', sources)).length}
                 </Choice>
               ))}
