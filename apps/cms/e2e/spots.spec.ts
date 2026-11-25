@@ -30,9 +30,14 @@ test('with no spots, the empty state has New spot and the template gallery under
   const gallery = page.getByRole('region', { name: 'Templates' });
   const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
   await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
-  // The thumbnail's corner fits the tile's: its radius less its padding (#383).
-  const galleryCorner = await innerCorner(clock.locator('img'));
-  expect(galleryCorner.radius).toBe(galleryCorner.fits);
+  // The thumbnail's corner fits the tile's: its radius less its padding (#383). So too at a 20 px default text
+  // size, where the radius and the padding, both in rem, grow, and a fixed px between them would not.
+  for (const size of ['', '20px']) {
+    await page.evaluate((s) => void (document.documentElement.style.fontSize = s), size);
+    const galleryCorner = await innerCorner(clock.locator('img'));
+    expect(galleryCorner.radius, size).toBeCloseTo(galleryCorner.fits, 5);
+  }
+  await page.evaluate(() => void (document.documentElement.style.fontSize = ''));
   await axe(page);
   await shots(page, '28-spots-gallery');
   await page.setViewportSize({ width: 390, height: 844 });

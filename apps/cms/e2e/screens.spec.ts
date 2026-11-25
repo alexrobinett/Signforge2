@@ -84,6 +84,12 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // The thumbnail's corner fits the stage around it: the stage's radius less its padding (#383).
   const stageCorner = await innerCorner(page.getByRole('img', { name: 'Nothing published yet' }));
   expect(stageCorner.radius).toBe(stageCorner.fits);
+  // And a menu's item, its highlight, inside the menu (ui/dropdown-menu.tsx).
+  await page.getByRole('button', { name: 'More actions: settings, display hours, revoke' }).click();
+  const itemCorner = await innerCorner(page.getByRole('menuitem').first(), page.getByRole('menu'));
+  expect(itemCorner.radius).toBe(itemCorner.fits);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
   // Nothing published is said by the thumbnail alone: no caption under it (#374).
   await expect(page.locator('figcaption')).toHaveCount(0);

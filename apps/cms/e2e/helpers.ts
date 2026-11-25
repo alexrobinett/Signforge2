@@ -398,17 +398,18 @@ export async function createOrg(page: Page, name: string, address: string) {
 }
 
 /**
- * A box's corner and the corner that fits it inside its parent (#383): the parent's radius less its
- * padding, so the two curves keep one distance apart. In px.
+ * A box's corner and the corner that fits it inside `outer` (#383), by default its parent: the outer
+ * radius less its padding, so the two curves keep one distance apart. In px.
  */
-export async function innerCorner(inner: Locator) {
-  return inner.evaluate((e) => {
-    const outer = getComputedStyle(e.parentElement!);
+export async function innerCorner(inner: Locator, outer?: Locator) {
+  const box = outer ? await outer.elementHandle() : null;
+  return inner.evaluate((e, o) => {
+    const around = getComputedStyle(o ?? e.parentElement!);
     return {
       radius: Number.parseFloat(getComputedStyle(e).borderTopLeftRadius),
-      fits: Number.parseFloat(outer.borderTopLeftRadius) - Number.parseFloat(outer.paddingTop),
+      fits: Number.parseFloat(around.borderTopLeftRadius) - Number.parseFloat(around.paddingTop),
     };
-  });
+  }, box);
 }
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */

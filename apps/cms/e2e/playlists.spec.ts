@@ -1,5 +1,5 @@
 import { expect, test, type Frame, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, stageShows, tool, innerCorner } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.44';
@@ -87,6 +87,9 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
 
   // Removed, and put back from its toast's Undo at once: the toast goes on its own after a few
   // seconds, so nothing is checked in between. Then removed for good.
+  // Remove sits in its row's corner: its corner fits the row's, the row's radius less its padding (#383).
+  const removeCorner = await innerCorner(page.getByRole('button', { name: 'Remove Berries' }), list.getByRole('listitem').filter({ hasText: 'Berries' }));
+  expect(removeCorner.radius).toBe(removeCorner.fits);
   await page.getByRole('button', { name: 'Remove Berries' }).click();
   await page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Berries' }).getByRole('button', { name: 'Undo' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Berries', 'Lunch']);
