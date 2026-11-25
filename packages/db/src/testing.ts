@@ -435,6 +435,15 @@ export async function queueDeletedFiles(db: D1Database, orgId: string, shas: str
   await org.commit(org.storage.stage.queue(shas, at).writes);
 }
 
+/** The storage sweep's tombstone for an org's file: it deleted the object at `at` (#432). For a writer's test. */
+export async function tombstoneFile(db: D1Database, orgId: string, sha256: string, at: number) {
+  await drizzle(db)
+    .insert(schema.blobDeletes)
+    .values({ orgId, sha256, queuedAt: 0, deletedAt: at })
+    .onConflictDoUpdate({ target: [schema.blobDeletes.orgId, schema.blobDeletes.sha256], set: { deletedAt: at } })
+    .run();
+}
+
 /** Runs one SQL statement on `db` with its bound values: for fixtures no repository writes. */
 export const runSql = (db: D1Database, query: string, ...binds: unknown[]) =>
   db

@@ -546,7 +546,12 @@ export const assets = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('assets_org_id_uq').on(t.orgId, t.id), index('assets_org_sha_idx').on(t.orgId, t.sha256)],
+  (t) => [
+    uniqueIndex('assets_org_id_uq').on(t.orgId, t.id),
+    index('assets_org_sha_idx').on(t.orgId, t.sha256),
+    // The storage sweep's unfinished uploads, by age (#433).
+    index('assets_pending_idx').on(t.orgId, t.createdAt).where(sql`status = 'pending'`),
+  ],
 );
 
 export const assetRenditions = sqliteTable(
@@ -1252,6 +1257,13 @@ export const feedImageDeletes = sqliteTable(
   (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
 
+/** A row for an R2 object the storage sweep deletes (#235): its claim while it deletes it (owner, until when), and when it did. */
+const sweptObject = () => ({
+  claimOwner: text('claim_owner'),
+  claimUntil: integer('claim_until').notNull().default(0),
+  deletedAt: integer('deleted_at'),
+});
+
 /**
  * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete_asset` in its batch for the storage sweep (#235),
  * which deletes one past the grace period once nothing the org keeps names its bytes (packages/db `storage.ts`).
@@ -1264,10 +1276,17 @@ export const blobDeletes = sqliteTable(
     orgId: orgId(),
     sha256: text('sha256').notNull(),
     queuedAt: integer('queued_at').notNull(),
-    claimOwner: text('claim_owner'),
-    claimUntil: integer('claim_until').notNull().default(0),
+    // Once its object is deleted, kept a week as a tombstone: a writer that names the hash after it checked the file was
+    // there finds out at its commit (#432). `deleted_at` null while queued.
+    ...sweptObject(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.sha256] }),
+    // The storage sweep's due files, by age (#433): queued rows only, tombstones outside (#432).
+    index('blob_deletes_due_idx').on(t.orgId, t.queuedAt, t.claimUntil).where(sql`deleted_at IS NULL`),
+    // The tombstones, by age: what is pruned, and what a writer may be refused by (#432).
+    index('blob_deletes_tombstone_idx').on(t.orgId, t.deletedAt).where(sql`deleted_at IS NOT NULL`),
+  ],
 );
 
 /**
@@ -1275,7 +1294,7 @@ export const blobDeletes = sqliteTable(
  * and its content-addressed id, as R2 keys it (#235): written in the batch of the publish or `/admin` push that stores
  * it, and by the storage sweep for one stored before this table. What the sweep keeps a file for. `files_json` is null
  * for one the sweep found no object for: its files are unknown, the screen can fetch nothing through it, and a real
- * write replaces it.
+ * write replaces it. The sweep deletes a row's object once its screen no longer keeps it, and marks it deleted.
  */
 export const storedManifests = sqliteTable(
   'stored_manifests',
@@ -1285,8 +1304,13 @@ export const storedManifests = sqliteTable(
     manifestId: text('manifest_id').notNull(),
     filesJson: text('files_json'),
     storedAt: integer('stored_at').notNull(),
+    ...sweptObject(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] })],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] }),
+    // The rows the storage sweep may delete, by age: it looks for an org's old ones without reading the deleted (#235).
+    index('stored_manifests_live_idx').on(t.orgId, t.storedAt).where(sql`files_json IS NOT NULL AND deleted_at IS NULL`),
+  ],
 );
 
 /**
@@ -1300,6 +1324,8 @@ export const storageSweeps = sqliteTable('storage_sweeps', {
   owner: text('owner'),
   leaseUntil: integer('lease_until').notNull().default(0),
   sweptAt: integer('swept_at').notNull().default(0),
+  // When its stored manifests were last looked at with none left due: looked at again a week on (STORAGE_RECHECK_MS).
+  manifestsCheckedAt: integer('manifests_checked_at').notNull().default(0),
 });
 
 // --------------------------------------------------------------- connections

@@ -4,7 +4,7 @@
 import { MANIFEST_SCHEMA, manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
-import { claimFileForSweep, seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg, tombstoneFile } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
@@ -264,6 +264,63 @@ describe('the storage sweep (#235, review of #429, round 2)', () => {
       .bind(org.orgId, org.screen, b.manifest.id)
       .first<{ f: string }>();
     expect(JSON.parse(row!.f)).toEqual(Object.keys(b.manifest.files).sort());
+  });
+
+  it('uploads again a file the sweep deleted, though a copy is back, which clears its tombstone (#432)', async () => {
+    const b = await build('tombstoned');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    await client(b, org.screen).run();
+    // The sweep deleted the image's earlier copy (its tombstone), and a copy is back in R2 since.
+    await tombstoneFile(env.DB, org.orgId, image, AT - 1);
+    const missing = await admin('POST', `/screens/${org.screen}/missing`, b.manifestText);
+    expect(((await missing.json()) as { missing: { sha256: string }[] }).missing).toEqual([{ sha256: image, scope: 'org' }]);
+    const again = client(b, org.screen);
+    expect(await again.run()).toMatchObject({ manifestId: b.manifest.id, uploaded: 1 });
+    expect(again.puts).toEqual([expect.stringContaining(image)]);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([image], AT)).toEqual([]);
+  });
+
+  /** PUTs `bytes` as an org blob through the API, with `during` run as R2 has just stored them. */
+  async function putRacing(bytes: string, during: (sha: string) => Promise<unknown>) {
+    const sha = await sha256(bytes);
+    const blobs = new Proxy(env.BLOBS, {
+      get(target, key) {
+        if (key === 'put')
+          return async (...args: Parameters<R2Bucket['put']>) => {
+            const put = await target.put(...args);
+            await during(sha);
+            return put;
+          };
+        const v: unknown = Reflect.get(target, key, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const res = await app.fetch(
+      new Request(`${API}/admin/orgs/${org.orgId}/blobs/${sha}`, { method: 'PUT', body: bytes, headers: { authorization: `Bearer ${TOKEN}` } }),
+      { ...env, BLOBS: blobs },
+    );
+    return { sha, res };
+  }
+
+  it('keeps a tombstone the sweep stamps as a blob is stored, or one it claims meanwhile, and says so (review of #434, 1)', async () => {
+    // The sweep deletes the fresh copy as it lands: 409, and its tombstone stays.
+    const deleted = await putRacing('stored as the sweep deleted it', async (sha) => tombstoneFile(env.DB, org.orgId, sha, AT));
+    expect(deleted.res.status).toBe(409);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([deleted.sha], AT)).toEqual([deleted.sha]);
+    // The sweep claims the bytes after the PUT's check: 409, nothing cleared.
+    const claimed = await putRacing('stored as the sweep claimed it', async (sha) => {
+      await tombstoneFile(env.DB, org.orgId, sha, AT - 1);
+      await claimFile(org.orgId, sha, true);
+    });
+    expect(claimed.res.status).toBe(409);
+    const row = await env.DB.prepare('SELECT deleted_at AS d FROM blob_deletes WHERE org_id = ? AND sha256 = ?')
+      .bind(org.orgId, claimed.sha)
+      .first<{ d: number }>();
+    expect(row?.d).toBe(AT - 1);
+    // Stored again after an older deletion, with nothing in the way: the tombstone goes.
+    const fresh = await putRacing('stored after an older deletion', async (sha) => tombstoneFile(env.DB, org.orgId, sha, AT - 1));
+    expect(fresh.res.status).toBe(200);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([fresh.sha], AT)).toEqual([]);
   });
 });
 

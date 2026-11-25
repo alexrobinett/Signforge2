@@ -18,18 +18,20 @@ const run = (query: string, ...binds: unknown[]) => runSql(env.DB, query, ...bin
 const exists = async (key: string) => (await env.BLOBS.head(key)) !== null;
 const at = (t: number) => () => t;
 
-/** R2, recording every key the sweep deletes; `beforeDelete` runs before each delete. */
+/** R2, recording every key the sweep deletes and counting its calls; `beforeDelete` runs before each delete. */
 const recorded = (beforeDelete: () => Promise<unknown> = async () => {}) => {
   const keys: string[] = [];
+  const calls = { get: 0, delete: 0 };
   const blobs: SweptBlobs = {
-    get: (key) => env.BLOBS.get(key),
+    get: (key) => (calls.get++, env.BLOBS.get(key)),
     delete: async (batch) => {
+      calls.delete++;
       await beforeDelete();
       keys.push(...batch);
       await env.BLOBS.delete(batch);
     },
   };
-  return { keys, blobs };
+  return { keys, calls, blobs };
 };
 
 /** An org with one screen, a deleted asset's file `file` queued at T0 and stored in R2: due at DUE. */
@@ -95,10 +97,13 @@ describe('the storage sweep', () => {
     // Measured: the orgs due, then the org's lease, its unindexed manifests, the index written, the claim's batch, the
     // pending uploads and the last batch; an image upload's renditions are one query more. Seven an org at most, so
     // ORGS_PER_RUN fit in Free D1's 50. A new query fails this on purpose: look at the budget, then raise it.
-    expect(measured.result()).toEqual({ statements: 13, queries: 7, rpcs: [] });
+    expect(measured.result()).toEqual({ statements: 16, queries: 7, rpcs: [] });
     expect(1 + ORGS_PER_RUN * 7).toBeLessThanOrEqual(50);
-    // R2: INDEX_PER_ORG reads and one delete an org, within 50 subrequests.
-    expect(ORGS_PER_RUN * (INDEX_PER_ORG + 1)).toBeLessThanOrEqual(50);
+    // R2: here a read (the manifest indexed) and a delete. At most INDEX_PER_ORG reads and two deletes an org: a sweep
+    // claims at most 90 files, 90 uploads' 360 and 1,000 manifests, 1,000 keys a delete (review of #431).
+    expect(first.calls).toEqual({ get: 1, delete: 1 });
+    expect(Math.ceil((90 + 90 * 4 + 1000) / 1000)).toBe(2);
+    expect(ORGS_PER_RUN * (INDEX_PER_ORG + 2)).toBeLessThanOrEqual(50);
 
     // A newer publish moves the screen on: the old manifest is still kept (its publish is the screen's newest before the
     // grace period), so its file stays, until a publish past the grace period replaces it there too.
@@ -107,16 +112,25 @@ describe('the storage sweep', () => {
     expect(await exists(keys.pinned)).toBe(true);
     await published(A, 'pub_a3', 3, DUE + DAY + STORAGE_GRACE_MS, screen, 'man_a3', []);
     const later = recorded();
-    // With it, the upload's hash, queued again as it went: a copy finalized meanwhile would be under the org's blobs.
-    expect(await sweepStorage(env.DB, later.blobs, at(DUE + 2 * DAY + STORAGE_GRACE_MS))).toBe(2);
-    expect(later.keys.toSorted()).toEqual([keys.pinned, orgBlobKey(A, sha('3'))].sort());
+    // With it, the upload's hash, queued again as it went (a copy finalized meanwhile would be under the org's blobs), and
+    // the old manifest itself, kept by no screen and no publish since. The two newer ones stay.
+    expect(await sweepStorage(env.DB, later.blobs, at(DUE + 2 * DAY + STORAGE_GRACE_MS))).toBe(3);
+    expect(later.keys.toSorted()).toEqual([keys.pinned, orgBlobKey(A, sha('3')), keys.manifest].sort());
+    for (const id of ['man_a2', 'man_a3']) expect(await exists(manifestKey(A, screen, id)), id).toBe(true);
+    // Once a3 is past the grace period too, a2 is left behind and goes; a3, the screen's own, stays.
+    const last = recorded();
+    expect(await sweepStorage(env.DB, last.blobs, at(DUE + 3 * STORAGE_GRACE_MS))).toBe(1);
+    expect(last.keys).toEqual([manifestKey(A, screen, 'man_a2')]);
+    expect(await exists(manifestKey(A, screen, 'man_a3'))).toBe(true);
+    for (const key of [...later.keys, ...last.keys]) expect(key.startsWith(`o/${A}/b/`) || key.startsWith(`o/${A}/m/`), key).toBe(true);
     // Idempotent: nothing more is due, and nothing is deleted; the queued file named again is forgotten.
-    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + 3 * STORAGE_GRACE_MS))).toBe(0);
+    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE + 4 * STORAGE_GRACE_MS))).toBe(0);
     const queued = await env.DB.prepare('SELECT count(*) AS n FROM blob_deletes WHERE org_id = ?').bind(A).first<{ n: number }>();
     expect(queued?.n).toBe(0);
     expect(await audits(A)).toEqual([
-      { files: 2, uploads: [] },
-      { files: 1, uploads: [left.id] },
+      { files: 0, uploads: [], manifests: 1 },
+      { files: 2, uploads: [], manifests: 1 },
+      { files: 1, uploads: [left.id], manifests: 0 },
     ]);
   });
 
@@ -188,7 +202,7 @@ describe('the storage sweep', () => {
     resume();
     expect(await running).toBe(1);
     expect(first.keys).toEqual([key]);
-    expect(await audits('sweep-overlap')).toEqual([{ files: 1, uploads: [] }]);
+    expect(await audits('sweep-overlap')).toEqual([{ files: 1, uploads: [], manifests: 0 }]);
   });
 
   it('takes up a run whose R2 delete failed, once its lease has run out', async () => {

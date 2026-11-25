@@ -4,16 +4,18 @@
  *
  * Per org, the least recently swept first: take the org's lease with an owner token; index from R2 any manifest the org
  * keeps that is not indexed yet (one stored before the index, or one a screen reports); claim what is due (files only
- * while every kept manifest's files are known, checked in the claim itself); delete those objects while the lease still holds; then, in one batch held to the lease,
- * forget its own claims, delete the uploads still pending, audit the run and let the lease go. Every key it deletes is
- * built here under the org's own prefixes (`orgBlobKey`, `uploadKey`, from the org being swept): a row's hash or id fills
- * in only what follows, and R2 keys are flat strings, so a sweep reaches no other org's objects and none outside them.
- * Manifests are read, never deleted. A run that fails part-way leaves its rows and its claims, which expire with the
- * lease, and the next run takes them up: deleting an object twice is harmless.
+ * while every kept manifest's files are known, checked in the claim itself); delete those objects while the lease still
+ * holds; then, in one batch held to the lease, forget its own claims, mark its manifests deleted, delete the uploads
+ * still pending, audit the run and let the lease go. Every key it deletes is built here under the org's own prefixes
+ * (`orgBlobKey`, `uploadKey`, `manifestKey`, from the org being swept): a row's hash or id fills in only what follows,
+ * and R2 keys are flat strings, so a sweep reaches no other org's objects and none outside them. A run that fails
+ * part-way leaves its rows and its claims, which expire with the lease, and the next run takes them up: deleting an
+ * object twice is harmless.
  *
  * Bounded for Free D1's 50 queries and 50 subrequests an invocation: ORGS_PER_RUN orgs, each at most seven D1 queries
  * (the lease, the unindexed manifests, the index written, the claim's batch, the pending uploads, their renditions, the
- * last batch) and at most INDEX_PER_ORG manifest reads and one R2 delete.
+ * last batch), INDEX_PER_ORG manifest reads and two R2 deletes of 1,000 keys: at most 90 files, 90 uploads' 360, and
+ * 1,000 stored manifests, one key each (packages/db `MANIFESTS_PER_SWEEP`).
  */
 import { nothingDue, orgsWithStorageDue, scoped, STORAGE_LEASE_MS } from '@signforge/db';
 import { manifestKey, orgBlobKey, uploadKey } from '@signforge/tools';
@@ -76,7 +78,11 @@ async function sweepOrg(db: D1Database, blobs: SweptBlobs, clock: () => number, 
     await org.commit(org.storage.stage.release(owner, now).writes);
     return 0;
   }
-  const keys = [...due.files.map((sha) => orgBlobKey(orgId, sha)), ...due.uploads.flatMap((u) => u.files.map((sha) => uploadKey(orgId, u.assetId, sha)))];
+  const keys = [
+    ...due.files.map((sha) => orgBlobKey(orgId, sha)),
+    ...due.uploads.flatMap((u) => u.files.map((sha) => uploadKey(orgId, u.assetId, sha))),
+    ...due.manifests.map((m) => manifestKey(orgId, m.screenId, m.manifestId)),
+  ];
   // Deleted only while the lease holds: past it, a writer may have taken the bytes up again. The claims then expire unforgotten.
   if (clock() > now + STORAGE_LEASE_MS - LEASE_MARGIN_MS) return 0;
   for (let i = 0; i < keys.length; i += 1000) await blobs.delete(keys.slice(i, i + 1000));

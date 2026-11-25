@@ -31,7 +31,7 @@
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
 import { baseTemplateHtml, isId, manifestIdInput, parseManifest, type ScreenManifest } from '@signforge/contract';
-import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
+import { findDeviceScreen, organizationExists, platform, scoped, StaleVersionError } from '@signforge/db';
 import {
   dispatch,
   platformRegistry,
@@ -84,11 +84,18 @@ async function readManifest(text: string): Promise<{ manifest: ScreenManifest } 
   return problems.length ? { problems } : { manifest };
 }
 
-/** Files of the manifest that R2 does not hold yet. */
-async function missingFiles(bucket: R2Bucket, m: ScreenManifest, orgId: string) {
+/** Files of the manifest that R2 does not hold yet, or whose copy the storage sweep deleted. */
+async function missingFiles(c: Context<AdminEnv>, m: ScreenManifest, orgId: string) {
   const files = fileKeys(m, orgId);
-  const held = await Promise.all(files.map((f) => bucket.head(f.key)));
-  return files.filter((_, i) => !held[i]).map(({ sha256, scope }) => ({ sha256, scope }));
+  // One the storage sweep deleted is uploaded again, even if a copy is back: the upload clears its tombstone (#432).
+  const [held, deleted] = await Promise.all([
+    Promise.all(files.map((f) => c.env.BLOBS.head(f.key))),
+    scoped(c.env.DB, orgId).storage.deleted(
+      files.filter((f) => f.scope === 'org').map((f) => f.sha256),
+      Date.now(),
+    ),
+  ]);
+  return files.filter((f, i) => !held[i] || (f.scope === 'org' && deleted.includes(f.sha256))).map(({ sha256, scope }) => ({ sha256, scope }));
 }
 
 /** Store a file under `key` if its bytes hash to `sha`. */
@@ -105,9 +112,21 @@ async function putBlob(c: Context<AdminEnv>, key: string, sha: string) {
  * be deleted under the manifest that is to name it. The push that names it is fenced too (`publish_manifest_to_screen`).
  */
 async function putOrgBlob(c: Context<AdminEnv>, orgId: string, sha: string) {
-  if (await scoped(c.env.DB, orgId).storage.claimed([sha], Date.now()))
+  const org = scoped(c.env.DB, orgId);
+  if (await org.storage.claimed([sha], Date.now()))
     return fail(c, 409, 'the storage clean-up is deleting an earlier copy of these bytes: try again in a few minutes');
-  return putBlob(c, orgBlobKey(orgId, sha), sha);
+  const since = Date.now();
+  const stored = await putBlob(c, orgBlobKey(orgId, sha), sha);
+  if (!stored.ok) return stored;
+  // Stored again: a tombstone the sweep left for these bytes before goes (#432). Not if it claims them, or deleted them
+  // after `since`: this copy may be the one gone (review of #434).
+  try {
+    await org.commit(org.storage.stage.restored([sha], Date.now(), since));
+  } catch (err) {
+    if (!(err instanceof StaleVersionError)) throw err;
+    return fail(c, 409, 'the storage clean-up deleted these bytes as they were stored: upload them again');
+  }
+  return stored;
 }
 
 export const admin = new Hono<AdminEnv>();
@@ -118,7 +137,7 @@ admin.post('/screens/:screen/missing', async (c) => {
   if (!screen) return fail(c, 404, 'screen not found');
   const read = await readManifest(await c.req.text());
   if ('problems' in read) return fail(c, 400, 'invalid manifest', { problems: read.problems });
-  return c.json({ manifestId: read.manifest.id, missing: await missingFiles(c.env.BLOBS, read.manifest, screen.orgId) });
+  return c.json({ manifestId: read.manifest.id, missing: await missingFiles(c, read.manifest, screen.orgId) });
 });
 
 admin.put('/screens/:screen/blobs/:sha256', async (c) => {
@@ -145,7 +164,7 @@ admin.put('/screens/:screen/manifest', async (c) => {
   const { manifest } = read;
 
   // Nothing a screen could not fetch is ever made desired.
-  const missing = await missingFiles(c.env.BLOBS, manifest, screen.orgId);
+  const missing = await missingFiles(c, manifest, screen.orgId);
   if (missing.length) return fail(c, 409, 'files are missing; upload them first', { missing });
 
   const key = manifestKey(screen.orgId, screen.screenId, manifest.id);

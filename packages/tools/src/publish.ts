@@ -15,7 +15,7 @@
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
 import type { ScreenManifest } from '@signforge/contract';
-import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
+import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow, type StoredManifest } from '@signforge/db';
 import { z } from 'zod';
 import { clearOfSweep } from './assets';
 import { madeBySpotEditor } from './data-sources';
@@ -53,6 +53,10 @@ const publishManifestToScreen = defineTool({
   handler: async ({ org, blobs, input, write, notify }) => {
     const screen = await org.screens.get(input.screenId);
     if (!screen) throw notFound('screen', input.screenId);
+    // Seen stored from now, so never one the storage sweep deletes before this commits (#235).
+    const since = Date.now();
+    const at = { screenId: screen.id, manifestId: input.manifestId };
+    await manifestsNotSwept(org, [at], since);
     // A manifest is stored only once every file it lists is in R2 (the /admin upload checks), so
     // a stored manifest is one the screen can fetch completely. The key is under this org alone.
     const stored = await blobs.get(manifestKey(org.orgId, screen.id, input.manifestId));
@@ -65,7 +69,13 @@ const publishManifestToScreen = defineTool({
       // sweep keeps them from the commit on (#235, review of #429, round 2).
       const files = Object.keys((await stored.json<Pick<ScreenManifest, 'files'>>()).files);
       await clearOfSweep(org, write, files);
+      // A file the sweep deleted since the push checked it was there (#432): refused, from a read and at the commit.
+      const now = Date.now();
+      const deleted = await org.storage.deleted(files, now);
+      if (deleted.length) throw new ToolError('conflict', 'the storage clean-up deleted files this manifest names: push again to upload them', { deleted });
+      write({ row: undefined, writes: org.storage.stage.notDeleted(files, now) });
       write(org.storage.stage.index([{ screenId: screen.id, id: input.manifestId, files }], Date.now()));
+      write({ row: undefined, writes: org.storage.stage.manifestsStored([at], since, since) });
       write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));
       // The screen's socket carries it at once; its next sync would anyway.
       notify((screens) => screens.manifest(screen.id, input.manifestId));
@@ -73,6 +83,15 @@ const publishManifestToScreen = defineTool({
     return { screenId: screen.id, manifestId: input.manifestId, changed };
   },
 });
+
+/**
+ * Refuses a writer while the storage sweep is deleting a manifest it is about to store again or point screens at
+ * (#235): claimed at `since`, or deleted at or after it, `since` being before the writer stores them.
+ */
+async function manifestsNotSwept(org: OrgScope, stored: readonly StoredManifest[], since: number) {
+  if ((await org.storage.manifestsGone(stored, since, since)).length)
+    throw new ToolError('conflict', 'the storage clean-up is deleting an earlier copy of this content: try again in a few minutes');
+}
 
 /** How long a source the spot editor made is kept unbound: its autosave binds it a second or so later, longer while the draft cannot be saved. */
 const SOURCE_GRACE_MS = 15 * 60_000;
@@ -158,6 +177,10 @@ export async function runPublish(
   }));
   const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, madeDefault: result.madeDefault, screens };
   const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
+  // Stored again below: refused while the storage sweep deletes one of them, or if it deleted one after now (#235).
+  const since = Date.now();
+  const stored = changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id }));
+  await manifestsNotSwept(org, stored, since);
   // Deleted entries go in the same batch as the switches; on their own they make no publish.
   write({ row: undefined, writes: result.removals });
   if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
@@ -166,6 +189,7 @@ export async function runPublish(
   // deleted while this compiled refuses the batch, and the publish runs again from a fresh read (review of #429).
   const files = [...new Set(changed.flatMap((m) => Object.keys(m.files)))];
   write({ row: undefined, writes: org.storage.stage.filesLive(files) });
+  write({ row: undefined, writes: org.storage.stage.manifestsStored(stored, since, since) });
   write(
     org.storage.stage.index(
       changed.map((m) => ({ screenId: m.screen.id, id: m.id, files: Object.keys(m.files) })),
@@ -368,6 +392,12 @@ const rollBackPublish = defineTool({
     const desired = new Map(screens.map((s) => [s.id, s.desiredManifestId]));
     const rows = then.filter((r) => desired.has(r.screenId) && desired.get(r.screenId) !== r.manifestId);
     if (!rows.length) return { publish: null };
+    // Pointed at as they are stored: refused if the storage sweep has deleted or is deleting one (#235).
+    const stored = rows.map((r) => ({ screenId: r.screenId, manifestId: r.manifestId }));
+    const now = Date.now();
+    if ((await org.storage.manifestsGone(stored, now, 0)).length)
+      throw new ToolError('conflict', `publish v${target.revision}'s manifests are no longer stored, so it can no longer be rolled back to`, { tooOld: true });
+    write({ row: undefined, writes: org.storage.stage.manifestsStored(stored, now, 0) });
     write(org.publishes.stage.advance(revision));
     return { publish: await switchScreens(ctx, revision + 1, rows, target.id) };
   },
