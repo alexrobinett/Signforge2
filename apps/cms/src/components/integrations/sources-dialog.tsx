@@ -141,12 +141,14 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
       )}
       {locked && (
         <p id={whyId} className="text-sm text-muted-foreground">
-          Only owners publish in this organization, so only they change this source’s address or photos: screens follow those changes without a publish.
+          Only owners publish in this organization, so only they change this source’s address{source.format === 'rss' ? ' or photos' : ''}: screens follow
+          those changes without a publish.
         </p>
       )}
       {canManage &&
         source.format !== 'provider' &&
-        (editing && hasAddress(source) ? (
+        // The address form only for one who may publish: another never gets a form whose Save is refused.
+        (editing && hasAddress(source) && canPublish ? (
           <form onSubmit={submit} className="space-y-2">
             <Label htmlFor={inputId}>New address for {source.name}</Label>
             <Input

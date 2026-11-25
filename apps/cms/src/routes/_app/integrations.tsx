@@ -45,7 +45,7 @@ import {
   sourceState,
   sourcesOf,
 } from '~/lib/integrations';
-import { useCanManage, useNow, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { connectionsQuery } from '~/queries/integrations';
@@ -102,6 +102,9 @@ const TILE: Record<Connector['state'], string> = {
 function IntegrationsPage() {
   const orgId = useOrgId();
   const canManage = useCanManage();
+  // A source's address goes to screens with no publish: only someone who may publish fixes it (owner decision on #424).
+  const canPublish = useCanPublish();
+  const canFix = canManage && canPublish;
   const { timezone, locale } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -120,7 +123,7 @@ function IntegrationsPage() {
   const groups = CATALOGUE.map((g) => ({ ...g, items: g.items.filter((c) => shows(c, show, q, sources)) })).filter((g) => g.items.length);
   const notice = connectionNotice(search, connections);
   // One filled button on the page (#364): the first failing source's fix, else the first Connect shown, else none.
-  const fixing = canManage && sources.some((s) => s.failures > 0 && hasAddress(s));
+  const fixing = canFix && sources.some((s) => s.failures > 0 && hasAddress(s));
   const firstConnect = fixing ? undefined : groups.flatMap((g) => g.items).find((c) => actionOf(c, sources, canManage) === 'Connect')?.name;
 
   return (
@@ -146,7 +149,7 @@ function IntegrationsPage() {
           </Button>
         </div>
       )}
-      <FailingSources sources={sources} clock={clock} canManage={canManage} />
+      <FailingSources sources={sources} clock={clock} canManage={canManage} canFix={canFix} />
       {/* Sources first and "Missing one?" last on a phone; beside the catalogue on a wide screen (the board). */}
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-[auto_1fr]">
         <aside aria-label="Sources and accounts" className="flex flex-col gap-3.5 lg:col-start-2 lg:row-start-1">
@@ -278,11 +281,11 @@ function ConnectorRow({
  * A failing source, at the top of the page (#364): what is wrong in words, the spots it feeds, and its
  * fix as a button, so the urgent thing is not a link in the margin. The first fix is the page's one filled button.
  */
-function FailingSources({ sources, clock, canManage }: { sources: ListedSource[]; clock: Clock; canManage: boolean }) {
+function FailingSources({ sources, clock, canManage, canFix }: { sources: ListedSource[]; clock: Clock; canManage: boolean; canFix: boolean }) {
   const openSources = useAppStore((s) => s.openSources);
   const failing = sources.filter((s) => s.failures > 0);
   // One filled button per view: the first fix; the others are outlined.
-  const first = canManage ? failing.find((s) => hasAddress(s))?.id : undefined;
+  const first = canFix ? failing.find((s) => hasAddress(s))?.id : undefined;
   return failing.map((s) => (
     <Alert key={s.id} variant="destructive" role="alert" aria-labelledby={`failing-${s.id}`}>
       <TriangleAlertIcon aria-hidden />
@@ -295,7 +298,10 @@ function FailingSources({ sources, clock, canManage }: { sources: ListedSource[]
           {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
         </p>
         {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
-        {canManage && hasAddress(s) && (
+        {canManage && !canFix && hasAddress(s) && (
+          <p className="text-sm">Only an owner can fix its address here: screens follow it without a publish.</p>
+        )}
+        {canFix && hasAddress(s) && (
           <Button
             type="button"
             variant={s.id === first ? 'default' : 'outline'}

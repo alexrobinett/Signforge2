@@ -216,7 +216,10 @@ test('make a spot from a template, see it on the real player as you type, and ke
 
 test('a change someone else made while the editor was open is not overwritten', async () => {
   await page.getByRole('link', { name: /Lobby clock/ }).click();
+  // The editor's own page, not the list it came from: hydrated() can resolve before the route commits (review of #427).
+  await expect(page).toHaveURL(/\/spots\/[^/?]+$/);
   await hydrated(page);
+  await expect(page.getByLabel('Message')).toBeVisible();
   const url = new URL(page.url());
   const spotId = url.pathname.split('/').at(-1);
   // Stands in for an agent: a change lands after the page read the spot.

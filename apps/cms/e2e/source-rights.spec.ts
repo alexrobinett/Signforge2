@@ -3,7 +3,7 @@
 // photos switch unavailable, with why, and the API refuses the change too; its name stays theirs.
 // Light and dark, desktop and phone, with axe at each.
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
 
 const ADDRESS = { owner: '192.0.2.242', editor: '192.0.2.243' };
 
@@ -20,14 +20,23 @@ test("an editor where only owners publish sees a feed's address and photos unava
     idempotencyKey: `source-rights-${Date.now()}`,
   });
   await tool(page, 'update_org_settings', { editorsPublish: false });
+  // Failing: the page offers its fix to one who may make it, and to no one else (review of #427).
+  await d1(`UPDATE data_sources SET failures = 3, last_error = 'timeout' WHERE id = '${dataSource.id}'`);
 
   const editor = await (await browser.newContext()).newPage();
   await joinAsEditor(page, editor, `e2e-source-rights-editor-${Date.now()}@example.com`, ADDRESS.editor);
   await editor.goto('/integrations');
   await hydrated(editor);
+  const failing = editor.getByRole('alert').filter({ hasText: 'Bakery news' });
+  await expect(failing).toContainText('Only an owner can fix its address here: screens follow it without a publish.');
+  await expect(failing.getByRole('button')).toHaveCount(0);
+  await editor.setViewportSize({ width: 1440, height: 900 });
+  await axe(editor);
+  await shots(editor, '107-source-rights-failing');
   await editor.getByRole('button', { name: 'Manage RSS / Atom' }).click();
   const feeds = editor.getByRole('dialog', { name: 'RSS / Atom feeds' });
   const why = 'Only owners publish in this organization, so only they change this source’s address or photos';
+  // The address form never opens: Change URL is unavailable, and the fix above is not offered.
   await expect(feeds.getByText(why)).toBeVisible();
   const change = feeds.getByRole('button', { name: 'Change URL of Bakery news' });
   await expect(change).toBeDisabled();
