@@ -233,7 +233,8 @@ function ScreenPage() {
         <div className="flex min-w-0 flex-[2_1_34rem] flex-col gap-4">
           <figure className="m-0 flex flex-col gap-3 rounded-xl border bg-card p-3.5">
             <div className="overflow-hidden rounded-lg bg-stage p-2">
-              <ScreenThumb screen={screen} className="rounded" />
+              {/* Its corner inside the stage's (#383): the stage's radius less its padding. */}
+              <ScreenThumb screen={screen} className="rounded-[calc(var(--radius-lg)-(--spacing(2)))]" />
             </div>
             {/* Only with something to say: nothing published is said by the thumbnail (#374). A screen showing something always has a playlist or is asleep. */}
             {screen.showing && (

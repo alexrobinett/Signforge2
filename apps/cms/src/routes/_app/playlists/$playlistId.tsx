@@ -312,7 +312,8 @@ function PlaylistEditor() {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="size-9"
+                              // In the row's corner: its corner fits the row's, the row's radius less its padding (#383).
+                              className="size-9 rounded-[calc(var(--radius-lg)-(--spacing(1)))]"
                               onClick={() => remove(orgId, playlist.id, i, name)}
                               aria-label={`Remove ${name}`}
                             >
