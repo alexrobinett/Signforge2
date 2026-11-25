@@ -42,7 +42,12 @@ async function publish(orgId: string, id: string, revision: number, at: number, 
 /** Indexes manifests as stored for `screenId` (a manifest's files are its own whatever the screen). */
 const index = async (orgId: string, manifests: { id: string; files: string[] | null }[], screenId = 'scr_stored') => {
   const org = scoped(env.DB, orgId);
-  await org.commit(org.storage.stage.index(manifests.map((m) => ({ ...m, screenId })), T0).writes);
+  await org.commit(
+    org.storage.stage.index(
+      manifests.map((m) => ({ ...m, screenId })),
+      T0,
+    ).writes,
+  );
 };
 /** Leases the org for `owner` at `at` and claims what is due then. */
 async function claimed(orgId: string, at: number, owner = 'sweep-a') {

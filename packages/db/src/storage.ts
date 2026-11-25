@@ -301,7 +301,10 @@ export function storage(db: Db, orgId: string) {
                     FROM json_each(${JSON.stringify(part)}) WHERE true`,
                 )
                 // Files known replace files unknown, never the other way round.
-                .onConflictDoUpdate({ target: [sm.orgId, sm.screenId, sm.manifestId], set: { filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})` } }),
+                .onConflictDoUpdate({
+                  target: [sm.orgId, sm.screenId, sm.manifestId],
+                  set: { filesJson: sql`coalesce(excluded.files_json, ${sm.filesJson})` },
+                }),
             ),
         );
       },
