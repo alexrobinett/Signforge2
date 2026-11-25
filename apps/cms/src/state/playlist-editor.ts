@@ -74,6 +74,12 @@ export interface PlaylistEditorSlice {
   /** The stage's manifest for a playlist target (called by the stage's redraw). */
   playlistStageDraft: (target: StageTarget & { playlistId: string }) => Promise<{ manifest?: ScreenManifest; problems: string[] } | undefined>;
   openNewPlaylist: (open: boolean) => void;
+  /**
+   * New playlist from elsewhere (⌘K, a screen's fix, #367): Playlists, with its dialog when the org has a spot to
+   * put in one. With none, that page's own first step is a spot, and no dialog is left asked for, to open on a later
+   * visit (review of #458).
+   */
+  startNewPlaylist: (orgId: string) => Promise<void>;
   nameNewPlaylist: (name: string) => void;
   /** Creates an empty playlist from the dialog and opens its editor. */
   createPlaylist: (orgId: string) => Promise<void>;
@@ -249,6 +255,11 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     },
 
     openNewPlaylist: (open) => editor((e) => ({ ...e, newPlaylist: { ...closedNew(), open } })),
+    async startNewPlaylist(orgId) {
+      await router.navigate({ to: '/playlists' });
+      const { spots } = await queryClient.query(spotsQuery(orgId));
+      if (spots.length && orgOnScreen(router) === orgId) get().openNewPlaylist(true);
+    },
     nameNewPlaylist: (name) => editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, name, error: null } })),
 
     async createPlaylist(orgId) {

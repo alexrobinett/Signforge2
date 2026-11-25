@@ -239,3 +239,18 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
   });
 });
+
+describe('New playlist from elsewhere (#367, review of #458)', () => {
+  it('goes to Playlists, and asks for its dialog only when the org has a spot to put in one', async () => {
+    const { getSpots } = await import('../src/server/spots.functions');
+    const { store } = setup();
+    vi.mocked(getSpots).mockResolvedValueOnce({ spots: [] } as never);
+    await store.getState().startNewPlaylist(ORG);
+    // No spot: nothing left asked for, to open on a later visit.
+    expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);
+    vi.mocked(getSpots).mockResolvedValueOnce({ spots: [{ id: 'spt_1' }] } as never);
+    const { store: withSpot } = setup();
+    await withSpot.getState().startNewPlaylist(ORG);
+    expect(withSpot.getState().playlistEditor.newPlaylist.open).toBe(true);
+  });
+});

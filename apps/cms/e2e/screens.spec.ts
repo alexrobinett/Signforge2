@@ -94,6 +94,23 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await fix.click();
   await expect(page).toHaveURL(/\/playlists$/);
   await expect(page.getByRole('heading', { name: 'Make a spot first, then a playlist' })).toBeVisible();
+  // Nothing is left asked for: with a spot made since, in the app as a person makes one (so what the page holds is
+  // kept), a later visit to Playlists opens no dialog by itself.
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await nav.getByRole('link', { name: 'Spots' }).click();
+  await expect(page.getByRole('heading', { name: 'Spots', level: 1 })).toBeVisible();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New spot' }).first().click();
+  const newSpot = page.getByRole('dialog', { name: 'New spot' });
+  await newSpot.getByRole('radio', { name: 'Clock', exact: true }).check();
+  await newSpot.getByLabel('Name').fill('Arcade clock');
+  await newSpot.getByRole('button', { name: 'Create spot' }).click();
+  await expect(page.getByRole('heading', { name: 'Arcade clock', level: 1 })).toBeVisible();
+  await nav.getByRole('link', { name: 'Playlists' }).click();
+  await expect(page.getByRole('heading', { name: 'Playlists', level: 1 })).toBeVisible();
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'New playlist' }).first()).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'New playlist' })).toHaveCount(0);
   // With one, it is to play it here.
   await tool(page, 'create_playlist', { name: 'Arcade loop', spotIds: [] });
   await page.goto(screenPage);

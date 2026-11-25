@@ -7,7 +7,7 @@
  */
 import { Badge } from '~/components/ui/badge';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, getRouteApi, Link, notFound, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon, ZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
@@ -132,8 +132,7 @@ function ScreenPage() {
   const canPublish = useCanPublish();
   const now = useNow(at);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
-  const openNewPlaylist = useAppStore((s) => s.openNewPlaylist);
-  const navigate = useNavigate();
+  const startNewPlaylist = useAppStore((s) => s.startNewPlaylist);
   const openTakeover = useAppStore((s) => s.openTakeover);
   const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
@@ -193,7 +192,7 @@ function ScreenPage() {
               fellBackFrom={fallbackPublish}
               hasPlaylists={playlists.length > 0}
               onPlay={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}
-              onMakePlaylist={() => void navigate({ to: '/playlists' }).then(() => openNewPlaylist(true))}
+              onMakePlaylist={() => void startNewPlaylist(orgId)}
             />
           )}
           {canManage && !revoked && (
