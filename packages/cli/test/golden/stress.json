@@ -16,10 +16,6 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee": {
-      "size": 123092,
-      "type": "text/html"
-    },
     "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
       "size": 401879,
       "type": "text/html"
@@ -97,6 +93,10 @@
       "size": 43425,
       "type": "image/png"
     },
+    "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05": {
+      "size": 123078,
+      "type": "text/html"
+    },
     "de29f63a8d1386d966af4f67750a68a3498ec14b44d005facc2144f63162c937": {
       "size": 46747,
       "type": "image/png"
@@ -138,7 +138,7 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 60
+            "maxLength": 40
           },
           "instructions": {
             "type": "text",
@@ -199,7 +199,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee"
+      "html": "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "715f1ebb423444182651893f9174701aa042a0e4750b31c4cd5bff54103919c1"
+  "id": "6c3920211953fd53fb67335bd2c413602fd0369e700e95f40a5c53e4b0c32930"
 }

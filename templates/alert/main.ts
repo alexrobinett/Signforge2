@@ -48,13 +48,14 @@ defineTemplate({
     // New data while the faces loaded: the SDK put a fresh copy of the loaded body in place and
     // inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
     if (document.body !== page) throw new Error('new data replaced this prepare');
-    // In portrait the copy's row gives way to the QR code's, so the copy can overflow its own row too. Measured by its
-    // last box, not its scroll size, which counts the lines' rise in (a transform) as the play starts.
+    // The copy's row gives way to the QR code's, so the copy can overflow its own row too. Measured by its last box, not
+    // its scroll size, which counts the lines' rise in (a transform) as the play starts; each offset is rounded on its
+    // own, so a box that fits can measure a pixel over.
     const copy = document.querySelector<HTMLElement>('.copy')!;
     const last = document.querySelector<HTMLElement>('.instructions')!;
     for (const fit of FITS) {
       root.style.setProperty('--fit', String(fit));
-      if (body.scrollHeight <= body.clientHeight && last.offsetTop + last.offsetHeight <= copy.clientHeight) break;
+      if (body.scrollHeight <= body.clientHeight && last.offsetTop + last.offsetHeight <= copy.clientHeight + 1) break;
     }
   },
 });

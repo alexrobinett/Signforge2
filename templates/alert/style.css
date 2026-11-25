@@ -184,7 +184,10 @@ body {
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* The copy's row is the flexible one: an item spanning a flexible row does not size the grid, so the code, beside both
+     rows, always has the screen's height, however long the copy (review of #448, round 2). The copy itself never runs
+     past its row: its limits are set so the longest fits at the smallest step (main.ts). */
+  grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
     'copy qr'
     'meta qr';
@@ -361,7 +364,6 @@ body {
 }
 :root[data-orientation='portrait'] .copy {
   gap: 4.44vmin;
-  overflow: hidden;
 }
 :root[data-orientation='portrait'] .headline {
   font-size: calc(11.5vmin * var(--scale) * var(--fit));

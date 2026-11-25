@@ -101,10 +101,6 @@
     }
   },
   "files": {
-    "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee": {
-      "size": 123092,
-      "type": "text/html"
-    },
     "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
       "size": 401879,
       "type": "text/html"
@@ -160,6 +156,10 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05": {
+      "size": 123078,
+      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -529,7 +529,7 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 60
+            "maxLength": 40
           },
           "instructions": {
             "type": "text",
@@ -590,7 +590,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "23480963f4cb6da59d95f81282bce2a4db0f16997986cf27a85090a9c9a790ee"
+      "html": "d6e8765a0900897c7045a0e00f262b80354a7c1562b6ef6c6dfc9b074b0e8f05"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "380123ed384fc07eb572fcb92ee74c9e0d3fb359f7816acb19924641daa0ce88"
+  "id": "e567edfe28bce28c9149222ed448d57c8b044a493ba8195d052fb0e6cae33f0c"
 }
