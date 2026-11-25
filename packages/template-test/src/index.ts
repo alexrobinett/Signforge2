@@ -112,7 +112,8 @@ export interface Host {
   /**
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
    * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
-   * An asset under `$brand.logo`, or `logo` (a 4x1 logo of that colour), is the kit's logo, sent in `theme`.
+   * An asset under `$brand.logo`, or `logo` (a 4x1 logo of that colour), is the kit's logo, sent in `theme`. An asset `'broken'` is a
+   * PNG header and nothing that decodes.
    */
   init(
     frame: string,
@@ -223,6 +224,11 @@ export async function host(orientation: Orientation = 'landscape', full = false)
           const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
           const blobs: Record<string, Blob> = {};
           for (const [field, spec] of Object.entries(assets)) {
+            // A file the browser cannot decode: a PNG header and nothing after it.
+            if (spec === 'broken') {
+              blobs[field] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
+              continue;
+            }
             const key = samples[field];
             const cached = cache.get(spec);
             if (cached && !key) {

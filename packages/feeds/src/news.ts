@@ -1,4 +1,4 @@
-import { type NewsFeed, SCREEN_BOX } from '@signforge/contract';
+import { NEWS_SUMMARY_MAX, type NewsFeed, SCREEN_BOX } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { checkSize, FeedError, LIMITS } from './errors';
 import { isoInstant } from './time';
@@ -291,6 +291,53 @@ function unescapeHtml(v: string): string {
   });
 }
 
+/** HTML's named references that story descriptions use most, beyond XML's five. */
+const NAMED_TEXT: Record<string, string> = {
+  nbsp: ' ',
+  mdash: '—',
+  ndash: '–',
+  hellip: '…',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”',
+  laquo: '«',
+  raquo: '»',
+};
+
+/**
+ * A story's description as plain text (the contract's `summary`): tags dropped with the bodies of
+ * scripts and styles, character references read, spaces collapsed, and at most `NEWS_SUMMARY_MAX`
+ * characters, cut on a word with "…". Undefined when nothing is left or it only repeats the title.
+ * Each scan starts where the last ended, so a body of unclosed tags costs linear time.
+ */
+function summaryOf(html: string, title: string): { summary: string } | Record<string, never> {
+  const lower = html.toLowerCase();
+  let out = '';
+  for (let i = 0; ; ) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) {
+      out += html.slice(i);
+      break;
+    }
+    out += `${html.slice(i, lt)} `;
+    const gt = html.indexOf('>', lt);
+    if (gt === -1) break;
+    const hidden = /^<(script|style)\b/.exec(lower.slice(lt, lt + 7))?.[1];
+    const close = hidden ? lower.indexOf(`</${hidden}`, gt) : gt;
+    const end = close === -1 ? -1 : html.indexOf('>', close);
+    if (end === -1) break;
+    i = end + 1;
+  }
+  const text = unescapeHtml(out.replace(/&([a-z]+);/gi, (ref, name: string) => NAMED_TEXT[name.toLowerCase()] ?? ref))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.toLowerCase() === title.toLowerCase()) return {};
+  if (text.length <= NEWS_SUMMARY_MAX) return { summary: text };
+  const cut = text.lastIndexOf(' ', NEWS_SUMMARY_MAX - 1);
+  return { summary: `${text.slice(0, cut > 0 ? cut : NEWS_SUMMARY_MAX - 1).replace(/[\s,;:.–—-]+$/, '')}…` };
+}
+
 /** Gravatar avatars, WordPress emoji and feedburner's pixels, by host and path. */
 const NOT_A_PHOTO_URL = /(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
 
@@ -557,7 +604,12 @@ function readNews(body: string, options: NewsOptions): { title: string; language
       return url && imageUrl(text(url.v), url.base(search), search)?.href;
     };
     stories = channel.kids(r, 'item').map((it) => ({
-      item: { title: it.text(r, 'title'), published: published(it.text(r, 'pubDate') || it.text(NS.dc, 'date')), source: title },
+      item: {
+        title: it.text(r, 'title'),
+        published: published(it.text(r, 'pubDate') || it.text(NS.dc, 'date')),
+        source: title,
+        ...summaryOf(it.text(r, 'description'), it.text(r, 'title')),
+      },
       image: (search) => {
         const item = it.withLink(
           it
@@ -581,7 +633,12 @@ function readNews(body: string, options: NewsOptions): { title: string; language
       return undefined;
     };
     stories = feed.kids(a, 'entry').map((entry) => ({
-      item: { title: entry.text(a, 'title'), published: published(entry.text(a, 'updated') || entry.text(a, 'published')), source: title },
+      item: {
+        title: entry.text(a, 'title'),
+        published: published(entry.text(a, 'updated') || entry.text(a, 'published')),
+        source: title,
+        ...summaryOf(entry.text(a, 'summary') || entry.text(a, 'content'), entry.text(a, 'title')),
+      },
       image: (search) => {
         const link = entry.kids(a, 'link').find((l) => ['', 'alternate'].includes(l.attr('rel')));
         const item = entry.withLink(link?.attr('href') ?? '');
