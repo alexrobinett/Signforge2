@@ -922,6 +922,21 @@ The re-check of #222 found the fade above had taken Poster's ink wipe away: the 
 - Two single stalls broke the 50 ms frame rule once each: 200 ms while portrait emergency played (cut, run 3) and 250 ms in portrait notice's fade (run 2). Neither came back in 5 more runs of each spec straight after: portrait cut emergency 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms; portrait fade notice 0.00%, worst 17 ms. They are read as the Pi's own noise, not the larger tile.
 - Against the 23vmin code (the Alert above) nothing moved beyond run-to-run noise: emergency still drops a little while the next spot loads, as its pulse keeps two layers animating, and prepares are close: first 333 to 380 ms (315 to 476 before), later medians 177 to 198 ms in landscape (about 165 before) and 180 to 261 ms in portrait (175 to 230 before), portrait emergency the highest in both. All are well inside the 500 ms budget.
 
+### The stalls, A/B: 23vmin against 40vmin (review of #448, 2026-11-25)
+
+The same build and session, at `67e74d6`, differing only in the tile: A with `--qr` at 23vmin, B at 40vmin, each at its own content path (`?content=/ab/A`, `/ab/B`), with a 213-byte link and default copy. Portrait, run in turn A then B, 5 runs each of the two specs that stalled once: emergency on a cut and notice on a fade. Method as above.
+
+| Spec | Tile | Overall (5 runs) | Playing | Worst frame | Later prepares, median |
+| --- | --- | --- | --- | --- | --- |
+| emergency, cut | A 23vmin | 0.17, 0.17, 0.28, 0.44, 0.22% | 0.00, 0.00, 0.00, 0.17, 0.00% | 33, 33, 50, 67, 50 ms | 266 ms |
+| | B 40vmin | 0.22, 0.22, 0.28, **1.22**, 0.17% | 0.00, 0.00, 0.00, **0.97**, 0.00% | 50, 50, 50, **300**, 50 ms | 270 ms |
+| notice, fade | A 23vmin | 0.00% | 0.00% | 17 ms | 179 ms |
+| | B 40vmin | 0.00, 0.06, 0.11, 0.00, 0.06% | 0.00% | 17 to 33 ms | 196 ms |
+
+- **B had one more stall.** Its run 4 of emergency on a cut held a 300 ms frame while playing, 1.22% overall, over the 1% budget. A's worst was a 67 ms frame in the same run (run 4), over the 50 ms rule too, but nothing like it.
+- **Not settled by this many runs.** Counting every portrait run of these two specs, stalls of 200 ms or more came 3 times in 26 runs with the 40vmin tile (above and here) and never in 10 with the 23vmin one. With so few, that difference could be chance (Fisher's exact test, p ≈ 0.5). Every stall came in a spec where emergency's pulse or a fade was moving. The code itself is still once drawn, but a 40vmin tile has more than three times the area of a 23vmin one, so a link to the bigger tile cannot be ruled out. Telling the two apart would take about 30 runs of each.
+- Notice's fade and the prepares barely move. Notice is 0.00 to 0.11% against 0.00%. Later prepares are 266 against 270 ms for emergency, and 179 against 196 ms for notice.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
