@@ -1322,6 +1322,14 @@ describe('forbidden CSS', () => {
   });
 });
 
+/**
+ * The final check of #438: markup a scan for <select> tags read otherwise than parse5 (an abruptly closed comment, a
+ * quote in an unquoted value), so each <select> was parsed again to the end of the bundle. About 100 kB each.
+ */
+const SELECT_DESYNC = ['<!-->', '<!--->', '<!--x--!>', "<div a=b'c>"].map(
+  (before) => `${before}${'<select></select>'.repeat(5000)}<style>${'a'.repeat(20_000)}</style>`,
+);
+
 describe('network check', () => {
   const problems = (html: string) =>
     checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'network')?.problems;
@@ -1531,13 +1539,6 @@ describe('network check', () => {
 
     // The third review of #438: each passed the lint and fetched in headless Chromium.
     const fetchedThird = [
-      // Inside a <select>, where parse5 drops what Chromium's customizable select keeps.
-      '<select><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select><div class=b></div>',
-      String.raw`<select><style>.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style></select><div class=b></div>`,
-      `<select><div style="background-image:image-set('//t.example/p.gif' 1x)"></div></select>`,
-      '<select><option><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></option></select><div class=b></div>',
-      '<select><svg><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></svg></select><div class=b></div>',
-      String.raw`<select><style>@\69mport "//t.example/a.css";</style></select>`,
       // url( read as CSS reads it: past 64 spaces, U+00A0 is no whitespace, a comment ends a name, and a name with
       // more than url in it (a non-ASCII letter, an escape) is not url.
       `<style>.a{background:url(${' '.repeat(64)}"a)b/*")}.b{background-image:image-set("\\2f\\2f t.example/p.gif" 1x)}.c{content:"*/"}</style><div class=b></div>`,
@@ -1550,21 +1551,6 @@ describe('network check', () => {
 
     it('refuses each the third review found', () => {
       for (const html of fetchedThird) expect(problems(html), html).toEqual(refused);
-    });
-
-    // The fourth review of #438: a literal <select in an attribute value or a comment cut a select's text short.
-    it('reads a <select>’s text past "<select" in an attribute value or a comment', () => {
-      for (const html of [
-        `<select><div title="<select"><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></div></select>`,
-        `<select><!-- <select --><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select>`,
-      ])
-        expect(problems(html), html).toEqual(refused);
-      const scripts = checkTemplateBundle({
-        manifest: template,
-        html: `<select><div title="<select"><script>"use strict";a()</script></div></select>`,
-        sources: { 'main.ts': '' },
-      }).checks.find((c) => c.check === 'scripts')?.problems;
-      expect(scripts).toEqual([expect.stringMatching(/^a <select> may not hold a script/)]);
     });
 
     // In source order, as the walk went before it kept a stack of its own (review of #438, round 4).
@@ -1594,15 +1580,6 @@ describe('network check', () => {
       expect(withoutComments('a /* one */ b /* two')).toBe('a  b /* two');
     });
 
-    it('refuses an @import in a <select>’s <style> as forbidden CSS', () => {
-      const forbidden = checkTemplateBundle({
-        manifest: template,
-        html: String.raw`<select><style>@\69mport "a.css";</style></select>`,
-        sources: { 'main.ts': '' },
-      });
-      expect(forbidden.checks.find((c) => c.check === 'forbidden-css')?.problems).toEqual(['stylesheets must be bundled, not imported at run time']);
-    });
-
     it('refuses an @import spelled with a character reference in an SVG <style> as forbidden CSS', () => {
       const forbidden = (html: string) =>
         checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
@@ -1620,9 +1597,9 @@ describe('network check', () => {
         `<svg>${'<style>'.repeat(4000)}${'a'.repeat(20_000)}`,
         `<svg>${'<style>'.repeat(400)}${'a'.repeat(200_000)}${'</style>'.repeat(400)}</svg>`,
         `<svg>${'<style>'.repeat(2000)}${'a'.repeat(100_000)}${'</style>'.repeat(2000)}</svg>`.repeat(3),
-        // And <select>s, each read again only to the next one.
         '<select>'.repeat(4000),
         `${'<select><style>'.repeat(2000)}${'a'.repeat(20_000)}`,
+        ...SELECT_DESYNC,
       ]) {
         const { styles, styleAttributes } = bundleScripts(html);
         const read = styles.reduce((n, style) => n + style.text.length, 0) + styleAttributes.reduce((n, value) => n + value.length, 0);
@@ -1712,12 +1689,34 @@ describe('script check', () => {
     ]);
   });
 
-  it('refuses a select that holds script markup, where browsers parse differently, and skips a script in MathML', () => {
-    const select = ['a <select> may not hold a script: browsers parse <select> differently, and none runs in a template'];
-    expect(problems('<select><script>"use strict";x()</script></select>')).toEqual(select);
-    // A script that only Chromium's customizable-select parsing finds: the markup is refused all the same.
-    expect(problems('<select><svg><textarea><script>"use strict";x()</script></textarea></svg></select>')).toEqual(select);
-    expect(problems('<select><option>One</option><option>Two</option></select>')).toEqual([]);
+  // A screen takes no input. And inside a <select> Chromium's customizable select keeps what parse5 drops: reading that
+  // took a second parse, which went quadratic each time the select scan and parse5 disagreed (review of #438).
+  it('refuses every <select>, whatever it holds, and skips a script in MathML', () => {
+    const select = ['a template may not hold a <select>: a screen takes no input; use text or an image'];
+    for (const html of [
+      '<select><option>One</option><option>Two</option></select>',
+      '<template><select></select></template>',
+      '<select><script>"use strict";x()</script></select>',
+      // A script that only Chromium's customizable-select parsing finds.
+      '<select><svg><textarea><script>"use strict";x()</script></textarea></svg></select>',
+      // Styles parse5 drops in a <select> and Chromium applies (third review), and ones a <select scan cut short (fourth).
+      '<select><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select><div class=b></div>',
+      String.raw`<select><style>.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style></select><div class=b></div>`,
+      `<select><div style="background-image:image-set('//t.example/p.gif' 1x)"></div></select>`,
+      '<select><option><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></option></select><div class=b></div>',
+      '<select><svg><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></svg></select><div class=b></div>',
+      String.raw`<select><style>@\69mport "//t.example/a.css";</style></select>`,
+      `<select><div title="<select"><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></div></select>`,
+      `<select><!-- <select --><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select>`,
+      `<select><div title="<select"><script>"use strict";a()</script></div></select>`,
+      // The final check's: a <selected> taken for a <select>, and "<select" in a <style>'s comment or string.
+      '<select><selected><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></selected></select><div class=b></div>',
+      '<select><style>/* <select */ .b{background-image:image-set("//t.example/p.gif" 1x)}</style></select><div class=b></div>',
+      '<select><style>.a{content:"<select"}.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select><div class=b></div>',
+      '<select><selected><svg><textarea><script>"use strict";evil()</script></textarea></svg></selected></select>',
+      ...SELECT_DESYNC,
+    ])
+      expect([...new Set(problems(html))], html.slice(0, 40)).toEqual(select);
     expect(problems('<math><script>x()</script></math>')).toEqual([]);
   });
 

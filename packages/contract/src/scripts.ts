@@ -2,23 +2,23 @@
  * The scripts of a template bundle, read with an HTML parser: parse5 follows the HTML standard's
  * tokenizer and tree builder, so HTML and SVG script elements are found (those in a `<template>` too)
  * with their attributes decoded, and text that only looks like a script (in a textarea, a comment, an
- * attribute) is not one. A `script` in MathML never runs, and is skipped. Inside a `<select>` parse5
- * and Chromium disagree (Chromium parses it as a customizable select), so a `<select>` that holds any
- * script markup is refused and nothing in it is armed. The bundle check and the player
+ * attribute) is not one. A `script` in MathML never runs, and is skipped. A `<select>` is refused: a
+ * screen takes no input, and inside one parse5 and Chromium disagree (Chromium parses it as a
+ * customizable select), so nothing in it is armed either. Up to the first `<select>` the two parse
+ * alike, so parse5 finds that one where Chromium does. The bundle check and the player
  * (`containedFrames` in packages/player-core) both read scripts through this, so they agree on which
  * ones a template frame runs and where their text is. See Template containment in docs/architecture.md.
  *
  * The same walk gives the bundle check its styles (#326): each `<style>` element's text and each `style` attribute's
  * value as the parser reads them (in an SVG's `<style>`, character references read, CDATA unwrapped and comments left
- * out; in an HTML one, the text as written), linear in the bundle. Inside a `<select>`, where parse5 drops what
- * Chromium's customizable select keeps and applies, the select's own text is parsed again for them.
+ * out; in an HTML one, the text as written), linear in the bundle. What a refused `<select>` holds is not read again.
  */
-import { type DefaultTreeAdapterTypes as Tree, parse, parseFragment } from 'parse5';
+import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
 
-/** A script element, or a `<select>` that holds script markup. */
+/** A script element, or a `<select>`, which a template may not hold. */
 export interface BundleScript {
-  /** Where the script's text (or the `<select>`) is in the returned `html`, from `start` to `end`. */
+  /** Where the script's text (or the whole `<select>`) is in the returned `html`, from `start` to `end`. */
   start: number;
   end: number;
   /** Whether a template frame runs it: inline, classic JavaScript, plain text, starting with exactly TEMPLATE_SCRIPT_START. */
@@ -29,7 +29,7 @@ export interface BundleScript {
 
 const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
-const IN_SELECT = 'a <select> may not hold a script: browsers parse <select> differently, and none runs in a template';
+const NO_SELECT = 'a template may not hold a <select>: a screen takes no input; use text or an image';
 // The HTML standard's JavaScript MIME type essences, and the other types it runs as a script.
 const JAVASCRIPT = new Set([
   'application/ecmascript',
@@ -59,35 +59,6 @@ function asciiTrim(text: string): string {
   while (start < end && asciiSpace(text[start])) start += 1;
   while (end > start && asciiSpace(text[end - 1])) end -= 1;
   return text.slice(start, end);
-}
-
-/**
- * Where each `<select` and `</select` tag starts, in one pass: not one inside a comment or a quoted attribute value,
- * where it is no tag (review of #438, round 4).
- */
-function selectTagsOf(html: string): number[] {
-  const at: number[] = [];
-  for (let i = 0; i < html.length; ) {
-    if (html.startsWith('<!--', i)) {
-      const end = html.indexOf('-->', i + 4);
-      i = end < 0 ? html.length : end + 3;
-      continue;
-    }
-    if (html[i] !== '<' || !/[a-z/!?]/i.test(html[i + 1] ?? '')) {
-      i += 1;
-      continue;
-    }
-    if (/^<\/?select/i.test(html.slice(i, i + 8))) at.push(i);
-    // To the tag's end, its quoted values whole.
-    let quote = '';
-    for (i += 1; i < html.length && (quote || html[i] !== '>'); i += 1) {
-      if (quote) {
-        if (html[i] === quote) quote = '';
-      } else if (html[i] === '"' || html[i] === "'") quote = html[i]!;
-    }
-    i += 1;
-  }
-  return at;
 }
 
 /** A script element's type string, as the HTML standard's "prepare the script element" computes it, lowercased. */
@@ -148,22 +119,6 @@ function eachElement<F>(root: Tree.ParentNode, flag: F, visit: (element: Tree.El
   }
 }
 
-/** The `<style>` elements and `style` attribute values in `root`, a tree parsed from `src`, added to `styles` and `attributes`. */
-function collectStyles(root: Tree.ParentNode, src: string, styles: BundleStyle[], attributes: string[]) {
-  eachElement(root, false, (child, inStyle) => {
-    for (const a of child.attrs) if (a.name === 'style' && !a.prefix) attributes.push(a.value);
-    const style = child.tagName === 'style';
-    if (style) {
-      const loc = child.sourceCodeLocation!;
-      const start = loc.startTag!.endOffset;
-      const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
-      const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
-      styles.push({ text, written: inStyle ? '' : src.slice(start, end) });
-    }
-    return inStyle || style;
-  });
-}
-
 /**
  * A bundle as the browser reads it (CR LF and CR as LF), its script elements in source order, and its styles: each
  * `<style>` element, and each `style` attribute's value.
@@ -173,32 +128,13 @@ export function bundleScripts(bundle: string): { html: string; scripts: BundleSc
   const scripts: BundleScript[] = [];
   const styles: BundleStyle[] = [];
   const styleAttributes: string[] = [];
-  // Where each <select and </select starts, found once: a select's text ends at the next one.
-  const selectTags = selectTagsOf(html);
-  const nextSelectTag = (from: number) => {
-    let low = 0;
-    let high = selectTags.length;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (selectTags[mid]! < from) low = mid + 1;
-      else high = mid;
-    }
-    return selectTags[low] ?? html.length;
-  };
   const visit = (child: Tree.Element, inSelect: boolean) => {
     const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
     if (select) {
-      // Text up to the next <select or </select, not parse5's element: where parse5 closes a <select> early
-      // (at a <textarea>, say), Chromium may go on and find a script that parse5 never sees. Each select's text
-      // ends before the next one's starts, so all of them add up to the bundle at most.
-      const start = child.sourceCodeLocation!.startOffset;
-      const from = child.sourceCodeLocation!.startTag!.endOffset;
-      const end = nextSelectTag(from);
-      const inside = html.slice(from, end);
-      if (/<script/i.test(inside)) scripts.push({ start, end, runs: false, problem: IN_SELECT });
-      // parse5 drops a <style>, and the elements a style attribute is on, inside a <select>; Chromium's customizable
-      // select keeps and applies them (review of #438, round 3). Read again on their own, they are found.
-      collectStyles(parseFragment(inside, { sourceCodeLocationInfo: true }), inside, styles, styleAttributes);
+      // Refused whatever it holds (review of #438, final check): reading what Chromium's customizable select finds
+      // in it, which parse5 drops, took a second parse that a tag scan out of step with parse5 made quadratic.
+      const loc = child.sourceCodeLocation!;
+      scripts.push({ start: loc.startOffset, end: loc.endOffset, runs: false, problem: NO_SELECT });
     }
     if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
       const found = classify(child, html);
@@ -208,7 +144,18 @@ export function bundleScripts(bundle: string): { html: string; scripts: BundleSc
     return inSelect || select;
   };
   const document = parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true });
-  collectStyles(document, html, styles, styleAttributes);
+  eachElement(document, false, (child, inStyle) => {
+    for (const a of child.attrs) if (a.name === 'style' && !a.prefix) styleAttributes.push(a.value);
+    const style = child.tagName === 'style';
+    if (style) {
+      const loc = child.sourceCodeLocation!;
+      const start = loc.startTag!.endOffset;
+      const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
+      const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
+      styles.push({ text, written: inStyle ? '' : html.slice(start, end) });
+    }
+    return inStyle || style;
+  });
   eachElement(document, false, visit);
   return { html, scripts: scripts.sort((a, b) => a.start - b.start), styles, styleAttributes };
 }
