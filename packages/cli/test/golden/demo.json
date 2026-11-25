@@ -129,6 +129,10 @@
       "size": 396225,
       "type": "text/html"
     },
+    "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
+      "size": 125360,
+      "type": "text/html"
+    },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
@@ -156,10 +160,6 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
-      "size": 122770,
-      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -507,10 +507,10 @@
       },
       "html": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f"
     },
-    "base/alert@1.0.1": {
+    "base/alert@1.1.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -529,37 +529,42 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 60
+            "maxLength": 40,
+            "maxMarks": 4
           },
           "instructions": {
             "type": "text",
             "label": "Instructions",
             "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-            "maxLength": 240
+            "maxLength": 240,
+            "maxMarks": 4
           },
           "issuedBy": {
             "type": "text",
             "label": "Issued by",
             "default": "Issued by Building Safety",
-            "maxLength": 48
+            "maxLength": 48,
+            "maxMarks": 4
           },
           "endsAt": {
             "type": "text",
             "label": "Ends at",
             "default": "4:00 PM",
-            "maxLength": 24
+            "maxLength": 24,
+            "maxMarks": 4
           },
           "qrUrl": {
             "type": "url",
             "label": "QR code address",
             "default": "",
-            "maxLength": 200
+            "maxBytes": 213
           },
           "qrLabel": {
             "type": "text",
             "label": "QR code label",
             "default": "Scan for updates",
-            "maxLength": 32
+            "maxLength": 32,
+            "maxMarks": 4
           },
           "showQr": {
             "type": "boolean",
@@ -590,7 +595,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
+      "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1098,7 +1103,7 @@
       "id": "fire-drill",
       "name": "Fire drill notice",
       "kind": "template",
-      "template": "base/alert@1.0.1",
+      "template": "base/alert@1.1.0",
       "data": {
         "severity": "notice",
         "headline": "Fire drill at 2 PM today",
@@ -1284,5 +1289,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "2bbf217604a27ea764ed23d03d46a153c50be0e504026e5788f10ee450283e1e"
+  "id": "85824c05db3b2d2870c92b6bae35692e6bfd44ac528ccf4d155a1f81013285eb"
 }

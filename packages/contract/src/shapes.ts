@@ -60,13 +60,20 @@ export type Sha256 = string;
 // ---------------------------------------------------------------- templates
 
 export type ScalarFieldDef =
-  | { type: 'text'; label: string; default?: string; maxLength?: number }
+  /**
+   * Text. `maxMarks` bounds the combining marks (accents, vowel signs, tone marks) on any one character, a grapheme
+   * cluster: Zalgo text stacks dozens, whose ink stands far past its line, over whatever is near (#230).
+   */
+  | { type: 'text'; label: string; default?: string; maxLength?: number; maxMarks?: number }
   | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string }
-  /** A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. */
-  | { type: 'url'; label: string; default?: string; maxLength?: number }
+  /**
+   * A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. `maxBytes`
+   * bounds its UTF-8 bytes, which is what a QR code holds: some characters use more than one byte (#230).
+   */
+  | { type: 'url'; label: string; default?: string; maxLength?: number; maxBytes?: number }
   /** A calendar day, `YYYY-MM-DD`; `min` and `max` are days too. */
   | { type: 'date'; label: string; default?: string; min?: string; max?: string }
   /**

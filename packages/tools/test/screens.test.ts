@@ -187,3 +187,39 @@ describe('a revoked screen', () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe('get_screen: the publish a screen fell back from (#367, review of #458)', () => {
+  it('names the latest publish that gave the screen the manifest it fell back from, and none when nothing did', async () => {
+    const org = testScope(env.DB, o.orgId);
+    const FAILED = 'e'.repeat(64);
+    const before = (await org.screens.get(o.screen))!;
+    const hb: ScreenHeartbeat = {
+      at: Date.now(),
+      player: { version: '1.2.3', manifestSchemas: [2], protocols: [1, 2] },
+      manifest: { active: MANIFEST, filesMissing: 0, fallbackFrom: FAILED },
+      display: { on: true },
+      clock: { offsetMs: 12, trusted: true },
+      driftMs: 40,
+      dataRejected: {},
+    };
+    await org.screens.update(o.screen, { heartbeatJson: JSON.stringify(hb) });
+    expect((await call('get_screen', { screenId: o.screen })).fallbackPublish).toBeNull();
+    const made = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'u', revision: 7 });
+    await org.commit([...made.writes, ...org.publishes.stage.addScreens(made.row.id, [{ screenId: o.screen, manifestId: FAILED }]).writes]);
+    expect((await call('get_screen', { screenId: o.screen })).fallbackPublish).toEqual({ id: made.row.id, revision: 7 });
+
+    // Sol's case (review of #458): it fell back from v7's manifest; v8 shipped another; v9 rolled back to v7's
+    // manifest. The publish it fell back from is v7, made before it said so, not v9.
+    const t7 = Date.now();
+    await org.screens.update(o.screen, { fallbackSince: t7 + 1_000 });
+    vi.setSystemTime(t7 + 60_000);
+    const v8 = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'u', revision: 8 });
+    await org.commit([...v8.writes, ...org.publishes.stage.addScreens(v8.row.id, [{ screenId: o.screen, manifestId: MANIFEST }]).writes]);
+    vi.setSystemTime(t7 + 120_000);
+    const v9 = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'u', revision: 9, restoresId: made.row.id });
+    await org.commit([...v9.writes, ...org.publishes.stage.addScreens(v9.row.id, [{ screenId: o.screen, manifestId: FAILED }]).writes]);
+    expect((await call('get_screen', { screenId: o.screen })).fallbackPublish).toEqual({ id: made.row.id, revision: 7 });
+    vi.setSystemTime(NOW);
+    await org.screens.update(o.screen, { heartbeatJson: before.heartbeatJson, fallbackSince: null });
+  });
+});

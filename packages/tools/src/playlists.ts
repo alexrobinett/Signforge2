@@ -32,6 +32,7 @@ const playlistView = (row: PlaylistRow, items: string[], defaultId: string | nul
   version: row.rowVersion,
   isDefault: row.id === defaultId,
   published: published(row) !== undefined,
+  publishedSpotCount: published(row)?.items.length ?? 0,
   draftChanged: draftChanged(row, items),
   publishedAt: row.publishedAt,
   createdAt: row.createdAt,
