@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, createOrg, d1, disabledOnServer, hydrated, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, innerCorner, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -58,6 +58,10 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByRole('heading', { name: 'See your first spot on a screen' })).toBeVisible();
+  // The pairing picture is the screen and where it shows the code: no window dots, no drop shadow (#384).
+  const picture = page.getByRole('img', { name: 'A screen showing its pairing code' }).locator('xpath=..');
+  expect(await picture.evaluate((f) => getComputedStyle(f).boxShadow)).toBe('none');
+  await expect(picture.locator('.rounded-full')).toHaveCount(0);
   await axe(page);
   await shots(page, '11-screens-empty');
 
@@ -81,6 +85,15 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
+  // The thumbnail's corner fits the stage around it: the stage's radius less its padding (#383).
+  const stageCorner = await innerCorner(page.getByRole('img', { name: 'Nothing published yet' }));
+  expect(stageCorner.radius).toBe(stageCorner.fits);
+  // And a menu's item, its highlight, inside the menu (ui/dropdown-menu.tsx).
+  await page.getByRole('button', { name: 'More actions: settings, display hours, revoke' }).click();
+  const itemCorner = await innerCorner(page.getByRole('menuitem').first(), page.getByRole('menu'));
+  expect(itemCorner.radius).toBe(itemCorner.fits);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
   // Nothing published is said by the thumbnail alone: no caption under it (#374).
   await expect(page.locator('figcaption')).toHaveCount(0);

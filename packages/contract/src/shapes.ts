@@ -17,8 +17,11 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      refuses such a template, so the server tells it to reload, as for 4.
  *   7  a template's `live` may name several sources (`sources`, #193). A player that knows only 5
  *      and 6 refuses such a template, so the server tells it to reload, as for 4.
+ *   8  a `list` field's `item` may declare an `image` property, carrying a `NewsImage` (#196). A
+ *      player that knows only 6 and 7 refuses such a template, so the server tells it to reload,
+ *      as for 4.
  */
-export const MANIFEST_SCHEMA = 7;
+export const MANIFEST_SCHEMA = 8;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -88,11 +91,14 @@ export type ScalarFieldDef =
  */
 export const MAX_URL_BYTES = 2048;
 
+/** Field types a list row (`FieldDef` of type `list`) may declare: any scalar, or an optional image (`NewsImage`). */
+export type ListItemFieldDef = ScalarFieldDef | { type: 'image'; label: string };
+
 export type FieldDef =
   | ScalarFieldDef
   | { type: 'image'; label: string }
-  /** Repeating rows, such as menu items or calendar events. Each row is an object of scalar fields. */
-  | { type: 'list'; label: string; item: Record<string, ScalarFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
+  /** Repeating rows, such as menu items, calendar events or news stories. Each row holds scalar fields and optional image fields. */
+  | { type: 'list'; label: string; item: Record<string, ListItemFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
 
 /** `template.json`, written by the template author. */
 export interface TemplateManifest {
@@ -302,7 +308,9 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
   // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
   {
     // An `on…=` attribute in markup, in a file or in a string, or set with setAttribute; not a property such as `img.onload = f`.
-    pattern: /<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
+    // Tried only from a `>` or the start, to the first `<letter` after it: a later `<` before the next `>` sees no more
+    // of the text, so trying each one again would make a long run without `>` cost its length squared.
+    pattern: /(?:^|>)[^<>]*(?:<(?![a-z])[^<>]*)*<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
     reason: 'inline event handlers do not run in a template; use addEventListener',
   },
   { pattern: /\bjavascript:/i, reason: '`javascript:` URLs do not run in a template' },
@@ -384,20 +392,33 @@ const COLOUR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi;
 /** Properties where a bare word may be a colour; anywhere else `white` could be a name. */
 const COLOUR_PROPERTY = /color|background|border|outline|shadow|fill|stroke|text-decoration|column-rule|^--/i;
 
+/** Just past the `)` that balances the `(` at `open` in `text`, or the end of `text` when none does. */
+function callEnd(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
+
 /** `text` with every `name(...)` call (balanced) replaced by spaces, so offsets stay put. */
 function blankCalls(text: string, name: RegExp): string {
-  let out = text;
-  for (const m of [...text.matchAll(name)]) {
-    let depth = 0;
-    let i = m.index! + m[0].length - 1;
-    for (; i < text.length; i++) {
-      if (text[i] === '(') depth++;
-      else if (text[i] === ')' && --depth === 0) break;
-    }
-    out = out.slice(0, m.index!) + ' '.repeat(i + 1 - m.index!) + out.slice(i + 1);
+  let out = '';
+  for (const m of text.matchAll(name)) {
+    // A call inside one already blanked closes inside it too; scanning it again would be quadratic.
+    if (m.index < out.length) continue;
+    out += text.slice(out.length, m.index) + ' '.repeat(callEnd(text, m.index + m[0].length - 1) - m.index);
   }
-  return out;
+  return out + text.slice(out.length);
 }
+
+/**
+ * The brand colour lint's limits: an author needs the first few warnings, and a stylesheet of nested or unclosed calls
+ * would otherwise make a report its length squared (#446). Past `warnings`, one more says how many were left out.
+ */
+const COLOUR_LINT = { warnings: 20, quote: 80 };
+const clip = (text: string) => (text.length > COLOUR_LINT.quote ? `${text.slice(0, COLOUR_LINT.quote - 1)}…` : text);
 
 /**
  * The brand colour lint: colours in a template's CSS should come from `var(--sf-*)` or be built on
@@ -409,6 +430,7 @@ function blankCalls(text: string, name: RegExp): string {
  */
 export function brandColourWarnings(sources: Record<string, string>): string[] {
   const warnings: string[] = [];
+  let more = 0;
   for (const [name, text] of Object.entries(sources)) {
     let css: string;
     if (name.endsWith('.css')) css = text;
@@ -417,29 +439,60 @@ export function brandColourWarnings(sources: Record<string, string>): string[] {
       const blank = (t: string) => t.replace(/[^\n]/g, ' ');
       css = '';
       let at = 0;
-      for (const m of text.matchAll(/(<style[^>]*>)([\s\S]*?)<\/style>/gi)) {
-        css += blank(text.slice(at, m.index! + m[1]!.length)) + m[2];
-        at = m.index! + m[1]!.length + m[2]!.length;
+      // An element opens at the first `>` after `<style` and closes at the next `</style>`. Once one cannot close,
+      // no later one can, so the scan stops there rather than trying each `<style` to the end.
+      const opening = /<style/gi;
+      const closing = /<\/style>/gi;
+      for (let open = opening.exec(text); open; open = opening.exec(text)) {
+        const body = text.indexOf('>', opening.lastIndex) + 1;
+        if (body === 0) break;
+        closing.lastIndex = body;
+        const close = closing.exec(text);
+        if (!close) break;
+        css += blank(text.slice(at, body)) + text.slice(body, close.index);
+        at = close.index;
+        opening.lastIndex = closing.lastIndex;
       }
       css += blank(text.slice(at));
     } else continue;
-    css = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
-    for (const d of css.matchAll(/([-\w]+)\s*:\s*([^;{}]+)(?=[;}])/g)) {
+    // A comment closes by the last `*/` or not at all, so the rest is left alone rather than searched from each `/*`.
+    const commentsEnd = css.lastIndexOf('*/') + 2;
+    css = css.slice(0, commentsEnd).replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')) + css.slice(commentsEnd);
+    // A declaration ends at `;` or `}` and holds none of `;{}`, so each piece between them has at most one: the first
+    // `name:` in it. Matching piece by piece keeps a piece with none from being searched again from each character.
+    let line = 1;
+    let counted = 0;
+    let from = 0;
+    for (const stop of css.matchAll(/[;{}]/g)) {
+      const piece = css.slice(from, stop.index);
+      const offset = from;
+      from = stop.index + 1;
+      if (stop[0] === '{') continue;
+      const d = /(?<![-\w])([-\w]+)\s*:\s*([\s\S]+)/.exec(piece);
+      if (!d) continue;
       const prop = d[1]!;
       const value = blankCalls(blankCalls(d[2]!, /\bvar\(/gi), /\burl\(/gi);
       const found: { at: number; text: string }[] = [];
-      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index!, text: m[0] });
+      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index, text: m[0] });
       const calls = blankCalls(value, COLOUR_FUNCTION);
+      // Each call to its own `)`; one nested in it is part of its text, not another literal.
+      let end = 0;
       for (const m of value.matchAll(COLOUR_FUNCTION)) {
-        const end = calls.slice(m.index!).search(/\S/);
-        found.push({ at: m.index!, text: d[2]!.slice(m.index!, end < 0 ? undefined : m.index! + end).trim() });
+        if (m.index < end) continue;
+        end = callEnd(value, m.index + m[0].length - 1);
+        found.push({ at: m.index, text: d[2]!.slice(m.index, end).trim() });
       }
-      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index!, text: m[0] });
-      const line = css.slice(0, d.index!).split('\n').length;
-      for (const f of found.sort((a, b) => a.at - b.at))
-        warnings.push(`${name}:${line}: literal colour ${f.text} in ${prop}; use var(--sf-*) with it as the fallback`);
+      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index, text: m[0] });
+      line += css.slice(counted, offset + d.index).split('\n').length - 1;
+      counted = offset + d.index;
+      for (const f of found.sort((a, b) => a.at - b.at)) {
+        if (warnings.length < COLOUR_LINT.warnings)
+          warnings.push(`${name}:${line}: literal colour ${clip(f.text)} in ${clip(prop)}; use var(--sf-*) with it as the fallback`);
+        else more += 1;
+      }
     }
   }
+  if (more) warnings.push(`and ${more} more literal colour${more === 1 ? '' : 's'}`);
   return warnings;
 }
 
@@ -482,8 +535,10 @@ export interface FrameTheme {
 export interface InitPayload {
   data: Record<string, unknown>;
   /**
-   * Image fields, by field name, and under `sampleAsset(field)` the sample of a field's image when
-   * its file has one (`ManifestFile.sample`). The SDK turns each into an object URL.
+   * Image fields, by field name; under `sampleAsset(field)` the sample of a field's image when
+   * its file has one (`ManifestFile.sample`); and under `rowAsset(field, index, prop)` (and
+   * `rowAsset(field, index, prop, 'thumb')`) a list row's image blobs when held. The SDK turns
+   * each into an object URL.
    */
   assets: Record<string, Blob>;
   /** How long this play lasts. The template fits its outro to it. */
@@ -904,6 +959,15 @@ export const MAX_SYNC_PLAY_COUNTS = 500;
  */
 export const MAX_SYNC_SOURCES = 256;
 
+/** The most held feed-image blob hashes a screen may report in `SyncRequest.blobs`. */
+export const MAX_SYNC_BLOBS = 256;
+
+/**
+ * The most missing feed-image blob hashes one `SyncResponse.blobs` asks a screen to fetch (one
+ * full 10-story news source's lead files and thumbnails); any more arrive on the next sync.
+ */
+export const MAX_SYNC_RESPONSE_BLOBS = 20;
+
 /**
  * The largest `POST /v1/device/sync` body the server reads, in bytes; a larger one is refused (413)
  * before it is parsed. A sync holds at most MAX_SYNC_PLAY_COUNTS counts (about 50 kB). A player
@@ -946,6 +1010,8 @@ export interface SyncRequest {
   snapshots: Record<string, number>;
   /** Live values and snapshots refused since the player started, by source id: a broken feed shows here. */
   dataRejected?: Record<string, number>;
+  /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
+  blobs?: Sha256[];
 }
 
 export interface SyncResponse {
@@ -969,6 +1035,11 @@ export interface SyncResponse {
    * does not go stale and the data is not sent again.
    */
   checked?: Record<string, { version: number; checkedAt: string }>;
+  /**
+   * Feed image blob hashes referenced by the screen's snapshots that it did not report holding in
+   * `SyncRequest.blobs`, at most `MAX_SYNC_RESPONSE_BLOBS`. Fetched from `/v1/device/blobs/:sha256`.
+   */
+  blobs?: Sha256[];
   /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */
   socketTicket: string;
   commands: DeviceCommand[];

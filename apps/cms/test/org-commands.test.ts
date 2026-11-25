@@ -11,8 +11,9 @@ import { createUiSlice } from '../src/state/ui';
 const orgs = vi.hoisted(() => ({ switchOrganization: vi.fn(async () => {}), createOrganization: vi.fn() }));
 vi.mock('~/lib/orgs', () => orgs);
 vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
+vi.mock('~/server/nav-counts.functions', () => ({ getNavCounts: vi.fn(async () => ({ spots: 0, playlists: 0, schedule: 0 })) }));
 
-const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}) };
+const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}), state: { matches: [] } };
 const deps = { router, queryClient: {} } as never;
 /** The slices these commands touch, with the settings slice's, the agent drawer's and the sidebar Publish's one action they call. */
 const forgetAgentDrawer = vi.fn();

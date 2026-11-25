@@ -107,7 +107,21 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await hydrated(page);
   const latest = page.getByRole('region', { name: 'Latest publish' });
   await expect(latest).toContainText('v4');
-  await expect(latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ })).toBeVisible({ timeout: 30_000 });
+  const rollout = latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ });
+  await expect(rollout).toBeVisible({ timeout: 30_000 });
+  // As screens take a publish, each part of the bar eases to its new width (#385), and under reduced motion it is set at once.
+  const easing = () =>
+    rollout
+      .locator('span')
+      .first()
+      .evaluate((s) => [getComputedStyle(s).transitionProperty, getComputedStyle(s).transitionDuration]);
+  expect(await easing()).toEqual(['flex-grow', '0.3s']);
+  // Every part stays drawn, an empty one at no width, so the bar can ease to the whole of it, and back.
+  expect(await rollout.locator('span').count()).toBe(8);
+  expect(await rollout.locator('span').evaluateAll((parts) => parts.filter((p) => getComputedStyle(p).flexGrow === '0').length)).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await easing())[1]).toBe('1e-05s');
+  await page.emulateMedia({ reducedMotion: null });
   // Its tile shows the template the player drew and the template's name, not its key or a hash (#362).
   // It took the publish, so its tile says Playing, not Updating to (#362).
   const thumb = page.getByRole('img', { name: 'Playing: Deal' });
@@ -150,8 +164,16 @@ test('a publish made more than 90 days ago can no longer be rolled back to, and 
   await hydrated(page);
   const old = page.getByRole('button', { name: 'Roll back to v1' });
   await expect(old).toBeDisabled();
-  await expect(old).toHaveAccessibleDescription('Over 90 days old: its files are no longer kept.');
+  // What each publish changed, so a roll back is to something seen, not remembered (#370): v1 made the spot and the
+  // playlist live; v2 only compiled the screens again, for the new default; v3 published the spot's edit.
+  const history = page.getByRole('region', { name: 'Publish history' });
+  await expect(history.getByRole('listitem').filter({ hasText: /^v1/ })).toContainText('Spot Deal; playlist Main');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v2/ })).toContainText('No draft changed: the screens were compiled again');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v3/ })).toContainText('Spot Deal');
+  await expect(old).toHaveAccessibleDescription('Spot Deal; playlist Main Over 90 days old: its files are no longer kept.');
   await expect(page.getByRole('button', { name: 'Roll back to v2' })).toBeEnabled();
+  // A roll back's says what it put back (review of #455): v4 put v2 back.
+  await expect(page.getByRole('button', { name: 'Roll back to v4' })).toHaveAccessibleDescription('Restores v2');
   // The tool refuses it too, and says why.
   const { publishes } = await tool(page, 'list_publishes', {});
   const v1 = publishes.find((p: { revision: number }) => p.revision === 1);
@@ -194,4 +216,20 @@ test('Publish pressed while an autosave is on its way waits for it, and publishe
   await expect.poll(() => stageShows(screen, 'Five for $7'), { timeout: 20_000 }).toBe(true);
   expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { message: 'Five for $7' }, draftChanged: false });
   await page.unroute('**/api/tools/update_spot');
+});
+
+test("a name with no break wraps in the history's line at a phone's width (review of #455)", async () => {
+  const { spot } = await tool(page, 'get_spot', { spotId });
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'update_spot', { spotId, name: unbroken, ifVersion: spot.version });
+  await tool(page, 'publish', {});
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/publishes');
+  await hydrated(page);
+  const line = page.getByRole('region', { name: 'Publish history' }).getByText(unbroken, { exact: false }).first();
+  await line.scrollIntoViewIfNeeded();
+  expect(await line.evaluate((l) => l.scrollWidth <= l.clientWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 });

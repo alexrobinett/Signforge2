@@ -13,6 +13,7 @@ import {
   type Binding,
   type DataSource,
   type FieldDef,
+  type ListItemFieldDef,
   type Orientation,
   type ScalarFieldDef,
   type Playlist,
@@ -70,7 +71,7 @@ export function draftCheck(
 }
 
 /** A list row with each unpicked date or datetime in it replaced by a value its field takes (its min, else its max, else 1900). */
-function rowChecked(item: Record<string, ScalarFieldDef>, row: unknown): unknown {
+function rowChecked(item: Record<string, ListItemFieldDef>, row: unknown): unknown {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
   const cells: Record<string, unknown> = { ...row };
   for (const [k, d] of Object.entries(item))
@@ -154,14 +155,19 @@ export function sampleData(m: Pick<TemplateManifest, 'fields' | 'live'>): Record
 
 /**
  * The fields `sampleData` filled with sample copy (#360), as the contract's `SampleFields`: each text
- * holding words, and each list's rows, every cell. A live field starts empty, so none is. Null for none.
+ * holding words, and each list's rows, every cell but an image's: only a feed fills one, and the form
+ * has no edit for it, so a mark there could never be cleared (review of #240). A live field starts
+ * empty, so none is. Null for none.
  */
 export function sampleFieldsOf(m: Pick<TemplateManifest, 'fields'>, data: Record<string, unknown>): SampleFields | null {
   const sample: SampleFields = { texts: [], lists: {} };
   for (const [name, def] of Object.entries(m.fields)) {
     const v = data[name];
     if (def.type === 'text' && typeof v === 'string' && v !== '') sample.texts.push(name);
-    if (def.type === 'list' && Array.isArray(v) && v.length) sample.lists[name] = v.map(() => Object.keys(def.item));
+    if (def.type === 'list' && Array.isArray(v) && v.length) {
+      const cells = Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? [] : [k]));
+      sample.lists[name] = v.map(() => cells);
+    }
   }
   return compactSample(sample);
 }

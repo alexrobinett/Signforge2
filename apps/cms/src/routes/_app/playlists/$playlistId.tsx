@@ -12,6 +12,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { ProposalPanel } from '~/components/proposal';
 import {
@@ -43,6 +44,38 @@ import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { shown } from '~/state/versioned-draft';
+
+/**
+ * A move of a spot (#385): made at once, then shown. The rows slide from where they were to where they are
+ * (each by its offset, measured before and after: FLIP), and, when it `moves`, the row now at `to` is ringed a moment,
+ * a ring and not a tint so its text keeps its contrast: by its place, so a spot listed twice rings the one moved, though
+ * React may keep its node where the other copy was. Under reduced motion it is just made.
+ */
+function showMove(list: Element | null, to: number, change: () => void, moves = true) {
+  const rows = list ? [...list.children] : [];
+  // Where each row is drawn now, mid-slide if a move is still sliding: a second move starts from there, not with a
+  // jump. That slide is then stopped, so the place measured after is the row's own.
+  const before = new Map(rows.map((r) => [r, r.getBoundingClientRect().top]));
+  for (const r of rows)
+    for (const a of r.getAnimations()) if (a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k)) a.cancel();
+  flushSync(change);
+  if (!list || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // Only drawn: the move is made, and a browser that cannot draw this leaves it as made.
+  try {
+    for (const row of list.children) {
+      const top = before.get(row);
+      const by = top === undefined ? 0 : top - row.getBoundingClientRect().top;
+      if (by) row.animate([{ transform: `translateY(${by}px)` }, { transform: 'none' }], { duration: 200, easing: 'ease-out' });
+    }
+    const moved = list.children[to];
+    if (moves && moved instanceof HTMLElement) {
+      const ring = getComputedStyle(moved).getPropertyValue('--ring');
+      moved.animate([{ boxShadow: `0 0 0 3px ${ring}` }, { boxShadow: '0 0 0 3px transparent' }], { duration: 1200, easing: 'ease-out' });
+    }
+  } catch {
+    return;
+  }
+}
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -224,7 +257,7 @@ function PlaylistEditor() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          drop(orgId, playlist.id, i);
+                          showMove(e.currentTarget.parentElement, i, () => drop(orgId, playlist.id, i), dragging !== null && dragging !== i);
                         }}
                         onDragEnd={() => startDrag(null)}
                         // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
@@ -262,7 +295,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === 0}
                               ref={focusOn('up')}
-                              onClick={() => move(orgId, playlist.id, i, i - 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('ol'), i - 1, () => move(orgId, playlist.id, i, i - 1, name))}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -274,7 +307,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
                               ref={focusOn('down')}
-                              onClick={() => move(orgId, playlist.id, i, i + 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('ol'), i + 1, () => move(orgId, playlist.id, i, i + 1, name))}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />
@@ -283,7 +316,8 @@ function PlaylistEditor() {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="size-9"
+                              // In the row's corner: its corner fits the row's, the row's radius less its padding (#383).
+                              className="size-9 rounded-[calc(var(--radius-lg)-(--spacing(1)))]"
                               onClick={() => remove(orgId, playlist.id, i, name)}
                               aria-label={`Remove ${name}`}
                             >

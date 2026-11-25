@@ -29,6 +29,32 @@ export function standing(p: PublishView): string {
 /** Whether a rollout is over, as its page says "complete": it switched screens, and each plays it, was replaced or was revoked. */
 export const rolloutComplete = (p: Pick<PublishView, 'screens' | 'open'>) => p.screens > 0 && p.open === 0;
 
+/** One kind of what a publish changed, for the page to say (#370): the words around its names, which it shows, and how many more. */
+export interface ChangePart {
+  lead: string;
+  names: readonly string[];
+  more: number;
+  tail: string;
+}
+
+/** Names shown at most per kind: the rest are counted. */
+const SHOWN = 3;
+
+/**
+ * What a publish changed, kind by kind (#370): its spots and playlists made live, the playlists whose schedule
+ * entries it made live, and those it took off the schedule; three names each at most, the rest counted.
+ */
+export function changeParts(changes: NonNullable<PublishView['changes']>): ChangePart[] {
+  return changes.map((g) => {
+    const names = g.names.slice(0, SHOWN);
+    const more = g.omitted + g.names.length - names.length;
+    const plural = g.count === 1 ? '' : 's';
+    if (g.kind === 'spot') return { lead: `spot${plural}`, names, more, tail: '' };
+    if (g.kind === 'playlist') return { lead: `playlist${plural}`, names, more, tail: '' };
+    return g.removed ? { lead: 'took', names, more, tail: 'off the schedule' } : { lead: 'the schedule for', names, more, tail: '' };
+  });
+}
+
 /** A publish's name as people say it. */
 export const versionName = (p: { revision: number }) => `v${p.revision}`;
 
@@ -47,7 +73,7 @@ const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
 export const byWord = (p: Pick<PublishView, 'by'>, me: string) =>
   p.by.kind === 'user' && p.by.id === me ? 'you' : p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
 
-const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
+export const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
 
 /** Each outcome's mark on the bar: the chart tokens, and the one red for a screen that needs a person. */
 export const OUTCOME_COLOR: Record<Outcome, string> = {

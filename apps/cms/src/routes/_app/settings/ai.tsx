@@ -1,5 +1,5 @@
 /**
- * Settings, AI & agents (canvas board Settings-AI, #261, #262): the model the org's built-in agent
+ * Settings, AI model (canvas board Settings-AI, #261, #262): the model the org's built-in agent
  * uses. With no key of its own the org uses SignForge's demo model; an owner saves, tests and removes
  * a key for Anthropic or an OpenAI-compatible endpoint (its https address, and whether it takes images
  * and returns JSON-schema output), chooses the fast and capable models from the provider's own list,
@@ -26,7 +26,7 @@ import type { SettingsScope } from '~/state/settings';
 export const Route = createFileRoute('/_app/settings/ai')({
   server: { handlers: backToPage },
   loader: () => getAiSettings(),
-  head: () => ({ meta: [{ title: 'AI & agents · SignForge' }] }),
+  head: () => ({ meta: [{ title: 'AI model · SignForge' }] }),
   component: AiSettings,
 });
 
@@ -42,7 +42,7 @@ function AiSettings() {
   const { provider, names } = data;
   return (
     <div className="space-y-6">
-      <PageHeader title="AI & agents" description="The model behind the agent that fills spots from a flyer, a photo or a link." />
+      <PageHeader title="AI model" description="The model behind the agent that fills spots from a flyer, a photo or a link." />
       <SettingsSection
         id={`${id}-provider`}
         title="Provider & quota"

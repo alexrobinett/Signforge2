@@ -1,46 +1,34 @@
 /**
- * The command menu's entries: one per sidebar section, then one per tool the member's role may use,
- * read from `GET /api/tools` (the registry's `describeTools`, the list an agent gets). A tool's
- * form comes from its input's JSON Schema. Typing also finds screens and groups by name (#180),
- * each with its own actions (`targetActions`).
+ * The command menu's entries (#358): actions for people, each opening the page's own dialog, those the
+ * member's role allows (`GET /api/tools`, the registry's `describeTools`, read for permissions only);
+ * the pages, found when typed; and the agent. It opens on the page's own actions and questions. Typing
+ * also finds screens and groups by name (#180), each with its own actions (`targetActions`). The raw tool
+ * registry is the agents' and the API's, not the menu's.
  */
 import type { GroupView, ScreenView } from './screen-types';
 import { reachable } from './screen-status';
 import { SECTIONS, type Section } from './sections';
 import { findTargets } from './targets';
 
-/** One input of a tool's form. `key` is an idempotency key: never shown, filled by `withKey`. */
-export type Field = { name: string; label: string; hint: string; required: boolean; nullable: boolean } & (
-  | { type: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'key' }
-  | { type: 'choice'; options: string[] }
-);
-
-/** A tool as the menu needs it. */
+/** A tool as the menu needs it: what the member's role may call, for which actions to offer. */
 export interface ToolListing {
   name: string;
   description: string;
   mutates: boolean;
-  fields: Field[];
 }
 
+/** What a person does from ⌘K, each the page's own dialog (#358). */
+export type PeopleAction = 'pair' | 'new-spot' | 'new-playlist' | 'new-entry' | 'take-over' | 'publish-all';
+
 export type CommandEntry =
+  /** A page: listed only when typed, as the sidebar lists them (#358). */
   | { kind: 'go'; id: string; label: string; to: Section['to']; keywords: string[] }
-  /** `developer`: a tool for building on SignForge, listed to owners only, under Developer (#270). */
-  | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[]; developer: boolean }
-  /** `start_takeover` for a member who may publish: the takeover dialog, which sends it at once, as the Schedule page's does (#253). */
-  | { kind: 'takeover'; id: string; label: string; tool: ToolListing; keywords: string[] }
+  | { kind: 'action'; id: string; label: string; action: PeopleAction; keywords: string[] }
   | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] }
   /** The agent's drawer (#267). */
   | { kind: 'agent'; id: string; label: string; keywords: string[] }
   /** A question for the agent (#270): what was typed, or one suggested for the page. */
   | { kind: 'ask'; id: string; label: string; question: string; keywords: string[] };
-
-/**
- * Tools for building on SignForge, not for running signage: under Developer, for owners only (#270).
- * Menu curation only: the API's permissions are unchanged, and an editor may still call them through
- * `/api/tools` or an agent, as their role allows. The menu just leaves them out of an editor's list.
- */
-const DEVELOPER_TOOLS: ReadonlySet<string> = new Set(['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places']);
 
 /** Words a question or a request to the agent starts with. */
 const ASKING =
@@ -100,36 +88,6 @@ export function pageQuestions(path: string): CommandEntry[] {
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const text = (v: unknown) => (typeof v === 'string' ? v : '');
-
-/** A field from one property of the input schema. `anyOf [X, null]` is X, nullable. */
-function field(name: string, schema: unknown, required: boolean): Field {
-  const s = isRecord(schema) ? schema : {};
-  const options = Array.isArray(s.anyOf) ? s.anyOf.filter(isRecord) : [];
-  const nullable = options.some((o) => o.type === 'null');
-  const nonNull = options.filter((o) => o.type !== 'null');
-  const inner = nullable && nonNull.length === 1 ? { ...nonNull[0], description: s.description ?? nonNull[0]!.description } : s;
-  const base = { name, label: name, hint: text(inner.description), required, nullable };
-  if (name === 'idempotencyKey') return { ...base, type: 'key' };
-  if (Array.isArray(inner.enum) && inner.enum.every((v) => typeof v === 'string')) return { ...base, type: 'choice', options: inner.enum };
-  switch (inner.type) {
-    case 'string':
-      return { ...base, type: 'text' };
-    case 'integer':
-    case 'number':
-    case 'boolean':
-      return { ...base, type: inner.type };
-    default:
-      return { ...base, type: 'json' };
-  }
-}
-
-/** The form for an input schema: its top-level properties, in order. */
-function fieldsOf(schema: unknown): Field[] {
-  if (!isRecord(schema) || !isRecord(schema.properties)) return [];
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  return Object.entries(schema.properties).map(([name, prop]) => field(name, prop, required.includes(name)));
-}
 
 /** Parses `GET /api/tools`' body: `{ tools: [{ name, description, mutates, inputSchema, ... }] }`. */
 export function parseToolList(body: unknown): ToolListing[] {
@@ -138,140 +96,65 @@ export function parseToolList(body: unknown): ToolListing[] {
     if (!isRecord(t) || typeof t.name !== 'string' || typeof t.description !== 'string' || typeof t.mutates !== 'boolean') {
       throw new Error('The tool list has a tool without a name, description or mutates.');
     }
-    return { name: t.name, description: t.description, mutates: t.mutates, fields: fieldsOf(t.inputSchema) };
+    return { name: t.name, description: t.description, mutates: t.mutates };
   });
 }
 
-/**
- * A tool's name for people: its description's first sentence, up to a colon, a semicolon or ", so"
- * (what follows says why, not what), without the paging every list tool describes.
- */
-const labelOf = (description: string) =>
-  (description.split(/(?<=\.)\s/)[0] ?? description)
-    .split(/:|;|, so /)[0]!
-    .replace(/, ordered by id|,? a page at a time|\.$/g, '')
-    .trim();
+/** Each action's words, and the tools a member's role must have for it. */
+const ACTIONS: Record<PeopleAction, { label: string; needs: readonly string[]; keywords: string[] }> = {
+  pair: { label: 'Pair a screen…', needs: ['claim_screen'], keywords: ['add screen', 'new screen', 'code'] },
+  'new-spot': { label: 'New spot…', needs: ['create_spot'], keywords: ['create', 'template', 'image', 'web page'] },
+  'new-playlist': { label: 'New playlist…', needs: ['create_playlist'], keywords: ['create', 'loop'] },
+  'new-entry': { label: 'Add to the schedule…', needs: ['create_schedule_entry'], keywords: ['schedule', 'play', 'plan'] },
+  // A takeover is sent at once wherever the CMS offers it: one who may only draft it is not offered it (#253).
+  'take-over': { label: 'Take over screens now…', needs: ['start_takeover', 'publish'], keywords: ['takeover', 'urgent', 'override'] },
+  'publish-all': { label: 'Publish all changes…', needs: ['publish'], keywords: ['publish', 'unpublished', 'drafts'] },
+};
 
-/**
- * Navigation first, in sidebar order, then the tools in registry order, the developer tools only for
- * an owner (`owner`, #270). A takeover is sent at once
- * wherever the CMS offers it, so `start_takeover`, which only drafts one, opens the takeover dialog
- * for a member who may publish; one who may not can only draft it, as its own words say. Restart is
- * left out: a found screen offers it only once it is in touch (`targetActions`), and the tool would
- * say Sent to one that is not (#253).
- */
-export function commandEntries(tools: ToolListing[], owner = true): CommandEntry[] {
-  const publishes = tools.some((t) => t.name === 'publish');
-  return [
-    ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
-    { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] },
-    ...tools
-      // The takeover dialog already makes and publishes one at once (`takeover`): publish_takeover, the agent drawer's, is not listed beside it.
-      .filter((t) => t.name !== 'restart_screen' && t.name !== 'publish_takeover' && (owner || !DEVELOPER_TOOLS.has(t.name)))
-      .map((tool): CommandEntry => {
-        const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
-        return tool.name === 'start_takeover' && publishes
-          ? { kind: 'takeover', label: 'Take over screens now…', ...entry }
-          : { kind: 'tool', label: labelOf(tool.description), developer: DEVELOPER_TOOLS.has(tool.name), ...entry };
-      }),
-  ];
+/** The order the actions are listed in when typed. */
+const ORDER: readonly PeopleAction[] = ['pair', 'new-spot', 'new-playlist', 'new-entry', 'take-over', 'publish-all'];
+
+const actionEntry = (action: PeopleAction): CommandEntry => ({
+  kind: 'action',
+  id: `action:${action}`,
+  action,
+  label: ACTIONS[action].label,
+  keywords: ACTIONS[action].keywords,
+});
+
+/** The actions the member's role allows (`tools`), Publish all only while there are `drafts`: every page's, when typed. */
+export function peopleActions(tools: readonly ToolListing[], drafts: boolean): CommandEntry[] {
+  const may = (a: PeopleAction) => ACTIONS[a].needs.every((n) => tools.some((t) => t.name === n)) && (a !== 'publish-all' || drafts);
+  return ORDER.filter(may).map(actionEntry);
 }
+
+/** The actions the empty menu suggests on each page (#358), by its section; Publish all on every page. */
+const PAGE_ACTIONS: Record<string, readonly PeopleAction[]> = {
+  '/screens': ['pair', 'take-over'],
+  '/spots': ['new-spot'],
+  '/playlists': ['new-playlist'],
+  '/schedule': ['new-entry', 'take-over'],
+};
+
+/** The empty menu's actions for `path`, of those `allowed` (`peopleActions`): its section's, then Publish all. */
+export function pageActions(path: string, allowed: readonly CommandEntry[]): CommandEntry[] {
+  const section = Object.keys(PAGE_ACTIONS).find((to) => path === to || path.startsWith(`${to}/`));
+  const wanted: readonly PeopleAction[] = [...(section ? (PAGE_ACTIONS[section] ?? []) : []), 'publish-all'];
+  return wanted.flatMap((a) => allowed.filter((e) => e.kind === 'action' && e.action === a));
+}
+
+/** The pages, in sidebar order: found when typed, never listed on opening (#358). */
+export const pageEntries = (): CommandEntry[] =>
+  SECTIONS.map((s) => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] }));
+
+/** The agent's drawer, listed with the page's questions. */
+export const agentEntry: CommandEntry = { kind: 'agent', id: 'agent:ask', label: 'Ask the agent…', keywords: ['agent', 'ask', 'assistant', 'why', 'help'] };
 
 /** The organization commands: switching only for a member of two or more orgs (#182). */
 export function orgCommands(orgCount: number): CommandEntry[] {
   const create: CommandEntry = { kind: 'org', id: 'org:create', label: 'Create organization…', action: 'create', keywords: ['new organization'] };
   if (orgCount < 2) return [create];
   return [{ kind: 'org', id: 'org:switch', label: 'Switch organization…', action: 'switch', keywords: ['change organization'] }, create];
-}
-
-/** The value a choice field's select sends for null. */
-export const NULL_CHOICE = '(null)';
-
-/** Whether a tool opens a form: it does when any input is required. */
-export const needsInput = (tool: ToolListing) => tool.fields.some((f) => f.required);
-
-type InputResult = { ok: true; input: Record<string, unknown> } | { ok: false; field: string; message: string };
-
-/**
- * A submitted form as the tool's input, without its idempotency key (`withKey`). An empty field is
- * left out, or sent as null when the tool requires it and allows null. The API checks the rest
- * and refuses with its own message.
- */
-export function toolInput(fields: Field[], form: FormData): InputResult {
-  const input: Record<string, unknown> = {};
-  for (const f of fields) {
-    const raw = form.get(f.name);
-    const value = typeof raw === 'string' ? raw.trim() : '';
-    const empty = !value && f.type !== 'key' && f.type !== 'boolean';
-    if (value === NULL_CHOICE || (empty && f.required && f.nullable)) {
-      input[f.name] = null;
-      continue;
-    }
-    if (empty && !f.required) continue;
-    switch (f.type) {
-      case 'key':
-        // Filled by `withKey`, which knows whether this is a call already sent.
-        break;
-      case 'boolean':
-        if (value || f.required) input[f.name] = value === 'on';
-        break;
-      case 'text':
-      case 'choice':
-        input[f.name] = value;
-        break;
-      case 'integer':
-      case 'number': {
-        const n = Number(value);
-        if (!value || !Number.isFinite(n)) return { ok: false, field: f.name, message: `${f.label} must be a number.` };
-        input[f.name] = n;
-        break;
-      }
-      case 'json':
-        try {
-          input[f.name] = JSON.parse(value);
-        } catch {
-          return { ok: false, field: f.name, message: `${f.label} must be JSON, such as ["a", "b"] or {"key": "value"}.` };
-        }
-        break;
-    }
-  }
-  return { ok: true, input };
-}
-
-/** A call sent and not yet answered with success: its tool, its input without the key, and the key. */
-export interface PendingCall {
-  tool: string;
-  input: string;
-  key: string;
-}
-
-/**
- * The input with its idempotency key, if the tool takes one, and the call as now pending. The
- * same input to the same tool as the pending call is that call again, after a lost answer or a
- * refusal, and keeps its key, so the server does it once; anything else is a new call.
- */
-export function withKey(
-  tool: ToolListing,
-  input: Record<string, unknown>,
-  pending: PendingCall | null,
-): { input: Record<string, unknown>; pending: PendingCall | null } {
-  const field = tool.fields.find((f) => f.type === 'key');
-  if (!field) return { input, pending: null };
-  const same = JSON.stringify(input);
-  const key = pending?.tool === tool.name && pending.input === same ? pending.key : crypto.randomUUID();
-  return { input: { ...input, [field.name]: key }, pending: { tool: tool.name, input: same, key } };
-}
-
-/** A tool's output in a few words, for its toast: lists counted, a changed thing by name. */
-export function resultText(output: unknown): string {
-  if (!isRecord(output)) return 'Done';
-  if (output.changed === false) return 'Nothing changed: it was already so';
-  const parts = Object.entries(output).flatMap(([key, v]) => {
-    if (Array.isArray(v)) return [`${v.length} ${key}`];
-    if (isRecord(v) && typeof v.name === 'string') return [v.name];
-    return [];
-  });
-  return parts.join(', ') || 'Done';
 }
 
 /** A screen or a group ⌘K found, whose actions are showing. */

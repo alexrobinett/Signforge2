@@ -1,5 +1,5 @@
 {
-  "schema": 7,
+  "schema": 8,
   "screen": {
     "id": "stress-screen",
     "name": "Stress test screen",
@@ -2159,5 +2159,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "d081add1a4616a02632df6952ed24b57c43aee7334c43b0ed8389064ce0f108a"
+  "id": "6e2af16f314a9d3c8c477437ca576f94bc40a90404756b0fb842d91a03bb97cf"
 }

@@ -785,6 +785,9 @@ importers:
       '@signforge/template-build':
         specifier: workspace:*
         version: link:../template-build
+      '@signforge/template-news':
+        specifier: workspace:*
+        version: link:../../templates/news
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../template-sdk

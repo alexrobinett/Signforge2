@@ -21,7 +21,9 @@ import {
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
+  MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SYNC_RESPONSE_BLOBS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
   MAX_URL_BYTES,
@@ -29,11 +31,13 @@ import {
   SUPPORTED_PROTOCOLS,
   TABLE_ROWS_PATH,
   TEMPLATE_BUDGET,
+  TEMPLATE_CHECKS,
   templateKey,
   WEATHER_UNITS,
   type BrandKit,
   type DisplayHours,
   type FieldDef,
+  type NewsImage,
   type ScalarFieldDef,
   type ScreenManifest,
   type TableFeed,
@@ -54,8 +58,11 @@ const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isIdValue = (v: unknown): v is string => typeof v === 'string' && ID_PATTERN.test(v);
-/** A manifest id as a screen reports it: lowercase hex sha256, as `canonicalJson` describes. */
-const isManifestId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+/** A lowercase hex SHA-256 hash: manifest ids, file hashes and feed image hashes. */
+const isSha256 = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+const isManifestId = isSha256;
+/** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
+export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
@@ -203,7 +210,7 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
   }
 }
 
-/** What is wrong with one field definition. List items may hold only scalar fields. */
+/** What is wrong with one field definition. List items may hold scalars or an optional image (`NewsImage`). */
 function fieldDefProblems(name: string, def: unknown, inList = false): string[] {
   const where = `field "${name}"`;
   if (!isObj(def)) return [`${where} is not a field definition`];
@@ -246,7 +253,6 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
       if (!Array.isArray(def.options) || !def.options.length || !def.options.every(isStr)) out.push(`${where}: options must be a list of text`);
       break;
     case 'image':
-      if (inList) out.push(`${where}: a list row cannot hold an image`);
       return out;
     case 'list':
       if (inList) return [...out, `${where}: a list row cannot hold a list`];
@@ -282,6 +288,11 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
     }
     if (!open) for (const k of Object.keys(row)) if (!Object.hasOwn(def.item, k)) out.push(`field "${name}" row ${i + 1} has no column "${k}"`);
     for (const [k, d] of Object.entries(def.item)) {
+      if (d.type === 'image') {
+        const cell = own(row, k);
+        if (cell !== undefined && !isNewsImage(cell)) out.push(`field "${name}[${i + 1}].${k}" must be an image hash pair ({ file, thumb })`);
+        continue;
+      }
       const cell = own(row, k) ?? d.default;
       if (cell === undefined) out.push(`field "${name}" row ${i + 1} is missing "${k}"`);
       else {
@@ -400,10 +411,11 @@ function tableBindingProblems(name: string, def: FieldDef, path: unknown, t: unk
   const props = Object.keys(def.item);
   for (const [prop, column] of Object.entries(t.columns)) {
     if (!Object.hasOwn(def.item, prop)) out.push(`${where}: "${prop}" is not a property of its items (${props.join(', ')})`);
+    else if (def.item[prop]!.type === 'image') out.push(`${where}: "${prop}" is an image and cannot be mapped from a table column`);
     else if (!isText(column)) out.push(`${where}: the column for "${prop}" must be a column name`);
   }
   for (const [prop, d] of Object.entries(def.item))
-    if (d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
+    if (d.type !== 'image' && d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
   if (t.filter !== undefined && !(isObj(t.filter) && isText(t.filter.column) && isStr(t.filter.equals)))
     out.push(`${where}: filter needs a column and the text it equals`);
   if (t.sort !== undefined && !(isObj(t.sort) && isText(t.sort.column) && (t.sort.descending === undefined || typeof t.sort.descending === 'boolean')))
@@ -617,6 +629,7 @@ export function tableItems(
     const item: Record<string, unknown> = {};
     let problem: string | undefined;
     for (const [prop, d] of Object.entries(def.item)) {
+      if (d.type === 'image') continue;
       const column = own(t.columns, prop);
       const cell = isStr(column) ? cells[at(column)] : undefined;
       // A cell that does not convert is checked as written, so the problem names what is wrong with it.
@@ -1069,6 +1082,11 @@ export function validateSyncRequest(r: unknown): string[] {
     if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
     else errors.push(...sourceMapProblems('dataRejected', r.dataRejected, 'a count'));
   }
+  if (r.blobs !== undefined) {
+    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
+    else if (r.blobs.length > MAX_SYNC_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_BLOBS} hashes`);
+    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
+  }
   return errors;
 }
 
@@ -1088,6 +1106,11 @@ export function validateSyncResponse(r: unknown): string[] {
       for (const [k, v] of Object.entries(r.checked))
         if (!isIdValue(k) || !isCount(own(v, 'version')) || !isInstant(own(v, 'checkedAt')))
           errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
+  }
+  if (r.blobs !== undefined) {
+    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
+    else if (r.blobs.length > MAX_SYNC_RESPONSE_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_RESPONSE_BLOBS} hashes`);
+    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
   }
   if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
   errors.push(...list('command', r.commands, validateDeviceCommand));
@@ -1142,6 +1165,126 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
 
 // ------------------------------------------------------------- template bundle
 
+const codePoint = (code: number) => (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '�' : String.fromCodePoint(code));
+
+/** CSS whitespace: space, tab and the newlines (CR LF and CR are LF already). U+00A0 is not, though JS's `\s` is. */
+const cssSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+/** A name code point (CSS Syntax 3): an ASCII letter, digit, `_` or `-`, or any non-ASCII. An escape is one too. */
+const nameChar = (c: string) => /[\w-]/.test(c) || c.charCodeAt(0) >= 0x80;
+
+/**
+ * CSS as the browser reads it, for the checks to see what it fetches (#326): from a style's text as the HTML parser
+ * gives it (`bundleScripts`), CSS comments dropped outside strings and url() tokens, a backslash-newline dropped in a
+ * string, and each escape (`\2f `, `\/`) read as its character. An escaped quote is read as no quote at all, so it
+ * neither starts nor ends a string here, as it does not in CSS. A string ends at a newline, as in CSS, and in a string
+ * or an unquoted url() the control characters go (tab, newline and the rest of C0), as the URL parser drops them.
+ *
+ * A url() token is read as CSS Syntax 3 reads one: a name of exactly `url` (any case, escapes read), then `(`, then
+ * CSS whitespace only, and no quote. The name is kept as it is read, four characters at most, so nothing already read
+ * is read again: the whole reading is one pass (review of #438, round 3).
+ */
+export function readCss(text: string): string {
+  let out = '';
+  // In a string: its quote; in an unquoted url(): ')'.
+  let inside = '';
+  // The name being read, lowercased, cut at four characters: only whether it is `url` matters.
+  let name = '';
+  const named = (c: string) => {
+    name = name.length < 4 ? name + c.toLowerCase() : 'long';
+  };
+  const put = (c: string) => {
+    if (!(inside && c.charCodeAt(0) < 0x20)) out += c;
+  };
+  /** Whether, from `j` on, CSS whitespace and then a quote come: `url(` then opens a function, not a url token. */
+  const quoteAfter = (j: number) => {
+    while (cssSpace(text[j])) j += 1;
+    return text[j] === '"' || text[j] === "'";
+  };
+  for (let i = 0; i < text.length; ) {
+    const c = text[i]!;
+    if (!inside && c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+      name = '';
+      continue;
+    }
+    if (c === '\\') {
+      const next = text[i + 1];
+      if (next === undefined) break;
+      if (next === '\n' || next === '\r' || next === '\f') {
+        // In a string, a line continuation: gone. Elsewhere, no escape: the backslash stays, and ends a name.
+        const quoted = inside && inside !== ')';
+        if (!quoted) {
+          out += c;
+          name = '';
+        }
+        i += quoted ? (next === '\r' && text[i + 2] === '\n' ? 3 : 2) : 1;
+        continue;
+      }
+      const hex = /^[0-9a-f]{1,6}/i.exec(text.slice(i + 1, i + 7));
+      const decoded = hex ? codePoint(Number.parseInt(hex[0], 16)) : next;
+      if (!inside) named(decoded);
+      put(decoded === '"' || decoded === "'" ? '�' : decoded);
+      i += 1 + (hex ? hex[0].length : 1);
+      // One whitespace after a hex escape is part of it.
+      if (hex && text[i] === '\r' && text[i + 1] === '\n') i += 2;
+      else if (hex && cssSpace(text[i])) i += 1;
+      continue;
+    }
+    if (!inside && (c === '"' || c === "'")) inside = c;
+    else if (!inside && c === '(' && name === 'url' && !quoteAfter(i + 1)) inside = ')';
+    else if (inside && (c === inside || (inside !== ')' && (c === '\n' || c === '\r' || c === '\f')))) inside = '';
+    if (!inside && nameChar(c)) named(c);
+    else name = '';
+    put(c);
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * The patterns the styles lint finds a network address with: a quoted string that starts with one, as read (`quoted`)
+ * and as written (`written`, where a quote after a backslash is escaped and starts no string: `"say \"//hi\""`), and
+ * a url() (`url`). `image-set("//x" 1x)` is fetched with no url() around it. A backslash counts as a slash: the URL
+ * parser reads "\" as "/" in an http(s) address (#326); two backslashes or slashes at a string's start are refused even
+ * where they are a path, as no template has a reason to write that. No two quantifiers in one can match the same
+ * characters side by side: each is linear, whatever a bundle holds (review of #438, round 4).
+ */
+export const STYLE_ADDRESS = {
+  quoted: /["']\s*(?:https?:)?[/\\]{2}/i,
+  written: /(?<!\\)["']\s*(?:https?:)?[/\\]{2}/i,
+  url: /url\(\s*(?:["']\s*)?(?:https?:)?[/\\]{2}/i,
+};
+
+const lineEnd = (c: string | undefined) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+
+/**
+ * An author's source with its comments taken out, so a note about `fetch` is not a call to it: `/* … *\/` closed, and
+ * `//` to the line's end where no colon is before it (`//` after a colon is a URL, and is kept). An unclosed `/*` is
+ * kept, with what follows. One pass, linear (review of #438, round 4): once no `*\/` is left, none is looked for again.
+ */
+export function withoutComments(text: string): string {
+  let out = '';
+  let closes = true;
+  for (let i = 0; i < text.length; ) {
+    if (closes && text[i] === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end >= 0) {
+        i = end + 2;
+        continue;
+      }
+      closes = false;
+    }
+    if (text[i] === '/' && text[i + 1] === '/' && text[i - 1] !== ':') {
+      while (i < text.length && !lineEnd(text[i])) i += 1;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
+
 /**
  * Lint a built template: the manifest, the forbidden CSS list, the size budget and network
  * references are checked on the bundle; the forbidden-code list on the author's own source files
@@ -1150,6 +1293,17 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
  * sandbox with its no-network policy is what keeps a screen safe.
  */
 export function checkTemplateBundle(input: { manifest: unknown; html: string; sources: Record<string, string> }): TemplateCheckReport {
+  try {
+    return checkBundle(input);
+  } catch (err) {
+    // What the checks build is bounded by a few times the bundle, but a bundle far over the size budget can take that
+    // past the longest string the runtime makes: refused with why, never thrown at the server (review of #438, round 3).
+    const problem = `the bundle could not be checked: ${err instanceof Error ? err.message : String(err)}`;
+    return { ok: false, bundleBytes: input.html.length, checks: TEMPLATE_CHECKS.map((check) => ({ check, ok: false, problems: [problem] })), warnings: [] };
+  }
+}
+
+function checkBundle(input: { manifest: unknown; html: string; sources: Record<string, string> }): TemplateCheckReport {
   const { manifest, html, sources } = input;
   const bundleBytes = new TextEncoder().encode(html).byteLength;
   const matches = (rules: { pattern: RegExp; reason: string }[], text: string) => rules.filter((r) => r.pattern.test(text)).map((r) => r.reason);
@@ -1160,42 +1314,44 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
 
   const network: string[] = [];
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
-  // In the bundle's styles, any quoted string that is a network address: `image-set("//x" 1x)` is
-  // fetched with no url() around it. Comments go first, a font licence notice's addresses with them;
-  // strings are kept whole, so a /* in one opens no comment. Where this reading and the browser's
-  // disagree (an escape, an unquoted url(), the HTML around the style), a comment can hide an address
-  // two ways: around it, so a comment that quotes one stays; or from inside it, at its own slash
-  // ("//*" or "https:/*", which the browser fetches), so that is refused in the text as written.
-  const quotedAddress = /["']\s*(?:https?:)?\/\//i;
-  const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!);
-  const styles = css
+  const { quoted: quotedAddress, written: writtenAddress, url: urlAddress } = STYLE_ADDRESS;
+  // Read twice, from the HTML parser's tree (`bundleScripts`): as written, comments that quote an
+  // address left in sight, so a reading out of step with the browser's cannot hide one; and as the
+  // browser reads it (`readCss`): the parser's text of each <style> and style attribute, with CSS
+  // comments, line continuations and escapes undone.
+  const bundle = bundleScripts(html);
+  const blocks = bundle.styles.map((style) => style.written);
+  const asWritten = blocks
     .map((text) =>
       text.replace(
-        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?\*\//g,
-        (c, string?: string) => string ?? (quotedAddress.test(c) ? c : ''),
+        // An unclosed comment runs to the end, as in CSS: one match, not a scan to the end from each /* (review of #438).
+        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?(?:\*\/|$)/g,
+        (c, string?: string) => string ?? (writtenAddress.test(c) ? c : ''),
       ),
     )
     .join('\n');
+  const asRead = [...bundle.styles.map((style) => style.text), ...bundle.styleAttributes].map(readCss);
   if (
     /\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) ||
-    /url\(\s*["']?(?:https?:)?\/\//i.test(html) ||
-    quotedAddress.test(styles) ||
-    /["']\s*(?:https?:\/?|\/)\/\*/i.test(css.join('\n'))
+    urlAddress.test(html) ||
+    writtenAddress.test(asWritten) ||
+    // A comment marker at an address's own slash, where the two readings part: refused as written.
+    /["']\s*(?:https?:[/\\]+|[/\\]{2,})\*/i.test(blocks.join('\n')) ||
+    asRead.some((text) => quotedAddress.test(text) || urlAddress.test(text))
   )
     network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
-  const authored = Object.values(sources)
-    .map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, ''))
-    .join('\n');
+  const authored = Object.values(sources).map(withoutComments).join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
   // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
-  const scripts = bundleScripts(html).scripts.flatMap((s) => (s.problem ? [s.problem] : []));
+  const scripts = bundle.scripts.flatMap((s) => (s.problem ? [s.problem] : []));
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
-    { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
+    // As written and as read, so an escaped letter (`@\69mport`) hides nothing (#326).
+    { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, [html, ...asRead].join('\n')) },
     {
       check: 'size',
       ok: true,

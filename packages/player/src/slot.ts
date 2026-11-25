@@ -4,6 +4,8 @@
  */
 import {
   SUPPORTED_PROTOCOLS,
+  isNewsImage,
+  rowAsset,
   sampleAsset,
   type FrameClock,
   type FrameFont,
@@ -12,6 +14,7 @@ import {
   type Orientation,
   type ScreenManifest,
   type Spot,
+  type TemplateManifest,
   type TemplateMessage,
 } from '@signforge/contract';
 import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
@@ -44,6 +47,8 @@ interface LiveFrame {
   html: string;
   spot: TemplateSpot;
   manifest: ScreenManifest;
+  data: Record<string, unknown>;
+  locale: string;
   assets: Record<string, Blob>;
   /** The screen's brand kit as the frame takes it; protocol 2 only. */
   theme?: FrameTheme;
@@ -70,6 +75,77 @@ async function spotAssets(spot: TemplateSpot, manifest: ScreenManifest): Promise
     }),
   );
   return assets;
+}
+
+/**
+ * Resolve any list-row image blobs (`NewsImage` in list fields whose `item` declares an `image`
+ * property) into `init.assets` under `rowAsset(field, i, prop)` and `rowAsset(..., 'thumb')`.
+ * Missing blobs never fail the spot: the row's image property is omitted from `data` and neither
+ * asset key is added, so the story plays cleanly as a story with no image.
+ */
+async function resolveRowImages(
+  fields: TemplateManifest['fields'],
+  data: Record<string, unknown>,
+): Promise<{ data: Record<string, unknown>; assets: Record<string, Blob> }> {
+  const listFields: { name: string; imageProps: string[] }[] = [];
+  for (const [name, def] of Object.entries(fields)) {
+    if (def.type !== 'list') continue;
+    const imageProps = Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? [k] : []));
+    if (imageProps.length) listFields.push({ name, imageProps });
+  }
+  if (!listFields.length) return { data, assets: {} };
+
+  const shas = new Set<string>();
+  for (const { name, imageProps } of listFields) {
+    const rows = data[name];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue;
+      for (const prop of imageProps) {
+        if (!Object.hasOwn(row, prop)) continue;
+        const img: unknown = Reflect.get(row, prop);
+        if (!isNewsImage(img)) continue;
+        shas.add(img.file);
+        shas.add(img.thumb);
+      }
+    }
+  }
+  if (!shas.size) return { data, assets: {} };
+
+  const loaded = new Map<string, Blob>();
+  await Promise.all(
+    [...shas].map(async (sha) => {
+      const blob = await getFile(sha).catch(() => undefined);
+      if (blob) loaded.set(sha, blob);
+    }),
+  );
+
+  const nextData: Record<string, unknown> = { ...data };
+  const assets: Record<string, Blob> = {};
+  for (const { name, imageProps } of listFields) {
+    const rows = data[name];
+    if (!Array.isArray(rows)) continue;
+    nextData[name] = rows.map((row: unknown, i) => {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) return row;
+      let cloned: Record<string, unknown> | undefined;
+      for (const prop of imageProps) {
+        if (!Object.hasOwn(row, prop)) continue;
+        const img: unknown = Reflect.get(row, prop);
+        if (!isNewsImage(img)) continue;
+        const fileBlob = loaded.get(img.file);
+        const thumbBlob = loaded.get(img.thumb);
+        if (fileBlob && thumbBlob) {
+          assets[rowAsset(name, i, prop)] = fileBlob;
+          assets[rowAsset(name, i, prop, 'thumb')] = thumbBlob;
+        } else {
+          cloned ??= Object.fromEntries(Object.entries(row));
+          delete cloned[prop];
+        }
+      }
+      return cloned ?? row;
+    });
+  }
+  return { data: nextData, assets };
 }
 
 /** The last manifest's theme: every template spot of a manifest shares it, so its files are read once. */
@@ -227,10 +303,18 @@ export class Slot {
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const { wrapper: wrapperHtml, template: templateHtml } = await framesFor(manifest, t.html);
-    const assets = await spotAssets(spot, manifest);
-    // Protocol 1 bundles predate the theme.
-    const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
+    const locale = screenLocale(manifest);
+    const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
+    reportRejected(rejected);
+    const [{ wrapper: wrapperHtml, template: templateHtml }, baseAssets, rowImages, theme] = await Promise.all([
+      framesFor(manifest, t.html),
+      spotAssets(spot, manifest),
+      resolveRowImages(t.manifest.fields, resolvedData),
+      // Protocol 1 bundles predate the theme.
+      protocol >= 2 ? brandTheme(manifest) : Promise.resolve(undefined),
+    ]);
+    const assets = { ...baseAssets, ...rowImages.assets };
+    const data = rowImages.data;
     alive(signal);
 
     // Fit the template to the screen. On an orientation it does not support it is letterboxed
@@ -281,6 +365,8 @@ export class Slot {
       html: t.html,
       spot,
       manifest,
+      data,
+      locale,
       assets,
       theme,
       orientation,
@@ -307,19 +393,16 @@ export class Slot {
       (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          const locale = screenLocale(live.manifest);
-          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now(), locale);
-          reportRejected(rejected);
           this.post({
             sf: protocol,
             type: 'init',
-            data,
+            data: live.data,
             assets: live.assets,
             durationMs: live.spot.durationMs,
             orientation: live.orientation,
             viewport: live.viewport,
             timezone: live.manifest.screen.timezone,
-            locale,
+            locale: live.locale,
             clock: frameClock(),
             ...(live.theme ? { theme: live.theme } : {}),
           });
@@ -352,10 +435,16 @@ export class Slot {
       return;
     }
     const signal = this.abort.signal;
-    const assets = await spotAssets(spot, manifest);
-    const theme = await brandTheme(manifest);
+    const locale = screenLocale(manifest);
+    const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
+    reportRejected(rejected);
+    const [baseAssets, rowImages, theme] = await Promise.all([
+      spotAssets(spot, manifest),
+      resolveRowImages(t.manifest.fields, resolvedData),
+      brandTheme(manifest),
+    ]);
     alive(signal);
-    Object.assign(live, { spot, manifest, assets, theme });
+    Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
     // The frames are reused, so a rename in the editor must reach their titles too.
     live.frame.title = live.wrapperFrame.title = spot.name;
     this.spot = spot;
