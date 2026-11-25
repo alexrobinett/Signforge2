@@ -14,49 +14,86 @@ const SEVERITIES: Record<string, { label: string; ground: string; ink: string }>
 };
 
 /**
- * Halvings of the search for the largest scale at which text fits its region: within 1/64 of it, seven layouts at most.
- * Eight took a cold prepare of the widest copy to 590 ms on the Pi, over the 500 ms budget (review of #448).
+ * Probes of the search for the largest scale at which text fits its region, after the one at full size: seven layouts at
+ * most, and within 1/64 of the scale. A search of eight halvings for each region in turn took a cold prepare of the
+ * widest copy to 590 ms on the Pi, over the 500 ms budget (review of #448).
  */
-const STEPS = 6;
+const PROBES = 6;
+/** How close the scale is found, and the first step from the estimate. */
+const PRECISION = 1 / 64;
+const STRIDE = 1 / 16;
 /** A line may stand this far past its region's edge, for sub-pixel layout: never a whole pixel. */
 const SLACK = 0.5;
 
 type Side = 'top' | 'bottom';
 /**
- * Whether every line of text in `region` lies inside its box on the sides text can run out of: left, right and `side`,
- * the end it grows towards. Measured line by line (`Range.getClientRects`), as laid out: a line's box is its font's
- * whole height, which stands out past a tight line on the side the text starts from, so that side is not measured.
+ * Whether the text of `region` lies inside its box on the sides text can run out of: left and right, line by line
+ * (`Range.getClientRects`), and `side`, the end it grows towards, by the boxes of the blocks it is in, which are its line
+ * boxes. A line's own rect is its font's whole height, which a tall fallback font stands past its line box by a pixel
+ * at some sizes, so the height is measured by the blocks: what fits is then the same at every smaller scale, and ink
+ * past a box is clipped (style.css). With it, what the text needs: the height it takes against the region's, and the
+ * width it would at most fit in, as a share of what it takes.
  */
-function linesFit(region: Element, side: Side): boolean {
+function measure(region: Element, side: Side): { fits: boolean; height: number; room: number; across: number } {
   const box = region.getBoundingClientRect();
   const range = document.createRange();
   const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+  let [left, right, top, bottom] = [box.left, box.left, box.bottom, box.top];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     range.selectNodeContents(node);
-    for (const line of range.getClientRects()) {
-      if (line.left < box.left - SLACK || line.right > box.right + SLACK) return false;
-      if (side === 'bottom' ? line.bottom > box.bottom + SLACK : line.top < box.top - SLACK) return false;
-    }
+    for (const line of range.getClientRects()) [left, right] = [Math.min(left, line.left), Math.max(right, line.right)];
   }
-  return true;
+  for (const block of region.children) {
+    const r = block.getBoundingClientRect();
+    [top, bottom] = [Math.min(top, r.top), Math.max(bottom, r.bottom)];
+  }
+  const across = left >= box.left - SLACK && right <= box.right + SLACK;
+  const fits = across && (side === 'bottom' ? bottom <= box.bottom + SLACK : top >= box.top - SLACK);
+  const height = side === 'bottom' ? bottom - box.top : box.bottom - top;
+  return { fits, height, room: box.height, across: box.width / (right - left) };
 }
 
 /**
- * Sets `name` on the root to the largest scale, from 1 down with no floor, at which `fits` holds: 1 when the text fits as
- * it is (one layout, as realistic copy does), else a binary search. Small text beats hidden or covered text in an
- * emergency (review of #448, round 3).
+ * Sets each scale (`name` on the root) to the largest, from 1 down with no floor, at which its regions' text fits: 1 when
+ * it fits as it is (one layout, as realistic copy does). Else it probes the scale estimated from that layout, then one
+ * STRIDE from it towards the answer, then halves what is left: five layouts as a rule, never more than PROBES and one,
+ * and it keeps the largest scale seen to fit. The regions are independent, so their searches share each layout: every
+ * step sets every scale and one layout answers every check. Small text beats hidden or covered text in an emergency
+ * (review of #448).
  */
-function fitScale(root: HTMLElement, name: string, fits: () => boolean): void {
-  root.style.setProperty(name, '1');
-  if (fits()) return;
-  let [low, high] = [0, 1];
-  for (let i = 0; i < STEPS; i++) {
-    const mid = (low + high) / 2;
-    root.style.setProperty(name, String(mid));
-    if (fits()) low = mid;
-    else high = mid;
+function fitScales(root: HTMLElement, scales: [name: string, groups: [Element, Side][][]][]): void {
+  // The scale estimated to fit: wrapped text needs height about as the square of the scale, and a glyph too wide to wrap
+  // needs width as the scale. Over each group of regions together, as one may take room from another (the meta line's
+  // row grows into the copy's when they share a column), and the smallest of the groups'.
+  const check = (groups: [Element, Side][][]) => {
+    let [fits, estimate] = [true, 1];
+    for (const group of groups) {
+      const all = group.map(([el, side]) => measure(el, side));
+      const sum = (k: 'height' | 'room') => all.reduce((n, m) => n + m[k], 0);
+      fits &&= all.every((m) => m.fits);
+      estimate = Math.min(estimate, Math.sqrt(sum('room') / sum('height')), ...all.map((m) => m.across));
+    }
+    return { fits, estimate };
+  };
+  for (const [name] of scales) root.style.setProperty(name, '1');
+  const open = scales.flatMap(([name, regions]) => {
+    const { fits, estimate } = check(regions);
+    return fits ? [] : [{ name, regions, low: 0, high: 1, next: estimate, probed: 0 }];
+  });
+  for (let i = 0; i < PROBES && open.some((s) => s.high - s.low > PRECISION); i++) {
+    const live = open.filter((s) => s.high - s.low > PRECISION);
+    for (const s of live) root.style.setProperty(s.name, String(s.next));
+    for (const s of live) {
+      const at = s.next;
+      if (check(s.regions).fits) s.low = at;
+      else s.high = at;
+      s.probed += 1;
+      // From the estimate a stride towards the answer, then halves; a step that would leave the bracket halves it.
+      const step = s.probed === 1 ? (s.low === at ? at + STRIDE : at - STRIDE) : (s.low + s.high) / 2;
+      s.next = step > s.low && step < s.high ? step : (s.low + s.high) / 2;
+    }
   }
-  root.style.setProperty(name, String(low));
+  for (const s of open) root.style.setProperty(s.name, String(s.low));
 }
 
 defineTemplate({
@@ -95,10 +132,18 @@ defineTemplate({
     // together. Measured with the intros off, as the text lies when it plays.
     root.dataset.measuring = '';
     const caption = document.querySelector('.qr figcaption');
-    if (caption) fitScale(root, '--cap-fit', () => linesFit(caption, 'bottom'));
     const copy = document.querySelector('.copy')!;
     const meta = document.querySelector('.meta')!;
-    fitScale(root, '--fit', () => linesFit(copy, 'bottom') && linesFit(meta, 'top'));
+    // The copy and the meta line share a column in landscape, and in portrait without the code; beside the code in
+    // portrait the meta line has a region of its own.
+    const shared = root.dataset.orientation !== 'portrait' || !caption;
+    const text: [Element, Side][] = [
+      [copy, 'bottom'],
+      [meta, 'top'],
+    ];
+    const scales: [string, [Element, Side][][]][] = [['--fit', shared ? [text] : text.map((region) => [region])]];
+    if (caption) scales.push(['--cap-fit', [[[caption, 'bottom']]]]);
+    fitScales(root, scales);
     delete root.dataset.measuring;
   },
 });
