@@ -1,5 +1,5 @@
 {
-  "schema": 7,
+  "schema": 8,
   "screen": {
     "id": "demo-counter",
     "name": "Demo counter screen",
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "7fb82c960c4427cdcf03a790a4a4abe4808cd5950b62563c51204f5640f5f5ce"
+  "id": "2bbf217604a27ea764ed23d03d46a153c50be0e504026e5788f10ee450283e1e"
 }

@@ -21,7 +21,9 @@ import {
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
+  MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SYNC_RESPONSE_BLOBS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
   MAX_URL_BYTES,
@@ -35,6 +37,7 @@ import {
   type BrandKit,
   type DisplayHours,
   type FieldDef,
+  type NewsImage,
   type ScalarFieldDef,
   type ScreenManifest,
   type TableFeed,
@@ -55,8 +58,11 @@ const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isIdValue = (v: unknown): v is string => typeof v === 'string' && ID_PATTERN.test(v);
-/** A manifest id as a screen reports it: lowercase hex sha256, as `canonicalJson` describes. */
-const isManifestId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+/** A lowercase hex SHA-256 hash: manifest ids, file hashes and feed image hashes. */
+const isSha256 = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+const isManifestId = isSha256;
+/** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
+export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
@@ -192,7 +198,7 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
   }
 }
 
-/** What is wrong with one field definition. List items may hold only scalar fields. */
+/** What is wrong with one field definition. List items may hold scalars or an optional image (`NewsImage`). */
 function fieldDefProblems(name: string, def: unknown, inList = false): string[] {
   const where = `field "${name}"`;
   if (!isObj(def)) return [`${where} is not a field definition`];
@@ -231,7 +237,6 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
       if (!Array.isArray(def.options) || !def.options.length || !def.options.every(isStr)) out.push(`${where}: options must be a list of text`);
       break;
     case 'image':
-      if (inList) out.push(`${where}: a list row cannot hold an image`);
       return out;
     case 'list':
       if (inList) return [...out, `${where}: a list row cannot hold a list`];
@@ -267,6 +272,11 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
     }
     if (!open) for (const k of Object.keys(row)) if (!Object.hasOwn(def.item, k)) out.push(`field "${name}" row ${i + 1} has no column "${k}"`);
     for (const [k, d] of Object.entries(def.item)) {
+      if (d.type === 'image') {
+        const cell = own(row, k);
+        if (cell !== undefined && !isNewsImage(cell)) out.push(`field "${name}[${i + 1}].${k}" must be an image hash pair ({ file, thumb })`);
+        continue;
+      }
       const cell = own(row, k) ?? d.default;
       if (cell === undefined) out.push(`field "${name}" row ${i + 1} is missing "${k}"`);
       else {
@@ -385,10 +395,11 @@ function tableBindingProblems(name: string, def: FieldDef, path: unknown, t: unk
   const props = Object.keys(def.item);
   for (const [prop, column] of Object.entries(t.columns)) {
     if (!Object.hasOwn(def.item, prop)) out.push(`${where}: "${prop}" is not a property of its items (${props.join(', ')})`);
+    else if (def.item[prop]!.type === 'image') out.push(`${where}: "${prop}" is an image and cannot be mapped from a table column`);
     else if (!isText(column)) out.push(`${where}: the column for "${prop}" must be a column name`);
   }
   for (const [prop, d] of Object.entries(def.item))
-    if (d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
+    if (d.type !== 'image' && d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
   if (t.filter !== undefined && !(isObj(t.filter) && isText(t.filter.column) && isStr(t.filter.equals)))
     out.push(`${where}: filter needs a column and the text it equals`);
   if (t.sort !== undefined && !(isObj(t.sort) && isText(t.sort.column) && (t.sort.descending === undefined || typeof t.sort.descending === 'boolean')))
@@ -602,6 +613,7 @@ export function tableItems(
     const item: Record<string, unknown> = {};
     let problem: string | undefined;
     for (const [prop, d] of Object.entries(def.item)) {
+      if (d.type === 'image') continue;
       const column = own(t.columns, prop);
       const cell = isStr(column) ? cells[at(column)] : undefined;
       // A cell that does not convert is checked as written, so the problem names what is wrong with it.
@@ -1054,6 +1066,11 @@ export function validateSyncRequest(r: unknown): string[] {
     if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
     else errors.push(...sourceMapProblems('dataRejected', r.dataRejected, 'a count'));
   }
+  if (r.blobs !== undefined) {
+    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
+    else if (r.blobs.length > MAX_SYNC_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_BLOBS} hashes`);
+    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
+  }
   return errors;
 }
 
@@ -1073,6 +1090,11 @@ export function validateSyncResponse(r: unknown): string[] {
       for (const [k, v] of Object.entries(r.checked))
         if (!isIdValue(k) || !isCount(own(v, 'version')) || !isInstant(own(v, 'checkedAt')))
           errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
+  }
+  if (r.blobs !== undefined) {
+    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
+    else if (r.blobs.length > MAX_SYNC_RESPONSE_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_RESPONSE_BLOBS} hashes`);
+    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
   }
   if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
   errors.push(...list('command', r.commands, validateDeviceCommand));

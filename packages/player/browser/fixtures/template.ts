@@ -13,6 +13,7 @@
 import { Sha256 } from '@signforge/player-core/sha256';
 import { defineTemplate } from '@signforge/template-sdk';
 import { sampleAsset } from '@signforge/template-sdk/backdrop';
+import { bindRow } from '@signforge/template-sdk/rows';
 import { attribute, childPage, childScript } from './child';
 
 const forever = () => new Promise<never>(() => {});
@@ -140,8 +141,20 @@ defineTemplate({
       await after(200);
       throw new Error(`${mode} was refused`);
     }
-    const items = (ctx.data.items ?? []) as { title: string }[];
+    const items = (ctx.data.items ?? []) as { title: string; image?: { file: string; thumb: string } }[];
     document.getElementById('box')!.textContent = items.map((i) => i.title).join(', ');
+    if (items.length) {
+      const ul = document.createElement('ul');
+      ul.id = 'rows';
+      items.forEach((item, i) => {
+        const li = document.createElement('li');
+        li.dataset.hasImage = item.image ? '1' : '0';
+        li.innerHTML = '<span data-sf="title"></span><img class="lead" data-sf-src="image"><img class="thumb" data-sf-src="image:thumb">';
+        bindRow(li, ctx, 'items', i);
+        ul.appendChild(li);
+      });
+      document.body.appendChild(ul);
+    }
   },
   play() {
     document.body.dataset.playing = '1';

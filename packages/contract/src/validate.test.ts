@@ -6,8 +6,12 @@ import {
   STYLE_ADDRESS,
   withoutComments,
   IMAGE_SAMPLE_CELL,
+  isNewsImage,
   MANIFEST_SCHEMA,
+  MAX_SYNC_BLOBS,
+  MAX_SYNC_RESPONSE_BLOBS,
   MAX_URL_BYTES,
+  rowAsset,
   SCREEN_BOX,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
@@ -515,17 +519,64 @@ describe('validateTemplateManifest', () => {
     const bad = structuredClone(template) as unknown as { fields: Record<string, unknown> };
     bad.fields.price = { type: 'number', label: 'Price', min: 10, max: 1, step: 0 };
     bad.fields.size = { type: 'select', label: 'Size', options: [] };
-    bad.fields.items = { type: 'list', label: 'Items', item: { pic: { type: 'image', label: 'Pic' } } };
+    bad.fields.items = { type: 'list', label: 'Items', item: { nested: { type: 'list', label: 'Nested', item: {} } } };
     bad.fields.odd = { type: 'video', label: 'Odd' };
     bad.fields.link = { type: 'url', label: 'Link', maxLength: 0 };
     expect(validateTemplateManifest(bad)).toEqual([
       'field "price": step must be a number above 0',
       'field "price": min must not be above max',
-      'field "items.pic": a list row cannot hold an image',
+      'field "items.nested": a list row cannot hold a list',
       'field "size": options must be a list of text',
       'field "odd": type must be one of text, number, boolean, color, select, url, date, datetime, image, list',
       'field "link": maxLength must be a whole number above 0',
     ]);
+  });
+
+  it('allows an image property in list items, holding an optional NewsImage (#196)', () => {
+    const shaA = 'a'.repeat(64);
+    const shaB = 'b'.repeat(64);
+    const m = structuredClone(template);
+    m.fields.items = {
+      type: 'list',
+      label: 'Headlines',
+      maxItems: 10,
+      default: [],
+      item: {
+        title: { type: 'text', label: 'Headline' },
+        image: { type: 'image', label: 'Photo' },
+      },
+    };
+    expect(validateTemplateManifest(m)).toEqual([]);
+    expect(isNewsImage({ file: shaA, thumb: shaB })).toBe(true);
+    expect(isNewsImage({ file: 'https://example.com/a.jpg', thumb: shaB })).toBe(false);
+    expect(isNewsImage({ file: shaA })).toBe(false);
+    expect(isNewsImage(null)).toBe(false);
+    expect(rowAsset('items', 0, 'image')).toBe('items.0.image');
+    expect(rowAsset('items', 2, 'image', 'thumb')).toBe('items.2.image:thumb');
+
+    // Rows may omit the image, or carry a NewsImage hash pair; a URL or broken shape is refused.
+    expect(validateBoundValue(m.fields, 'items', [{ title: 'No photo' }, { title: 'With photo', image: { file: shaA, thumb: shaB } }])).toEqual([]);
+    expect(validateBoundValue(m.fields, 'items', [{ title: 'URL', image: 'https://example.com/x.jpg' }])).toEqual([
+      'field "items[1].image" must be an image hash pair ({ file, thumb })',
+    ]);
+    expect(validateBoundValue(m.fields, 'items', [{ title: 'Half', image: { file: shaA } }])).toEqual([
+      'field "items[1].image" must be an image hash pair ({ file, thumb })',
+    ]);
+    expect(validateSpotData(m.fields, { title: 'News', price: 5, items: [{ title: 'Fallback' }] }, { photo: shaA })).toEqual([]);
+    expect(validateSpotData(m.fields, { title: 'News', price: 5, items: [{ title: 'Bad', image: { file: 'bad', thumb: shaB } }] }, { photo: shaA })).toEqual([
+      'field "items[1].image" must be an image hash pair ({ file, thumb })',
+    ]);
+
+    // A table binding cannot map a column onto a list row's image property, and does not require one for it.
+    const byTable = (columns: Record<string, string>) =>
+      validateSpotData(m.fields, { title: 'News', price: 5, items: [] }, { photo: shaA }, { items: { source: 'menu', path: 'rows', table: { columns } } });
+    expect(byTable({ title: 'Name', image: 'Img' })).toEqual(['binding for "items": "image" is an image and cannot be mapped from a table column']);
+    expect(byTable({ title: 'Name' })).toEqual([]);
+    const listDef = m.fields.items as Extract<FieldDef, { type: 'list' }>;
+    expect(tableItems(listDef, { columns: { title: 'Name' } }, { columns: ['Name'], rows: [['Soup']] }, 'en-US')).toEqual({
+      items: [{ title: 'Soup' }],
+      problems: [],
+    });
   });
 
   it('takes date and datetime fields, in list rows too, with min and max of their own kind and a default between them', () => {
@@ -1000,12 +1051,12 @@ describe('validateManifest', () => {
 
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
-    expect(MANIFEST_SCHEMA).toBe(7);
-    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([6, 7]);
-    expect(validateManifest({ ...validManifest(), schema: 6 })).toEqual([]);
+    expect(MANIFEST_SCHEMA).toBe(8);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([7, 8]);
     expect(validateManifest({ ...validManifest(), schema: 7 })).toEqual([]);
-    // A player that knows only schemas 5 and 6 refuses a template with several live sources (#193): the server tells it to reload (apps/api sync's canPlay).
-    expect(validateManifest({ ...validManifest(), schema: 5 })).toEqual(['manifest schema 5 is not one this player can play (6, 7)']);
+    expect(validateManifest({ ...validManifest(), schema: 8 })).toEqual([]);
+    // A player that knows only schemas 6 and 7 refuses a template with an image in a list item (#196): the server tells it to reload (apps/api sync's canPlay).
+    expect(validateManifest({ ...validManifest(), schema: 6 })).toEqual(['manifest schema 6 is not one this player can play (7, 8)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {
@@ -1801,5 +1852,47 @@ describe('validatePairStartRequest', () => {
   it('refuses another kind', () => {
     expect(validatePairStartRequest({ kind: 'tv' })).toEqual(['kind must be one of device, browser']);
     expect(validatePairStartRequest(null)).toEqual(['request is not an object']);
+  });
+});
+
+describe('sync blobs (#196)', () => {
+  const sha = 'a'.repeat(64);
+  const req = {
+    seq: 1,
+    epoch: 'ep1',
+    player: { version: '2.0.0', manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
+    manifest: { filesMissing: 0 },
+    display: { on: true },
+    deviceTime: '2026-11-22T12:00:00Z',
+    clock: { offsetMs: 0, trusted: true },
+    playCounts: [],
+    snapshots: {},
+  };
+  const res = {
+    serverTime: '2026-11-22T12:00:00Z',
+    nextSyncS: 300,
+    epoch: 'ep1',
+    ackSeq: 1,
+    snapshots: [],
+    socketTicket: 'ticket',
+    commands: [],
+  };
+
+  it('validates optional blobs on SyncRequest and SyncResponse within their limits', () => {
+    expect(validateSyncRequest(req)).toEqual([]);
+    expect(validateSyncRequest({ ...req, blobs: [sha] })).toEqual([]);
+    expect(validateSyncRequest({ ...req, blobs: 'not-a-list' })).toEqual(['blobs must be a list of sha256 hashes']);
+    expect(validateSyncRequest({ ...req, blobs: ['bad'] })).toEqual(['blobs must contain sha256 hashes']);
+    expect(validateSyncRequest({ ...req, blobs: Array.from({ length: MAX_SYNC_BLOBS + 1 }, () => sha) })).toEqual([
+      `blobs holds at most ${MAX_SYNC_BLOBS} hashes`,
+    ]);
+
+    expect(validateSyncResponse(res)).toEqual([]);
+    expect(validateSyncResponse({ ...res, blobs: [sha] })).toEqual([]);
+    expect(validateSyncResponse({ ...res, blobs: {} })).toEqual(['blobs must be a list of sha256 hashes']);
+    expect(validateSyncResponse({ ...res, blobs: ['bad'] })).toEqual(['blobs must contain sha256 hashes']);
+    expect(validateSyncResponse({ ...res, blobs: Array.from({ length: MAX_SYNC_RESPONSE_BLOBS + 1 }, () => sha) })).toEqual([
+      `blobs holds at most ${MAX_SYNC_RESPONSE_BLOBS} hashes`,
+    ]);
   });
 });

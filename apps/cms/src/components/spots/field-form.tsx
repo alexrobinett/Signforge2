@@ -293,7 +293,7 @@ function ListField({
 }) {
   const setRows = (next: Record<string, unknown>[]) => onChange((d) => ({ ...d, data: { ...d.data, [name]: next } }));
   const full = def.maxItems !== undefined && rows.length >= def.maxItems;
-  const blank = Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, startValue(d)]));
+  const blank = Object.fromEntries(Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? [] : [[k, startValue(d)]])));
   const sampleId = `field-${name}-sample`;
   const isSampleRow = (i: number) => (sampleRows?.[i]?.length ?? 0) > 0;
   return (
@@ -333,6 +333,7 @@ function ListField({
             </Button>
           </div>
           {Object.entries(def.item).map(([k, d]) => {
+            if (d.type === 'image') return null;
             const id = `field-${name}-${i}-${k}`;
             const sampleCell = sampleRows?.[i]?.includes(k) === true;
             // Every cell of a sample row points at the list's note, the problem's message first.

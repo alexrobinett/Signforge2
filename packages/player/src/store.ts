@@ -152,6 +152,19 @@ export class PinSet implements Iterable<string> {
   }
 }
 
+/**
+ * The end of the file cache work queued so far. A sync and a feed-image pass take turns: each
+ * one's cleanup deletes every partial download and every file the active manifest does not name,
+ * so run alongside another it would delete that one's download in flight, or the files of a
+ * manifest downloaded but not yet made active.
+ */
+let turn: Promise<unknown> = Promise.resolve();
+function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  const run = turn.then(work);
+  turn = run.catch(() => undefined);
+  return run;
+}
+
 /** Files of the manifest last synced, and of the one playing while falling back, that were missing and are not yet downloaded. */
 let missingNow = 0;
 export const filesMissing = (): number => missingNow;
@@ -188,9 +201,13 @@ export interface SyncOptions {
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(
+export function sync(base: string, options: SyncOptions = {}): Promise<SyncResult> {
+  return inTurn(() => syncNow(base, options));
+}
+
+async function syncNow(
   base: string,
-  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback, signal = new AbortController().signal }: SyncOptions = {},
+  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback, signal = new AbortController().signal }: SyncOptions,
 ): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
@@ -269,12 +286,61 @@ export async function sync(
   return same ? { changed: false, downloaded } : { manifest: next, changed: true, downloaded };
 }
 
-/** Delete every file neither the active manifest nor a pin needs, and any leftover partial download. */
-async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<string>): Promise<void> {
+/** Delete every file neither the active manifest nor a pin needs, and any leftover partial download. Returns true if any stale file was kept by a pin. */
+async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<string>): Promise<boolean> {
   const { hashes, partials } = await heldKeys(blobs);
   const { stale } = planSync(active, hashes);
   const keep = new Set(pinned);
-  await Promise.all([...stale.filter((sha) => !keep.has(sha)).map(blobKey), ...partials].map((k) => blobs.delete(k)));
+  const evict = stale.filter((sha) => !keep.has(sha));
+  await Promise.all([...evict.map(blobKey), ...partials].map((k) => blobs.delete(k)));
+  return evict.length < stale.length;
+}
+
+/** Which of `hashes` are currently stored in the local blob cache, in order and deduplicated. */
+export async function heldBlobs(hashes: Iterable<string>): Promise<string[]> {
+  const want = [...new Set(hashes)];
+  if (!want.length) return [];
+  const held = new Set((await heldKeys(await caches.open(BLOBS))).hashes);
+  return want.filter((sha) => held.has(sha));
+}
+
+/**
+ * Feed images (#196): delete the files nothing needs, as a sync's cleanup does, then fetch those of
+ * `hashes` that are missing. Cleanup goes first, so the space is free before new files arrive.
+ *
+ * What to keep is the stored active manifest's files (the synced one, which while falling back is
+ * not the one playing) and `pinned`, read when cleanup runs. With no stored manifest nothing is
+ * known to be stale, and nothing is deleted.
+ *
+ * Best-effort: a feed image that is missing, corrupt, too large or not an image is logged and
+ * skipped, so its story plays with no image; a 401 (`UnauthorisedError`) or an abort is rethrown.
+ * Returns true if cleanup kept a stale file because a pin held it.
+ */
+export function syncFeedImages(
+  base: string,
+  hashes: Iterable<string>,
+  { headers = {}, stallMs = STALL_MS, pinned = [], signal = new AbortController().signal }: Pick<SyncOptions, 'headers' | 'stallMs' | 'pinned' | 'signal'> = {},
+): Promise<boolean> {
+  return inTurn(async () => {
+    const blobs = await caches.open(BLOBS);
+    const active = await loadStored(ACTIVE);
+    const kept = active ? await cleanup(blobs, active, pinned) : false;
+    const held = new Set((await heldKeys(blobs)).hashes);
+    for (const sha of new Set(hashes)) {
+      if (held.has(sha)) continue;
+      signal.throwIfAborted();
+      try {
+        await fetchFile(
+          { url: `${base}/blobs/${sha}`, sha, feedImage: true, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` },
+          signal,
+        );
+      } catch (err) {
+        if (err instanceof UnauthorisedError || signal.aborted) throw err;
+        console.warn(`[sf] feed image ${sha.slice(0, 12)} unavailable`, err);
+      }
+    }
+    return kept;
+  });
 }
 
 /** Ask the browser not to evict the cache under storage pressure. */

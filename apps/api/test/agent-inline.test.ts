@@ -634,14 +634,14 @@ const ROWS = [
 const MENU_DATA = { title: 'Morning', items: ROWS, qr: 'https://cafe.example/order', accent: '$brand.primary' };
 
 /** A fresh org with the menu template and one menu spot, its answers pushed once its key is known. */
-async function menu(options: Parameters<typeof setup>[0] & { bindings?: Record<string, unknown> } = {}) {
+async function menu(options: Parameters<typeof setup>[0] & { bindings?: Record<string, unknown>; manifest?: unknown; data?: unknown } = {}) {
   const answers: Answer[] = [];
   const s = await setup({ ...options, answers });
   const template = await s.scope.templates.insert({ key: 'menu', name: 'Menu' });
   const version = await s.scope.templates.versions.insert({
     templateId: template.id,
     version: '1.0.0',
-    manifestJson: JSON.stringify(MENU),
+    manifestJson: JSON.stringify(options.manifest ?? MENU),
     bundleSha256: 'a'.repeat(64),
     status: 'approved',
   });
@@ -651,7 +651,7 @@ async function menu(options: Parameters<typeof setup>[0] & { bindings?: Record<s
     kind: 'template',
     durationMs: 8000,
     templateVersionId: version.id,
-    dataJson: JSON.stringify(MENU_DATA),
+    dataJson: JSON.stringify(options.data ?? MENU_DATA),
     ...(options.bindings && { bindingsJson: JSON.stringify(options.bindings) }),
   });
   const menuKey = `${s.org.id}/menu@1.0.0`;
@@ -718,6 +718,31 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     const sent = m.model.asked[0]!.body;
     expect(sent.messages[0].content.at(-1).text).toContain('<current>\n{"title":"Morning","items":[');
     expect(sent.output_config.format.schema.properties.template.enum).toEqual([m.menuKey]);
+  });
+
+  // A row's photo comes only from a feed (#196): the fill keeps the one a row has, takes none the model writes, and a new row has none.
+  it("keeps each row's photo, writes none, and starts a new row with no photo", async () => {
+    const photo = { file: 'f'.repeat(64), thumb: 'e'.repeat(64) };
+    const items = { ...MENU.fields.items, item: { ...MENU.fields.items.item, photo: { type: 'image', label: 'Photo' } } };
+    const data = { ...MENU_DATA, items: [{ ...ROWS[0], photo }, ROWS[1], ROWS[2]] };
+    const m = await menu({ manifest: { ...MENU, fields: { ...MENU.fields, items } }, data });
+    m.answer({
+      items: [
+        { name: 'Latte', price: '$4.75', photo: { file: '1'.repeat(64), thumb: '2'.repeat(64) } },
+        { name: 'Mocha', price: '$5.00' },
+        { name: 'Scone', price: '$3.00', photo: { file: '3'.repeat(64), thumb: '4'.repeat(64) } },
+        { name: 'Flat white', price: '$4.00', photo: { file: '5'.repeat(64), thumb: '6'.repeat(64) } },
+      ],
+    });
+    const res = await m.update({ kind: 'image', mediaType: 'image/jpeg', data: JPEG });
+    const body = await res.json<any>();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.review.data.items).toEqual([
+      { ...ROWS[0], price: '$4.75', photo },
+      ROWS[1],
+      ROWS[2],
+      { name: 'Flat white', price: '$4.00', link: '', hot: false },
+    ]);
   });
 
   it('keeps the latte when the photo calls it something else: the model is asked to name it as the spot does', async () => {

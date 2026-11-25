@@ -36,7 +36,7 @@
  * proposal, so the draft it replaces is kept beside it, with the draft's version guard (#116).
  */
 import { startData, startValue } from '@signforge/compiler/draft';
-import { MAX_URL_BYTES, templateKey, validateSpotField, type FieldDef, type ScalarFieldDef, type TemplateManifest } from '@signforge/contract';
+import { MAX_URL_BYTES, templateKey, validateSpotField, type FieldDef, type ListItemFieldDef, type TemplateManifest } from '@signforge/contract';
 import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import type { OrgScope } from '@signforge/db';
 import { CMS_AGENT_CLIENT_ID, dispatch, grantOf, permits, registry, type Caller } from '@signforge/tools';
@@ -305,15 +305,17 @@ const LINK = 'A link on the flyer: it is not added. Check where it goes, then ad
 
 /**
  * A list row as the fill writes it: only its own columns; a column the fill does not write (a link,
- * a colour, a switch) as the row it updates has it, or as a new row starts it. A link read is kept to show.
+ * a colour, a switch, a feed's photo) as the row it updates has it, or as a new row starts it: with
+ * no photo, which only a feed gives (#196). A link read is kept to show.
  */
-function rowOf(item: Record<string, ScalarFieldDef>, row: Record<string, unknown>, links: string[], was?: Record<string, unknown>): Record<string, unknown> {
+function rowOf(item: Record<string, ListItemFieldDef>, row: Record<string, unknown>, links: string[], was?: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(item).map(([k, d]) => {
+    Object.entries(item).flatMap(([k, d]) => {
       const v = row[k];
       if (d.type === 'url' && typeof v === 'string' && v.trim() && v.trim() !== was?.[k]) links.push(v.trim().slice(0, MAX_URL_BYTES));
-      if (WRITES.has(d.type) && v !== undefined && v !== null) return [k, v];
-      return [k, was && Object.hasOwn(was, k) ? was[k] : startValue(d)];
+      if (WRITES.has(d.type) && v !== undefined && v !== null) return [[k, v]];
+      if (was && Object.hasOwn(was, k)) return [[k, was[k]]];
+      return d.type === 'image' ? [] : [[k, startValue(d)]];
     }),
   );
 }
@@ -322,7 +324,7 @@ function rowOf(item: Record<string, ScalarFieldDef>, row: Record<string, unknown
  * An update's list (#264): the spot's rows in their order, each the material shows again changed in
  * place, those it no longer shows removed, and its new ones after them.
  */
-function mergedRows(item: Record<string, ScalarFieldDef>, before: Record<string, unknown>[], shown: unknown[], links: string[]): unknown[] {
+function mergedRows(item: Record<string, ListItemFieldDef>, before: Record<string, unknown>[], shown: unknown[], links: string[]): unknown[] {
   const rows = shown.filter(isRow);
   const { pairs, added } = matchRows(item, before, rows);
   const after = new Map(pairs.map(([i, j]) => [i, j]));
@@ -442,10 +444,9 @@ function keepProblem(offer: Offer, was: Record<string, unknown>, data: Record<st
     const before = Array.isArray(was[name]) ? was[name].filter(isRow) : [];
     const after = data[name].filter(isRow);
     const { pairs, added } = matchRows(def.item, before, after);
-    const kept = (k: string) =>
-      pairs.every(([i, j]) => same(after[j]?.[k], before[i]?.[k])) &&
-      added.every((j) => same(after[j]?.[k], startValue(def.item[k] ?? { type: 'text', label: k })));
-    for (const [k, d] of Object.entries(def.item)) if (!WRITES.has(d.type) && !kept(k)) return `the agent does not change "${name}.${k}"`;
+    const kept = (k: string, d: ListItemFieldDef) =>
+      pairs.every(([i, j]) => same(after[j]?.[k], before[i]?.[k])) && added.every((j) => same(after[j]?.[k], d.type === 'image' ? undefined : startValue(d)));
+    for (const [k, d] of Object.entries(def.item)) if (!WRITES.has(d.type) && !kept(k, d)) return `the agent does not change "${name}.${k}"`;
   }
   for (const name of Object.keys(data)) if (!Object.hasOwn(offer.manifest.fields, name)) return `unknown field "${name}"`;
   return undefined;
