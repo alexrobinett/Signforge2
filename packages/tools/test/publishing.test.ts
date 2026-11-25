@@ -2,10 +2,10 @@
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
 import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
-import { draftChanged, platform, published, StaleVersionError } from '@signforge/db';
+import { draftChanged, platform, published, StaleVersionError, STORAGE_GRACE_MS } from '@signforge/db';
 import { seedOrganization, seedScreen, testScope, type TestScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
 import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
@@ -824,6 +824,63 @@ describe('the publish tools (M3-18)', () => {
     const page2 = await ok(call('list_publishes', { limit: 1, cursor: page1.next }));
     expect(page2).toMatchObject({ publishes: [{ revision: 1 }], next: null });
     expect(await call('get_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('is refused at its commit when an asset its manifests name is deleted while it compiles, and runs again without it (review of #429, 5)', async () => {
+    const { org, lobby } = await seedSmallOrg('tool-pub-logo-race');
+    const logo = await addImage(org, sha('e'), sha('f'));
+    const kit = await org.brandKits.insert({
+      name: 'Brand',
+      colorsJson: JSON.stringify({ primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' }),
+      shape: 'soft',
+      logoOnDarkAssetId: logo.id,
+    });
+    await org.commit((await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id)).writes);
+    // While the first attempt stores its manifests, a person takes the logo off the kit and deletes it.
+    const p = publisher(org, {
+      onPut: async (attempt) => {
+        if (attempt !== 1) return;
+        await org.brandKits.update(kit.id, { logoOnDarkAssetId: null });
+        expect(await editorCalls(org)('delete_asset', { assetId: logo.id })).toMatchObject({ ok: true });
+      },
+    });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(out.publish).toMatchObject({ revision: 1 });
+    // What screens play, and what the index keeps for them, name none of the deleted logo's files.
+    const desired = (await org.screens.get(lobby.id))!.desiredManifestId!;
+    const manifest: ScreenManifest = await (await env.BLOBS.get(manifestKey(org.orgId, lobby.id, desired)))!.json();
+    expect(Object.keys(manifest.files)).not.toContain(sha('e'));
+    const index = await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ? AND manifest_id = ?')
+      .bind(org.orgId, desired)
+      .first<{ f: string }>();
+    expect(JSON.parse(index!.f)).not.toContain(sha('e'));
+  });
+
+  it('refuses a roll back to a publish made more than 90 days ago, saying why, and gives each publish its last day for one (#235)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const start = Date.UTC(2026, 3, 1);
+      vi.setSystemTime(start);
+      const { org } = await seedSmallOrg('tool-rollback-age');
+      const p = publisher(org);
+      const first = (await ok(p.call('publish', {}))) as unknown as Out;
+      await editDeal(org, 'Two for $4');
+      await ok(p.call('publish', {}));
+      const made = (await org.publishes.get(first.publish!.id))!.createdAt;
+      expect((await ok(editorCalls(org)('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ rollBackUntil: made + STORAGE_GRACE_MS });
+      vi.setSystemTime(made + STORAGE_GRACE_MS + 1);
+      expect(await p.call('roll_back_publish', { publishId: first.publish!.id })).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        details: { tooOld: true },
+        message: expect.stringContaining('more than 90 days ago'),
+      });
+      // On its last day it still may.
+      vi.setSystemTime(made + STORAGE_GRACE_MS);
+      expect(await p.call('roll_back_publish', { publishId: first.publish!.id })).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sets the default playlist, without which no screen can be published to', async () => {

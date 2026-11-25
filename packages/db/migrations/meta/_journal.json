@@ -288,6 +288,13 @@
       "when": 1795548833876,
       "tag": "0040_draft_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1795568645486,
+      "tag": "0041_storage_cleanup",
+      "breakpoints": true
     }
   ]
 }

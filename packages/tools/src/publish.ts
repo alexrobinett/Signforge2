@@ -14,7 +14,7 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import { published, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
+import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
 import { z } from 'zod';
 import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
@@ -154,6 +154,16 @@ export async function runPublish(
   write({ row: undefined, writes: result.removals });
   if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
   write({ row: undefined, writes: result.writes });
+  // What the manifests it stores name, for the storage sweep to keep (#235), and held to the commit: a file of an asset
+  // deleted while this compiled refuses the batch, and the publish runs again from a fresh read (review of #429).
+  const files = [...new Set(changed.flatMap((m) => Object.keys(m.files)))];
+  write({ row: undefined, writes: org.storage.stage.filesLive(files) });
+  write(
+    org.storage.stage.index(
+      changed.map((m) => ({ id: m.id, files: Object.keys(m.files) })),
+      Date.now(),
+    ),
+  );
   // The spot editor's weather sources nothing binds: not as drafted, not as published once this
   // commits, and not as published before it, which Undo sends screens back to (that one goes at
   // the next publish). One made in the last minutes may be about to be bound by an autosave.
@@ -313,7 +323,7 @@ const publishTakeover = defineTool({
 const rollBackPublish = defineTool({
   name: 'roll_back_publish',
   description:
-    "Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. A publish keeps the data sources and assets the one before it used, so undoing the latest publish finds them all; a roll back further than that can reach a manifest whose data source or asset has since been deleted, and a screen then shows that spot's last values, then its fallback. To undo a publish, pass it as ifLatest: refused with a conflict if a later publish has been made since, which a roll back would undo too. Returns { publish }, null when every screen already had it.",
+    "Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. A publish keeps the data sources and assets the one before it used, so undoing the latest publish finds them all; a roll back further than that can reach a manifest whose data source or asset has since been deleted, and a screen then shows that spot's last values, then its fallback. To undo a publish, pass it as ifLatest: refused with a conflict if a later publish has been made since, which a roll back would undo too. A publish made more than 90 days ago is refused with a conflict (details { tooOld: true }): the storage clean-up keeps the files of the last 90 days' publishes, and no older. Returns { publish }, null when every screen already had it.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -331,6 +341,13 @@ const rollBackPublish = defineTool({
     const revision = (await org.settings.get())?.publishRevision ?? 0;
     const target = await org.publishes.get(input.publishId);
     if (!target) throw notFound('publish', input.publishId);
+    // As far back as the storage sweep keeps every file and manifest, and no further (owner decision on #235).
+    if (!rollbackOpen(target.createdAt, Date.now()))
+      throw new ToolError(
+        'conflict',
+        `publish v${target.revision} was made more than 90 days ago: its files may no longer be stored, so it can no longer be rolled back to`,
+        { tooOld: true },
+      );
     if (input.ifLatest) {
       // Read after the revision: a publish made since fails the batch's guard, and the rerun lands here.
       const [latest] = await org.publishes.history({ limit: 1 });
@@ -359,6 +376,7 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
     restoresRevision: h.restoresRevision,
     by: { kind: h.actorKind, id: h.actorId, name: h.actorName },
     createdAt: h.createdAt,
+    rollBackUntil: h.createdAt + STORAGE_GRACE_MS,
     finishedAt: h.finishedAt,
     reached: h.reached,
     screens,

@@ -1252,6 +1252,53 @@ export const feedImageDeletes = sqliteTable(
   (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
 
+/**
+ * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete_asset` in its batch for the storage sweep (#235),
+ * which deletes one past the grace period once nothing the org keeps names its bytes (packages/db `storage.ts`).
+ * `claim_owner` and `claim_until`: the sweep's claim while it deletes the object; a writer that could reuse the bytes is
+ * refused while it holds.
+ */
+export const blobDeletes = sqliteTable(
+  'blob_deletes',
+  {
+    orgId: orgId(),
+    sha256: text('sha256').notNull(),
+    queuedAt: integer('queued_at').notNull(),
+    claimOwner: text('claim_owner'),
+    claimUntil: integer('claim_until').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
+);
+
+/**
+ * The files each stored manifest names (`ScreenManifest.files`' hashes, as a JSON array), by its content-addressed id
+ * (#235): written in the batch of the publish that stores it, and by the storage sweep for one stored before this table.
+ * What the sweep keeps a file for.
+ */
+export const storedManifests = sqliteTable(
+  'stored_manifests',
+  {
+    orgId: orgId(),
+    manifestId: text('manifest_id').notNull(),
+    filesJson: text('files_json').notNull(),
+    storedAt: integer('stored_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.manifestId] })],
+);
+
+/**
+ * Each org's storage sweep (#235): its lease (`owner`, `lease_until`), so two never run on one org, and when it was last
+ * swept, so the orgs least recently swept go first and none waits behind others' backlogs.
+ */
+export const storageSweeps = sqliteTable('storage_sweeps', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id),
+  owner: text('owner'),
+  leaseUntil: integer('lease_until').notNull().default(0),
+  sweptAt: integer('swept_at').notNull().default(0),
+});
+
 // --------------------------------------------------------------- connections
 
 /**

@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { id } from './fields';
 import { page, pageInput, type SortKey } from './paging';
 import { baseBlobKey, orgBlobKey } from './r2';
+import { clearOfSweep } from './assets';
 import { defineSharedTool, defineTool, notFound, ToolError, type DataScope } from './tool';
 import { outputs, TEMPLATE_STATUSES, type TemplateVersionView, type TemplateView } from './outputs';
 
@@ -143,6 +144,8 @@ const registerTemplateVersion = defineSharedTool({
   },
   target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
   handler: async ({ org, blobs, input, write, services: { templateCheck, rateLimit } }) => {
+    // An org's bundle and sources are content-addressed in its own prefix, as uploads are: not while a sweep deletes them.
+    if ('storage' in org) await clearOfSweep(org, write, [input.bundleId, input.sourcesId]);
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
     if (!sourcesObj) throw new ToolError('not_found', `sources ${input.sourcesId} have not been uploaded`);

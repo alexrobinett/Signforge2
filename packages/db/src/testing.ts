@@ -428,3 +428,9 @@ export async function seedTwoOrgs(db: D1Database): Promise<Seeded> {
   const base = await seedBaseTemplate(db);
   return { a: await seedOrg(db, 'org-a'), b: await seedOrg(db, 'org-b', base.templateVersion), base };
 }
+
+/** A deleted asset's files queued in `orgId` at `at`, as `delete_asset` queues them, for the storage sweep's tests (#235). */
+export async function queueDeletedFiles(db: D1Database, orgId: string, shas: string[], at: number) {
+  const org = scoped(db, orgId);
+  await org.commit(org.storage.stage.queue(shas, at).writes);
+}

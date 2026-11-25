@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { id, idempotencyKey, name } from './fields';
 import { page, pageInput } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, notFound, ToolError, type ToolContext } from './tool';
 import type { UploadSigner } from './upload';
 import { ORIENTATIONS, ASSET_STATUSES, outputs, type AssetView, type RenditionView } from './outputs';
 
@@ -178,6 +178,11 @@ const createAssetUpload = defineTool({
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, input, write, services: { uploads } }) => {
     const { landscape } = input.renditions;
+    await clearOfSweep(
+      org,
+      write,
+      ORIENTATIONS.flatMap((o) => [input.renditions[o].sha256, ...(input.renditions[o].sample ? [input.renditions[o].sample.sha256] : [])]),
+    );
     // The asset and both renditions are written in one batch: never an asset without its renditions.
     const asset = write(
       org.assets.stage.insert({
@@ -224,6 +229,18 @@ function claimedFiles(renditions: readonly AssetRendition[]) {
       : []),
   ]);
   return Map.groupBy(claims, (c) => c.sha);
+}
+
+/**
+ * A writer that could reuse stored bytes (an upload made or verified, a template registered) never adopts an object the
+ * storage sweep is deleting (#235, review of #429): refused while a sweep claims any of `shas`, as it starts and again in
+ * its batch. A claim lasts minutes.
+ */
+export async function clearOfSweep(org: OrgScope, write: ToolContext<unknown>['write'], shas: readonly string[]) {
+  const now = Date.now();
+  if (await org.storage.claimed(shas, now))
+    throw new ToolError('conflict', 'the storage clean-up is deleting an earlier copy of these bytes: try again in a few minutes');
+  write({ row: undefined, writes: org.storage.stage.unclaimed(shas, now) });
 }
 
 /**
@@ -297,6 +314,7 @@ const finalizeAsset = defineTool({
     const renditions = await org.assets.renditions.forAsset(asset.id);
     if (asset.status === 'verified') return { asset: assetView(asset, renditions), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the image again`);
+    await clearOfSweep(org, write, [...claimedFiles(renditions).keys()]);
     // Both renditions, or the asset cannot be verified: a screen of either orientation needs its own.
     const absent = ORIENTATIONS.filter((o) => !renditions.some((r) => r.orientation === o));
     if (absent.length) {
@@ -377,7 +395,7 @@ const finalizeAsset = defineTool({
 const deleteAsset = defineTool({
   name: 'delete_asset',
   description:
-    'Delete an asset from the library. Refused with a conflict while any spot uses it, or a brand kit uses it as its logo (details list the spot or brand kit ids); change or delete those first. Screens already playing it keep their copy until their next publish. Returns { deleted: assetId }.',
+    'Delete an asset from the library. Refused with a conflict while any spot uses it, or a brand kit uses it as its logo (details list the spot or brand kit ids); change or delete those first. Screens already playing it keep their copy until their next publish; its stored files are deleted 90 days later, once nothing needs them. Returns { deleted: assetId }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -394,15 +412,27 @@ const deleteAsset = defineTool({
       throw new ToolError('conflict', `asset ${asset.id} is the logo of ${brandKitIds.length} brand kit${brandKitIds.length === 1 ? '' : 's'}`, {
         brandKitIds,
       });
-    // Uploads never finalized. Stored files stay: other assets and published manifests may name the same bytes.
+    // Uploads never finalized. Stored files stay for now: other assets and published manifests may name the same bytes.
     const renditions = await org.assets.renditions.forAsset(asset.id);
     // A video has no renditions: its one file is the asset's own.
     const files = asset.kind === 'video' ? [asset.sha256] : [...claimedFiles(renditions).keys()];
     const staged = [...new Set(files.map((sha) => uploadKey(org.orgId, asset.id, sha)))];
     if (staged.length) await blobs.delete(staged);
-    // Its renditions go with it (the foreign key cascades).
+    // Its renditions go with it (the foreign key cascades). Its stored files are queued for the storage sweep, which deletes
+    // each past the grace period once nothing of the org names its bytes and no screen holds a manifest from before (#235).
+    // Held to the commit: a spot or a brand kit that took it up meanwhile refuses the batch (review of #429).
+    write({ row: undefined, writes: [org.assets.stage.unused(asset.id)] });
     write(org.assets.stage.delete(asset.id));
+    if (asset.status === 'verified') write(org.storage.stage.queue(files, Date.now()));
     return { deleted: asset.id };
+  },
+  // Its batch refused as it ran: a spot or a brand kit took the asset up meanwhile.
+  refuseFailedCommit: async ({ org, input }) => {
+    const spotIds = (await org.assets.usage([input.assetId])).get(input.assetId) ?? [];
+    const kits = (await org.brandKits.list()).filter((k) => k.logoOnDarkAssetId === input.assetId || k.logoOnLightAssetId === input.assetId);
+    return spotIds.length || kits.length
+      ? new ToolError('conflict', `asset ${input.assetId} was taken into use while it was being deleted`, { spotIds, brandKitIds: kits.map((k) => k.id) })
+      : undefined;
   },
 });
 

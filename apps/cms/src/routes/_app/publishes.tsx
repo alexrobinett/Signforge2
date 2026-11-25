@@ -124,11 +124,22 @@ function PublishesPage() {
                 <span className="w-40 text-sm text-muted-foreground tabular-nums">{standing(p)}</span>
                 {canPublish && (
                   <span className="flex w-40 justify-end">
-                    {p.id !== latest?.id && (
-                      <Button variant="outline" className="sm:h-8" disabled={pending} onClick={() => void rollBack(orgId, p)}>
-                        Roll back to <span className="font-mono">{versionName(p)}</span>
-                      </Button>
-                    )}
+                    {p.id !== latest?.id &&
+                      (now <= p.rollBackUntil ? (
+                        <Button variant="outline" className="sm:h-8" disabled={pending} onClick={() => void rollBack(orgId, p)}>
+                          Roll back to <span className="font-mono">{versionName(p)}</span>
+                        </Button>
+                      ) : (
+                        // Older than the storage clean-up keeps files for (owner decision on #235): unavailable, and why.
+                        <span className="flex flex-col items-end gap-1">
+                          <Button variant="outline" className="sm:h-8" disabled aria-describedby={`${p.id}-too-old`}>
+                            Roll back to <span className="font-mono">{versionName(p)}</span>
+                          </Button>
+                          <span id={`${p.id}-too-old`} className="text-right text-meta text-muted-foreground">
+                            Over 90 days old: its files are no longer kept.
+                          </span>
+                        </span>
+                      ))}
                   </span>
                 )}
               </li>

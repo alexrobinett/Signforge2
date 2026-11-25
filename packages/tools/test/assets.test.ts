@@ -3,8 +3,9 @@
 // decodes. Real images through the browser and real presigned PUTs: packages/media/test/upload.test.ts.
 import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
+import { racing } from './calls';
 import { memberOf } from './member';
 
 let o: SeededOrg;
@@ -214,6 +215,14 @@ describe('finalize_asset', () => {
     expect((await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).objects).toHaveLength(1);
     await call('delete_asset', { assetId: pending.asset.id });
     expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).toMatchObject({ objects: [] });
+    // Never finalized, it stored nothing: nothing is queued for the storage sweep (#235).
+    expect(
+      (
+        await env.DB.prepare('SELECT count(*) AS n FROM blob_deletes WHERE org_id = ? AND sha256 IN (?, ?)')
+          .bind(o.orgId, await sha256(l), await sha256(p))
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(0);
   });
 
   it("refuses a sample that is not a PNG of its rendition's sample size", async () => {
@@ -386,9 +395,50 @@ describe('list, usage and delete', () => {
     // The seeded brand kit uses it as its logo, too.
     expect(await run('delete_asset', { assetId: o.asset })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [o.brandKit] } });
     await org.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
-    expect(await call('delete_asset', { assetId: o.asset })).toEqual({ deleted: o.asset });
+    const files = (await org.assets.renditions.forAsset(o.asset)).flatMap((r) => [r.sha256, ...(r.sampleSha256 ? [r.sampleSha256] : [])]);
+    // On a fixed clock: each file is queued at the moment of the deletion (review of #429, 10).
+    const at = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    try {
+      expect(await call('delete_asset', { assetId: o.asset })).toEqual({ deleted: o.asset });
+    } finally {
+      vi.useRealTimers();
+    }
     expect(await org.assets.get(o.asset)).toBeUndefined();
     expect(await org.assets.renditions.forAsset(o.asset)).toEqual([]);
+    // Its stored files are queued, in the same batch, for the storage sweep (#235).
+    const queued = await env.DB.prepare('SELECT sha256, queued_at AS at FROM blob_deletes WHERE org_id = ?')
+      .bind(o.orgId)
+      .all<{ sha256: string; at: number }>();
+    expect(queued.results.map((q) => q.sha256).toSorted()).toEqual([...new Set(files)].sort());
+    expect(new Set(queued.results.map((q) => q.at))).toEqual(new Set([at]));
+  });
+
+  // Through an asset map: no foreign key holds the asset there, only the batch's guard (review of #429, 5).
+  it('refuses, writing nothing, an asset a template spot takes up between the check and its batch', async () => {
+    const org = testScope(env.DB, o.orgId);
+    const asset = await org.assets.insert({ kind: 'video', name: 'Raced', sha256: '7'.repeat(64), type: 'video/mp4', size: 1, status: 'verified' });
+    let spotId = '';
+    const raced = racing(owner, async () => {
+      spotId = (
+        await org.spots.insert({
+          name: 'Takes it',
+          kind: 'template',
+          durationMs: 10_000,
+          templateVersionId: o.templateVersion,
+          dataJson: '{}',
+          assetMapJson: JSON.stringify({ hero: asset.id }),
+        })
+      ).id;
+    });
+    expect(await dispatch(registry, 'delete_asset', { assetId: asset.id }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('taken into use'),
+      details: { spotIds: [spotId] },
+    });
+    expect(await org.assets.get(asset.id)).toBeDefined();
   });
 
   it('deletes a pending asset and its uploads', async () => {
@@ -400,6 +450,54 @@ describe('list, usage and delete', () => {
     });
     await call('delete_asset', { assetId: created.asset.id });
     expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${created.asset.id}/` })).toMatchObject({ objects: [] });
+  });
+});
+
+describe('the storage sweep and uploads (#235, review of #429, 6)', () => {
+  /** The sweep's claim on `sha`, as its claim batch writes it: held for an hour, or run out. */
+  const claimFile = (sha: string, held: boolean) =>
+    env.DB.prepare(
+      `INSERT INTO blob_deletes (org_id, sha256, queued_at, claim_owner, claim_until) VALUES (?, ?, 0, 'sweep', ?)
+       ON CONFLICT (org_id, sha256) DO UPDATE SET claim_owner = excluded.claim_owner, claim_until = excluded.claim_until`,
+    )
+      .bind(o.orgId, sha, held ? Date.now() + 3_600_000 : 0)
+      .run();
+  const pair = (seed: number) => {
+    const l = png(1920, 1080, seed),
+      p = png(1080, 1920, seed + 1);
+    return Promise.all([claim(l, 'image/png', 1920, 1080), claim(p, 'image/png', 1080, 1920)]).then(
+      ([lc, pc]) => ({ landscape: [l, lc], portrait: [p, pc] }) as { landscape: [Uint8Array, { sha256: string }]; portrait: [Uint8Array, { sha256: string }] },
+    );
+  };
+
+  it('refuses to start an upload of bytes the sweep has claimed, and starts it once the claim has run out', async () => {
+    const files = await pair(30);
+    await claimFile(files.landscape[1].sha256, true);
+    const input = { name: 'Claimed bytes', renditions: { landscape: files.landscape[1], portrait: files.portrait[1] } };
+    expect(await run('create_asset_upload', input)).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('storage clean-up') });
+    await claimFile(files.landscape[1].sha256, false);
+    expect(await run('create_asset_upload', input)).toMatchObject({ ok: true });
+  });
+
+  it('refuses, writing nothing, an upload whose bytes the sweep claims between the check and its batch', async () => {
+    const files = await pair(32);
+    const raced = racing(owner, () => claimFile(files.portrait[1].sha256, true));
+    const input = { name: 'Raced claim', renditions: { landscape: files.landscape[1], portrait: files.portrait[1] } };
+    expect(await dispatch(registry, 'create_asset_upload', input, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    const made = await env.DB.prepare("SELECT count(*) AS n FROM assets WHERE org_id = ? AND name = 'Raced claim'").bind(o.orgId).first<{ n: number }>();
+    expect(made?.n).toBe(0);
+  });
+
+  it('refuses to verify an upload whose bytes the sweep has claimed since it started', async () => {
+    const files = await pair(34);
+    const created = await upload('Claimed later', files);
+    await claimFile(files.portrait[1].sha256, true);
+    expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('storage clean-up'),
+    });
+    expect((await testScope(env.DB, o.orgId).assets.get(created.asset.id))?.status).toBe('pending');
   });
 });
 

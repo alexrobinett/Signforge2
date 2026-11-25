@@ -64,6 +64,7 @@ describe('a rollout', () => {
       restoresRevision: null,
       by: { kind: 'user', id: 'u', name: 'Maria' },
       createdAt: 0,
+      rollBackUntil: 0,
       screens: 2,
       open: 0,
     };
