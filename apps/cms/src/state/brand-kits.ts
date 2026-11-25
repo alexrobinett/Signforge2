@@ -13,14 +13,14 @@
  */
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
 import { PREVIEW_PROTOCOL, type BrandColor, type ScreenManifest } from '@signforge/contract';
-import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { draftColors, duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
 import { callTool, toolMessage } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
+import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 const PREVIEW_DELAY_MS = 40;
 
@@ -69,9 +69,6 @@ export interface BrandKitsSlice {
   editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
   fixKitPair: (orgId: string, kitId: string, fg: BrandColor, bg: BrandColor) => void;
-  discardKitDraft: (kitId: string) => void;
-  /** Saves the kit's draft, unless a kit action, a save or a new kit is on its way. */
-  saveKit: (kitId: string) => Promise<void>;
   /** After a refused save: reads the kits again and drops the kit's draft. */
   reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
@@ -135,9 +132,18 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       ]);
       return { version };
     },
+    // A kit the server would refuse as it is (no name, a colour not yet a colour) is marked, not sent, as an editor's is.
+    invalid: ({ edit }) => !edit.name.trim() || draftColors(edit) === null,
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
+  });
+  // Saved as the editors save (#366): a second after the last edit. Kit actions run one at a time (a save during
+  // Duplicate would leave the copy without it): one due while an action runs waits another second.
+  const saveSoon: (kitId: string) => void = autosave(realClock, AUTOSAVE_MS, async (kitId) => {
+    const { pending, newKit } = get().brandKits;
+    if (pending !== null || newKit.pending) return saveSoon(kitId);
+    await drafts.save(kitId);
   });
   const links = new Map<string, PreviewLink>();
   const cachedKit = (orgId: string, kitId: string) => queryClient.getQueryData(brandKitsQuery(orgId).queryKey)?.brandKits.find((k) => k.id === kitId);
@@ -287,9 +293,12 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       const kit = cachedKit(orgId, kitId);
       // Not read, or deleted: there is nothing to change.
       if (!kit) return;
+      // Another kit's edit, still waiting out its second: it is saved now, not left behind, as an editor's is.
+      for (const [id, d] of Object.entries(get().brandKits.drafts)) if (id !== kitId && d.status === 'unsaved') void drafts.save(id);
       // A new draft builds on the kit as the page holds it now; a later read of the kits does not move it.
       drafts.edit(kitId, { orgId, record: kitId, version: kit.version, edit: kitDraftOf(kit) }, change);
       redrawAll();
+      saveSoon(kitId);
     },
 
     fixKitPair(orgId, kitId, fg, bg) {
@@ -298,16 +307,6 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
       const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
       get().editKit(orgId, kitId, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
-    },
-
-    discardKitDraft(kitId) {
-      drafts.drop(kitId);
-      redrawAll();
-    },
-
-    async saveKit(kitId) {
-      if (kitActionRunning(get())) return;
-      await drafts.save(kitId);
     },
 
     async reloadKit(orgId, kitId) {
@@ -337,6 +336,12 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     async duplicateKit(orgId, kit) {
+      // An edit still waiting out its second is saved first, and the copy is of the kit as saved; refused, the copy is
+      // not made, and the refusal is said where the kit's are.
+      if (get().brandKits.drafts[kit.id]?.status === 'unsaved') {
+        if ((await drafts.save(kit.id))?.status !== 'saved') return;
+        kit = cachedKit(orgId, kit.id) ?? kit;
+      }
       const of = `${kit.id}:${kit.version}`;
       const key = duplicateKeys.get(of) ?? crypto.randomUUID();
       duplicateKeys.set(of, key);

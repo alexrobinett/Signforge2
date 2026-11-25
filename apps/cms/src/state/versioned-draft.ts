@@ -316,6 +316,9 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
   };
 }
 
+/** How long after the last edit an editor saves: the spot, playlist and brand kit editors alike (#366). */
+export const AUTOSAVE_MS = 1000;
+
 /** Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. */
 export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): (key: string) => void {
   const timers = new Map<string, () => void>();

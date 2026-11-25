@@ -14,11 +14,11 @@ import { ChevronLeftIcon, TriangleAlertIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CatalogueFonts, ColourFields, FontField, LogoFields, ShapeField } from '~/components/brand/kit-fields';
 import { KitPreviews } from '~/components/brand/kit-previews';
-import { EditorFields } from '~/components/editor';
+import { EditorFields, saveWord } from '~/components/editor';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { draftColors, kitDraftOf, screensText, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { kitDraftOf, screensText, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
@@ -202,9 +202,6 @@ function KitEditor() {
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
 
   const saved = useAppStore((s) => s.brandKits.drafts[kitId]);
-  const unsaved = saved !== undefined && saved.status !== 'saved';
-  const saving = saved?.pending ?? false;
-  const savedAt = saved?.savedAt ?? null;
   const stale = saved?.stale ?? false;
   const saveError = stale ? 'This kit changed since you opened it.' : (saved?.error ?? null);
   const actionError = useAppStore((s) => (s.brandKits.actionError?.kitId === kitId ? s.brandKits.actionError.text : null));
@@ -212,8 +209,6 @@ function KitEditor() {
   const logoFor = useAppStore((s) => s.brandKits.logoFor);
   const edit = useAppStore((s) => s.editKit);
   const fix = useAppStore((s) => s.fixKitPair);
-  const discard = useAppStore((s) => s.discardKitDraft);
-  const save = useAppStore((s) => s.saveKit);
   const reload = useAppStore((s) => s.reloadKit);
   const pickLogo = useAppStore((s) => s.pickLogo);
   const duplicate = useAppStore((s) => s.duplicateKit);
@@ -225,14 +220,10 @@ function KitEditor() {
   const colors = shownColors(draft, kit.colors);
   const change = (c: (d: KitDraft) => KitDraft) => edit(orgId, kit.id, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
-  const ready = unsaved && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
-  const statusWord = unsaved
-    ? 'Unsaved changes'
-    : savedAt
-      ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-      : 'Saved';
+  // How its save is going, in the editors' words (#366): it saves itself, a second after the last edit.
+  const statusWord = saveWord(saved?.status ?? 'saved', saved?.savedAt ?? null);
 
   return (
     <div className="space-y-5">
@@ -262,12 +253,6 @@ function KitEditor() {
             <EditorFields>
               <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
-              </Button>
-              <Button variant="outline" disabled={!unsaved || saving} onClick={() => discard(kit.id)}>
-                Discard changes
-              </Button>
-              <Button disabled={!ready} aria-disabled={busy || undefined} onClick={() => void save(kit.id)}>
-                {saving ? 'Saving…' : 'Save kit'}
               </Button>
             </EditorFields>
           )}

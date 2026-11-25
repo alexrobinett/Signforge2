@@ -41,11 +41,10 @@ import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
 import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
-import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
+import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** How long typing pauses before the stage redraws, and before the draft is saved. */
 const STAGE_DELAY_MS = 40;
-const SAVE_DELAY_MS = 1000;
 
 /** What the stage shows, a spot or a playlist, as the stage component reads it from the URL. */
 export type StageShows = {
@@ -365,7 +364,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
   });
-  const saveSoon = autosave(realClock, SAVE_DELAY_MS, (spotId) => drafts.save(spotId));
+  const saveSoon = autosave(realClock, AUTOSAVE_MS, (spotId) => drafts.save(spotId));
 
   return {
     spotEditor: initial,
