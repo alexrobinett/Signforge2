@@ -7,6 +7,7 @@ import { type AnswerCard, CHAT_EVENTS, type ConfirmCard, type ToolCard } from '@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
+import { initialOrgs, type OrgsState } from '../src/state/orgs';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 // The pages' reads the drafts' summaries use (#268): none is drafted here.
@@ -77,14 +78,27 @@ const answering = (card: AnswerCard) => (run: { runId: string; threadId: string 
 function drawerStore() {
   const panel: boolean[] = [];
   const router = { state: { location: { pathname: '/screens/scr_1' }, matches: [{ params: { screenId: 'scr_1' } as Record<string, string> }] } };
-  const store = createStore<AgentDrawerSlice & { setRightPanel: (open: boolean) => void }>()((set, get) => ({
+  const store = createStore<AgentDrawerSlice & { setRightPanel: (open: boolean) => void; orgs: OrgsState }>()((set, get) => ({
     ...createAgentDrawerSlice(set as never, get as never, { router, queryClient: {} } as never),
     setRightPanel: (open) => void panel.push(open),
+    orgs: initialOrgs,
   }));
   return { store, panel, router };
 }
 
 describe('the agent drawer, in the store', () => {
+  it("asks nothing while the org changes: the drawer is already the next org's, and a turn now would be the last one's (review of #469)", async () => {
+    const { store } = drawerStore();
+    answer = answering(CARD);
+    store.setState({ orgs: { ...initialOrgs, switchingTo: 'org_2' } });
+    await store.getState().askAgent('Tell me about these screens');
+    expect(sent).toEqual([]);
+    expect(store.getState().agentDrawer.messages).toEqual([]);
+    store.setState({ orgs: initialOrgs });
+    await store.getState().askAgent('Tell me about these screens');
+    expect(sent).toHaveLength(1);
+  });
+
   it('opens, folding the sidebar, and closes', () => {
     const { store, panel } = drawerStore();
     store.getState().openAgentDrawer('sidebar');
