@@ -578,15 +578,16 @@ describe("the storage sweep's queries (review of #431, round 2)", () => {
         .bind(...q.binds)
         .all<{ detail: string }>()
     ).results.map((r) => r.detail);
-  /** Its reads of stored_manifests: each through the live rows' index, never a scan of the table. */
-  const throughLiveIndex = (details: string[]) => {
-    const reads = details.filter((d) => /^(?:SCAN|SEARCH) (?:stored_manifests|m)\b/.test(d));
+  /** Its reads of `table` (or its alias): one through `index` at least, and none a scan of the table. */
+  const searchedThrough = (details: string[], table: string, alias: string, index: string) => {
+    const reads = details.filter((d) => new RegExp(`^(?:SCAN|SEARCH) (?:${table}|${alias})\\b`).test(d));
     expect(
-      reads.some((d) => d.includes('USING INDEX stored_manifests_live_idx')),
+      reads.some((d) => d.includes(`USING INDEX ${index}`) || d.includes(`USING COVERING INDEX ${index}`)),
       details.join('\n'),
     ).toBe(true);
     for (const d of reads) expect(d.startsWith('SCAN'), d).toBe(false);
   };
+  const throughLiveIndex = (details: string[]) => searchedThrough(details, 'stored_manifests', 'm', 'stored_manifests_live_idx');
 
   it('finds orgs with old manifests, and an org’s due manifests, through the live rows’ partial index', async () => {
     const { orgId, screens } = await fresh(1);
@@ -607,6 +608,29 @@ describe("the storage sweep's queries (review of #431, round 2)", () => {
     // The claim's and the release's look for due manifests.
     expect(touching).toHaveLength(2);
     for (const q of touching) throughLiveIndex(await plan(q));
+  });
+
+  it('finds orgs with due files or unfinished uploads, and an org’s own, through org-led indexes (#433)', async () => {
+    const { orgId } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('p')], T0);
+    const upload = await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Left', sha256: sha('q'), type: 'video/mp4', size: 1 });
+    await run('UPDATE assets SET created_at = ? WHERE id = ?', T0, upload.id);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    const listing = await plan(orgs.seen[0]!);
+    searchedThrough(listing, 'blob_deletes', 'b', 'blob_deletes_due_idx');
+    searchedThrough(listing, 'assets', 'a', 'assets_pending_idx');
+    throughLiveIndex(listing);
+    // The org's own claim: its due files and its unfinished uploads.
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    const due = await scope.storage.claim('sweep-a', DUE, 90);
+    expect(due).toMatchObject({ files: [sha('p')], uploads: [{ assetId: upload.id }] });
+    const claimFiles = sweep.seen.find((q) => q.query.startsWith('update "blob_deletes" set "claim_owner"'));
+    const pending = sweep.seen.find((q) => q.query.startsWith('select "id", "kind", "sha256" from "assets"'));
+    searchedThrough(await plan(claimFiles!), 'blob_deletes', 'blob_deletes', 'blob_deletes_due_idx');
+    searchedThrough(await plan(pending!), 'assets', 'assets', 'assets_pending_idx');
   });
 
   it('starts a manifest’s grace period when a real store replaces a look that found no object', async () => {

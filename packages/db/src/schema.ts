@@ -546,7 +546,12 @@ export const assets = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('assets_org_id_uq').on(t.orgId, t.id), index('assets_org_sha_idx').on(t.orgId, t.sha256)],
+  (t) => [
+    uniqueIndex('assets_org_id_uq').on(t.orgId, t.id),
+    index('assets_org_sha_idx').on(t.orgId, t.sha256),
+    // The storage sweep's unfinished uploads, by age (#433).
+    index('assets_pending_idx').on(t.orgId, t.createdAt).where(sql`status = 'pending'`),
+  ],
 );
 
 export const assetRenditions = sqliteTable(
@@ -1267,7 +1272,8 @@ export const blobDeletes = sqliteTable(
     claimOwner: text('claim_owner'),
     claimUntil: integer('claim_until').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
+  // The storage sweep's due files, by age (#433).
+  (t) => [primaryKey({ columns: [t.orgId, t.sha256] }), index('blob_deletes_due_idx').on(t.orgId, t.queuedAt, t.claimUntil)],
 );
 
 /**
