@@ -32,7 +32,7 @@ import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
 import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
-import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
+import { draftRef, outputs, publishChanges, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -208,16 +208,28 @@ export async function runPublish(
     .map((d) => d.id)
     .sort();
   write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
-  // What it made live and removed, named as published (#370): a schedule entry by its playlist.
-  const spotNames = new Map(result.read.spots.map((s) => [s.id, s.name]));
-  const playlistNames = new Map(result.read.playlists.map((p) => [p.id, p.name]));
-  const entryPlaylists = new Map(result.read.entries.map((e) => [e.id, e.playlistId]));
-  const nameOf = (d: { kind: DraftKind; id: string }) =>
-    (d.kind === 'spot' ? spotNames.get(d.id) : playlistNames.get(d.kind === 'playlist' ? d.id : (entryPlaylists.get(d.id) ?? ''))) ?? '';
-  const changes = [
-    ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d), removed: false })),
-    ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d), removed: true })),
-  ];
+  // What it made live and removed (#370), named as screens have them after it: a draft made live by its draft, which
+  // becomes the published one; a schedule entry by its playlist; one removed by what was published, as it played.
+  const spots = new Map(result.read.spots.map((s) => [s.id, s]));
+  const playlists = new Map(result.read.playlists.map((p) => [p.id, p]));
+  const entries = new Map(result.read.entries.map((e) => [e.id, e]));
+  // Every draft it reports is one this publish read.
+  const playlistName = (id: string, live: boolean) => {
+    const p = playlists.get(id);
+    if (!p) return '';
+    return (live ? published(p)?.name : undefined) ?? p.name;
+  };
+  const nameOf = (d: { kind: DraftKind; id: string }, removed: boolean) => {
+    if (d.kind === 'spot') return spots.get(d.id)?.name ?? '';
+    if (d.kind === 'playlist') return playlistName(d.id, false);
+    const e = entries.get(d.id);
+    if (!e) return '';
+    return playlistName((removed ? published(e)?.playlistId : undefined) ?? e.playlistId, removed);
+  };
+  const changes = summarizeChanges([
+    ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
+    ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d, true), removed: true })),
+  ]);
   const made = await switchScreens(
     ctx,
     result.revision + 1,
@@ -419,6 +431,46 @@ const rollBackPublish = defineTool({
 
 type PublishView = z.output<typeof publishOutput>;
 
+/** Names kept per kind, at most; then fewer while the whole is over `CHANGES_BYTES`. */
+const CHANGES_NAMES = 10;
+/** The most a publish's changes may take on its row, as JSON: D1 refuses a value over 2 MB, and the page shows a line. */
+export const CHANGES_BYTES = 4096;
+
+/**
+ * What a publish changed, by kind (#370): exact counts, and the first names of each, each once, while the whole is
+ * under `CHANGES_BYTES`. A publish of thousands of drafts with long names keeps its counts and a few of them.
+ */
+export function summarizeChanges(items: readonly { kind: DraftKind; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
+  const groups = (['spot', 'playlist', 'schedule_entry'] as const).flatMap((kind) =>
+    [false, true].flatMap((removed) => {
+      const these = items.filter((i) => i.kind === kind && i.removed === removed);
+      if (!these.length) return [];
+      const distinct = [...new Set(these.map((i) => i.name))];
+      const names = distinct.slice(0, CHANGES_NAMES);
+      return [{ kind, removed, count: these.length, names, omitted: distinct.length - names.length }];
+    }),
+  );
+  const bytes = () => new TextEncoder().encode(JSON.stringify(groups)).length;
+  while (bytes() > CHANGES_BYTES) {
+    const longest = groups.reduce((a, b) => (b.names.length > a.names.length ? b : a));
+    if (!longest.names.length) break;
+    longest.names.pop();
+    longest.omitted += 1;
+  }
+  return groups;
+}
+
+/** A publish's changes as its row keeps them: none when it has none, or when what is there is not that shape. */
+function changesOf(json: string | null): PublishView['changes'] {
+  if (json === null) return null;
+  try {
+    const read = publishChanges.safeParse(JSON.parse(json));
+    return read.success ? read.data : null;
+  } catch {
+    return null;
+  }
+}
+
 const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => {
   const { screens, playing, replaced, open } = tally(h.rollout);
   return {
@@ -435,8 +487,7 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
     playing,
     replaced,
     open,
-    // Written by switchScreens, from this output's own shape.
-    changes: h.changesJson === null ? null : JSON.parse(h.changesJson),
+    changes: changesOf(h.changesJson),
   };
 };
 

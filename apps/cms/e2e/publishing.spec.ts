@@ -158,6 +158,8 @@ test('a publish made more than 90 days ago can no longer be rolled back to, and 
   await expect(history.getByRole('listitem').filter({ hasText: /^v3/ })).toContainText('Spot Deal');
   await expect(old).toHaveAccessibleDescription('Spot Deal; playlist Main Over 90 days old: its files are no longer kept.');
   await expect(page.getByRole('button', { name: 'Roll back to v2' })).toBeEnabled();
+  // A roll back's says what it put back (review of #455): v4 put v2 back.
+  await expect(page.getByRole('button', { name: 'Roll back to v4' })).toHaveAccessibleDescription('Restores v2');
   // The tool refuses it too, and says why.
   const { publishes } = await tool(page, 'list_publishes', {});
   const v1 = publishes.find((p: { revision: number }) => p.revision === 1);
@@ -200,4 +202,20 @@ test('Publish pressed while an autosave is on its way waits for it, and publishe
   await expect.poll(() => stageShows(screen, 'Five for $7'), { timeout: 20_000 }).toBe(true);
   expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { message: 'Five for $7' }, draftChanged: false });
   await page.unroute('**/api/tools/update_spot');
+});
+
+test("a name with no break wraps in the history's line at a phone's width (review of #455)", async () => {
+  const { spot } = await tool(page, 'get_spot', { spotId });
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'update_spot', { spotId, name: unbroken, ifVersion: spot.version });
+  await tool(page, 'publish', {});
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/publishes');
+  await hydrated(page);
+  const line = page.getByRole('region', { name: 'Publish history' }).getByText(unbroken, { exact: false }).first();
+  await line.scrollIntoViewIfNeeded();
+  expect(await line.evaluate((l) => l.scrollWidth <= l.clientWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 });

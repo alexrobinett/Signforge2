@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
 import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
+import { CHANGES_BYTES, summarizeChanges } from '../src/publish';
 import { dispatch, manifestKey, registry, type Caller, type ScreenNotifier } from '../src';
 import { fakeServices } from './services';
 import { sha256Hex } from '../src/dispatch';
@@ -621,6 +622,40 @@ const bound = (target: R2Bucket, key: string | symbol) => {
   return typeof v === 'function' ? v.bind(target) : v;
 };
 
+describe("a publish's changes, kept to a size (#370, review of #455)", () => {
+  it('keeps exact counts and a few names of 6,000 long CJK ones, in at most CHANGES_BYTES', () => {
+    const long = (i: number) => `${'看板'.repeat(49)}${String(i).padStart(4, '0')}`;
+    const items = [
+      ...Array.from({ length: 3000 }, (_, i) => ({ kind: 'spot' as const, name: long(i), removed: false })),
+      ...Array.from({ length: 2000 }, (_, i) => ({ kind: 'playlist' as const, name: long(i), removed: false })),
+      ...Array.from({ length: 1000 }, (_, i) => ({ kind: 'schedule_entry' as const, name: long(i % 7), removed: i % 2 === 0 })),
+    ];
+    const kept = summarizeChanges(items);
+    expect(new TextEncoder().encode(JSON.stringify(kept)).length).toBeLessThanOrEqual(CHANGES_BYTES);
+    expect(kept.map((g) => [g.kind, g.removed, g.count])).toEqual([
+      ['spot', false, 3000],
+      ['playlist', false, 2000],
+      ['schedule_entry', false, 500],
+      ['schedule_entry', true, 500],
+    ]);
+    // Each group keeps some names, and says how many it left out.
+    for (const g of kept) expect(g.names.length + g.omitted).toBe(g.kind === 'schedule_entry' ? 7 : g.count);
+  });
+
+  it('keeps every name of a small publish, each once', () => {
+    expect(
+      summarizeChanges([
+        { kind: 'spot', name: 'Deal', removed: false },
+        { kind: 'schedule_entry', name: 'Main', removed: false },
+        { kind: 'schedule_entry', name: 'Main', removed: false },
+      ]),
+    ).toEqual([
+      { kind: 'spot', removed: false, count: 1, names: ['Deal'], omitted: 0 },
+      { kind: 'schedule_entry', removed: false, count: 2, names: ['Main'], omitted: 0 },
+    ]);
+  });
+});
+
 describe('the publish tools (M3-18)', () => {
   /** Calls as an editor, with a notifier that records which screens it was told of and a bucket `put` can be wrapped around. */
   function publisher(org: TestScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
@@ -832,25 +867,56 @@ describe('the publish tools (M3-18)', () => {
     expect(await call('get_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
-  it('says what each publish changed, by name as published; a roll back, which changed no draft, says nothing (#370)', async () => {
+  it('says what each publish changed, by kind with exact counts, named as published; a roll back says nothing (#370)', async () => {
     const { org } = await seedSmallOrg('tool-changes');
     const p = publisher(org);
     const call = editorCalls(org);
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
-    const made = (await ok(call('get_publish', {}))).publish as { changes: { kind: string; name: string; removed: boolean }[] };
-    expect(made.changes).toHaveLength(first.promoted.length);
-    expect(made.changes.every((c) => c.name !== '' && !c.removed)).toBe(true);
+    type Changes = { kind: string; removed: boolean; count: number; names: string[]; omitted: number }[];
+    const made = ((await ok(call('get_publish', {}))).publish as { changes: Changes }).changes;
+    expect(made.reduce((n, g) => n + g.count, 0)).toBe(first.promoted.length);
+    expect(made.every((g) => !g.removed && g.names.every((n) => n !== ''))).toBe(true);
 
     const deal = (await org.spots.get(x('deal')))!;
     await org.spots.update(deal.id, { name: 'Deal of the week', dataJson: JSON.stringify({ title: 'Three for $5' }) });
     await ok(p.call('publish', {}));
     const page = await ok(call('list_publishes', {}));
     expect((page.publishes as { revision: number; changes: unknown }[]).map((x) => [x.revision, x.changes])).toEqual([
-      [2, [{ kind: 'spot', name: 'Deal of the week', removed: false }]],
-      [1, made.changes],
+      [2, [{ kind: 'spot', removed: false, count: 1, names: ['Deal of the week'], omitted: 0 }]],
+      [1, made],
     ]);
     await ok(p.call('roll_back_publish', { publishId: first.publish!.id }));
     expect((await ok(call('get_publish', {}))).publish).toMatchObject({ revision: 3, changes: null });
+  });
+
+  it('names a removed schedule entry by what screens played, not by its draft (review of #455)', async () => {
+    const { org } = await seedSmallOrg('tool-changes-removed');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    await ok(p.call('publish', {}));
+    // Published playing Evenings; its draft then pointed at Main, and deleted.
+    const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
+    const edited = await ok(call('update_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }));
+    await ok(call('delete_schedule_entry', { scheduleEntryId: entry.id, ifVersion: (edited.entry as { version: number }).version }));
+    await ok(p.call('publish', {}));
+    expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toContainEqual({
+      kind: 'schedule_entry',
+      removed: true,
+      count: 1,
+      names: ['Evenings'],
+      omitted: 0,
+    });
+  });
+
+  it('reads a summary not of its shape as none, so the history still lists the publish (review of #455)', async () => {
+    const { org } = await seedSmallOrg('tool-changes-bad');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    for (const bad of ['{}', 'not json', '[{"kind":"spot"}]']) {
+      await env.DB.prepare('UPDATE publishes SET changes_json = ? WHERE id = ?').bind(bad, first.publish!.id).run();
+      expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes, bad).toBeNull();
+    }
   });
 
   it('is refused at its commit when an asset its manifests name is deleted while it compiles, and runs again without it (review of #429, 5)', async () => {

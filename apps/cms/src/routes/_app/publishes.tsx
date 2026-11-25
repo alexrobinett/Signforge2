@@ -12,7 +12,8 @@ import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, changesText, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { PublishChanges } from '~/components/publishes/changes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
@@ -126,7 +127,12 @@ function PublishesPage() {
                 <span className="flex min-w-0 flex-[1_1_14rem] flex-col gap-0.5 text-sm">
                   <span className="text-muted-foreground">{about(p, me)}</span>
                   {/* What it changed, so a roll back to it is to something seen, not remembered (#370). */}
-                  {p.changes && <span id={`${p.id}-changes`}>{changesText(p.changes)}</span>}
+                  {/* A roll back says what it put back (review of #455). */}
+                  {p.restoresRevision !== null ? (
+                    <span id={`${p.id}-changes`}>Restores {versionName({ revision: p.restoresRevision })}</span>
+                  ) : (
+                    p.changes && <PublishChanges id={`${p.id}-changes`} changes={p.changes} />
+                  )}
                 </span>
                 <span aria-hidden className="h-2 w-32 overflow-hidden rounded-full bg-muted">
                   <span className={cn('block h-full', movedOn ? 'bg-border-strong' : 'bg-chart-1')} style={{ width: `${share}%` }} />
@@ -140,7 +146,7 @@ function PublishesPage() {
                           variant="outline"
                           className="sm:h-8"
                           disabled={pending}
-                          aria-describedby={p.changes ? `${p.id}-changes` : undefined}
+                          aria-describedby={p.changes || p.restoresRevision !== null ? `${p.id}-changes` : undefined}
                           onClick={() => void rollBack(orgId, p)}
                         >
                           Roll back to <span className="font-mono">{versionName(p)}</span>
@@ -152,7 +158,7 @@ function PublishesPage() {
                             variant="outline"
                             className="sm:h-8"
                             disabled
-                            aria-describedby={[p.changes ? `${p.id}-changes` : '', `${p.id}-too-old`].join(' ').trim()}
+                            aria-describedby={[p.changes || p.restoresRevision !== null ? `${p.id}-changes` : '', `${p.id}-too-old`].join(' ').trim()}
                           >
                             Roll back to <span className="font-mono">{versionName(p)}</span>
                           </Button>

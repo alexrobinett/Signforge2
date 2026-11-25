@@ -234,6 +234,21 @@ const checkPublishRequestResult = z.object({
     .describe('Each pinned draft, and what it changes'),
 });
 
+/**
+ * What a publish changed (#370), kept on its row: per kind, and whether made live or removed, how many drafts
+ * exactly, and some of their names. Held to a size (`summarizeChanges`), so a publish of thousands of drafts
+ * stores a few kilobytes.
+ */
+export const publishChanges = z.array(
+  z.object({
+    kind: z.enum(DRAFT_KINDS),
+    removed: z.boolean().describe('Schedule entries this publish deleted; false for drafts it made live'),
+    count: z.number().int().describe('How many drafts, exactly'),
+    names: z.array(z.string()).describe("Some of their names, each once, as published: a schedule entry's is its playlist's"),
+    omitted: z.number().int().describe('Names left out of names, for the size'),
+  }),
+);
+
 export const publishOutput = z.object({
   id: z.string(),
   revision: z.number().int(),
@@ -263,12 +278,9 @@ export const publishOutput = z.object({
     .describe(
       'Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished',
     ),
-  changes: z
-    .array(
-      z.object({ kind: z.enum(DRAFT_KINDS), name: z.string().describe("Its name as published; a schedule entry's is its playlist's"), removed: z.boolean() }),
-    )
+  changes: publishChanges
     .nullable()
-    .describe('What it made live, and the schedule entries it removed (removed: true); null for a roll back, and for a publish made before these were kept'),
+    .describe('What it made live, and the schedule entries it removed, by kind; null for a roll back, and for a publish made before these were kept'),
 });
 
 export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;

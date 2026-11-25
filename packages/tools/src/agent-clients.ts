@@ -1,6 +1,6 @@
 /**
- * An agent's OAuth client as a page may show it (#299's reviews, M4-07): `/connect` and Settings › API &
- * agents both name a client through `shownClient`. A client registers its own name and redirect, so an
+ * An agent's OAuth client as a page may show it (#299's reviews, M4-07): `/connect` and Settings › Connected
+ * agents (MCP) both name a client through `shownClient`. A client registers its own name and redirect, so an
  * unverified one's are shown only when plain, never read as SignForge's; anything else is shown as an
  * unverified app at where its code goes.
  */
