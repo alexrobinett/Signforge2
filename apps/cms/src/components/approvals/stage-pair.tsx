@@ -5,7 +5,7 @@
  */
 import { SCREEN_BOX } from '@signforge/contract';
 import { useCallback } from 'react';
-import type { SpotStage } from '~/lib/approvals';
+import { afterStage, type SpotStage } from '~/lib/approvals';
 import { useHydrated } from '~/lib/hydrated';
 import { useWidthRef } from '~/lib/measured';
 import { PLAYER_URL } from '~/lib/preview';
@@ -59,6 +59,7 @@ function Player({ stageKey, orgId, spot, label, after }: { stageKey: string; org
 export function StagePair({ requestId, orgId, stage, screens }: { requestId: string; orgId: string; stage: SpotStage; screens: number }) {
   const { now, after } = stage;
   const key = `${requestId}:${after.id}`;
+  const shown = afterStage(stage);
   return (
     <div className="grid max-w-[900px] grid-cols-[repeat(auto-fit,minmax(min(360px,100%),1fr))] gap-4">
       <figure className="m-0 flex min-w-0 flex-col gap-2">
@@ -72,12 +73,8 @@ export function StagePair({ requestId, orgId, stage, screens }: { requestId: str
         )}
       </figure>
       <figure className="m-0 flex min-w-0 flex-col gap-2">
-        <figcaption className="text-meta font-semibold">
-          {after.version === stage.pinned
-            ? `After approval · Draft ${after.version}`
-            : `Draft ${after.version} · changed since it was asked for (Draft ${stage.pinned})`}
-        </figcaption>
-        <Player stageKey={`${key}:after`} orgId={orgId} spot={after} label={`${after.name} as approving would publish it`} after />
+        <figcaption className="text-meta font-semibold">{shown.caption}</figcaption>
+        <Player stageKey={`${key}:after`} orgId={orgId} spot={after} label={shown.title} after />
       </figure>
     </div>
   );
