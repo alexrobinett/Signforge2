@@ -837,7 +837,7 @@ describe('confirmation cards (#269)', () => {
     expect(await s.scope.invitations.get(invited.id)).toMatchObject({ status: 'canceled' });
   });
 
-  it("offers an editor no list of invitations: a call to it is refused unrun, and no invitee reaches the model or the browser (#425)", async () => {
+  it('offers an editor no list of invitations: a call to it is refused unrun, and no invitee reaches the model or the browser (#425)', async () => {
     const s = await setup({ role: 'editor', steps: [{ calls: [{ name: 'list_invitations', input: {} }] }, ANSWER] });
     await s.owner.ok('/api/auth/organization/invite-member', { email: 'hidden-425@signforge.test', role: 'viewer' });
     const all = await raw(await s.ask('Who is invited?'));

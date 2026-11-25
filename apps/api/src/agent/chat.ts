@@ -169,7 +169,6 @@ export const drawerTools = (grant: Grant) =>
       !(t.name in CONFIRMABLE),
   );
 
-
 /** The model's answer, every field required: prose alone, or a lone `{ text }`, is not one (#350). */
 const answerInput = z
   .object({
