@@ -66,45 +66,48 @@ export function DisplayHoursEditor({
 
       {value && (
         <>
-          {/* Each window set apart by a rule and space, not a box in the form (#377). */}
+          {/* Each window set apart by a rule and space, not a box in the form (#377), and named, so its times say whose they are. */}
           <ul className="divide-y">
             {value.weekly.map((w, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
-              <li key={i} className="space-y-2 py-3 first:pt-0">
-                <fieldset className="flex flex-wrap gap-1">
-                  <legend className="sr-only">Days for window {i + 1}</legend>
-                  {DAYS.map(([d, short, long]) => {
-                    const on = w.days.includes(d);
-                    return (
-                      <Choice
-                        key={d}
-                        selected={on}
-                        onClick={() =>
-                          setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, days: on ? x.days.filter((y) => y !== d) : [...x.days, d].sort() } : x)))
-                        }
-                        className="h-8 min-w-11 rounded-md px-2 text-xs font-medium"
-                      >
-                        {/* Named "Monday" by hidden text, not aria-label: axe counts a label that does not contain the "Mon" shown as a mismatch. */}
-                        <span aria-hidden>{short}</span>
-                        <span className="sr-only">{long}</span>
-                      </Choice>
-                    );
-                  })}
+              <li key={i} className="py-3 first:pt-0">
+                <fieldset className="space-y-2">
+                  <legend className="sr-only">Window {i + 1}</legend>
+                  <fieldset className="flex flex-wrap gap-1">
+                    <legend className="sr-only">Days for window {i + 1}</legend>
+                    {DAYS.map(([d, short, long]) => {
+                      const on = w.days.includes(d);
+                      return (
+                        <Choice
+                          key={d}
+                          selected={on}
+                          onClick={() =>
+                            setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, days: on ? x.days.filter((y) => y !== d) : [...x.days, d].sort() } : x)))
+                          }
+                          className="h-8 min-w-11 rounded-md px-2 text-xs font-medium"
+                        >
+                          {/* Named "Monday" by hidden text, not aria-label: axe counts a label that does not contain the "Mon" shown as a mismatch. */}
+                          <span aria-hidden>{short}</span>
+                          <span className="sr-only">{long}</span>
+                        </Choice>
+                      );
+                    })}
+                  </fieldset>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <TimeField label="On at" value={w.from} onChange={(from) => setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, from } : x)))} />
+                    <TimeField label="Off at" value={w.to} onChange={(to) => setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, to } : x)))} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove window ${i + 1}`}
+                      onClick={() => setWeekly(value.weekly.filter((_, j) => j !== i))}
+                    >
+                      <Trash2Icon aria-hidden />
+                    </Button>
+                  </div>
+                  {w.to <= w.from && <p className="text-xs text-muted-foreground">Ends after midnight, the next day.</p>}
                 </fieldset>
-                <div className="flex flex-wrap items-end gap-2">
-                  <TimeField label="On at" value={w.from} onChange={(from) => setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, from } : x)))} />
-                  <TimeField label="Off at" value={w.to} onChange={(to) => setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, to } : x)))} />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove window ${i + 1}`}
-                    onClick={() => setWeekly(value.weekly.filter((_, j) => j !== i))}
-                  >
-                    <Trash2Icon aria-hidden />
-                  </Button>
-                </div>
-                {w.to <= w.from && <p className="text-xs text-muted-foreground">Ends after midnight, the next day.</p>}
               </li>
             ))}
           </ul>
@@ -126,57 +129,60 @@ export function DisplayHoursEditor({
                 const date = e.date || 'this date';
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: a dated exception is edited in place, date included.
-                  <li key={i} className="space-y-2 py-3 first:pt-0">
-                    <div className="flex flex-wrap items-end gap-2">
-                      <div className="grid gap-1 text-xs font-medium">
-                        <label htmlFor={`${id}-date-${i}`}>Date</label>
-                        <Input id={`${id}-date-${i}`} type="date" value={e.date} onChange={(ev) => set({ ...e, date: ev.target.value })} className="w-40" />
-                      </div>
-                      <label className="flex h-10 items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={closed}
-                          onChange={(ev) => setWindows(ev.target.checked ? [] : [{ from: '09:00', to: '17:00' }])}
-                          className="size-4 accent-primary"
-                        />
-                        Off all day
-                      </label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Remove ${date}`}
-                        onClick={() => setExceptions(all.filter((_, j) => j !== i))}
-                      >
-                        <Trash2Icon aria-hidden />
-                      </Button>
-                    </div>
-                    {!closed && (
-                      <fieldset className="space-y-2">
-                        <legend className="sr-only">Hours on {date}</legend>
-                        {e.on.map((w, k) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
-                          <div key={k} className="flex flex-wrap items-end gap-2">
-                            <TimeField label="On at" value={w.from} onChange={(from) => setWindows(e.on.map((x, j) => (j === k ? { ...x, from } : x)))} />
-                            <TimeField label="Off at" value={w.to} onChange={(to) => setWindows(e.on.map((x, j) => (j === k ? { ...x, to } : x)))} />
-                            {e.on.length > 1 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                aria-label={`Remove hours ${k + 1} on ${date}`}
-                                onClick={() => setWindows(e.on.filter((_, j) => j !== k))}
-                              >
-                                <Trash2Icon aria-hidden />
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                        <Button type="button" variant="ghost" size="sm" onClick={() => setWindows([...e.on, { from: '18:00', to: '22:00' }])}>
-                          <PlusIcon aria-hidden /> Add hours on this date
+                  <li key={i} className="py-3 first:pt-0">
+                    <fieldset className="space-y-2">
+                      <legend className="sr-only">Date {i + 1}</legend>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="grid gap-1 text-xs font-medium">
+                          <label htmlFor={`${id}-date-${i}`}>Date</label>
+                          <Input id={`${id}-date-${i}`} type="date" value={e.date} onChange={(ev) => set({ ...e, date: ev.target.value })} className="w-40" />
+                        </div>
+                        <label className="flex h-10 items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={closed}
+                            onChange={(ev) => setWindows(ev.target.checked ? [] : [{ from: '09:00', to: '17:00' }])}
+                            className="size-4 accent-primary"
+                          />
+                          Off all day
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Remove ${date}`}
+                          onClick={() => setExceptions(all.filter((_, j) => j !== i))}
+                        >
+                          <Trash2Icon aria-hidden />
                         </Button>
-                      </fieldset>
-                    )}
+                      </div>
+                      {!closed && (
+                        <fieldset className="space-y-2">
+                          <legend className="sr-only">Hours on {date}</legend>
+                          {e.on.map((w, k) => (
+                            // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
+                            <div key={k} className="flex flex-wrap items-end gap-2">
+                              <TimeField label="On at" value={w.from} onChange={(from) => setWindows(e.on.map((x, j) => (j === k ? { ...x, from } : x)))} />
+                              <TimeField label="Off at" value={w.to} onChange={(to) => setWindows(e.on.map((x, j) => (j === k ? { ...x, to } : x)))} />
+                              {e.on.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={`Remove hours ${k + 1} on ${date}`}
+                                  onClick={() => setWindows(e.on.filter((_, j) => j !== k))}
+                                >
+                                  <Trash2Icon aria-hidden />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setWindows([...e.on, { from: '18:00', to: '22:00' }])}>
+                            <PlusIcon aria-hidden /> Add hours on this date
+                          </Button>
+                        </fieldset>
+                      )}
+                    </fieldset>
                   </li>
                 );
               })}
