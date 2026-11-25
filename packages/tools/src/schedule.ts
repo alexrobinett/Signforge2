@@ -338,14 +338,15 @@ const deleteEntry = defineTool({
   output: outputs.delete_schedule_entry,
   example: { scheduleEntryId: 'sch_example' },
   target: entryTarget,
-  handler: async ({ org, input, write, scopes }) => {
+  handler: async ({ org, input, write, publishRight }) => {
     const row = await requireEntry(org, input.scheduleEntryId);
     if (input.ifVersion !== undefined && row.rowVersion !== input.ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
     if (!published(row)) {
       write(org.scheduleEntries.stage.remove(row));
       return { deleted: row.id, version: null };
     }
-    if (!scopes.includes('content:publish')) throw new ToolError('forbidden', 'Screens play this entry: deleting it needs the right to publish');
+    // Held to the commit too (review of #419): a role or editors-publish changed meanwhile refuses it.
+    publishRight('Screens play this entry: deleting it needs the right to publish');
     const marked = write(org.scheduleEntries.stage.update(row, { deletedAt: Date.now() }, row.rowVersion));
     return { deleted: row.id, version: marked.rowVersion };
   },

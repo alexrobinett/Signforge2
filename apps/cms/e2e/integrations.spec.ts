@@ -126,6 +126,11 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await hydrated(owner);
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(now.getByText('failed 2×')).toBeVisible();
+  // Its count is a number in Geist with tabular figures, not mono, which is for identifiers (#375).
+  expect(await now.getByText('failed 2×').evaluate((e) => [getComputedStyle(e).fontVariantNumeric, getComputedStyle(e).fontFamily.includes('Mono')])).toEqual([
+    'tabular-nums',
+    false,
+  ]);
   // The failing calendar's fix, at the top of the page as its one filled button (#364).
   const failing = owner.getByRole('alert', { name: 'iCal · Break room' });
   await expect(failing).toContainText(

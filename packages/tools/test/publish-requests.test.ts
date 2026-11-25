@@ -3,7 +3,7 @@
 // changed draft makes the approval a conflict, an agent never decides, and a request expires after
 // 7 days. Asking tells the members who may approve and the channels the org's rule names. Times are
 // the test's: Date is faked for the whole file, its setup included, never the clock's.
-import { draftChanged, type OrgScope, published, StaleVersionError } from '@signforge/db';
+import { draftChanged, type OrgScope, published, StaleVersionError, type Write } from '@signforge/db';
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -466,6 +466,51 @@ describe('the second re-check of #386', () => {
   const demote = (role: Role, to: string) =>
     env.DB.prepare('UPDATE member SET role = ? WHERE organizationId = ? AND userId = ?').bind(to, o.orgId, `${o.orgId}-${role}`).run();
 
+  it('refuses a publish whose member loses the right as each attempt commits, though it is back by every read: forbidden, never a conflict (review of #419)', async () => {
+    const caller = asMember('editor');
+    const org = caller.org as OrgScope;
+    // Each commit sees the member a viewer; each read after it, an editor again.
+    const flickering: Caller = {
+      ...caller,
+      org: new Proxy(org, {
+        get: (t, k) =>
+          k === 'commit'
+            ? async (writes: readonly Write[]) => {
+                await demote('editor', 'viewer');
+                try {
+                  return await org.commit(writes);
+                } finally {
+                  await demote('editor', 'editor');
+                }
+              }
+            : Reflect.get(t, k),
+      }),
+    };
+    await editSpot(agent(), o.templateSpot, 14_000);
+    expect(
+      await dispatch(registry, 'publish', { drafts: [{ kind: 'spot', id: o.templateSpot, version: await spotVersion(o.templateSpot) }] }, flickering),
+    ).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
+  });
+
+  it('refuses a decline when editors stop publishing between its read and its batch, saying so (#417)', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 13_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    const raced = racing(asMember('editor'), () => call(person('owner'), 'update_org_settings', { editorsPublish: false }));
+    try {
+      expect(await dispatch(registry, 'decline_publish_request', { publishRequestId: request.id }, raced)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'Only owners publish in this organization',
+      });
+    } finally {
+      await call(person('owner'), 'update_org_settings', { editorsPublish: true });
+    }
+    await pendingStill(request.id);
+  });
+
   it('refuses an editor demoted while the approval waits for the lock, and one demoted between its read and its batch', async () => {
     const version = await editSpot(agent(), o.templateSpot, 12_000);
     const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
@@ -601,6 +646,26 @@ describe('putting a declined request back (#115)', () => {
     // The editor did not decline it: they may put it back only while they may decide it, checked again in the batch.
     const raced = racing(person('editor'), () => call(person('owner'), 'update_org_settings', { editorsPublish: false }));
     expect(await reopen(raced, id)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect((await scope().publishRequests.get(id))!.status).toBe('declined');
+  });
+
+  it('says why in its own words when the right is lost and the same drafts are asked again, both meanwhile (review of #419)', async () => {
+    await call(person('owner'), 'update_org_settings', { editorsPublish: true });
+    const id = await declined(person('owner'));
+    const drafts = JSON.parse((await scope().publishRequests.get(id))!.draftsJson);
+    const raced = racing(person('editor'), async () => {
+      await call(person('owner'), 'update_org_settings', { editorsPublish: false });
+      await ask(agent(), drafts);
+    });
+    try {
+      expect(await reopen(raced, id)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: 'only the person who declined it, or someone who may publish, can put it back',
+      });
+    } finally {
+      await call(person('owner'), 'update_org_settings', { editorsPublish: true });
+    }
     expect((await scope().publishRequests.get(id))!.status).toBe('declined');
   });
 

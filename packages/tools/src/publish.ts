@@ -206,6 +206,7 @@ const publish = defineTool({
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
+  partialAgents: 'only a person publishes sample text anyway (allowSample)',
   publishes: true,
   input: z.object({
     ifDefault: id('playlist')

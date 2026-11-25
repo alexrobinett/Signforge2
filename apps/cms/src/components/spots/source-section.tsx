@@ -319,7 +319,7 @@ function FeedPicker({
                   max={366}
                   value={st.horizonDays}
                   onChange={(e) => editFeed(target, { horizonDays: Math.round(e.target.valueAsNumber) || 1 })}
-                  className="w-24 text-center font-mono"
+                  className="w-24 text-center tabular-nums"
                 />
               </div>
             )}

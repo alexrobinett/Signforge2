@@ -191,6 +191,42 @@ describe('revoking a grant', () => {
   });
 });
 
+describe("revoking all of a member's grants as their membership ends (#328, review of #422)", () => {
+  it("revokes theirs here, each with one audit row, and nothing of another member's or another org's; again, nothing more", async () => {
+    const clientId = await client();
+    const theirs = [await grant('grants-a', a.userId, clientId), await grant('grants-a', a.userId, clientId)];
+    const someoneElse = await grant('grants-a', b.userId, clientId);
+    const elsewhere = await grant('grants-b', a.userId, clientId);
+    for (const [g, h] of [
+      [theirs[0]!, 'h-all-0'],
+      [someoneElse, 'h-all-else'],
+      [elsewhere, 'h-all-elsewhere'],
+    ] as const)
+      await tokens(g.id, clientId, g.userId, h);
+    const org = scoped(env.DB, 'grants-a');
+    const end = () => org.commit(org.agentGrants.stage.revokeAllOf(a.userId, 'remover', 'cms', NOW, '{"reason":"membership_ended"}').writes);
+    await end();
+    for (const g of theirs) expect(await org.agentGrants.get(g.id)).toMatchObject({ revokedAt: NOW, revokedBy: 'remover', rowVersion: g.rowVersion + 1 });
+    expect(await count('oauthAccessToken', theirs[0]!.id)).toBe(0);
+    // Another member's grant in the org, and the member's grant in another org: untouched, tokens and all.
+    expect(await org.agentGrants.get(someoneElse.id)).toMatchObject({ revokedAt: null });
+    expect(await count('oauthAccessToken', someoneElse.id)).toBe(1);
+    expect(await scoped(env.DB, 'grants-b').agentGrants.get(elsewhere.id)).toMatchObject({ revokedAt: null });
+    expect(await count('oauthAccessToken', elsewhere.id)).toBe(1);
+    const rows = async () =>
+      (await org.auditLog.list({ limit: 100 })).filter((e) => e.action === 'revoke_agent_grant' && theirs.some((g) => g.id === e.targetId));
+    expect(await rows()).toHaveLength(2);
+    expect(await rows()).toEqual(
+      expect.arrayContaining(
+        theirs.map((g) => expect.objectContaining({ actorKind: 'user', actorId: 'remover', clientId: 'cms', targetKind: 'agent_grant', targetId: g.id })),
+      ),
+    );
+    // Idempotent: none is connected now, so nothing is written.
+    await end();
+    expect(await rows()).toHaveLength(2);
+  });
+});
+
 describe('the token check', () => {
   it("finds a live token's grant, with the member's role now and the grant's own org", async () => {
     const clientId = await client();

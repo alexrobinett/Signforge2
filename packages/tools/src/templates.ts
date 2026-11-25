@@ -228,10 +228,13 @@ const registerTemplateVersion = defineSharedTool({
 const setTemplateVersionStatus = defineSharedTool({
   name: 'set_template_version_status',
   description:
-    'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. Returns { version, changed }.',
+    'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. People only: an agent is refused. Returns { version, changed }.',
   scope: 'content:publish',
   minRole: 'owner',
   mutates: true,
+  // Approving code that runs on every screen showing it is a person's review (#122): an agent could otherwise approve the
+  // version it registered.
+  people: true,
   input: z.object({
     templateVersionId: id('template version'),
     status: z.enum(['approved', 'retired']),

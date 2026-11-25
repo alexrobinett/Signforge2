@@ -15,7 +15,7 @@
 import type { AgentGrantRow, OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { shownClient } from './agent-clients';
-import { id, ifVersion } from './fields';
+import { id } from './fields';
 import { outputs, SCOPES, type AgentGrantView } from './outputs';
 import { page, pageInput } from './paging';
 import { type Actor, defineTool, notFound, type Role, type Scope, ToolError } from './tool';
@@ -98,7 +98,7 @@ const getAgentGrant = defineTool({
 const updateAgentGrantScopes = defineTool({
   name: 'update_agent_grant_scopes',
   description:
-    "Set a connected agent's scopes, from its next call. The member who granted it may add or remove scopes, up to what they may do themselves now; an owner may only remove scopes from someone else's. content:read is always on. People only. Pass the version you read as ifVersion. Returns { grant }.",
+    "Set a connected agent's scopes, from its next call. The member who granted it may add or remove scopes, up to what they may do themselves now; an owner may only remove scopes from someone else's. content:read is always on. People only. ifVersion, the version you read, is required. Returns { grant }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: true,
@@ -110,7 +110,14 @@ const updateAgentGrantScopes = defineTool({
       .min(1)
       .max(SCOPES.length)
       .describe('Every scope it should hold, content:read among them: the whole set, replacing the grant’s'),
-    ifVersion,
+    // Required (#328): a set made from a stale read would put back a scope another person took away meanwhile.
+    ifVersion: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        'The version you read. If the grant has changed since, nothing is written and the call is refused with conflict, details { id, version }: read it again and redo the change',
+      ),
   }),
   output: outputs.update_agent_grant_scopes,
   example: { grantId: 'agt_example', scopes: ['content:read', 'content:draft'], ifVersion: 1 },

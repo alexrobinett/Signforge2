@@ -159,7 +159,7 @@ function IntegrationsPage() {
         <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
-            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md">
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md tabular-nums">
               {SHOW.map((s) => (
                 <Choice key={s} selected={show === s} onClick={() => set({ show: s === 'all' ? undefined : s })} className="min-h-10 rounded-full px-3.5">
                   {SHOW_WORD[s]} {all.filter((c) => shows(c, s, '', sources)).length}
@@ -256,7 +256,9 @@ function ConnectorRow({
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
           {kind && mine.length > 0 && (
-            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(kind, mine)}</span>
+            <span className={cn('text-sm tabular-nums', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>
+              {connectedWords(kind, mine)}
+            </span>
           )}
           {kind && action && (
             <Button
@@ -349,7 +351,7 @@ function FeedingNow({
                 <dt className="min-w-0 break-words">
                   {KIND_WORD[s.format]} · {s.name}
                 </dt>
-                <dd className={cn('m-0 font-mono text-meta', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+                <dd className={cn('m-0 text-meta tabular-nums', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                   {state.word}
                 </dd>
               </div>

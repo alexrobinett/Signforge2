@@ -222,7 +222,7 @@ function Summary({ screens }: { screens: ScreenView[] }) {
   const parts = summarise(screens).split(' · ');
   const needs = parts.at(-1)?.endsWith(' you') ? parts.pop() : undefined;
   return (
-    <p role="status" className="-mt-4 text-md text-muted-foreground">
+    <p role="status" className="-mt-4 text-md text-muted-foreground tabular-nums">
       {parts.join(' · ')}
       {needs && (
         <>
@@ -316,7 +316,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
               <ScreenStatus screen={s} now={now} className="absolute top-2.5 left-2.5" />
               {/* Only a portrait screen says its ratio: landscape is every other tile's (#374). */}
               {s.orientation === 'portrait' && (
-                <Badge variant="stage" className="absolute top-2.5 right-2.5 font-mono text-2xs">
+                <Badge variant="stage" className="absolute top-2.5 right-2.5 text-2xs tabular-nums">
                   9:16
                 </Badge>
               )}
@@ -332,7 +332,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 </Link>
                 {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
-              <p className="text-meta text-muted-foreground">
+              <p className="text-meta text-muted-foreground tabular-nums">
                 {/* Nothing published is said once, by the thumbnail (#374). */}
                 {[s.kind === 'browser' && 'Test screen', where, s.state.reason !== 'nothing_published' && d.line].filter(Boolean).join(' · ')}
               </p>
@@ -374,7 +374,7 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
   );
   return (
     <section aria-label="Selected screens" className="flex flex-wrap items-center gap-2 rounded-xl border border-border-strong bg-card px-4 py-2.5">
-      <p role="status" className="mr-2 text-sm font-medium">
+      <p role="status" className="mr-2 text-sm font-medium tabular-nums">
         {selected.length} selected
       </p>
       <div className="flex flex-wrap gap-2">
@@ -557,7 +557,7 @@ function ScreenTable({
                     <td className="px-3 py-1.5">
                       <ScreenStatus screen={s} now={now} />
                     </td>
-                    <td className="max-w-[28rem] px-3 py-1.5 leading-snug text-foreground/85">{d.line}</td>
+                    <td className="max-w-[28rem] px-3 py-1.5 leading-snug text-foreground/85 tabular-nums">{d.line}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
                     <td
                       className={cn(
@@ -568,7 +568,7 @@ function ScreenTable({
                       {v.text}
                     </td>
                     <td
-                      className="px-3 py-1.5 text-right font-mono text-meta whitespace-nowrap text-muted-foreground tabular-nums"
+                      className="px-3 py-1.5 text-right text-meta whitespace-nowrap text-muted-foreground tabular-nums"
                       title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
                     >
                       {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}

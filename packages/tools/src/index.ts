@@ -122,4 +122,4 @@ export {
 } from './screen-state';
 export { tally } from './rollout';
 export { orgSettings } from './settings';
-export { madeBySpotEditor } from './data-sources';
+export { madeBySpotEditor, reachesScreens } from './data-sources';

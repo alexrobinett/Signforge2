@@ -9,8 +9,8 @@
  *
  * What the model may do is decided here, never by the model or the browser:
  *  - it is offered only the registry's read tools that the member's role allows, less every tool that
- *    reaches an address or touches what only a person sets (`NEVER_OFFERED`, `org:manage`, `people`),
- *    and the drafting tools; tools the request declares are never offered;
+ *    reaches an address or touches what only a person sets (`NEVER_OFFERED`, `org:manage` but an owner's
+ *    list of invitations, `people`), and the drafting tools; tools the request declares are never offered;
  *  - it calls them through the dispatcher as the member with the cms-agent client, on the org's
  *    scoped repositories, so it reads what the person could read, and no more;
  *  - its answer must be the card (`answerInput`): a reply that is only prose, or JSON of another
@@ -73,27 +73,19 @@ const CHAT_MAX_TOKENS = 2048;
 
 /**
  * Never offered to the drawer, whatever the role (docs/proposals/cms-agent.md, Tools that reach an
- * address). Besides these, no tool that changes data, and no `org:manage` tool, is offered.
+ * address). Besides these, no tool that changes data outside a card, no `org:manage` tool but an
+ * owner's `list_invitations` and the `cancel_invitation` card, and no `people` tool is offered: alert channels' and connections' changes, pairing a screen and approving a template are
+ * `people` (review of #419).
  */
 export const NEVER_OFFERED: ReadonlySet<string> = new Set([
   // Alert channels post an org's events to an address its owner gave.
   'get_alert_channels',
   'list_alert_deliveries',
-  'set_webhook_alert_channel',
-  'set_slack_alert_channel',
-  'test_alert_channel',
-  'retry_alert_delivery',
-  'remove_alert_channel',
   // Connections: a provider's OAuth, and its data afterwards.
   'list_connections',
-  'start_connection',
-  'finish_connection',
   'disconnect',
-  // A pairing code in a flyer or a feed would pair an attacker's device and send it what is published.
-  'claim_screen',
   // Code that runs on screens.
   'register_template_version',
-  'set_template_version_status',
   'publish_manifest_to_screen',
 ]);
 
@@ -134,6 +126,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   count_drafts: { title: 'Unpublished drafts', did: 'Counted unpublished drafts' },
   list_audit_log: { title: 'Audit log', did: 'Read {n} audit entries' },
   list_members: { title: 'Members', did: 'Listed {n} members' },
+  list_invitations: { title: 'Invitations', did: 'Listed {n} pending invitations' },
   // The drafting tools (#268): a proposal, never a write.
   update_spot: { title: 'Spot change', did: 'Drafted a change to a spot' },
   update_playlist: { title: 'Playlist change', did: 'Drafted a change to a playlist' },
@@ -157,11 +150,23 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   set_spot_url: { title: 'Web page address', did: "Set a web page spot's address" },
 };
 
+/**
+ * The `org:manage` reads the drawer offers all the same, each only to whom its own scope and role allow (`describeTools`):
+ * an owner's pending invitations, so the drawer can name one to cancel (owner decision on #425). Its output, invitees'
+ * addresses among it, reaches the model fenced as data, as every output does.
+ */
+const ORG_READS: ReadonlySet<string> = new Set(['list_invitations']);
+
 /** The tools the drawer offers a caller with `grant`: its role's reads, less those above, and less those only people may call (`people`), which refuse it. */
 export const drawerTools = (grant: Grant) =>
   describeTools(registry, grant).filter(
     (t) =>
-      !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people && t.name in TOOL_CARDS && !(t.name in CONFIRMABLE),
+      !t.mutates &&
+      (t.scope !== 'org:manage' || ORG_READS.has(t.name)) &&
+      !NEVER_OFFERED.has(t.name) &&
+      !registry.get(t.name)?.people &&
+      t.name in TOOL_CARDS &&
+      !(t.name in CONFIRMABLE),
   );
 
 /** The model's answer, every field required: prose alone, or a lone `{ text }`, is not one (#350). */
@@ -264,7 +269,10 @@ function parsedJson(text: string): unknown {
   }
 }
 
-/** A tool's output as the model reads it: fenced as data, cut to a length it can read. */
+/**
+ * A tool's output as the model reads it, or a refusal's message: fenced as data, cut to a length it can read. A refusal
+ * can name org content too (a playlist that plays a spot, a spot holding sample text), so it is fenced as an output is (#122).
+ */
 function asData(output: unknown): string {
   const text = JSON.stringify(output);
   return fenced('data', text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)} [cut: the rest was too long]` : text);
@@ -436,7 +444,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             const out = await dispatch(registry, t.name, input, caller);
             return out.ok
               ? { card: card(t.name, summaryOf(t.name, out.output), true), content: asData(out.output) }
-              : { card: card(t.name, `Could not ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${out.message}`, refused: true };
+              : { card: card(t.name, `Could not ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${asData(out.message)}`, refused: true };
           }),
       })),
       ...drafting.map((t) => ({
@@ -468,7 +476,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
                   card: card(t.name, TOOL_CARDS[t.name]?.did ?? '', true),
                   content: `Proposed, not written${joined ? ', with your earlier change to the same thing, as one change' : ''}: the person sees what it changes and saves it, or not.`,
                 }
-              : { card: card(t.name, `Could not draft ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${problem}`, refused: true };
+              : { card: card(t.name, `Could not draft ${t.name.replaceAll('_', ' ')}`, false), content: `refused: ${asData(problem)}`, refused: true };
           }),
       })),
       // Behind a card (#269): the run pauses before it runs (`needsApproval`), and it runs only on the person's press.
@@ -503,7 +511,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
             return out.ok
               ? { card: card(name, done.message, true), content: asData(out.output) }
-              : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${out.message}`, refused: true };
+              : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${asData(out.message)}`, refused: true };
           }),
       })),
     ];
@@ -624,7 +632,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return;
         }
         const expiresAt = now() + CONFIRM_MS;
-        const why = whyNot(grant, name);
+        const why = whyNot(grant, name, Object.fromEntries(Object.entries(called)));
         if (why) {
           const title = TOOL_CARDS[name]?.title ?? '';
           const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt };

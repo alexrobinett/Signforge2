@@ -7,8 +7,9 @@ import { seedOrganization, testScope } from '@signforge/db/testing';
 import { resolvePlaylist } from '@signforge/player-core';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { manifestKey } from '../src';
-import { editorCalls, ok } from './calls';
+import { dispatch, manifestKey, registry } from '../src';
+import { editorCalls, ok, racing } from './calls';
+import { memberOf } from './member';
 
 /** Instants in Europe/London, which is UTC in November. 2026-11-17 is a Tuesday. */
 const at = (iso: string) => new Date(`${iso}Z`);
@@ -406,5 +407,38 @@ describe('schedule entries', () => {
     await publish(again);
     await ok(call('delete_schedule_entry', { scheduleEntryId: again.id }));
     expect(await ok(call('publish', {}))).toMatchObject({ removed: [{ kind: 'schedule_entry', id: again.id }] });
+  });
+
+  it('holds the right to delete what screens play to its batch: an editor whose editors stop publishing meanwhile is refused (review of #419)', async () => {
+    const { org, call, publish, lunch } = await setup('sch-delete-race');
+    const entry = entryOf(await ok(call('create_schedule_entry', { playlistId: lunch, target: 'org' })));
+    await publish(entry);
+    // The editor a member, whose right the batch reads as it runs.
+    const now = new Date(0).toISOString();
+    const userId = `${org.orgId}-editor-user`;
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        userId,
+        'Ed',
+        `${userId}@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(
+        `${userId}-m`,
+        org.orgId,
+        userId,
+        now,
+      ),
+    ]);
+    const raced = racing({ ...memberOf(org, 'editor'), member: userId }, async () =>
+      org.commit((await org.settings.stage.set({ editorsPublish: false })).writes),
+    );
+    expect(await dispatch(registry, 'delete_schedule_entry', { scheduleEntryId: entry.id }, raced)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: 'Only owners publish in this organization',
+    });
+    expect((await org.scheduleEntries.get(entry.id))?.deletedAt).toBeNull();
   });
 });

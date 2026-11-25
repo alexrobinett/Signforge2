@@ -314,6 +314,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
    * provider issued). Run after the refusal or failure, its own failure logged: best effort.
    */
   onDiscard: (undo: () => Promise<void>) => void;
+  /**
+   * For a change of a lesser scope that reaches screens all the same (a live feed's address, an entry screens play):
+   * refused `forbidden` with `why` unless the caller may publish now, and the right held to the commit as a publish's is.
+   */
+  publishRight: (why: string) => void;
 }
 
 /**
@@ -422,6 +427,11 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * not list it.
    */
   people?: boolean;
+  /**
+   * Why the tool treats an agent apart, short of refusing it the whole tool (`people`): refusing it some fields, or
+   * asking it for the right to publish. Declared, so a test holds every such tool to saying why (#122, review of #419).
+   */
+  partialAgents?: string;
   /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
   needs?: readonly N[];
   input: S;

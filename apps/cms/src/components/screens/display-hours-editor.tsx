@@ -211,7 +211,7 @@ function TimeField({ label, value, onChange }: { label: string; value: string; o
         step={60}
         value={value === '24:00' ? '00:00' : value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-32 font-mono"
+        className="w-32 tabular-nums"
         required
       />
     </div>

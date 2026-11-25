@@ -413,14 +413,13 @@ const reopenPublishRequest = defineTool({
     const now = Date.now();
     const row = await org.publishRequests.get(input.publishRequestId);
     if (!row) return notFound('publish request', input.publishRequestId);
+    // The right to decide first, in its own words: a lost right is the refusal, whatever else changed meanwhile (#417, review of #419).
+    const role = await org.members.roleOf(actor.id);
+    if (row.decidedBy !== actor.id && !approves(role ?? '', (await orgSettings(org)).editorsPublish))
+      return new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back');
     if (row.status !== 'declined' || row.expiresAt <= now)
       return new ToolError('conflict', `publish request ${row.id} is ${row.expiresAt <= now ? 'expired' : statusOf(row, now)}`, { status: statusOf(row, now) });
-    const refused = await reopenRefusal(org, row, now);
-    if (refused) return refused;
-    const role = await org.members.roleOf(actor.id);
-    return row.decidedBy !== actor.id && !approves(role ?? '', (await orgSettings(org)).editorsPublish)
-      ? new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back')
-      : undefined;
+    return reopenRefusal(org, row, now);
   },
 });
 
