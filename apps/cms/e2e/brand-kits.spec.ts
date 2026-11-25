@@ -176,18 +176,19 @@ test('a change someone else made while the kit was open is not overwritten, even
 });
 
 test("a kit's long name wraps in its title, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
+  // At a phone's width it would take four lines: two are shown.
   const { brandKit } = await tool(page, 'create_brand_kit', {
-    name: 'Northside Bakery winter menu boards and the café counter screens',
+    name: 'Northside Bakery winter menu boards, the café counter screens and the window displays on Main St',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `long-kit-${Date.now()}`,
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/settings/brand-kits/${brandKit.id}`);
   await hydrated(page);
-  expect(await titleLayout(page)).toEqual({ lines: 1, balanced: true, spills: false });
+  expect(await titleLayout(page)).toEqual({ lines: 2, full: 2, balanced: true, spills: false });
   await axe(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await titleLayout(page)).toEqual({ lines: 2, balanced: true, spills: false });
+  expect(await titleLayout(page)).toEqual({ lines: 2, full: 4, balanced: true, spills: false });
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 720 });
 });

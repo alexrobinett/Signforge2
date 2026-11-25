@@ -56,12 +56,13 @@ test('at 1440×900 the stage is in the first viewport, in the spot and playlist 
 });
 
 test("a long name wraps in the editor's header, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
-  // It was cut to one line with an ellipsis, the end of the name lost.
-  await newSpot(page, 'Announcement', 'Harvest Night at the Riverside Market: lanterns, cider and a band');
-  expect(await titleLayout(page)).toEqual({ lines: 1, balanced: true, spills: false });
+  // It was cut to one line with an ellipsis, the end of the name lost. At a phone's width it would take three
+  // lines: two are shown.
+  await newSpot(page, 'Announcement', 'Harvest Night at the Riverside Market: lanterns, warm cider, a brass band and food stalls until late');
+  expect(await titleLayout(page)).toEqual({ lines: 1, full: 1, balanced: true, spills: false });
   await axe(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await titleLayout(page)).toEqual({ lines: 2, balanced: true, spills: false });
+  expect(await titleLayout(page)).toEqual({ lines: 2, full: 3, balanced: true, spills: false });
   await axe(page);
   await page.setViewportSize({ width: 1440, height: 900 });
 });
