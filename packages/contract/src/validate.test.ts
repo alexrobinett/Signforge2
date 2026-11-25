@@ -1385,11 +1385,48 @@ describe('network check', () => {
       ['.a{x:\\"}', '//*.t.example/p.gif?*/'],
       ['.a{content:"x\f}', '//*.t.example/p.gif?*/'],
       ['.a{background:url(x")}', '//*.t.example/p.gif?*/'],
+      // From an https page Chromium reads this one as a path on the page's own origin, and fetches nothing from
+      // elsewhere; refused all the same, as the text is written.
       ['.a{x:\\"}', 'https:/*.t.example/p.gif?*/'],
     ]) {
       const css = `${before}.b{background-image:image-set("${address}" 1x)}`;
       expect(problems(`<style>${css}</style>`), css).toEqual(refused);
     }
+  });
+
+  describe('a backslash for a slash (#326)', () => {
+    // Each fixture is the style text exactly as a bundle holds it (String.raw: what is between the backticks, backslashes
+    // and all). CSS reads "\\" as one backslash, and the URL parser reads a backslash in an http(s) address as "/", so each
+    // of these is an address on another host (#326; the review of #324 saw Chromium fetch the first, second, fourth and
+    // seventh forms).
+    const fetched = [
+      String.raw`.b{background-image:image-set("\\\\b1.t.example/p.gif" 1x)}`,
+      String.raw`.b{background-image:image-set("/\\b2.t.example/p.gif" 1x)}`,
+      String.raw`.b{background-image:image-set("\\/b2.t.example/p.gif" 1x)}`,
+      String.raw`.b{background-image:image-set("https:\\\\b3.t.example/p.gif" 1x)}`,
+      String.raw`.b{background-image:image-set('HTTPS:/\\b3.t.example/p.gif' 1x)}`,
+      String.raw`.b{background-image:image-set(" \\\\b4.t.example/p.gif" 1x)}`,
+      // Out of step: the escaped quote opens no string, so the strip reads /* inside the address as a comment.
+      String.raw`.a{x:\"}.b{background-image:image-set("\\/*.t.example/p.gif?*/" 1x)}`,
+      String.raw`.a{x:\"}.b{background-image:image-set("https:\\/*.t.example/p.gif?*/" 1x)}`,
+    ];
+
+    it('refuses each, in a style element and in an SVG one', () => {
+      for (const css of fetched) {
+        expect(problems(`<style>${css}</style>`), css).toEqual(refused);
+        expect(problems(`<svg><style>${css}</style></svg>`), css).toEqual(refused);
+      }
+    });
+
+    it('passes a path, and a backslash that is not at a string’s start', () => {
+      for (const css of [
+        String.raw`.b{background-image:image-set("p.png" 1x)}`,
+        String.raw`.b{background-image:image-set("/p.png" 1x)}`,
+        String.raw`.b{content:"a\\b"}`,
+        String.raw`.b{content:"\201C"}`,
+      ])
+        expect(problems(`<style>${css}</style>`), css).toEqual([]);
+    });
   });
 });
 

@@ -1149,8 +1149,11 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   // strings are kept whole, so a /* in one opens no comment. Where this reading and the browser's
   // disagree (an escape, an unquoted url(), the HTML around the style), a comment can hide an address
   // two ways: around it, so a comment that quotes one stays; or from inside it, at its own slash
-  // ("//*" or "https:/*", which the browser fetches), so that is refused in the text as written.
-  const quotedAddress = /["']\s*(?:https?:)?\/\//i;
+  // ("//*" or "https:/*"), so that is refused in the text as written. A backslash counts as a slash
+  // (#326): CSS reads "\\" as one, and the URL parser reads "\" as "/" in an http(s) address, so
+  // "\\\\x", "/\\x" and "https:\\\\x" are fetched as //x. Two backslashes at a string's start are
+  // refused even where they are one, a path: no template has a reason to write that.
+  const quotedAddress = /["']\s*(?:https?:)?[\/\\]{2}/i;
   const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!);
   const styles = css
     .map((text) =>
@@ -1164,7 +1167,7 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
     /\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) ||
     /url\(\s*["']?(?:https?:)?\/\//i.test(html) ||
     quotedAddress.test(styles) ||
-    /["']\s*(?:https?:\/?|\/)\/\*/i.test(css.join('\n'))
+    /["']\s*(?:https?:[\/\\]+|[\/\\]{2,})\*/i.test(css.join('\n'))
   )
     network.push('a template may not load anything from the network');
 
