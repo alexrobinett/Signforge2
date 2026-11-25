@@ -59,7 +59,9 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/settings\/general$/);
   await hydrated(page);
-  await expect(settingsNav(page).getByText('Brand kits')).toBeVisible();
+  // Brand kits are a section of their own, not a page of Settings (#381).
+  await expect(settingsNav(page).getByText('General')).toBeVisible();
+  await expect(settingsNav(page).getByText('Brand kits')).toHaveCount(0);
   await page.getByLabel('Name', { exact: true }).fill('Northside Library Co');
   await page.getByLabel('Time zone').selectOption('Europe/London');
   await page.getByLabel('Locale').selectOption('en-GB');

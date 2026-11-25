@@ -1,5 +1,5 @@
 /**
- * Settings, Brand kits (canvas board SettingsBrandKits): every kit with its look, its fonts,
+ * Brand kits (canvas board SettingsBrandKits), a section of their own beside the content they dress (#381): every kit with its look, its fonts,
  * where it is used and its contrast warnings, a new kit, a copy of one, the default, and the
  * curated fonts. Each opens in the kit editor.
  */
@@ -19,9 +19,9 @@ import { brandKitsQuery } from '~/queries/spots';
 import { kitActionRunning } from '~/state/brand-kits';
 import { useAppStore } from '~/state/provider';
 
-export const Route = createFileRoute('/_app/settings/brand-kits/')({
+export const Route = createFileRoute('/_app/brand-kits/')({
   loader: async ({ context: { queryClient }, parentMatchPromise }) => {
-    const orgId = (await parentMatchPromise).loaderData?.orgId;
+    const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
     await Promise.all([queryClient.query(brandKitsQuery(orgId)), queryClient.query(screensQuery(orgId))]);
   },
@@ -94,11 +94,7 @@ function BrandKitsPage() {
               <KitTile name={k.name} colors={k.colors} displayFontId={k.displayFont?.id ?? null} className="sm:w-56" />
               <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-1">
                 <span className="flex flex-wrap items-center gap-2">
-                  <Link
-                    to="/settings/brand-kits/$kitId"
-                    params={{ kitId: k.id }}
-                    className="text-lg font-semibold tracking-tight underline-offset-4 hover:underline"
-                  >
+                  <Link to="/brand-kits/$kitId" params={{ kitId: k.id }} className="text-lg font-semibold tracking-tight underline-offset-4 hover:underline">
                     {k.name}
                   </Link>
                   <span
@@ -134,7 +130,7 @@ function BrandKitsPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline">
-                  <Link to="/settings/brand-kits/$kitId" params={{ kitId: k.id }} aria-label={`${canManage ? 'Edit' : 'Open'} ${k.name}`}>
+                  <Link to="/brand-kits/$kitId" params={{ kitId: k.id }} aria-label={`${canManage ? 'Edit' : 'Open'} ${k.name}`}>
                     {canManage ? 'Edit' : 'Open'}
                   </Link>
                 </Button>
