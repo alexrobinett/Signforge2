@@ -1,5 +1,6 @@
-// Each e2e spec signs in, and pairs screens, from addresses no other spec uses: Better Auth's rate
-// limits count per address, so two specs on one address share a budget (review of #182). And each
+// Each e2e spec signs in, pairs screens and calls tools from addresses no other spec uses: Better Auth's
+// and the tools' rate limits count per address, so two specs on one address share a budget (review of
+// #182, #333). And each
 // names its orgs with names no other spec uses: specs run in parallel, and two creates of one name
 // at once race for its slug, so one fails (#249).
 import { readdirSync, readFileSync } from 'node:fs';
@@ -25,6 +26,21 @@ describe('e2e client addresses', () => {
     const specs = specsOf(/192\.0\.2\.\d+/g);
     expect(specs.size).toBeGreaterThan(10);
     expect([...specs].filter(([, s]) => s.length > 1)).toEqual([]);
+  });
+});
+
+describe('e2e tool calls (#333)', () => {
+  const specs = readdirSync(dir).filter((f) => f.endsWith('.spec.ts'));
+  const read = (spec: string) => readFileSync(new URL(spec, dir), 'utf8');
+
+  it('go through tool() or toolResponse(), which send the page’s own address', () => {
+    expect(specs.filter((spec) => /request\.post\(\s*['`"]\/api\/tools\//.test(read(spec)))).toEqual([]);
+  });
+
+  it('come from a spec whose pages have an address of their own', () => {
+    const calling = specs.filter((spec) => /\b(?:tool|toolResponse)\(/.test(read(spec)));
+    expect(calling.length).toBeGreaterThan(10);
+    expect(calling.filter((spec) => !/\b(?:signInAs|fromAddress|joinAsEditor)\(/.test(read(spec)))).toEqual([]);
   });
 });
 

@@ -124,12 +124,16 @@ export async function signInAs(page: Page, email: string, address: string) {
   await fromAddress(page, address);
 }
 
+/** Each page's client address (`fromAddress`): its tool calls come from it too (#333). */
+const addresses = new WeakMap<Page, string>();
+
 /**
  * The page's calls come from `address` (the CMS passes it to the API), sign-in's included. Better
  * Auth counts a path's calls per address until 10 s pass with none, so on one shared address every
  * spec's shell read added up and a long run got 429.
  */
 export async function fromAddress(page: Page, address: string) {
+  addresses.set(page, address);
   await page
     .context()
     .route(`${CMS_URL}/**`, async (route) => route.fallback({ headers: { ...(await route.request().allHeaders()), 'cf-connecting-ip': address } }));
@@ -355,9 +359,20 @@ export async function stageShows(page: Page, text: string) {
 
 /** Call a tool as the signed-in member, as the CMS's pages do, and expect it to succeed. */
 export async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
+  const res = await toolResponse(page, name, input);
   expect(res.status(), await res.text()).toBe(200);
   return res.json();
+}
+
+/**
+ * A tool call as the page's session, from the page's own address (`fromAddress`; `signInAs` sets it), and its response
+ * as it came. `page.request` goes past the page's routes, so the address is sent here: on one shared address every
+ * spec's calls counted against one rate limit, a screen's claims 10 a minute among them (#333).
+ */
+export function toolResponse(page: Page, name: string, input: unknown) {
+  const address = addresses.get(page);
+  if (!address) throw new Error(`${name}: the page has no address of its own: sign it in with signInAs, or call fromAddress, first`);
+  return page.request.post(`/api/tools/${name}`, { data: input, headers: { 'cf-connecting-ip': address } });
 }
 
 /** The dev API's D1, by the placeholder id `env.dev` gives it in apps/api/wrangler.jsonc. */

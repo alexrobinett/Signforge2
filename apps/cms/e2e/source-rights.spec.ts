@@ -3,7 +3,7 @@
 // photos switch unavailable, with why, and the API refuses the change too; its name stays theirs.
 // Light and dark, desktop and phone, with axe at each.
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool, toolResponse } from './helpers';
 
 const ADDRESS = { owner: '192.0.2.242', editor: '192.0.2.243' };
 
@@ -52,7 +52,7 @@ test("an editor where only owners publish sees a feed's address and photos unava
   await shots(editor, '107-source-rights-phone');
 
   // The API refuses it as well, and a name alone it allows.
-  const refused = await editor.request.post('/api/tools/update_data_source', { data: { dataSourceId: dataSource.id, photos: false } });
+  const refused = await toolResponse(editor, 'update_data_source', { dataSourceId: dataSource.id, photos: false });
   expect(refused.status()).toBe(403);
   expect(await refused.text()).toContain('needs the right to publish');
   await tool(editor, 'update_data_source', { dataSourceId: dataSource.id, name: 'Bakery blog' });
