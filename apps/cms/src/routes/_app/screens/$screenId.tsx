@@ -7,7 +7,7 @@
  */
 import { Badge } from '~/components/ui/badge';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
+import { createFileRoute, getRouteApi, Link, notFound, useNavigate } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon, ZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
@@ -31,6 +31,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useCanPublish, useNow, useOrgId, useRole } from '~/lib/live';
+import { versionName } from '~/lib/publishes';
 import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock, reachable } from '~/lib/screen-status';
 import type { PlaylistView } from '~/lib/playlists';
@@ -44,31 +45,52 @@ import { useAppStore } from '~/state/provider';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
 
 /**
- * Why the screen needs you, and the one thing that fixes it, beside its state (#367): the page's one filled button.
- * Nothing published: play something on it. Its latest version played nothing: see that publish. Revoked: pair it
- * again. Unreachable and behind: nothing here reaches it, so only why, to check its power and network.
+ * Why the screen needs you, and the one thing that fixes it, beside its state (#367): the page's one filled button,
+ * off until the page has hydrated, as the editors' are. Nothing published: play something on it, or, with no playlist
+ * to play, make one. Its latest version played nothing: that publish, by its version. Revoked: pair it again.
+ * Unreachable and behind: nothing here reaches it, so only why, to check its power and network.
  */
-function NeedsYouFix({ reason, line, canFix, onPlay }: { reason: ScreenView['state']['reason']; line: string; canFix: boolean; onPlay: () => void }) {
+function NeedsYouFix({
+  reason,
+  line,
+  canFix,
+  fellBackFrom,
+  hasPlaylists,
+  onPlay,
+  onMakePlaylist,
+}: {
+  reason: ScreenView['state']['reason'];
+  line: string;
+  canFix: boolean;
+  fellBackFrom: { id: string; revision: number } | null;
+  hasPlaylists: boolean;
+  onPlay: () => void;
+  onMakePlaylist: () => void;
+}) {
   const fix =
-    reason === 'nothing_published' ? (
-      canFix && <Button onClick={onPlay}>Play on this screen…</Button>
-    ) : reason === 'fallback' ? (
-      <Button asChild>
-        <Link to="/publishes">See the publish</Link>
-      </Button>
-    ) : reason === 'revoked' ? (
-      canFix && (
-        <Button asChild>
-          <Link to="/screens" search={{ pair: true }}>
-            Pair it again…
-          </Link>
-        </Button>
-      )
-    ) : null;
+    reason === 'nothing_published'
+      ? canFix && (hasPlaylists ? <Button onClick={onPlay}>Play on this screen…</Button> : <Button onClick={onMakePlaylist}>Make a playlist…</Button>)
+      : reason === 'fallback'
+        ? fellBackFrom && (
+            <Button asChild>
+              <Link to="/publishes" search={{ id: fellBackFrom.id }}>
+                See {versionName(fellBackFrom)}, which played nothing
+              </Link>
+            </Button>
+          )
+        : reason === 'revoked'
+          ? canFix && (
+              <Button asChild>
+                <Link to="/screens" search={{ pair: true }}>
+                  Pair it again…
+                </Link>
+              </Button>
+            )
+          : null;
   return (
     <div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-2 text-sm text-status-needs-you-foreground">
       <span className="min-w-0 wrap-anywhere">{line}.</span>
-      {fix}
+      {fix && <EditorFields>{fix}</EditorFields>}
     </div>
   );
 }
@@ -102,7 +124,7 @@ export const Route = createFileRoute('/_app/screens/$screenId')({
 const app = getRouteApi('/_app');
 
 function ScreenPage() {
-  const { screen, groupIds, credentials, events, groups, at } = Route.useLoaderData();
+  const { screen, fallbackPublish, groupIds, credentials, events, groups, at } = Route.useLoaderData();
   const me = app.useLoaderData().user.id;
   const orgId = useOrgId();
   const canManage = useCanManage();
@@ -110,6 +132,8 @@ function ScreenPage() {
   const canPublish = useCanPublish();
   const now = useNow(at);
   const openNewEntry = useAppStore((s) => s.openNewEntry);
+  const openNewPlaylist = useAppStore((s) => s.openNewPlaylist);
+  const navigate = useNavigate();
   const openTakeover = useAppStore((s) => s.openTakeover);
   const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
@@ -137,7 +161,7 @@ function ScreenPage() {
 
   const spinner = (label: string, icon: ReactNode) => (busy === label ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : icon);
   const override = screen.displayOverride;
-  const playIsTheFix = screen.state.kind === 'needs_you' && screen.state.reason === 'nothing_published';
+  const playIsTheFix = screen.state.kind === 'needs_you' && screen.state.reason === 'nothing_published' && playlists.length > 0;
 
   return (
     <div className="space-y-5">
@@ -166,7 +190,10 @@ function ScreenPage() {
               reason={screen.state.reason}
               line={d.line}
               canFix={canManage}
+              fellBackFrom={fallbackPublish}
+              hasPlaylists={playlists.length > 0}
               onPlay={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}
+              onMakePlaylist={() => void navigate({ to: '/playlists' }).then(() => openNewPlaylist(true))}
             />
           )}
           {canManage && !revoked && (
@@ -533,7 +560,6 @@ function CacheState({ screen }: { screen: ScreenView }) {
         </strong>
         <span className="text-sm text-muted-foreground">{missing ? 'plays the last version meanwhile' : 'can play offline'}</span>
       </div>
-      {hb.fallbackFrom && <p className="text-sm text-status-needs-you-foreground">The latest version played nothing, so it went back to the one before.</p>}
     </>
   );
 }

@@ -237,7 +237,9 @@ const getScreen = defineTool({
       screenView(org, screen, blobs),
     ]);
     const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId }, input: inputOf(e.detailJson) }));
-    return { screen: view, groupIds, credentials: credentials.map(credentialView), events };
+    const fellBackFrom = view.heartbeat?.fallbackFrom;
+    const fallbackPublish = (fellBackFrom && (await org.publishes.ofManifest(screen.id, fellBackFrom))) || null;
+    return { screen: view, fallbackPublish, groupIds, credentials: credentials.map(credentialView), events };
   },
 });
 

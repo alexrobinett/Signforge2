@@ -85,9 +85,19 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
-  // Why, said once beside its state, with its fix as the page's one filled button (#367).
+  // Why, said once beside its state, with its fix as the page's one filled button (#367). With no playlist to play,
+  // the fix is to make one: Playlists, whose own first step this org with no spot yet is (review of #458).
   await expect(page.getByText('Nothing is published to it yet.', { exact: true })).toHaveCount(1);
   const fix = page.getByRole('main').locator('[data-slot="button"][data-variant="default"]');
+  await expect(fix).toHaveAccessibleName('Make a playlist…');
+  const screenPage = page.url();
+  await fix.click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole('heading', { name: 'Make a spot first, then a playlist' })).toBeVisible();
+  // With one, it is to play it here.
+  await tool(page, 'create_playlist', { name: 'Arcade loop', spotIds: [] });
+  await page.goto(screenPage);
+  await hydrated(page);
   await expect(fix).toHaveAccessibleName('Play on this screen…');
   await fix.click();
   await expect(page.getByRole('dialog', { name: 'Schedule a playlist' })).toBeVisible();
@@ -447,6 +457,30 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   const restart = page.getByRole('button', { name: 'Restart player' });
   await expect(restart).toBeDisabled();
   await expect(restart).toHaveAccessibleDescription('Restart is off: the screen cannot be reached now, and a restart only reaches a screen in touch.');
+  // Heard from, with nothing published to it, it needs you: its fix is off in the server's HTML too (review of #458).
+  await d1(`UPDATE screens SET last_seen_at = ${Date.now() + 3_600_000} WHERE id = '${screen.id}'`);
+  expect(await disabledOnServer(page, path, ['Make a playlist…'])).toEqual({ 'Make a playlist…': [true] });
+});
+
+test("Take over's notice keeps a name with no break inside the dialog at a phone's width (review of #453)", async ({ page, request }) => {
+  await signInAs(page, `e2e-screen-takeover-${Date.now()}@example.com`, '192.0.2.17');
+  await createOrg(page, 'Northside Arcade Takeover', '192.0.2.17');
+  const { code } = await startPairing(request);
+  const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'create_playlist', { name: unbroken, spotIds: [] });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/screens/${screen.id}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Take over this screen…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Take over screens' });
+  await dialog.getByLabel('Playlist', { exact: true }).selectOption({ label: unbroken });
+  const notice = dialog.getByText('also becomes the default playlist', { exact: false });
+  await expect(notice).toBeVisible();
+  const [box, frame] = await Promise.all([notice.boundingBox(), dialog.boundingBox()]);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(frame!.x + frame!.width);
+  expect(await notice.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+  await axe(page);
 });
 
 test("the Screens page's pairing form, and its search and filters, are disabled in the server's HTML, until the page has hydrated (#140)", async ({

@@ -1855,6 +1855,21 @@ export function scoped(d1: D1Database, orgId: string) {
         const counts = await rolloutCounts(db, and(eq(p.orgId, orgId), gte(p.revision, oldest.revision), lte(p.revision, newest.revision)));
         return page.map((h) => ({ ...h, rollout: counts.get(h.id) ?? [] }));
       },
+      /**
+       * The latest publish that gave `screenId` the manifest `manifestId` (#367): the one a screen fell back from,
+       * for its page to link to. Undefined when none did.
+       */
+      ofManifest: (screenId: string, manifestId: string) => {
+        const p = s.publishes;
+        return db
+          .select({ id: p.id, revision: p.revision })
+          .from(ps)
+          .innerJoin(p, and(eq(p.orgId, ps.orgId), eq(p.id, ps.publishId)))
+          .where(and(eq(ps.orgId, orgId), eq(ps.screenId, screenId), eq(ps.manifestId, manifestId)))
+          .orderBy(desc(p.revision))
+          .limit(1)
+          .get();
+      },
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>
         db
