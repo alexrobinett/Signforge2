@@ -317,6 +317,15 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });
 
+/** A playlist made for one test, open in its editor (#385): its list, and the names in it in order. */
+async function openPlaylist(name: string, spotIds: (string | undefined)[]) {
+  const { playlist } = await tool(page, 'create_playlist', { name, spotIds, idempotencyKey: `${name}-${Date.now()}` });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const list = page.getByRole('list', { name: 'Spots in play order' });
+  return { list, names: () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent)) };
+}
+
 /** Rows still sliding (#385) are where they were drawn, not where they are: a drag waits for them, as a person's would. */
 const slid = (list: Locator) =>
   expect
@@ -332,15 +341,7 @@ const slid = (list: Locator) =>
     .toBe(0);
 
 test('a move is made at once, then the rows slide and the moved one is ringed; under reduced motion it is just made (#385)', async () => {
-  const { playlist } = await tool(page, 'create_playlist', {
-    name: 'Motion loop',
-    spotIds: [spots.Opening, spots.Lunch, spots.Closing],
-    idempotencyKey: `motion-loop-${Date.now()}`,
-  });
-  await page.goto(`/playlists/${playlist.id}`);
-  await hydrated(page);
-  const list = page.getByRole('list', { name: 'Spots in play order' });
-  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  const { list, names } = await openPlaylist('Motion loop', [spots.Opening, spots.Lunch, spots.Closing]);
   // What the editor asked the browser to draw, kept on the page: each row it slid and the one it ringed, by place and name.
   await page.evaluate(() => {
     const log = (entry: string) => void (document.body.dataset.motion = `${document.body.dataset.motion ?? ''}${entry};`);
@@ -382,15 +383,7 @@ test('a move is made at once, then the rows slide and the moved one is ringed; u
 });
 
 test('a spot listed twice: the row moved is the one ringed, at its new place (review of #449)', async () => {
-  const { playlist } = await tool(page, 'create_playlist', {
-    name: 'Twice loop',
-    spotIds: [spots.Opening, spots.Lunch, spots.Opening],
-    idempotencyKey: `twice-loop-${Date.now()}`,
-  });
-  await page.goto(`/playlists/${playlist.id}`);
-  await hydrated(page);
-  const list = page.getByRole('list', { name: 'Spots in play order' });
-  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  const { list, names } = await openPlaylist('Twice loop', [spots.Opening, spots.Lunch, spots.Opening]);
   await page.evaluate(() => {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (frames, options) {
@@ -410,15 +403,7 @@ test('a spot listed twice: the row moved is the one ringed, at its new place (re
 });
 
 test('a move lands though the browser cannot draw it: no view transitions, or an animation that throws (review of #449)', async () => {
-  const { playlist } = await tool(page, 'create_playlist', {
-    name: 'Plain loop',
-    spotIds: [spots.Opening, spots.Lunch, spots.Closing],
-    idempotencyKey: `plain-loop-${Date.now()}`,
-  });
-  await page.goto(`/playlists/${playlist.id}`);
-  await hydrated(page);
-  const list = page.getByRole('list', { name: 'Spots in play order' });
-  const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
+  const { list, names } = await openPlaylist('Plain loop', [spots.Opening, spots.Lunch, spots.Closing]);
   const errors: Error[] = [];
   const onError = (e: Error) => void errors.push(e);
   page.on('pageerror', onError);
