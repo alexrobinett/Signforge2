@@ -13,8 +13,11 @@ const SEVERITIES: Record<string, { label: string; ground: string; ink: string }>
   notice: { label: 'Notice', ground: '#1e3a8a', ink: '#ffffff' },
 };
 
-/** Halvings of the search for the largest scale at which text fits its region: within 1/256 of it, nine layouts at most. */
-const STEPS = 8;
+/**
+ * Halvings of the search for the largest scale at which text fits its region: within 1/64 of it, seven layouts at most.
+ * Eight took a cold prepare of the widest copy to 590 ms on the Pi, over the 500 ms budget (review of #448).
+ */
+const STEPS = 6;
 /** A line may stand this far past its region's edge, for sub-pixel layout: never a whole pixel. */
 const SLACK = 0.5;
 

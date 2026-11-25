@@ -275,18 +275,24 @@ describe('alert (#200)', () => {
       }
     });
 
+    // The code and the headline apart, so each fails on its own with the clipping off.
     for (const orientation of ['landscape', 'portrait'] as const)
-      it(`keeps the marks out of the code and the headline, which a screen shows as without them, ${orientation}`, async () => {
+      it(`keeps the marks out of the code, which reads back as under a plain caption, ${orientation}`, async () => {
         const k = await alertFrame(orientation);
         for (const severity of severities) {
-          // The code: whole pixels as under a plain caption, and it reads back.
           const plain = await shot(k, await k.play({ severity, qrUrl: longestLinks[0] }), '.tile');
           for (const qrLabel of captions) {
             const f = await k.play({ severity, qrLabel, qrUrl: longestLinks[0] });
             expect((await shot(k, f, '.tile')).equals(plain), `${severity}: the code under ${qrLabel.slice(0, 3)}…`).toBe(true);
             expect(await decoded(k, f), severity).toBe(longestLinks[0]);
           }
-          // The headline: whole pixels as above plain instructions.
+        }
+      }, 120_000);
+
+    for (const orientation of ['landscape', 'portrait'] as const)
+      it(`keeps the marks out of the headline, which paints as above plain instructions, ${orientation}`, async () => {
+        const k = await alertFrame(orientation);
+        for (const severity of severities) {
           const headline = await shot(k, await k.play({ severity, instructions: plainInstructions }), '.headline');
           const f = await k.play({ severity, instructions: zalgoInstructions });
           expect((await shot(k, f, '.headline')).equals(headline), `${severity}: the headline`).toBe(true);
