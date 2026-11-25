@@ -21,6 +21,12 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
 
   // No horizontal scroll at phone width.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // The top bar is plain: no blur, and the page does not show through it (#384).
+  const topBar = page.locator('header').filter({ has: page.getByRole('button', { name: 'Open navigation' }) });
+  expect(await topBar.evaluate((h) => ({ blur: getComputedStyle(h).backdropFilter, background: getComputedStyle(h).backgroundColor }))).toEqual({
+    blur: 'none',
+    background: await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
+  });
   await axe(page);
   await screenshot(page, '08-phone-overview');
 

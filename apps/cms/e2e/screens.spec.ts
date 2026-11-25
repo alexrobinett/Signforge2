@@ -58,6 +58,10 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByRole('heading', { name: 'See your first spot on a screen' })).toBeVisible();
+  // The pairing picture is the screen and where it shows the code: no window dots, no drop shadow (#384).
+  const picture = page.getByRole('img', { name: 'A screen showing its pairing code' }).locator('xpath=..');
+  expect(await picture.evaluate((f) => getComputedStyle(f).boxShadow)).toBe('none');
+  await expect(picture.locator('.rounded-full')).toHaveCount(0);
   await axe(page);
   await shots(page, '11-screens-empty');
 
