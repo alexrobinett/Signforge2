@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   bundleScripts,
+  readCss,
   IMAGE_SAMPLE_CELL,
   MANIFEST_SCHEMA,
   MAX_URL_BYTES,
@@ -1526,6 +1527,38 @@ describe('network check', () => {
       for (const html of fetchedToo) expect(problems(html), html).toEqual(refused);
     });
 
+    // The third review of #438: each passed the lint and fetched in headless Chromium.
+    const fetchedThird = [
+      // Inside a <select>, where parse5 drops what Chromium's customizable select keeps.
+      '<select><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select><div class=b></div>',
+      String.raw`<select><style>.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style></select><div class=b></div>`,
+      `<select><div style="background-image:image-set('//t.example/p.gif' 1x)"></div></select>`,
+      '<select><option><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></option></select><div class=b></div>',
+      '<select><svg><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></svg></select><div class=b></div>',
+      String.raw`<select><style>@\69mport "//t.example/a.css";</style></select>`,
+      // url( read as CSS reads it: past 64 spaces, U+00A0 is no whitespace, a comment ends a name, and a name with
+      // more than url in it (a non-ASCII letter, an escape) is not url.
+      `<style>.a{background:url(${' '.repeat(64)}"a)b/*")}.b{background-image:image-set("\\2f\\2f t.example/p.gif" 1x)}.c{content:"*/"}</style><div class=b></div>`,
+      `<div style="x:url(${' '.repeat(64)}'a)b/*');background-image:image-set('\\2f\\2f t.example/p.gif' 1x);y:'*/'"></div>`,
+      `<style>.a{background:url(\u00a0"x)}.c{content:"/*"}.b{background-image:image-set("\\2f\\2f t.example/p.gif" 1x)}.d{content:"*/"}</style><div class=b></div>`,
+      String.raw`<style>.a{x:u/*x*/rl(1+"a)b/*")}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style><div class=b></div>`,
+      String.raw`<style>.a{x:éurl(1+"a)b/*")}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style><div class=b></div>`,
+      String.raw`<style>.a{x:\21 url(1+"a)b/*")}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style><div class=b></div>`,
+    ];
+
+    it('refuses each the third review found', () => {
+      for (const html of fetchedThird) expect(problems(html), html).toEqual(refused);
+    });
+
+    it('refuses an @import in a <select>’s <style> as forbidden CSS', () => {
+      const forbidden = checkTemplateBundle({
+        manifest: template,
+        html: String.raw`<select><style>@\69mport "a.css";</style></select>`,
+        sources: { 'main.ts': '' },
+      });
+      expect(forbidden.checks.find((c) => c.check === 'forbidden-css')?.problems).toEqual(['stylesheets must be bundled, not imported at run time']);
+    });
+
     it('refuses an @import spelled with a character reference in an SVG <style> as forbidden CSS', () => {
       const forbidden = (html: string) =>
         checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
@@ -1535,13 +1568,40 @@ describe('network check', () => {
     // High 1 of the second review: the styles come from one parse, so the text read is never more than the bundle,
     // however many unclosed <style> tags it holds. Measured in characters, not time.
     it('reads at most the bundle’s length of style text, whatever the bundle', () => {
-      for (const html of ['<style>'.repeat(4000), '<style '.repeat(8000), `${'<style>'.repeat(400)}${'a'.repeat(200_000)}</style>`]) {
+      for (const html of [
+        '<style>'.repeat(4000),
+        '<style '.repeat(8000),
+        `${'<style>'.repeat(400)}${'a'.repeat(200_000)}</style>`,
+        // In an SVG, <style>s nest: only the outermost one's text is written out (review of #438, round 3).
+        `<svg>${'<style>'.repeat(4000)}${'a'.repeat(20_000)}`,
+        `<svg>${'<style>'.repeat(400)}${'a'.repeat(200_000)}${'</style>'.repeat(400)}</svg>`,
+        `<svg>${'<style>'.repeat(2000)}${'a'.repeat(100_000)}${'</style>'.repeat(2000)}</svg>`.repeat(3),
+        // And <select>s, each read again only to the next one.
+        '<select>'.repeat(4000),
+        `${'<select><style>'.repeat(2000)}${'a'.repeat(20_000)}`,
+      ]) {
         const { styles, styleAttributes } = bundleScripts(html);
         const read = styles.reduce((n, style) => n + style.text.length, 0) + styleAttributes.reduce((n, value) => n + value.length, 0);
         const written = styles.reduce((n, style) => n + style.written.length, 0);
         expect(read, html.slice(0, 16)).toBeLessThanOrEqual(html.length);
         expect(written, html.slice(0, 16)).toBeLessThanOrEqual(html.length);
       }
+    });
+
+    it('checks the third review’s 390 kB nested-style bundle to a report, where it threw', () => {
+      const html = `<svg>${'<style>'.repeat(2000)}${'a'.repeat(100_000)}${'</style>'.repeat(2000)}</svg>`.repeat(3);
+      expect(checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'network')?.problems).toEqual([]);
+    });
+
+    // High 2 of the third review: readCss read the end of what it had read at each "(", which made V8 flatten it each
+    // time. It now never reads its own output: only appends to it and returns it, so each character is read once.
+    it('never reads back what it has read, so a long run of "(" is one pass', () => {
+      const body = readCss.toString();
+      const reads = [...body.matchAll(/\bout\b(?!\s*\+?=)/g)].map((m) => body.slice(m.index - 12, m.index + 8));
+      expect(reads).toEqual([expect.stringContaining('return out')]);
+      expect(readCss('a('.repeat(100_000))).toBe('a('.repeat(100_000));
+      expect(problems(`<style>${'('.repeat(200_000)}</style>`)).toEqual([]);
+      expect(problems(`<style>.a{x:${'('.repeat(200_000)}url(//t.example/p.gif)}</style>`)).toEqual(refused);
     });
 
     it('refuses an @import whose letters are escaped as forbidden CSS too', () => {

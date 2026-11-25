@@ -10,9 +10,10 @@
  *
  * The same walk gives the bundle check its styles (#326): each `<style>` element's text and each `style` attribute's
  * value as the parser reads them (in an SVG's `<style>`, character references read, CDATA unwrapped and comments left
- * out; in an HTML one, the text as written), in one pass, linear in the bundle.
+ * out; in an HTML one, the text as written), linear in the bundle. Inside a `<select>`, where parse5 drops what
+ * Chromium's customizable select keeps and applies, the select's own text is parsed again for them.
  */
-import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
+import { type DefaultTreeAdapterTypes as Tree, parse, parseFragment } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
 
 /** A script element, or a `<select>` that holds script markup. */
@@ -79,10 +80,40 @@ function classify(el: Tree.Element, html: string): BundleScript {
   return { ...at, runs: true };
 }
 
-/** A `<style>` element: its text as the parser reads it, and as it is written in the bundle. */
+/**
+ * A `<style>` element: its text as the parser reads it, and as it is written in the bundle. `written` is empty for one
+ * inside another (an SVG's `<style>`s nest): the outer one's holds it, so the written text adds up to the bundle at most.
+ */
 export interface BundleStyle {
   text: string;
   written: string;
+}
+
+/**
+ * Each element under `root` (a `<template>`'s content too), with what `visit` passes down to its children: by a stack of
+ * our own, not recursion, as a tree can be deeper than the call stack (an SVG's `<style>`s nest, review of #438).
+ */
+function eachElement<F>(root: Tree.ParentNode, flag: F, visit: (element: Tree.Element, flag: F) => F) {
+  const stack: [Tree.ParentNode, F][] = [[root, flag]];
+  for (let top = stack.pop(); top; top = stack.pop()) {
+    for (const child of top[0].childNodes) if ('tagName' in child) stack.push(['content' in child ? child.content : child, visit(child, top[1])]);
+  }
+}
+
+/** The `<style>` elements and `style` attribute values in `root`, a tree parsed from `src`, added to `styles` and `attributes`. */
+function collectStyles(root: Tree.ParentNode, src: string, styles: BundleStyle[], attributes: string[]) {
+  eachElement(root, false, (child, inStyle) => {
+    for (const a of child.attrs) if (a.name === 'style' && !a.prefix) attributes.push(a.value);
+    const style = child.tagName === 'style';
+    if (style) {
+      const loc = child.sourceCodeLocation!;
+      const start = loc.startTag!.endOffset;
+      const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
+      const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
+      styles.push({ text, written: inStyle ? '' : src.slice(start, end) });
+    }
+    return inStyle || style;
+  });
 }
 
 /**
@@ -94,34 +125,42 @@ export function bundleScripts(bundle: string): { html: string; scripts: BundleSc
   const scripts: BundleScript[] = [];
   const styles: BundleStyle[] = [];
   const styleAttributes: string[] = [];
-  const walk = (node: Tree.ParentNode, inSelect: boolean) => {
-    for (const child of node.childNodes) {
-      if (!('tagName' in child)) continue;
-      for (const a of child.attrs) if (a.name === 'style' && !a.prefix) styleAttributes.push(a.value);
-      if (child.tagName === 'style') {
-        const loc = child.sourceCodeLocation!;
-        const start = loc.startTag!.endOffset;
-        const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
-        const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
-        styles.push({ text, written: html.slice(start, end) });
-      }
-      const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
-      if (select) {
-        // Text up to the next </select>, not parse5's element: where parse5 closes a <select> early
-        // (at a <textarea>, say), Chromium may go on and find a script that parse5 never sees.
-        const start = child.sourceCodeLocation!.startOffset;
-        const close = html.slice(start).search(/<\/select/i);
-        const end = close < 0 ? html.length : start + close;
-        if (/<script/i.test(html.slice(start, end))) scripts.push({ start, end, runs: false, problem: IN_SELECT });
-      }
-      if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
-        const found = classify(child, html);
-        // In a <select> the <select> is the problem: its scripts are neither armed nor reported again.
-        scripts.push(inSelect ? { start: found.start, end: found.end, runs: false } : found);
-      }
-      walk('content' in child ? child.content : child, inSelect || select);
+  // Where each <select and </select starts, found once: a select's text ends at the next one.
+  const selectTags = [...html.matchAll(/<\/?select/gi)].map((m) => m.index);
+  const nextSelectTag = (from: number) => {
+    let low = 0;
+    let high = selectTags.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (selectTags[mid]! < from) low = mid + 1;
+      else high = mid;
     }
+    return selectTags[low] ?? html.length;
   };
-  walk(parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true }), false);
+  const visit = (child: Tree.Element, inSelect: boolean) => {
+    const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
+    if (select) {
+      // Text up to the next <select or </select, not parse5's element: where parse5 closes a <select> early
+      // (at a <textarea>, say), Chromium may go on and find a script that parse5 never sees. Each select's text
+      // ends before the next one's starts, so all of them add up to the bundle at most.
+      const start = child.sourceCodeLocation!.startOffset;
+      const from = child.sourceCodeLocation!.startTag!.endOffset;
+      const end = nextSelectTag(from);
+      const inside = html.slice(from, end);
+      if (/<script/i.test(inside)) scripts.push({ start, end, runs: false, problem: IN_SELECT });
+      // parse5 drops a <style>, and the elements a style attribute is on, inside a <select>; Chromium's customizable
+      // select keeps and applies them (review of #438, round 3). Read again on their own, they are found.
+      collectStyles(parseFragment(inside, { sourceCodeLocationInfo: true }), inside, styles, styleAttributes);
+    }
+    if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
+      const found = classify(child, html);
+      // In a <select> the <select> is the problem: its scripts are neither armed nor reported again.
+      scripts.push(inSelect ? { start: found.start, end: found.end, runs: false } : found);
+    }
+    return inSelect || select;
+  };
+  const document = parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true });
+  collectStyles(document, html, styles, styleAttributes);
+  eachElement(document, false, visit);
   return { html, scripts: scripts.sort((a, b) => a.start - b.start), styles, styleAttributes };
 }
