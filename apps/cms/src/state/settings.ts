@@ -111,7 +111,7 @@ interface AiKeyForm {
 }
 
 /** The AI settings' model choices and daily ceiling, as the form sends them: '' for none. */
-export interface AiChoices {
+interface AiChoices {
   fastModel: string;
   capableModel: string;
   dailyTurnCeiling: string;
