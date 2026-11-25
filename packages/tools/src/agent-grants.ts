@@ -1,6 +1,6 @@
 /**
  * Agent grant tools (M4-07): what people see and change of the agents connected to their org, on
- * Settings › API & agents. A grant (M4-04) is one member's, in one org, for one OAuth client.
+ * Settings › Connected agents (MCP). A grant (M4-04) is one member's, in one org, for one OAuth client.
  *
  * - Who sees a grant: an owner, every grant in the org; anyone else, their own.
  * - Who changes one: the member who granted it may raise or lower its scopes, within what they may

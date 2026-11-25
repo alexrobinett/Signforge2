@@ -60,13 +60,8 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
       </div>
 
       <figure className="m-0 flex min-w-0 flex-[1_1_24rem] flex-col gap-2.5">
-        <div className="overflow-hidden rounded-xl border border-border-strong bg-card shadow-[0_12px_32px_rgba(16,24,40,0.12)]">
+        <div className="overflow-hidden rounded-xl border border-border-strong bg-card">
           <div aria-hidden className="flex h-10 items-center gap-2.5 border-b bg-muted px-3 text-xs text-muted-foreground">
-            <span className="flex gap-1.5">
-              <span className="size-2.5 rounded-full bg-border-strong" />
-              <span className="size-2.5 rounded-full bg-border-strong" />
-              <span className="size-2.5 rounded-full bg-border-strong" />
-            </span>
             <span className="rounded-md bg-card px-2.5 py-1">SignForge player</span>
             <span className="flex-1 truncate rounded-md bg-card px-2.5 py-1 font-mono">…/player/pair</span>
           </div>

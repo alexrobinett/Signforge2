@@ -225,9 +225,9 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
-  // AI & agents (#261): read, with no key form, while the org uses the demo model.
+  // AI model (#261): read, with no key form, while the org uses the demo model.
   await invitee.goto('/settings/ai');
-  await expect(invitee.getByRole('heading', { name: 'AI & agents' })).toBeVisible();
+  await expect(invitee.getByRole('heading', { name: 'AI model' })).toBeVisible();
   await expect(invitee.getByText('Only an owner can add a key.')).toBeVisible();
   await expect(invitee.getByLabel('API key', { exact: true })).toHaveCount(0);
   await invitee.goto('/settings/members');

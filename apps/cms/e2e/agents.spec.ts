@@ -1,4 +1,4 @@
-// Settings › API & agents (M4-07, #112): a stub MCP client connects through /connect and is listed
+// Settings › Connected agents (MCP) (M4-07, #112): a stub MCP client connects through /connect and is listed
 // with its last 7 days of calls (M4-08, #113); turning screens:manage off on its page refuses its next
 // rename_screen with forbidden, which its page shows as its last refusal; Disconnect gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
 // reads as SignForge is named by its host on the list, the audit log and its CSV, never by its name.
@@ -14,7 +14,7 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await signInAs(page, `e2e-agents-${Date.now()}@example.com`, ADDRESS.owner);
   await createOrg(page, 'Kestrel Yard', ADDRESS.owner);
   await page.goto('/settings/api');
-  await expect(page.getByRole('heading', { name: 'API & agents', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connected agents (MCP)', level: 1 })).toBeVisible();
   await expect(page.getByText('No agents are connected yet.')).toBeVisible();
   await expect(page.getByLabel('MCP server address')).toHaveValue(/\/mcp$/);
 

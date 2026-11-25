@@ -1,5 +1,5 @@
 /**
- * Settings › API & agents (M4-07, the SettingsApi and AgentDetail boards): connected agents as the
+ * Settings › Connected agents (MCP) (M4-07, the SettingsApi and AgentDetail boards): connected agents as the
  * grant tools return them, the tool reference, each tool with its scope and role, and each agent's
  * calls over the last 7 days in words (M4-08, `get_agent_grant_usage`).
  */
