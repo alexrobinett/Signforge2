@@ -71,9 +71,10 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // Publishing on: the warning names the org.
   await page.getByLabel('Organisation', { exact: true }).selectOption({ label: 'Quayside Market' });
   await page.getByRole('checkbox', { name: /Publish to live screens/ }).check();
-  await expect(page.getByRole('status')).toContainText('Publishing lets “Test agent” change what every screen in Quayside Market shows without asking.');
+  const publishing = page.getByRole('status').filter({ hasText: 'Publishing lets' });
+  await expect(publishing).toContainText('Publishing lets “Test agent” change what every screen in Quayside Market shows without asking.');
   // A misled agent publishes too: the person granting it is told so (#122).
-  await expect(page.getByRole('status')).toContainText('can mislead it into publishing what you did not mean');
+  await expect(publishing).toContainText('can mislead it into publishing what you did not mean');
   await shots(page, '30-connect-agent-publish');
   await page.setViewportSize({ width: 390, height: 844 });
   await shots(page, '30-connect-agent-phone');
@@ -183,7 +184,7 @@ test('an unverified name that reads as SignForge is not on the page; a plain one
   expect(await page.content()).not.toContain('SI6NFOR6E');
   await expect(await headingFor('🆂🅸🅶🅽🅵🅾🆁🅶🅴')).toHaveAccessibleName('An unverified app at 127.0.0.1:33418 wants to work in SignForge Unverified');
   await hydrated(page);
-  await expect(page.getByRole('status')).toContainText('Without publishing, changes by this app stay drafts');
+  await expect(page.getByRole('status').filter({ hasText: 'Without publishing' })).toContainText('Without publishing, changes by this app stay drafts');
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 1150 });
   await shots(page, '30-connect-agent-unnamed');
