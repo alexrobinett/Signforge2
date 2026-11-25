@@ -996,6 +996,19 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 - **One cold prepare over 500 ms in 12:** 517 ms, the session's first run (landscape, `﷽`). The other eleven were 408 to 498 ms; the same search at `5ec7a79` gave 407 to 487 ms in 12. The probe cap is not what it costs: `﷽` takes four probes, as before.
 - The case that takes the most probes (six) has light text, and its cold prepare is 320 to 354 ms.
 
+### A close first step, and the first prepare after a kiosk restart (review of #448, 2026-11-25)
+
+`98cb08b`: after probing the estimated scale, the search steps 1/64 from it when that probe's own layout puts the answer that close, so two probes bracket it (`﷽` in every field, with the code, takes two in landscape and four in portrait). Worst-case cold prepares, 6 per orientation, the first straight after `systemctl restart signforge-kiosk` (the supervisor, which the kiosk's unit wants and so starts again, stopped at once; in portrait the panel is turned right after the restart, which the kiosk's start resets):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **543 ms** | 446, 450, 450, 471, 434 ms | 263-299 ms |
+| portrait | **516 ms** | 441, 436, 447, 433, 427 ms | 314-363 ms |
+
+- **Every cold prepare is under 500 ms but the first after a kiosk restart, which is 516 to 543 ms.**
+- That first prepare without any search (the scale left at 1) is 419 and 423 ms for the same copy, and 410 ms for default copy. So in a freshly started Chromium the search's two probes, each a layout of the reshaped `﷽` text, cost about 100 to 120 ms. The 1/64 guarantee needs at least two probes.
+- An earlier attempt at this measurement is discarded: restarting the kiosk had started the supervisor again, which restarted the kiosk every 50 s for want of the bench page's heartbeat. That cut some runs short and put the panel back to landscape.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
