@@ -68,16 +68,16 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "ac54740fc44ff22816aa859712e96134ccd75084601e540a40ceebdc2398cc26": {
+      "size": 124180,
+      "type": "text/html"
+    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
     },
     "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff": {
       "size": 90095,
-      "type": "text/html"
-    },
-    "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5": {
-      "size": 124028,
       "type": "text/html"
     },
     "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
@@ -138,25 +138,29 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 40
+            "maxLength": 40,
+            "maxMarks": 4
           },
           "instructions": {
             "type": "text",
             "label": "Instructions",
             "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-            "maxLength": 240
+            "maxLength": 240,
+            "maxMarks": 4
           },
           "issuedBy": {
             "type": "text",
             "label": "Issued by",
             "default": "Issued by Building Safety",
-            "maxLength": 48
+            "maxLength": 48,
+            "maxMarks": 4
           },
           "endsAt": {
             "type": "text",
             "label": "Ends at",
             "default": "4:00 PM",
-            "maxLength": 24
+            "maxLength": 24,
+            "maxMarks": 4
           },
           "qrUrl": {
             "type": "url",
@@ -168,7 +172,8 @@
             "type": "text",
             "label": "QR code label",
             "default": "Scan for updates",
-            "maxLength": 32
+            "maxLength": 32,
+            "maxMarks": 4
           },
           "showQr": {
             "type": "boolean",
@@ -199,7 +204,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5"
+      "html": "ac54740fc44ff22816aa859712e96134ccd75084601e540a40ceebdc2398cc26"
     },
     "base/announcement@1.0.2": {
       "manifest": {
@@ -2154,5 +2159,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "9598db084daea0dcdad14ec0bab4c98ec741bf22a40faac07f619afc1b09c401"
+  "id": "00c2f5b30d97e9abc0bf81c3017a9125f05659ff56e2b492e659f645e6f0d75e"
 }

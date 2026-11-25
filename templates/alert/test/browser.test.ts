@@ -249,6 +249,70 @@ describe('alert (#200)', () => {
       expect(found).toEqual([]);
     }, 300_000);
 
+  // Marks stacked above or below a character paint past its line, though the line fits (review of #448, final check):
+  // each text box clips its ink a little past its edges, and Alert refuses more than four marks on a character.
+  describe('stacked marks', () => {
+    const plainInstructions = 'Use the stairs. Do not use the elevators.';
+    const captions = [`WW${'͆'.repeat(16)}${'W'.repeat(14)}`, `W${'̾'.repeat(20)}${'W'.repeat(11)}`];
+    const zalgoInstructions = `U${'̍'.repeat(160)}se the stairs. Do not use the elevators.`;
+    /** A screenshot of `selector`'s box in the frame, as PNG bytes. */
+    const shot = async (k: { hst: { page: Page } }, f: Frame, selector: string) => {
+      const clip = await f.evaluate((sel) => {
+        for (const a of document.getAnimations()) a.currentTime = 3000;
+        const r = document.querySelector(sel)!.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }, selector);
+      return k.hst.page.screenshot({ clip });
+    };
+
+    it('refuses a fifth mark on one character in every text field', () => {
+      const fields = t().manifest.fields;
+      for (const name of ['headline', 'instructions', 'issuedBy', 'endsAt', 'qrLabel']) {
+        expect(fields[name], name).toMatchObject({ maxMarks: 4 });
+        const at = (marks: number) => validateSpotData(fields, spotData(t().manifest, { [name]: `U${'̍'.repeat(marks)}` }), {});
+        expect(at(4), name).toEqual([]);
+        expect(at(5), name).toEqual([`field "${name}" stacks more than 4 accents or marks on one character`]);
+      }
+    });
+
+    for (const orientation of ['landscape', 'portrait'] as const)
+      it(`keeps the marks out of the code and the headline, which a screen shows as without them, ${orientation}`, async () => {
+        const k = await alertFrame(orientation);
+        for (const severity of severities) {
+          // The code: whole pixels as under a plain caption, and it reads back.
+          const plain = await shot(k, await k.play({ severity, qrUrl: longestLinks[0] }), '.tile');
+          for (const qrLabel of captions) {
+            const f = await k.play({ severity, qrLabel, qrUrl: longestLinks[0] });
+            expect((await shot(k, f, '.tile')).equals(plain), `${severity}: the code under ${qrLabel.slice(0, 3)}…`).toBe(true);
+            expect(await decoded(k, f), severity).toBe(longestLinks[0]);
+          }
+          // The headline: whole pixels as above plain instructions.
+          const headline = await shot(k, await k.play({ severity, instructions: plainInstructions }), '.headline');
+          const f = await k.play({ severity, instructions: zalgoInstructions });
+          expect((await shot(k, f, '.headline')).equals(headline), `${severity}: the headline`).toBe(true);
+        }
+      }, 120_000);
+
+    // Clipping must take no ink a written language needs: Vietnamese stacks two marks on a capital, Thai three.
+    for (const orientation of ['landscape', 'portrait'] as const)
+      it(`clips none of the ink of real accents, ${orientation}`, async () => {
+        const k = await alertFrame(orientation);
+        const f = await k.play({
+          headline: 'ẾỂ ỄỆ ỘỚ ỜỞ ỠỢ ỨỪ ỬỮ ỰẤ',
+          instructions: 'Đi cầu thang gần nhất. Không dùng thang máy. น้ำใจผู้ใหญ่ที่นี่ ปั้นญี่ปุ่น',
+          issuedBy: 'Ban An toàn Tòa nhà ỆỘ',
+          qrLabel: 'Quét mã để cập nhật ẾỆ',
+        });
+        const clipped = await shot(k, f, '.body');
+        await f.evaluate(() => {
+          const style = document.createElement('style');
+          style.textContent = '.headline, .instructions, .meta p, .qr figcaption { overflow: visible !important; }';
+          document.head.append(style);
+        });
+        expect((await shot(k, f, '.body')).equals(clipped)).toBe(true);
+      });
+  });
+
   it('marks each toggle on the root and removes what is off; without the QR code the type steps up', async () => {
     const k = await alertFrame();
     const read = (f: Frame) =>

@@ -153,13 +153,13 @@
       "size": 12672,
       "type": "font/woff2"
     },
+    "ac54740fc44ff22816aa859712e96134ccd75084601e540a40ceebdc2398cc26": {
+      "size": 124180,
+      "type": "text/html"
+    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5": {
-      "size": 124028,
-      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -529,25 +529,29 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 40
+            "maxLength": 40,
+            "maxMarks": 4
           },
           "instructions": {
             "type": "text",
             "label": "Instructions",
             "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-            "maxLength": 240
+            "maxLength": 240,
+            "maxMarks": 4
           },
           "issuedBy": {
             "type": "text",
             "label": "Issued by",
             "default": "Issued by Building Safety",
-            "maxLength": 48
+            "maxLength": 48,
+            "maxMarks": 4
           },
           "endsAt": {
             "type": "text",
             "label": "Ends at",
             "default": "4:00 PM",
-            "maxLength": 24
+            "maxLength": 24,
+            "maxMarks": 4
           },
           "qrUrl": {
             "type": "url",
@@ -559,7 +563,8 @@
             "type": "text",
             "label": "QR code label",
             "default": "Scan for updates",
-            "maxLength": 32
+            "maxLength": 32,
+            "maxMarks": 4
           },
           "showQr": {
             "type": "boolean",
@@ -590,7 +595,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "b3554cc85c232b9ee0c688cb58b2f412fb2a0ca70327772621c1e6beac0570f5"
+      "html": "ac54740fc44ff22816aa859712e96134ccd75084601e540a40ceebdc2398cc26"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1284,5 +1289,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "b9e7f7bf07f87b029c51e8a5c03286a0d00b14cb568b3cbb1a8e51d829c676b7"
+  "id": "9e53da327f00649bbeab87cb1aa645fd6faac4e069907ce9fff8b69195fd2b1e"
 }

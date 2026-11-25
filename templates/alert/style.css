@@ -274,6 +274,23 @@ body {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: 'copy' 'meta';
 }
+/* Ink stays near its own box (review of #448, final check): marks stacked above or below a character paint past its
+   line, though the line fits its region, so each text box clips its paint a little past its edges, less than half the gap
+   to the next box (3.7vmin between rows and columns, 1.48vmin between the code and its caption). An accent keeps its ink;
+   no stack of marks reaches the next box, or the code. Layout is untouched: the regions are measured as before. */
+.headline,
+.instructions,
+.meta p {
+  overflow: clip;
+  overflow-clip-margin: 1.8vmin;
+}
+.qr figcaption {
+  overflow: clip;
+  overflow-clip-margin: 0.7vmin;
+}
+.tile {
+  contain: paint;
+}
 /* While main.ts measures the text: laid out as it plays, not where the intros' transforms hold it. */
 :root[data-measuring] *,
 :root[data-measuring] *::before,
