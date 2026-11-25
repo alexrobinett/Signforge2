@@ -47,7 +47,7 @@ const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
 export const byWord = (p: Pick<PublishView, 'by'>, me: string) =>
   p.by.kind === 'user' && p.by.id === me ? 'you' : p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
 
-const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
+export const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
 
 /** Each outcome's mark on the bar: the chart tokens, and the one red for a screen that needs a person. */
 export const OUTCOME_COLOR: Record<Outcome, string> = {

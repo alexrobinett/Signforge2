@@ -221,7 +221,7 @@ test('groups and screens in name order wherever they are listed, though their id
   await page.keyboard.press('Escape');
 
   // A brand kit's conflict alert: both screens are in groups that chose different kits.
-  await page.goto(`/settings/brand-kits/${kits[0]}`);
+  await page.goto(`/brand-kits/${kits[0]}`);
   await hydrated(page);
   await expect(page.getByText('Screen 2, Screen 10 are in groups that chose different kits')).toBeVisible();
 });

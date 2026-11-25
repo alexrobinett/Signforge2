@@ -4,6 +4,7 @@ import {
   ImagesIcon,
   LayersIcon,
   LayoutDashboardIcon,
+  PaletteIcon,
   ListVideoIcon,
   MonitorIcon,
   PlugIcon,
@@ -14,7 +15,19 @@ import {
 } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/approvals' | '/assets' | '/integrations' | '/audit' | '/settings';
+  to:
+    | '/'
+    | '/screens'
+    | '/spots'
+    | '/playlists'
+    | '/schedule'
+    | '/publishes'
+    | '/approvals'
+    | '/assets'
+    | '/brand-kits'
+    | '/integrations'
+    | '/audit'
+    | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -87,6 +100,14 @@ export const SECTIONS: Section[] = [
     icon: ImagesIcon,
     description: 'Images and video uploaded for your spots.',
     empty: { title: 'No assets yet', body: 'Uploaded images and video, checked for the screens they will play on, will be kept here.' },
+  },
+  // Beside the content it dresses, not in Settings: a page of content work, so the sidebar marks it, not Settings (#381).
+  {
+    to: '/brand-kits',
+    label: 'Brand kits',
+    icon: PaletteIcon,
+    description: 'Your colours and fonts, which templates wear on screens.',
+    empty: { title: '', body: '' },
   },
   {
     to: '/integrations',
