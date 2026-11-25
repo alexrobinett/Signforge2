@@ -40,7 +40,8 @@ describe('setupSteps', () => {
     expect(setupSteps(none)).toEqual({ spot: false, default: false, screen: false });
     expect(setupSteps({ ...none, templateSpot: true })).toEqual({ spot: true, default: false, screen: false });
     // A default never published, or published empty, is not one screens play, whatever its draft holds since (#397).
-    expect(setupSteps({ ...none, defaultPlaylist: { publishedSpotCount: 0 } }).default).toBe(false);
+    const emptyButDrafted = { publishedSpotCount: 0, spotIds: ['s1'] };
+    expect(setupSteps({ ...none, defaultPlaylist: emptyButDrafted }).default).toBe(false);
     expect(setupSteps({ ...none, defaultPlaylist: published }).default).toBe(true);
     // A screen counts once it has taken a publish, and only with a published default.
     expect(setupSteps({ ...none, defaultPlaylist: published, screens: [screen('online', 's1', { reported: null })] }).screen).toBe(false);
