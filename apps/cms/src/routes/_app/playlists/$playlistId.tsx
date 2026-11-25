@@ -14,7 +14,7 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Tria
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { ProposalPanel } from '~/components/proposal';
-import { DeleteButton, EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
@@ -153,13 +153,9 @@ function PlaylistEditor() {
         title={draft.name || playlist.name}
         about={`${count} · ${loop} loop · ${saveWord(status, savedAt)} · ${playlistPublishWord(playlist)}`}
       >
-        {canManage && (
-          <>
-            <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
-            <DeleteButton onAsk={() => askDelete(true)} />
-          </>
-        )}
+        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
+        {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
       <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
       {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}

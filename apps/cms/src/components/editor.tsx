@@ -4,10 +4,11 @@
  * and EditorFields, which the brand kit, screen, settings, audit log and assets pages and the pairing form use too.
  */
 import { Link } from '@tanstack/react-router';
-import { ChevronLeftIcon, Trash2Icon } from 'lucide-react';
+import { ChevronLeftIcon, MoreHorizontalIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { useHydrated } from '~/lib/hydrated';
 
 /** How the save is going, in the header's words. */
@@ -102,13 +103,24 @@ export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<
   );
 }
 
-/** Asks to delete what the editor has open (a playlist, a spot): its confirmation does the rest. */
-export function DeleteButton({ onAsk }: { onAsk: () => void }) {
+/**
+ * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Save draft and Publish, where
+ * a slip would hit it. It asks first; closing the question gives focus back to ⋯.
+ */
+export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {
   return (
-    <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={onAsk}>
-      <Trash2Icon aria-hidden />
-      Delete
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" aria-label="More actions: delete">
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}>
+          Delete…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
