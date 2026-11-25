@@ -243,6 +243,23 @@ describe('tools', () => {
     expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
   });
 
+  it('refuses an id or a version the listing no longer spells out (#345): the call checks the input, as invalid_input', async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'screens:manage']);
+    const listed = (await rpc<{ tools: { name: string; inputSchema: object }[] }>(access_token, 'tools/list')).result!.tools;
+    const schema = JSON.stringify(listed.find((tool) => tool.name === 'rename_screen')?.inputSchema);
+    expect(schema).not.toContain('pattern');
+    expect(schema).not.toContain(String(Number.MAX_SAFE_INTEGER));
+    for (const input of [
+      { screenId: 'not an id!', name: 'Lobby' },
+      { screenId: 'scr_1', name: 'Lobby', ifVersion: Number.MAX_SAFE_INTEGER + 2 },
+    ]) {
+      const refused = await call(access_token, 'rename_screen', input);
+      expect(refused?.isError, JSON.stringify(input)).toBe(true);
+      expect(refused?.structuredContent, JSON.stringify(input)).toMatchObject({ error: 'invalid_input' });
+    }
+  });
+
   it('runs a read and a write through the dispatcher, audited as the agent with its client', async () => {
     const { t, owner, org } = await team();
     const { access_token, clientId } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
