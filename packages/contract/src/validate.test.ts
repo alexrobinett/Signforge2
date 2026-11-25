@@ -7,6 +7,7 @@ import {
   SCREEN_BOX,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
+  brandColourWarnings,
   checkTemplateBundle,
   parseBrandKit,
   parseDataSnapshot,
@@ -1284,6 +1285,39 @@ describe('brand colour lint', () => {
     const report = lint({ 'index.html': '<style>\n.x { fill: hsl(200 50% 50%) }\n</style><p style="x">#abc</p>', 'main.ts': 'const c = "#000";' });
     expect(report.warnings).toEqual(['index.html:2: literal colour hsl(200 50% 50%) in fill; use var(--sf-*) with it as the fallback']);
   });
+
+  // #446 made the lint linear; at its edges it reads as it did: an unclosed comment or <style> is none, a declaration
+  // ends at `;` or `}` only, and the line is the declaration's.
+  it('reads unclosed comments and styles, and declarations cut short, as before', () => {
+    const literal = (at: string, colour: string, prop = 'color') => `${at}: literal colour ${colour} in ${prop}; use var(--sf-*) with it as the fallback`;
+    expect(brandColourWarnings({ 'a.css': '.a{color:red}/* .b{color:blue}' })).toEqual([literal('a.css:1', 'red'), literal('a.css:1', 'blue')]);
+    expect(brandColourWarnings({ 'a.css': '/* a */.b{color:#000}/* c */' })).toEqual([literal('a.css:1', '#000')]);
+    expect(brandColourWarnings({ 'a.css': '.a{color:red' })).toEqual([]);
+    expect(brandColourWarnings({ 'a.css': '.a{color:red{' })).toEqual([]);
+    expect(brandColourWarnings({ 'a.css': `${'a:b;\n'.repeat(3)}.x{fill:\n white}` })).toEqual([literal('a.css:4', 'white', 'fill')]);
+    expect(brandColourWarnings({ 'a.html': '<style>.a{color:red}</style><p>\n</p><style>.b{color:blue}' })).toEqual([literal('a.html:1', 'red')]);
+    expect(brandColourWarnings({ 'a.html': '<style x="<style">.a{color:red}</STYLE>\n<style\n>.b{color:#abc}</style>' })).toEqual([
+      literal('a.html:1', 'red'),
+      literal('a.html:3', '#abc'),
+    ]);
+  });
+
+  // Each of these made a pattern search to the end from every character, its length squared (#446). Measured in
+  // results, not time: at these sizes the old lint took minutes.
+  it('lints long runs with no end in one pass', () => {
+    for (const css of [
+      'a:b '.repeat(50_000),
+      `a:${'b'.repeat(200_000)}`,
+      '/*a'.repeat(70_000),
+      `a:${'var('.repeat(50_000)};`,
+      `.a{color:${'#'.repeat(200_000)}`,
+    ])
+      expect(brandColourWarnings({ 'a.css': css }), css.slice(0, 8)).toEqual([]);
+    expect(brandColourWarnings({ 'a.css': 'a:b;\n'.repeat(50_000) })).toEqual([]);
+    expect(brandColourWarnings({ 'a.css': `color:${'rgb(1,2,3) '.repeat(20_000)};` })).toHaveLength(20_000);
+    for (const html of ['<style>'.repeat(30_000), `${'<style'.repeat(30_000)}</style>`, '<style>a:b</style>'.repeat(10_000)])
+      expect(brandColourWarnings({ 'a.html': html }), html.slice(0, 8)).toEqual([]);
+  });
 });
 
 describe('forbidden code lint', () => {
@@ -1295,6 +1329,13 @@ describe('forbidden code lint', () => {
     expect(problems({ 'index.html': '<img src="a.png"\n  onerror="x()">' })).toEqual(handler);
     expect(problems({ 'main.ts': 'box.innerHTML = `<b onclick="go()">`;' })).toEqual(handler);
     expect(problems({ 'main.ts': "el.setAttribute('onload', 'x')" })).toEqual(handler);
+    // In a tag: after its first `<letter`, past a `<` that starts none, and not after the `>` that ends it.
+    expect(problems({ 'index.html': '<b<a onclick=x>' })).toEqual(handler);
+    expect(problems({ 'index.html': '<1 <b onclick=x>' })).toEqual(handler);
+    expect(problems({ 'index.html': '<a> onclick=x' })).toEqual([]);
+    // A long run with no `>` is read once, not again from each `<` in it (#446).
+    expect(problems({ 'main.ts': '<a'.repeat(100_000) })).toEqual([]);
+    expect(problems({ 'main.ts': `${'<a '.repeat(100_000)} onclick=x` })).toEqual(handler);
     expect(problems({ 'index.html': '<a href="javascript:go()">' })).toEqual(['`javascript:` URLs do not run in a template']);
   });
 

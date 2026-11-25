@@ -295,7 +295,9 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
   // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
   {
     // An `on…=` attribute in markup, in a file or in a string, or set with setAttribute; not a property such as `img.onload = f`.
-    pattern: /<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
+    // Tried only from a `>` or the start, to the first `<letter` after it: a later `<` before the next `>` sees no more
+    // of the text, so trying each one again would make a long run without `>` cost its length squared.
+    pattern: /(?:^|>)[^<>]*(?:<(?![a-z])[^<>]*)*<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
     reason: 'inline event handlers do not run in a template; use addEventListener',
   },
   { pattern: /\bjavascript:/i, reason: '`javascript:` URLs do not run in a template' },
@@ -379,17 +381,19 @@ const COLOUR_PROPERTY = /color|background|border|outline|shadow|fill|stroke|text
 
 /** `text` with every `name(...)` call (balanced) replaced by spaces, so offsets stay put. */
 function blankCalls(text: string, name: RegExp): string {
-  let out = text;
-  for (const m of [...text.matchAll(name)]) {
+  let out = '';
+  for (const m of text.matchAll(name)) {
+    // A call inside one already blanked closes inside it too; scanning it again would be quadratic.
+    if (m.index < out.length) continue;
     let depth = 0;
-    let i = m.index! + m[0].length - 1;
+    let i = m.index + m[0].length - 1;
     for (; i < text.length; i++) {
       if (text[i] === '(') depth++;
       else if (text[i] === ')' && --depth === 0) break;
     }
-    out = out.slice(0, m.index!) + ' '.repeat(i + 1 - m.index!) + out.slice(i + 1);
+    out += text.slice(out.length, m.index) + ' '.repeat(Math.min(i + 1, text.length) - m.index);
   }
-  return out;
+  return out + text.slice(out.length);
 }
 
 /**
@@ -410,25 +414,55 @@ export function brandColourWarnings(sources: Record<string, string>): string[] {
       const blank = (t: string) => t.replace(/[^\n]/g, ' ');
       css = '';
       let at = 0;
-      for (const m of text.matchAll(/(<style[^>]*>)([\s\S]*?)<\/style>/gi)) {
-        css += blank(text.slice(at, m.index! + m[1]!.length)) + m[2];
-        at = m.index! + m[1]!.length + m[2]!.length;
+      // An element opens at the first `>` after `<style` and closes at the next `</style>`. Once one cannot close,
+      // no later one can, so the scan stops there rather than trying each `<style` to the end.
+      const opening = /<style/gi;
+      const closing = /<\/style>/gi;
+      for (let open = opening.exec(text); open; open = opening.exec(text)) {
+        const body = text.indexOf('>', opening.lastIndex) + 1;
+        if (body === 0) break;
+        closing.lastIndex = body;
+        const close = closing.exec(text);
+        if (!close) break;
+        css += blank(text.slice(at, body)) + text.slice(body, close.index);
+        at = close.index;
+        opening.lastIndex = closing.lastIndex;
       }
       css += blank(text.slice(at));
     } else continue;
-    css = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
-    for (const d of css.matchAll(/([-\w]+)\s*:\s*([^;{}]+)(?=[;}])/g)) {
+    // A comment closes by the last `*/` or not at all, so the rest is left alone rather than searched from each `/*`.
+    const commentsEnd = css.lastIndexOf('*/') + 2;
+    css = css.slice(0, commentsEnd).replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')) + css.slice(commentsEnd);
+    // A declaration ends at `;` or `}` and holds none of `;{}`, so each piece between them has at most one: the first
+    // `name:` in it. Matching piece by piece keeps a piece with none from being searched again from each character.
+    let line = 1;
+    let counted = 0;
+    let from = 0;
+    for (const stop of css.matchAll(/[;{}]/g)) {
+      const piece = css.slice(from, stop.index);
+      const offset = from;
+      from = stop.index + 1;
+      if (stop[0] === '{') continue;
+      const d = /(?<![-\w])([-\w]+)\s*:\s*([\s\S]+)/.exec(piece);
+      if (!d) continue;
       const prop = d[1]!;
       const value = blankCalls(blankCalls(d[2]!, /\bvar\(/gi), /\burl\(/gi);
       const found: { at: number; text: string }[] = [];
-      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index!, text: m[0] });
+      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index, text: m[0] });
       const calls = blankCalls(value, COLOUR_FUNCTION);
+      // A call's text runs to the first character its blanking left. Calls only move forward, so the search does too.
+      const unblanked = /\S/g;
+      let end = -1;
       for (const m of value.matchAll(COLOUR_FUNCTION)) {
-        const end = calls.slice(m.index!).search(/\S/);
-        found.push({ at: m.index!, text: d[2]!.slice(m.index!, end < 0 ? undefined : m.index! + end).trim() });
+        if (end < m.index) {
+          unblanked.lastIndex = m.index;
+          end = unblanked.exec(calls)?.index ?? calls.length;
+        }
+        found.push({ at: m.index, text: d[2]!.slice(m.index, end).trim() });
       }
-      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index!, text: m[0] });
-      const line = css.slice(0, d.index!).split('\n').length;
+      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index, text: m[0] });
+      line += css.slice(counted, offset + d.index).split('\n').length - 1;
+      counted = offset + d.index;
       for (const f of found.sort((a, b) => a.at - b.at))
         warnings.push(`${name}:${line}: literal colour ${f.text} in ${prop}; use var(--sf-*) with it as the fallback`);
     }
