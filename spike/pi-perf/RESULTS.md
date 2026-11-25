@@ -895,6 +895,45 @@ The re-check of #222 found the fade above had taken Poster's ink wipe away: the 
 - Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
 - Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
 
+## Feed images on sync and prepare (issue #196, 2026-11-25)
+
+This branch (`e558986`) against master's player (`dc1244b`), both served beside the content from one origin by `packages/cli/bench/feed-images/serve.py`, measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first; 10 s to settle, 30 s measured; prepares printed after). Content from `packages/cli/bench/feed-images/make.ts`: the bench template over ten stories, `text` with no images and `photos` with each story's 1920x1080 photo and 480x270 thumbnail (20 seeded JPEGs, 4,933 kB). The stress set's `news` and `photo-kitchen` were built by master's `sf build` (schema 7, which both players play), with the bench's ten stories as `news`'s snapshot. 3 runs of each spec, cut and fade, landscape and portrait (`wlr-randr --transform 90`); the supervisor and the soak logger stopped.
+
+**Prepare: ten stories with their photos, against the same stories as text** (this branch):
+
+| Orientation | Spot | Overall (cut; fade) | Playing | Worst frame | Prepares, median (range) |
+| --- | --- | --- | --- | --- | --- |
+| landscape | text | 0.00%; 0.00% | 0.00% | 17 ms | 128 ms (110-144) |
+| | photos | 0.00-0.06%; 0.00-0.22% | 0.00% | 33 ms; 67 ms | 195 ms (193-245) cut, 205 ms (196-265) fade |
+| portrait | text | 0.00%; 0.00% | 0.00% | 17 ms | 147 ms (117-150) cut, 134 ms (113-148) fade |
+| | photos | 0.00%; 0.06-0.17% | 0.00% | 17 ms; 50 ms | 224 ms (209-261) cut, 229 ms (206-363) fade |
+
+Reading ten photos from the cache, decoding them and drawing them in their rows adds about 70 ms to a prepare in landscape and 80 to 90 ms in portrait. The slowest is 363 ms, inside the 500 ms budget, and nothing drops while the spot plays.
+
+**Sync: the photos arriving while a spot plays.** `text` plays while the `photos` snapshot's 20 JPEGs, held back until then, appear 5 s into the measured window. The next 5 s pass fetches them in the download worker, checks each hash and stores it. The time is from their appearing to the cache holding all 20, polled every 100 ms. Resource Timing cannot see a worker's fetches, so it is not used.
+
+| Orientation | Overall | Playing | Worst frame | All 20 held after |
+| --- | --- | --- | --- | --- |
+| landscape | 0.00, 0.00, 0.00% | 0.00% | 17 ms | 1,773, 1,665, 1,678 ms |
+| portrait | 0.00, 0.00, 0.06% | 0.00% | 17-33 ms | 1,653, 1,679, 1,675 ms |
+
+**This branch against master on shipped templates.** This branch also changes prepare for every template: framing, assets and theme in parallel, and data before framing.
+
+| Orientation | Spot | Transition | Master: overall, playing, worst, prepare median | This branch |
+| --- | --- | --- | --- | --- |
+| landscape | news | cut | 0.06-0.17%, 0.00%, 33 ms, 185 ms | 0.11-0.17%, 0.00%, 33 ms, 187 ms |
+| | | fade | 0.11-0.22%, 0.00%, 33 ms, 184 ms | 0.00-0.11%, 0.00%, 33 ms, 180 ms |
+| | photo-kitchen | cut | 0.11-0.17%, 0.00%, 50 ms, 231 ms | 0.17-**1.72**%, 0.00-**1.59**%, **483 ms** (one, run 1, playing), 230 ms |
+| | | fade | 0.11-0.22%, 0.00%, 33 ms, 230 ms | 0.17-0.33%, 0.00%, 33 ms, 229 ms |
+| portrait | news | cut | 0.06-0.17%, 0.00-0.06%, 50 ms, 262 ms | 0.11-0.17%, 0.00%, 50 ms, 252 ms |
+| | | fade | 0.28-0.39%, 0.00%, 50 ms, 249 ms | 0.28-0.44%, 0.00-0.06%, 50 ms, 252 ms |
+| | photo-kitchen | cut | 0.50-**2.33**%, 0.17-**2.03**%, **567 ms** (one, playing), 417 ms | 0.28-**2.00**%, 0.00-**1.04**%, **467 ms** (one, loading) and 283 ms (one, playing), 412 ms |
+| | | fade | **1.44-1.56%**, 0.25%, 67 ms, 416 ms | **1.28-1.61%**, 0.06-0.31%, 67 ms, 416 ms |
+
+- **Prepares match.** The medians are within 10 ms of each other everywhere. Each build's single stalls fall in the same specs: the 4K photo, and portrait photo-kitchen above all.
+- **Portrait photo-kitchen is over budget in both builds** (1.28 to 2.33% overall), as it was before: The look kit and Info frame above.
+- **The one stall only this branch showed** is landscape photo-kitchen, cut, run 1: a 483 ms frame while it played, which made 1.72% overall. Runs 2 and 3 were 0.17 and 0.28%, and master's portrait run of the same spot held a 567 ms frame. Single stalls of this size come with that spot on both builds. Three runs cannot tell this one apart from them.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
