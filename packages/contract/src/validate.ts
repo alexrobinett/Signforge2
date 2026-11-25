@@ -176,7 +176,7 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       if (bytes > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
       if (def.maxBytes && bytes > def.maxBytes)
-        return `field "${name}" is longer than ${def.maxBytes} bytes, the most its QR code holds (a letter outside A to Z takes 2 to 4)`;
+        return `field "${name}" is longer than ${def.maxBytes} bytes, the most its QR code holds. Some characters use more than one byte`;
       return undefined;
     }
     case 'date':

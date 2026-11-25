@@ -175,7 +175,7 @@ describe('validateSpotData', () => {
   // What a QR code holds is bytes, not characters: 200 characters of Japanese are 560 bytes, a far denser code (#230).
   it('holds a url to its maxBytes of UTF-8, counting a character outside A to Z by its 2 to 4 bytes', () => {
     const qr: Record<string, FieldDef> = { qrUrl: { type: 'url', label: 'QR link', maxBytes: 213 } };
-    const long = 'field "qrUrl" is longer than 213 bytes, the most its QR code holds (a letter outside A to Z takes 2 to 4)';
+    const long = 'field "qrUrl" is longer than 213 bytes, the most its QR code holds. Some characters use more than one byte';
     const ascii = `https://example.com/${'w'.repeat(193)}`;
     const japanese = `https://example.com/w${'避難案内'.repeat(16)}`;
     expect([ascii, japanese].map((v) => new TextEncoder().encode(v).length)).toEqual([213, 213]);
