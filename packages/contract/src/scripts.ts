@@ -7,6 +7,10 @@
  * script markup is refused and nothing in it is armed. The bundle check and the player
  * (`containedFrames` in packages/player-core) both read scripts through this, so they agree on which
  * ones a template frame runs and where their text is. See Template containment in docs/architecture.md.
+ *
+ * The same walk gives the bundle check its styles (#326): each `<style>` element's text and each `style` attribute's
+ * value as the parser reads them (in an SVG's `<style>`, character references read, CDATA unwrapped and comments left
+ * out; in an HTML one, the text as written), in one pass, linear in the bundle.
  */
 import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
@@ -75,13 +79,32 @@ function classify(el: Tree.Element, html: string): BundleScript {
   return { ...at, runs: true };
 }
 
-/** A bundle as the browser reads it (CR LF and CR as LF), and its script elements in source order. */
-export function bundleScripts(bundle: string): { html: string; scripts: BundleScript[] } {
+/** A `<style>` element: its text as the parser reads it, and as it is written in the bundle. */
+export interface BundleStyle {
+  text: string;
+  written: string;
+}
+
+/**
+ * A bundle as the browser reads it (CR LF and CR as LF), its script elements in source order, and its styles: each
+ * `<style>` element, and each `style` attribute's value.
+ */
+export function bundleScripts(bundle: string): { html: string; scripts: BundleScript[]; styles: BundleStyle[]; styleAttributes: string[] } {
   const html = bundle.replace(/\r\n?/g, '\n');
   const scripts: BundleScript[] = [];
+  const styles: BundleStyle[] = [];
+  const styleAttributes: string[] = [];
   const walk = (node: Tree.ParentNode, inSelect: boolean) => {
     for (const child of node.childNodes) {
       if (!('tagName' in child)) continue;
+      for (const a of child.attrs) if (a.name === 'style' && !a.prefix) styleAttributes.push(a.value);
+      if (child.tagName === 'style') {
+        const loc = child.sourceCodeLocation!;
+        const start = loc.startTag!.endOffset;
+        const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
+        const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
+        styles.push({ text, written: html.slice(start, end) });
+      }
       const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
       if (select) {
         // Text up to the next </select>, not parse5's element: where parse5 closes a <select> early
@@ -100,5 +123,5 @@ export function bundleScripts(bundle: string): { html: string; scripts: BundleSc
     }
   };
   walk(parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true }), false);
-  return { html, scripts: scripts.sort((a, b) => a.start - b.start) };
+  return { html, scripts: scripts.sort((a, b) => a.start - b.start), styles, styleAttributes };
 }

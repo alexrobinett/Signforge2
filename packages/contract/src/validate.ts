@@ -1126,72 +1126,25 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
 
 // ------------------------------------------------------------- template bundle
 
-/**
- * Each `<style>` element's text: to its end tag (`</style`, then space, `/` or `>`), or to the end of the file if it has
- * none. In an SVG, CDATA and comments are markup, and an end tag inside one ends nothing, so the text runs to the first
- * end tag outside them: at least as far as HTML reads it, and as far as an SVG does (#326).
- */
-function styleBlocks(html: string): string[] {
-  const blocks: string[] = [];
-  for (const open of html.matchAll(/<style\b[^>]*>/gi)) {
-    const start = open.index + open[0].length;
-    const marks = /<!\[CDATA\[|<!--|<\/style(?=[\s/>]|$)/gi;
-    marks.lastIndex = start;
-    let end = html.length;
-    for (let m = marks.exec(html); m; m = marks.exec(html)) {
-      if (m[0].toLowerCase().startsWith('</style')) {
-        end = m.index;
-        break;
-      }
-      const close = html.indexOf(m[0] === '<!--' ? '-->' : ']]>', marks.lastIndex);
-      if (close < 0) break;
-      marks.lastIndex = close + 3;
-    }
-    blocks.push(html.slice(start, end));
-  }
-  return blocks;
-}
-
-/** Each `style=` attribute's value, quoted or not. */
-const styleAttributes = (html: string) =>
-  [...html.matchAll(/[\s"'/]style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)].map((m) => m[1] ?? m[2] ?? m[3] ?? '');
-
-/** Named character references a style may spell an address with; numeric ones are read whatever the code. */
-const NAMED_REFERENCES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  bsol: '\\',
-  colon: ':',
-  lpar: '(',
-  quot: '"',
-  rpar: ')',
-  sol: '/',
-};
-
 const codePoint = (code: number) => (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '�' : String.fromCodePoint(code));
 
 /**
- * CSS as the browser reads it, for the checks to see what it fetches (#326): an SVG `<style>`'s comments dropped and its
- * CDATA markers with them, character references read (an SVG's `<style>` and a `style=` attribute read them), then
- * CSS comments dropped outside strings, a backslash-newline dropped in a string, and each escape (`\2f `, `\/`) read as
- * its character. A string ends at a newline, as in CSS, and the control characters in one go (tab, newline and the rest
- * of C0), as the URL parser drops them from an address.
+ * CSS as the browser reads it, for the checks to see what it fetches (#326): from a style's text as the HTML parser
+ * gives it (`bundleScripts`), CSS comments dropped outside strings and url() tokens, a backslash-newline dropped in a
+ * string, and each escape (`\2f `, `\/`) read as its character. An escaped quote is read as no quote at all, so it
+ * neither starts nor ends a string here, as it does not in CSS. A string ends at a newline, as in CSS, and in a string
+ * or an unquoted url() the control characters go (tab, newline and the rest of C0), as the URL parser drops them.
  */
-function readCss(raw: string): string {
-  const text = raw
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
-    .replace(/<!\[CDATA\[|\]\]>/g, '')
-    .replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));?/gi, (ref, dec?: string, hex?: string, name?: string) =>
-      dec !== undefined ? codePoint(Number(dec)) : hex !== undefined ? codePoint(Number.parseInt(hex, 16)) : (NAMED_REFERENCES[name!.toLowerCase()] ?? ref),
-    );
+function readCss(text: string): string {
   let out = '';
-  let quote = '';
+  // In a string: its quote; in an unquoted url(): ')'.
+  let inside = '';
   const put = (c: string) => {
-    if (!(quote && c.charCodeAt(0) < 0x20)) out += c;
+    if (!(inside && c.charCodeAt(0) < 0x20)) out += c;
   };
   for (let i = 0; i < text.length; ) {
     const c = text[i]!;
-    if (!quote && c === '/' && text[i + 1] === '*') {
+    if (!inside && c === '/' && text[i + 1] === '*') {
       const end = text.indexOf('*/', i + 2);
       i = end < 0 ? text.length : end + 2;
       continue;
@@ -1200,26 +1153,26 @@ function readCss(raw: string): string {
       const next = text[i + 1];
       if (next === undefined) break;
       if (/[\n\r\f]/.test(next)) {
-        // In a string, a line continuation: gone. Outside one, no escape: the backslash stays.
-        if (!quote) out += c;
-        i += quote ? (next === '\r' && text[i + 2] === '\n' ? 3 : 2) : 1;
+        // In a string, a line continuation: gone. Elsewhere, no escape: the backslash stays.
+        const quoted = inside && inside !== ')';
+        if (!quoted) out += c;
+        i += quoted ? (next === '\r' && text[i + 2] === '\n' ? 3 : 2) : 1;
         continue;
       }
       const hex = /^[0-9a-f]{1,6}/i.exec(text.slice(i + 1, i + 7));
-      if (hex) {
-        put(codePoint(Number.parseInt(hex[0], 16)));
-        i += 1 + hex[0].length;
-        // One space or newline after a hex escape is part of it.
-        if (text[i] === '\r' && text[i + 1] === '\n') i += 2;
-        else if (/[ \t\n\r\f]/.test(text[i] ?? '')) i += 1;
-        continue;
-      }
-      put(next);
-      i += 2;
+      const decoded = hex ? codePoint(Number.parseInt(hex[0], 16)) : next;
+      put(decoded === '"' || decoded === "'" ? '�' : decoded);
+      i += 1 + (hex ? hex[0].length : 1);
+      // One space or newline after a hex escape is part of it.
+      if (hex && text[i] === '\r' && text[i + 1] === '\n') i += 2;
+      else if (hex && /[ \t\n\r\f]/.test(text[i] ?? '')) i += 1;
       continue;
     }
-    if (!quote && (c === '"' || c === "'")) quote = c;
-    else if (quote && (c === quote || /[\n\r\f]/.test(c))) quote = '';
+    if (!inside && (c === '"' || c === "'")) inside = c;
+    // url( not followed by a quote is a url token: its text is the address, with no comment in it. Read from the end of
+    // what is read so far, a few characters, so the whole reading stays linear.
+    else if (!inside && c === '(' && /(?:^|[^\w-])url$/i.test(out.slice(-4)) && !/^\s*["']/.test(text.slice(i + 1, i + 64))) inside = ')';
+    else if (inside && (c === inside || (inside !== ')' && /[\n\r\f]/.test(c)))) inside = '';
     put(c);
     i += 1;
   }
@@ -1249,24 +1202,28 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   // in an http(s) address (#326). Two backslashes or slashes at a string's start are refused even
   // where they are a path: no template has a reason to write that.
   const quotedAddress = /["']\s*(?:https?:)?[/\\]{2}/i;
+  // As written, a quote right after a backslash is escaped: no string starts there (`"say \"//hi\""`).
+  const writtenAddress = /(?<!\\)["']\s*(?:https?:)?[/\\]{2}/i;
   const urlAddress = /url\(\s*["']?\s*(?:https?:)?[/\\]{2}/i;
-  // Read twice. As written, comments that quote an address left in sight, so a reading out of step
-  // with the browser's cannot hide one; and as the browser reads it (`bundleCss`): markup an SVG's
-  // <style> drops, character references, CSS comments, line continuations and escapes all undone.
-  const blocks = styleBlocks(html);
+  // Read twice, from the HTML parser's tree (`bundleScripts`): as written, comments that quote an
+  // address left in sight, so a reading out of step with the browser's cannot hide one; and as the
+  // browser reads it (`readCss`): the parser's text of each <style> and style attribute, with CSS
+  // comments, line continuations and escapes undone.
+  const bundle = bundleScripts(html);
+  const blocks = bundle.styles.map((style) => style.written);
   const asWritten = blocks
     .map((text) =>
       text.replace(
         /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?\*\//g,
-        (c, string?: string) => string ?? (quotedAddress.test(c) ? c : ''),
+        (c, string?: string) => string ?? (writtenAddress.test(c) ? c : ''),
       ),
     )
     .join('\n');
-  const asRead = [...blocks, ...styleAttributes(html)].map(readCss);
+  const asRead = [...bundle.styles.map((style) => style.text), ...bundle.styleAttributes].map(readCss);
   if (
     /\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) ||
     urlAddress.test(html) ||
-    quotedAddress.test(asWritten) ||
+    writtenAddress.test(asWritten) ||
     // A comment marker at an address's own slash, where the two readings part: refused as written.
     /["']\s*(?:https?:[/\\]+|[/\\]{2,})\*/i.test(blocks.join('\n')) ||
     asRead.some((text) => quotedAddress.test(text) || urlAddress.test(text))
@@ -1280,7 +1237,7 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
   // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
-  const scripts = bundleScripts(html).scripts.flatMap((s) => (s.problem ? [s.problem] : []));
+  const scripts = bundle.scripts.flatMap((s) => (s.problem ? [s.problem] : []));
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },

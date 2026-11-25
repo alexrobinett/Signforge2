@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  bundleScripts,
   IMAGE_SAMPLE_CELL,
   MANIFEST_SCHEMA,
   MAX_URL_BYTES,
@@ -1491,6 +1492,58 @@ describe('network check', () => {
       for (const html of fetched) expect(problems(html), html).toEqual(refused);
     });
 
+    // The second review of #438: each passed the lint and fetched in headless Chromium. Styles now come from the HTML
+    // parser's tree (`bundleScripts`), and readCss reads unquoted url() tokens.
+    const fetchedToo = [
+      // HTML <style> is raw text: <!-- and --> are CSS tokens there, and no character reference is read.
+      String.raw`<style><!-- .b{background-image:image-set("\2f\2f t.example/p.gif" 1x)} --></style>`,
+      String.raw`<style><!-- .b{background:u\72l(//t.example/p.gif)}</style>`,
+      String.raw`<style><!-- @\69mport "\2f\2f t.example/a.css"; --></style>`,
+      String.raw`<style>.a{content:"&quot;/*"}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style>`,
+      String.raw`<style>.a{content:"&#10;/*"}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style>`,
+      // An SVG's <style>: comments that end at --!> or at once.
+      String.raw`<svg><style><!-- x --!>.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style></svg>`,
+      String.raw`<svg><style><!-->.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}</style></svg>`,
+      // Attributes read as the parser reads them.
+      `<div title=" style=" style="background-image:image-set('//t.example/p.gif' 1x)"></div>`,
+      String.raw`<div title=" style=" style="background:u\72l(//t.example/p.gif)"></div>`,
+      String.raw`<style title=">">.a{content:"/*"}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{content:"*/"}</style>`,
+      // Unquoted url() tokens: control characters in them dropped, and no comment in one.
+      String.raw`<style>.b{background:url(\1 //t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(\2f \9 /t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background:url(h\9 ttps://t.example/p.gif)}</style>`,
+      String.raw`<style>.b{background-image:image-set(url(\2f \9 /t.example/p.gif) 1x)}</style>`,
+      String.raw`<style>.b{background-image:image-set(url(\1 //t.example/p.gif) 1x)}</style>`,
+      String.raw`<style>.a{background:url(/*)}.b{background-image:image-set("\2f\2f t.example/p.gif" 1x)}.c{background:url(*/)}</style>`,
+      String.raw`<style>.a{background:url(/*)}.b{background:u\72l(//t.example/p.gif)}.c{background:url(*/)}</style>`,
+      String.raw`<style>.a{background:url(/*)}@\69mport "\2f\2f t.example/a.css";.c{background:url(*/)}</style>`,
+      // Named character references the parser reads.
+      `<div style='background-image:image-set("/&Tab;/t.example/p.gif" 1x)'></div>`,
+      String.raw`<div style='background-image:image-set("\&NewLine;//t.example/p.gif" 1x)'></div>`,
+    ];
+
+    it('refuses each the second review found', () => {
+      for (const html of fetchedToo) expect(problems(html), html).toEqual(refused);
+    });
+
+    it('refuses an @import spelled with a character reference in an SVG <style> as forbidden CSS', () => {
+      const forbidden = (html: string) =>
+        checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
+      expect(forbidden('<svg><style>&commat;import "a.css";</style></svg>')).toEqual(['stylesheets must be bundled, not imported at run time']);
+    });
+
+    // High 1 of the second review: the styles come from one parse, so the text read is never more than the bundle,
+    // however many unclosed <style> tags it holds. Measured in characters, not time.
+    it('reads at most the bundle’s length of style text, whatever the bundle', () => {
+      for (const html of ['<style>'.repeat(4000), '<style '.repeat(8000), `${'<style>'.repeat(400)}${'a'.repeat(200_000)}</style>`]) {
+        const { styles, styleAttributes } = bundleScripts(html);
+        const read = styles.reduce((n, style) => n + style.text.length, 0) + styleAttributes.reduce((n, value) => n + value.length, 0);
+        const written = styles.reduce((n, style) => n + style.written.length, 0);
+        expect(read, html.slice(0, 16)).toBeLessThanOrEqual(html.length);
+        expect(written, html.slice(0, 16)).toBeLessThanOrEqual(html.length);
+      }
+    });
+
     it('refuses an @import whose letters are escaped as forbidden CSS too', () => {
       const forbidden = (html: string) =>
         checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
@@ -1507,6 +1560,12 @@ describe('network check', () => {
         '<style>/*! Licence: https://example.com/licence */.a{color:var(--sf-accent, #fff)}</style>',
         '<style>.a{font-family:"Inter", system-ui}</style><svg><style><![CDATA[.c{fill:currentColor}]]></style></svg>',
         `<div style="--sf-x:1;width:50%;font-family:&quot;Inter&quot;"></div><p style='color:var(--sf-ink)'>`,
+        // An escaped quote neither starts nor ends a string; a <style> in a comment or a script string is no style.
+        String.raw`<style>.q::after{content:"say \"//hi\""}.r::after{content:"\22//hi\22"}</style>`,
+        '<!-- <style> --><p title="//t.example/p.gif">a</p>',
+        `<script>"use strict";const s = '<style>';</script><p title="//t.example/p.gif">a</p>`,
+        // <!-- and --> around rules in an HTML <style> are CSS's own tokens: what is between them still applies, and passes.
+        '<style><!-- .a{color:red} --></style>',
       ])
         expect(problems(html), html).toEqual([]);
     });
