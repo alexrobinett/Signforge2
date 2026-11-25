@@ -319,7 +319,7 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
 
 /** A playlist made for one test, open in its editor (#385): its list, and the names in it in order. */
 async function openPlaylist(name: string, spotIds: (string | undefined)[]) {
-  const { playlist } = await tool(page, 'create_playlist', { name, spotIds, idempotencyKey: `${name}-${Date.now()}` });
+  const { playlist } = await tool(page, 'create_playlist', { name, spotIds, idempotencyKey: `${name.replaceAll(' ', '-')}-${Date.now()}` });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
   const list = page.getByRole('list', { name: 'Spots in play order' });
