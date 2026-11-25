@@ -15,15 +15,19 @@
     <p class="label" id="label"></p>
   </header>
   <main class="body">
-    <h1 class="headline" data-sf="headline">Evacuate the building now</h1>
-    <p class="instructions" data-sf="instructions"></p>
-    <p class="meta">
-      <span class="issued" data-show="issued-by" data-sf="issuedBy"></span>
-      <span class="ends" data-show="ends-at" id="ends"></span>
-    </p>
+    <div class="copy">
+      <h1 class="headline" data-sf="headline">Evacuate the building now</h1>
+      <p class="instructions" data-sf="instructions"></p>
+    </div>
+    <div class="meta">
+      <p>
+        <span class="issued" data-show="issued-by" data-sf="issuedBy"></span>
+        <span class="ends" data-show="ends-at" id="ends"></span>
+      </p>
+    </div>
     <figure class="qr" data-show="qr">
       <div class="tile" id="qr"></div>
-      <figcaption data-sf="qrLabel"></figcaption>
+      <figcaption><span data-sf="qrLabel"></span></figcaption>
     </figure>
   </main>
 </div>
