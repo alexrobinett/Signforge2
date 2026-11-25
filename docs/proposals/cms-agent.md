@@ -60,7 +60,7 @@ Why not three native adapters: each is code to keep current with its API, and Op
 
 ### Keys
 
-An owner saves, tests and removes the org's key in Settings → AI & agents. The key is stored in a new org table (`org_ai_providers`, through `packages/db`'s scoped repository), sealed with the connectors' vault (`CONNECTION_KEY`, `apps/api/src/connectors/vault.ts`) under its own label, `ai-key:<org>/<provider>`, beside the vault's `grant:` and `pkce:`. So a sealed key copied to another row, or a connection's grant copied into this one, does not open.
+An owner saves, tests and removes the org's key in Settings → AI model. The key is stored in a new org table (`org_ai_providers`, through `packages/db`'s scoped repository), sealed with the connectors' vault (`CONNECTION_KEY`, `apps/api/src/connectors/vault.ts`) under its own label, `ai-key:<org>/<provider>`, beside the vault's `grant:` and `pkce:`. So a sealed key copied to another row, or a connection's grant copied into this one, does not open.
 
 It is write-only. No tool output, audit row, error message or log line carries it: outputs give the provider, the key's last four characters, who saved it and when, and when it was last verified. The browser never gets it back.
 
@@ -130,7 +130,7 @@ An org with no key of its own uses SignForge's demo model: a platform key in a W
 
 An org with its own key has an org-wide daily ceiling of turns, which its owner sets.
 
-Until #265 lands there is no demo model: a fill in an org with no key of its own, or with no fast model chosen, is refused before anything is fetched or counted ("No model is set up for the agent yet"), with a link to Settings, AI & agents. An org with its own key has only the ceiling its owner set. Turns are counted in the org's `OrgObject` (`takeTurn`), per day in the org's time zone (UTC when it has none set); #265 adds the demo model's own counts beside it.
+Until #265 lands there is no demo model: a fill in an org with no key of its own, or with no fast model chosen, is refused before anything is fetched or counted ("No model is set up for the agent yet"), with a link to Settings, AI model. An org with its own key has only the ceiling its owner set. Turns are counted in the org's `OrgObject` (`takeTurn`), per day in the org's time zone (UTC when it has none set); #265 adds the demo model's own counts beside it.
 
 **The model is chosen by measurement, never from remembered prices.** On a fixed set of about 30 real flyers, menu photos and links, each candidate is measured for:
 

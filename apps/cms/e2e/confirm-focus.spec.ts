@@ -1,7 +1,7 @@
 // Focus through an inline removal (#289), by keyboard only: when Remove gives way to its
 // confirmation, focus goes to the confirmation's question; Keep it puts it back on Remove; and a
 // removal leaves it on the form that takes the place of what was removed, never on the page body.
-// Settings › Notifications (the webhook) and Settings › AI & agents (the key), axe at each, light
+// Settings › Notifications (the webhook) and Settings › AI model (the key), axe at each, light
 // and dark, at desktop and phone widths.
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
@@ -68,7 +68,7 @@ test('a removal moves focus into its confirmation, Keep it puts it back on Remov
   await expect(page.getByText('Webhook removed')).toBeVisible();
   await expect(page.getByLabel('Webhook URL', { exact: true })).toBeFocused();
 
-  // AI & agents: Remove key.
+  // AI model: Remove key.
   await page.goto('/settings/ai');
   await hydrated(page);
   const removeKey = page.getByRole('button', { name: 'Remove key' });

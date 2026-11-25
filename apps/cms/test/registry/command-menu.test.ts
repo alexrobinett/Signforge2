@@ -1,154 +1,63 @@
-import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
+import { describeTools, registry, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
 import {
   askEntry,
-  commandEntries,
+  asksFirst,
   foundValues,
   movesSelection,
-  needsInput,
-  NULL_CHOICE,
+  pageActions,
+  pageEntries,
   pageQuestions,
   parseToolList,
+  peopleActions,
   pointerMovesSelection,
   readsAsSentence,
-  asksFirst,
-  resultText,
   selectedItem,
   targetActions,
   targetItemKey,
-  toolInput,
-  withKey,
 } from '../../src/lib/command-menu';
 import type { GroupView, ScreenView } from '../../src/lib/screen-types';
 import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
 const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role, editorsPublish: true }) })));
-const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
+const actions = (role: Role, drafts = true, editorsPublish = true) =>
+  peopleActions(parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role, editorsPublish }) }))), drafts).map((e) =>
+    e.kind === 'action' ? e.action : e.kind,
+  );
 
-describe('command menu entries', () => {
-  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review);
-  // publish_takeover is the takeover dialog's own work, which the menu's takeover row opens (#351).
-  const PER_SCREEN = ['restart_screen', 'publish_takeover'];
-
-  it('lists every tool an owner may use: the whole registry, but for Restart', () => {
-    expect(toolNames('owner').sort()).toEqual(
-      TOOLS.map((t) => t.name)
-        .filter((n) => !PER_SCREEN.includes(n))
-        .sort(),
-    );
+describe("⌘K's actions for people (#358)", () => {
+  it('offers an owner every action, each a page dialog, and no raw tool', () => {
+    expect(actions('owner')).toEqual(['pair', 'new-spot', 'new-playlist', 'new-entry', 'take-over', 'publish-all']);
   });
 
-  it('offers Restart only on a found screen, where it is checked: never as a tool whose form takes any screen id', () => {
-    for (const role of ['owner', 'editor'] as const) {
-      expect(listed(role).map((t) => t.name)).toContain('restart_screen');
-      expect(toolNames(role)).not.toContain('restart_screen');
-    }
+  it('offers an editor what their role allows: no takeover or Publish all where only owners publish (#253)', () => {
+    expect(actions('editor')).toEqual(['pair', 'new-spot', 'new-playlist', 'new-entry', 'take-over', 'publish-all']);
+    expect(actions('editor', true, false)).toEqual(['pair', 'new-spot', 'new-playlist', 'new-entry']);
   });
 
-  it('lists every tool an editor may use, and none of the owner-only ones', () => {
-    const editorTools = TOOLS.filter((t) => t.minRole !== 'owner' && !PER_SCREEN.includes(t.name)).map((t) => t.name);
-    expect(toolNames('editor').sort()).toEqual(editorTools.sort());
-    expect(toolNames('editor')).not.toContain('revoke_screen_credential');
+  it('offers a viewer no action', () => {
+    expect(actions('viewer')).toEqual([]);
   });
 
-  it('lists only the read tools for a viewer, and the people-only ones for their own agents', () => {
-    // A viewer changes nothing in the org, but may change or disconnect the agents they connected (M4-07).
-    const reads = TOOLS.filter((t) => (!t.mutates || t.people) && t.minRole === 'viewer').map((t) => t.name);
-    expect(toolNames('viewer').sort()).toEqual(reads.sort());
-    expect(toolNames('viewer')).toEqual(expect.arrayContaining(['list_screens', 'get_screen']));
-    expect(toolNames('viewer')).not.toContain('rename_screen');
+  it('offers Publish all only while there are unpublished changes', () => {
+    expect(actions('owner', false)).not.toContain('publish-all');
   });
 
-  it('starts with a navigation entry for every section of the sidebar', () => {
-    const go = commandEntries([]).flatMap((e) => (e.kind === 'go' ? [e.to] : []));
-    expect(go).toEqual(SECTIONS.map((s) => s.to));
+  it("opens on the page's own actions, then Publish all: Pair and Take over on Screens, New spot on Spots, and so on", () => {
+    const allowed = peopleActions(listed('owner'), true);
+    const on = (path: string) => pageActions(path, allowed).map((e) => (e.kind === 'action' ? e.action : ''));
+    expect(on('/screens')).toEqual(['pair', 'take-over', 'publish-all']);
+    expect(on('/screens/scr_1')).toEqual(['pair', 'take-over', 'publish-all']);
+    expect(on('/spots')).toEqual(['new-spot', 'publish-all']);
+    expect(on('/playlists/pl_1')).toEqual(['new-playlist', 'publish-all']);
+    expect(on('/schedule')).toEqual(['new-entry', 'take-over', 'publish-all']);
+    expect(on('/')).toEqual(['publish-all']);
+    expect(pageActions('/screens', peopleActions(listed('viewer'), true))).toEqual([]);
   });
 
-  it('names a tool from the first sentence of its description, up to a colon, a semicolon or ", so"', () => {
-    const byName = new Map(commandEntries(listed('owner')).flatMap((e) => (e.kind === 'tool' ? [[e.tool.name, e.label]] : [])));
-    expect(byName.get('rename_screen')).toBe('Rename a screen');
-    expect(byName.get('claim_screen')).toBe('Pair a screen');
-    expect(byName.get('revoke_screen_credential')).toBe("Revoke one of a screen's credentials");
-    expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, labels, status and manifests');
-  });
-
-  it('opens the takeover dialog, sent at once, for a member who may publish, as the Schedule page does (#253)', () => {
-    const takeover = commandEntries(listed('owner')).find((e) => e.id === 'tool:start_takeover');
-    expect(takeover).toMatchObject({ kind: 'takeover', label: 'Take over screens now…' });
-    // An editor where only owners publish can only draft one, as the tool says.
-    const drafts = parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role: 'editor', editorsPublish: false }) })));
-    expect(commandEntries(drafts).find((e) => e.id === 'tool:start_takeover')).toMatchObject({
-      kind: 'tool',
-      label: 'Take over screens with a playlist, as a draft',
-    });
-  });
-});
-
-describe('a tool form’s input', () => {
-  const fieldsOf = (name: string) => listed('owner').find((t) => t.name === name)!.fields;
-  const form = (values: Record<string, string>) => {
-    const data = new FormData();
-    for (const [k, v] of Object.entries(values)) data.set(k, v);
-    return data;
-  };
-
-  it('reads text fields and leaves out empty optional ones', () => {
-    expect(toolInput(fieldsOf('rename_screen'), form({ screenId: 'scr_1', name: 'Lobby' }))).toEqual({ ok: true, input: { screenId: 'scr_1', name: 'Lobby' } });
-    expect(toolInput(fieldsOf('list_assets'), form({ query: '', status: '', limit: '' }))).toEqual({ ok: true, input: {} });
-  });
-
-  it('offers a nullable choice with null as an option', () => {
-    const state = fieldsOf('set_display_override').find((f) => f.name === 'state')!;
-    expect(state).toMatchObject({ type: 'choice', options: ['on', 'off'], nullable: true, required: true });
-    expect(toolInput(fieldsOf('set_display_override'), form({ screenId: 's', state: NULL_CHOICE }))).toEqual({
-      ok: true,
-      input: { screenId: 's', state: null },
-    });
-    expect(toolInput(fieldsOf('set_display_override'), form({ screenId: 's', state: 'off' }))).toEqual({ ok: true, input: { screenId: 's', state: 'off' } });
-  });
-
-  it('reads numbers, and refuses one that is not a number', () => {
-    expect(toolInput(fieldsOf('list_screens'), form({ limit: '20', cursor: '' }))).toEqual({ ok: true, input: { limit: 20 } });
-    expect(toolInput(fieldsOf('list_screens'), form({ limit: 'many' }))).toEqual({ ok: false, field: 'limit', message: 'limit must be a number.' });
-  });
-
-  it('reads JSON fields, and refuses JSON that does not parse', () => {
-    const fields = fieldsOf('create_group');
-    expect(fields.map((f) => f.type)).toEqual(['text', 'json', 'key']);
-    expect(toolInput(fields, form({ name: 'Downtown', screenIds: '["s1","s2"]' }))).toEqual({ ok: true, input: { name: 'Downtown', screenIds: ['s1', 's2'] } });
-    expect(toolInput(fields, form({ name: 'x', screenIds: '[s1' }))).toEqual({
-      ok: false,
-      field: 'screenIds',
-      message: 'screenIds must be JSON, such as ["a", "b"] or {"key": "value"}.',
-    });
-  });
-
-  it('keeps one idempotency key per call across retries, and makes a new one for a new call', () => {
-    const tool = listed('owner').find((t) => t.name === 'create_group')!;
-    const first = withKey(tool, { name: 'Downtown' }, null);
-    const key = first.input.idempotencyKey;
-    expect(typeof key === 'string' && key.length >= 8).toBe(true);
-    // The answer was lost: the same form sent again is the same call.
-    expect(withKey(tool, { name: 'Downtown' }, first.pending).input).toEqual({ name: 'Downtown', idempotencyKey: key });
-    // Changed input, or another tool, is a new call.
-    expect(withKey(tool, { name: 'Uptown' }, first.pending).input.idempotencyKey).not.toBe(key);
-    const rename = listed('owner').find((t) => t.name === 'rename_screen')!;
-    expect(withKey(rename, { screenId: 's', name: 'Downtown' }, first.pending)).toEqual({ input: { screenId: 's', name: 'Downtown' }, pending: null });
-  });
-
-  it('runs at once only when the tool needs no input', () => {
-    expect(needsInput(listed('owner').find((t) => t.name === 'list_screens')!)).toBe(false);
-    expect(needsInput(listed('owner').find((t) => t.name === 'identify_screen')!)).toBe(true);
-  });
-});
-
-describe('a result toast', () => {
-  it('counts lists, names what was changed, and says when nothing changed', () => {
-    expect(resultText({ screens: [{}, {}], next: null })).toBe('2 screens');
-    expect(resultText({ screen: { id: 's', name: 'Lobby' } })).toBe('Lobby');
-    expect(resultText({ screenId: 's', seconds: 10 })).toBe('Done');
-    expect(resultText({ screenId: 's', manifestId: 'm', changed: false })).toBe('Nothing changed: it was already so');
+  it('finds every page of the sidebar when typed', () => {
+    expect(pageEntries().flatMap((e) => (e.kind === 'go' ? [e.to] : []))).toEqual(SECTIONS.map((s) => s.to));
   });
 });
 
@@ -274,18 +183,6 @@ describe('Ask agent in ⌘K (#270)', () => {
     expect(asksFirst('why not bakery', names)).toBe(false);
     // Not a question or a request: never first.
     expect(asksFirst('bakery front window lights', [])).toBe(false);
-  });
-
-  it('lists the developer tools for an owner only, marked to go under Developer', () => {
-    const DEVELOPER = ['register_template_version', 'set_template_version_status', 'publish_manifest_to_screen', 'find_places'];
-    const owner = commandEntries(listed('owner'), true)
-      .filter((e) => e.kind === 'tool' && e.developer)
-      .map((e) => (e.kind === 'tool' ? e.tool.name : ''));
-    expect(owner.sort()).toEqual([...DEVELOPER].sort());
-    for (const role of ['editor', 'viewer'] as const) {
-      const names = commandEntries(listed(role), false).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
-      for (const name of DEVELOPER) expect(names, `${role}: ${name}`).not.toContain(name);
-    }
   });
 
   it("suggests three questions for the page shown: its section's, a record's page by its section's, else Overview's", () => {

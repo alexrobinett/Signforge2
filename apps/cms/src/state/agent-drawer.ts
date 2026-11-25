@@ -73,7 +73,7 @@ type DrawerMessage =
   | { role: 'assistant'; card: AnswerCard; drafts: Drafts | null }
   /** A tool the turn paused at, for the person to press (#269): the card as the API made it. */
   | { role: 'confirm'; card: ConfirmCard; press: Press; error: string | null }
-  /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI & agents. */
+  /** Why a turn gave no answer; `inSettings` when an owner mends it in Settings, AI model. */
   | { role: 'error'; text: string; inSettings: boolean };
 
 /** What a run of a turn said: its answer's card, a confirmation card, what a press did, why it ended, or how it failed. */
