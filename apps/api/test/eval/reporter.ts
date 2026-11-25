@@ -10,27 +10,27 @@ import type { RunRecord } from './harness';
 const OUT = new URL('./out/', import.meta.url).pathname;
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-const fixed = (n: number, digits = 1) => n.toFixed(digits);
 
-/** One row per task and arm: success over runs, and the means of the rest. */
+/** One row per task and arm: every attempt, its success (the check passed and the run completed), and the means of the rest. */
 export function table(records: readonly RunRecord[]): string {
   const keys = [...new Set(records.map((r) => `${r.task}\t${r.arm}`))];
   const rows = keys.map((key) => {
     const runs = records.filter((r) => `${r.task}\t${r.arm}` === key);
     const [task, arm] = key.split('\t');
-    const failed = runs.filter((r) => !r.success).map((r) => r.why ?? r.errors.join(' '));
-    return `| ${task} | ${arm} | ${runs[0]?.role} | ${runs.filter((r) => r.success).length}/${runs.length} | ${fixed(mean(runs.map((r) => r.toolCalls)))} | ${fixed(mean(runs.map((r) => r.refusedCalls)))} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | ${runs[0]?.catalogue.tokens} | ${[...new Set(failed)].join('; ')} |`;
+    const failed = runs.flatMap((r) => (r.why ? [r.why] : []));
+    const errors = runs.flatMap((r) => r.errors);
+    return `| ${task} | ${arm} | ${runs[0]?.role} | ${runs.filter((r) => r.success).length}/${runs.length} | ${runs.filter((r) => r.checked).length}/${runs.length} | ${mean(runs.map((r) => r.toolCalls)).toFixed(1)} | ${mean(runs.map((r) => r.refusedCalls)).toFixed(1)} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | ${runs[0]?.catalogue.tokens} | ${[...new Set(failed)].join('; ')} | ${[...new Set(errors)].join('; ')} |`;
   });
   const total = (arm: string) => {
     const runs = records.filter((r) => r.arm === arm);
     if (!runs.length) return [];
     return [
-      `| **all** | ${arm} | | ${runs.filter((r) => r.success).length}/${runs.length} | ${fixed(mean(runs.map((r) => r.toolCalls)))} | ${fixed(mean(runs.map((r) => r.refusedCalls)))} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | | |`,
+      `| **all** | ${arm} | | ${runs.filter((r) => r.success).length}/${runs.length} | ${runs.filter((r) => r.checked).length}/${runs.length} | ${mean(runs.map((r) => r.toolCalls)).toFixed(1)} | ${mean(runs.map((r) => r.refusedCalls)).toFixed(1)} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | | | ${runs.filter((r) => r.errors.length).length} runs with errors |`,
     ];
   };
   return [
-    '| Task | Arm | Role | Success | Tool calls | Refused | Input tokens | Output tokens | Catalogue tokens | Failures |',
-    '|---|---|---|---:|---:|---:|---:|---:|---:|---|',
+    '| Task | Arm | Role | Success | Check passed | Tool calls | Refused | Input tokens | Output tokens | Catalogue tokens | Check failures | Errors |',
+    '|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|',
     ...rows,
     ...total('mcp'),
     ...total('drawer'),

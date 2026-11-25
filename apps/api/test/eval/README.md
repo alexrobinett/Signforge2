@@ -9,15 +9,30 @@ A fixed set of agent tasks, run against SignForge's agent tools, so the tool con
 - **Two arms:**
   - **/mcp**: the MCP SDK's own client (`@modelcontextprotocol/client`) with an OAuth token the member consented to, and a plain loop over Anthropic's Messages API. The system prompt holds the server's instructions, as a client such as Claude Code does.
   - **The drawer**: `POST /api/agent/chat` as the member. The org's model is the one under test. When a task says so, the confirmation card the turn stops at is pressed.
-- **Checks** read the org after the run, or the tool results the model was sent. They never read the model's own words. The drawer only drafts, so a drawer write is checked against the drafts in its answer card.
+- **Checks** read the org after the run, or the tool results the model was sent. They never read the model's own words. A read check parses every successful result and merges what it shows of each record, across responses, then requires the fields the question asks for on the right records. So `get_screen` on each screen passes, and a list of states without names fails. A schedule check compares weekdays as a set and refuses date bounds. The drawer only drafts, so a drawer write is checked against the drafts in its answer card.
+- **Variants**: some tasks carry other scripts that CI runs: valid alternate paths that must pass, and incomplete ones that must fail.
 
 ## What it records
 
-For each run: success (and why not), tool calls, refused calls, model calls, input and output tokens, catalogue size (tools, bytes, o200k tokens) and how the run ended badly, if it did. All of it is measured from the model's side, so both arms count the same way. A tool call is one the model asked for. A card's pause counts once, and its press doesn't count again.
+Every attempt gives a record, including one where the model failed or the harness threw. Each record has:
+
+- **success**: the check passed and the run completed with no execution error. A read whose tools answered, followed by a model that failed, is a check pass but not a success.
+- **checked**: whether the check passed.
+- **why**: why the check failed.
+- **errors**: the model's failures (`model_503`, `model_unreachable`, an unreadable answer), the drawer's run errors, /mcp's protocol errors or its loop running out of turns, and the harness's own.
+- tool calls, refused calls, model calls, input and output tokens, and catalogue size.
+
+All of it is measured from the model's side, so both arms count the same way:
+
+- A tool call is one the model asked for. A card's pause counts once, and its press doesn't count again.
+- A refused call is a tool result marked as an error, or a card refused to the member.
+- Tokens are the provider's final usage for each call, with cache reads and writes included. A stream's `message_delta` counts when it has the input, and `message_start` otherwise.
+
+Scripted runs freeze the tools' clock and the drawer's, and give the model call no deadline, so nothing depends on when or how fast they run. Live runs keep the real clock and the drawer's own deadline.
 
 ## Running it
 
-In CI, `agent-eval.test.ts` runs every task with a scripted model, inside the normal API test run. Each script must pass its check, and a model that does nothing must fail it. This proves every seed, check and arm without a model.
+In CI, `agent-eval.test.ts` runs every task with a scripted model, inside the normal API test run. Each script must pass its check with the refusals it expects, each variant must pass or fail as it says, and a model that does nothing must fail. Models that answer 503 or can't be reached must give recorded failures. This proves every seed, check and arm without a model.
 
 A live run is done by hand and never in CI. It costs money:
 
@@ -36,14 +51,15 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 ## The catalogue budget
 
-`catalogue.test.ts` pins the catalogue's size per role for each arm. It measures what /mcp's `tools/list` returns and what the drawer sends its model, as `{ tools }` JSON in o200k tokens, the tool audit's method. A PR that grows the catalogue fails there. A PR that shrinks it updates the pin in the same diff.
+`catalogue.test.ts` pins the catalogue's size per role. The budget is the `tools` array in the model's first request in each arm, counted as `{ tools }` JSON in o200k tokens, the tool audit's method. /mcp's `tools/list`, what a client receives before it builds the model's tools, is pinned apart as discovery. A PR that grows either fails there. A PR that shrinks one updates the pin in the same diff.
 
-| Surface | Owner | Editor | Viewer |
+| Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp | 83 tools · 27,214 tokens | 79 · 25,405 | 36 · 7,264 |
-| Drawer | 52 · 13,105 | 51 · 12,995 | 51 · 12,995 |
+| /mcp request | 83 tools · 25,388 tokens | 79 · 23,667 | 36 · 6,472 |
+| Drawer request | 52 · 13,548 | 51 · 13,429 | 51 · 13,429 |
+| /mcp `tools/list` (discovery) | 83 · 27,214 | 79 · 25,405 | 36 · 7,264 |
 
-/mcp matches the audit byte for byte. Its token count is 22 higher because `tools/list` orders each schema's keys differently. The drawer counts about 800 tokens below the audit's 13,908. The audit built the tools from `chat.ts`'s lists, but TanStack AI's Anthropic adapter drops `$schema` from every input schema before sending, and this counts what is sent.
+The /mcp request carries each tool's name, description and input schema, and leaves out the annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`) and no `$schema`, so it isn't the audit's 13,908, which was built from `chat.ts`'s lists. `tools/list` is the audit's JSON byte for byte, with keys in another order, which comes to 22 more tokens.
 
 ## Adding a task
 

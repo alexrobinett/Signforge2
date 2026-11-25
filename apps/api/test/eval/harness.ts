@@ -9,8 +9,9 @@ import { testScope } from '@signforge/db/testing';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { getEncoding } from 'js-tiktoken';
-import { expect } from 'vitest';
-import { type AnswerCard, CHAT_EVENTS, type ConfirmCard, type ProposedCall } from '../../src/agent/chat-shapes';
+import { expect, vi } from 'vitest';
+import { z } from 'zod';
+import { CHAT_EVENTS } from '../../src/agent/chat-shapes';
 import { mcp } from '../../src/mcp';
 import { Client, email, ORIGIN, testApp } from '../client';
 import { anthropicStream } from '../model-streams';
@@ -21,10 +22,7 @@ export type Role = 'owner' | 'editor' | 'viewer';
 
 const o200k = getEncoding('o200k_base');
 
-/**
- * A tool catalogue's size as the audit of #345 counts it: `{ tools }` as compact JSON, in o200k tokens and
- * bytes. /mcp's in its own shape (`tools/list`), the drawer's in Anthropic's (`name`, `description`, `input_schema`).
- */
+/** A tool catalogue's size as the audit of #345 counts it: `{ tools }` as compact JSON, in o200k tokens and bytes. */
 function catalogueSize(tools: readonly unknown[]) {
   const json = JSON.stringify({ tools });
   return { tools: tools.length, bytes: new TextEncoder().encode(json).length, tokens: o200k.encode(json).length };
@@ -158,9 +156,18 @@ export type Step = Turn | ((results: string[]) => Turn);
 
 /** A request to Anthropic's Messages API, and its answer, as the eval saw them. */
 interface Exchange {
-  body: { tools?: { name: string; description?: string; input_schema: unknown }[]; messages: { role: string; content: unknown }[] };
-  answered: Promise<{ toolUses: string[]; input: number; output: number }>;
+  body: { tools?: unknown[]; messages: { role: string; content: unknown }[] };
+  answered: Promise<{ toolUses: string[]; input: number; output: number; problem?: string }>;
 }
+
+/** A usage block's input: what was billed fresh, and what was read from or written to the cache. */
+interface Usage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+const inputOf = (u: Usage) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
 
 /** What the model was asked and answered in one run. */
 class ModelLog {
@@ -180,26 +187,30 @@ class ModelLog {
       const [mine, theirs] = res.body ? res.body.tee() : [null, null];
       const answered = (async () => {
         const text = mine ? await new Response(mine).text() : '';
-        if (!res.ok) return { toolUses: [], input: 0, output: 0 };
-        if (!res.headers.get('content-type')?.includes('event-stream')) {
-          const msg: { content: { type: string; name?: string }[]; usage: { input_tokens: number; output_tokens: number } } = JSON.parse(text);
-          return {
-            toolUses: msg.content.flatMap((b) => (b.type === 'tool_use' && b.name ? [b.name] : [])),
-            input: msg.usage.input_tokens,
-            output: msg.usage.output_tokens,
-          };
+        if (!res.ok) return { toolUses: [], input: 0, output: 0, problem: `model_${res.status}` };
+        try {
+          if (!res.headers.get('content-type')?.includes('event-stream')) {
+            const msg: { content: { type: string; name?: string }[]; usage: Usage } = JSON.parse(text);
+            return {
+              toolUses: msg.content.flatMap((b) => (b.type === 'tool_use' && b.name ? [b.name] : [])),
+              input: inputOf(msg.usage),
+              output: msg.usage.output_tokens ?? 0,
+            };
+          }
+          const events = text.split('\n').flatMap((line) => (line.startsWith('data: ') ? [JSON.parse(line.slice(6))] : []));
+          // The provider's final usage is cumulative: message_delta's when it carries one, message_start's otherwise.
+          let started: Usage = {};
+          let final: Usage = {};
+          const toolUses: string[] = [];
+          for (const e of events) {
+            if (e.type === 'message_start') started = e.message.usage;
+            if (e.type === 'message_delta') final = e.usage;
+            if (e.type === 'content_block_start' && e.content_block.type === 'tool_use') toolUses.push(e.content_block.name);
+          }
+          return { toolUses, input: final.input_tokens === undefined ? inputOf(started) : inputOf(final), output: final.output_tokens ?? 0 };
+        } catch {
+          return { toolUses: [], input: 0, output: 0, problem: 'model_unreadable' };
         }
-        const events = text.split('\n').flatMap((line) => (line.startsWith('data: ') ? [JSON.parse(line.slice(6))] : []));
-        let inputTokens = 0;
-        let outputTokens = 0;
-        const toolUses: string[] = [];
-        for (const e of events) {
-          if (e.type === 'message_start')
-            inputTokens += e.message.usage.input_tokens + (e.message.usage.cache_read_input_tokens ?? 0) + (e.message.usage.cache_creation_input_tokens ?? 0);
-          if (e.type === 'message_delta') outputTokens = e.usage.output_tokens;
-          if (e.type === 'content_block_start' && e.content_block.type === 'tool_use') toolUses.push(e.content_block.name);
-        }
-        return { toolUses, input: inputTokens, output: outputTokens };
       })();
       this.exchanges.push({ body, answered });
       return new Response(theirs, { status: res.status, statusText: res.statusText, headers: res.headers });
@@ -275,9 +286,9 @@ export interface Outcome {
   /** Each tool result the model read: its tool, whether it was a refusal, and its text. */
   results: { tool: string; ok: boolean; text: string }[];
   /** The drawer's drafted changes, from its answer's card. */
-  drafts: ProposedCall[];
+  drafts: Draft[];
   /** The drawer's confirmation cards, as shown. */
-  cards: ConfirmCard[];
+  cards: Card[];
 }
 
 export interface RunRecord {
@@ -286,7 +297,10 @@ export interface RunRecord {
   role: Role;
   run: number;
   model: string;
+  /** The check passed and the run completed: no execution error. */
   success: boolean;
+  /** Whether the org or the tool results show the work done, whatever else happened. */
+  checked: boolean;
   /** Why the check failed. */
   why?: string;
   toolCalls: number;
@@ -294,10 +308,15 @@ export interface RunRecord {
   modelCalls: number;
   inputTokens: number;
   outputTokens: number;
-  catalogue: { tools: number; bytes: number; tokens: number };
-  /** How the run ended badly, if it did: the drawer's stream error, or /mcp's loop out of turns. */
+  /** The tools as the model's request carried them. */
+  catalogue: Size;
+  /** /mcp's tools/list as the client received it, before it became the model's tools. */
+  discovery?: Size;
+  /** What went wrong running it: the model's or the route's failures, /mcp's loop out of turns, or the harness's own. */
   errors: string[];
 }
+
+export type Size = ReturnType<typeof catalogueSize>;
 
 export interface Task {
   id: string;
@@ -307,6 +326,10 @@ export interface Task {
   script: Partial<Record<Arm, (w: World) => Step[]>>;
   /** In the drawer, press the confirmation card the turn stops at, as the person would. */
   press?: true;
+  /** The refused calls its script makes, per arm: a card refused to the member counts as one. */
+  refusals?: Partial<Record<Arm, number>>;
+  /** Other scripts, run in CI: each must pass, or must fail, its check. */
+  variants?: { name: string; arm: Arm; script: (w: World) => Step[]; passes: boolean }[];
   /** Why the run failed, from the org and the tool outputs, never the model's words; undefined when it passed. */
   check: (o: Outcome) => Promise<string | undefined> | string | undefined;
 }
@@ -351,7 +374,8 @@ export interface Model {
   /** What the results call it. */
   label: string;
   key: string;
-  now?: () => number;
+  /** A scripted run's fixed time: the tools' clock and the drawer's, with no model deadline. A live run keeps the real ones. */
+  clock?: number;
   fetchFor: (w: World) => typeof fetch;
 }
 
@@ -372,8 +396,18 @@ const worker: typeof fetch = async (input, init) => {
   return res;
 };
 
+/** What an arm's run leaves for its record and its check. */
+interface Ran {
+  world: World;
+  errors: string[];
+  drafts: Draft[];
+  cards: Card[];
+  /** /mcp's tools/list, as the client received it. */
+  discovery?: Size;
+}
+
 /** The /mcp arm: the MCP SDK's client, as the member's agent, and the eval's own loop over Anthropic's Messages API. */
-async function overMcp(task: Task, model: Model, log: ModelLog) {
+async function overMcp(task: Task, model: Model, log: ModelLog): Promise<Ran> {
   const t = testApp();
   const { member, world } = await team(t, task.role);
   const { access_token } = await agentToken(t, member, world.orgId, ALL_SCOPES);
@@ -382,7 +416,7 @@ async function overMcp(task: Task, model: Model, log: ModelLog) {
     new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), { fetch: worker, requestInit: { headers: { authorization: `Bearer ${access_token}` } } }),
   );
   const { tools } = await client.listTools();
-  const catalogue = catalogueSize(tools);
+  const discovery = catalogueSize(tools);
   const defs = tools.map((x) => ({ name: x.name, description: x.description ?? '', input_schema: x.inputSchema }));
   const system = `${SYSTEM}\n${client.getInstructions() ?? ''}`;
   const ask = log.wrap(model.fetchFor(world));
@@ -393,38 +427,65 @@ async function overMcp(task: Task, model: Model, log: ModelLog) {
       errors.push('out_of_turns');
       break;
     }
-    const res = await ask('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: model.id, max_tokens: MAX_TOKENS, system, tools: defs, messages }),
-    });
-    if (!res.ok) {
-      errors.push(`model_${res.status}`);
+    let res: Response;
+    try {
+      res = await ask('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: model.id, max_tokens: MAX_TOKENS, system, tools: defs, messages }),
+      });
+    } catch {
+      errors.push('model_unreachable');
       break;
     }
+    // The answer's own failure (its status, or a body that does not read) is recorded with its exchange.
+    if (!res.ok) break;
     const msg: { content: { type: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string } = await res.json();
     messages.push({ role: 'assistant', content: msg.content });
     const uses = msg.content.filter((b) => b.type === 'tool_use');
     if (!uses.length) break;
     const results = [];
     for (const use of uses) {
-      const result = await client.callTool({ name: use.name ?? '', arguments: use.input ?? {} });
-      const text = result.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n');
-      results.push({ type: 'tool_result', tool_use_id: use.id, content: text, ...(result.isError ? { is_error: true } : {}) });
+      try {
+        const result = await client.callTool({ name: use.name ?? '', arguments: use.input ?? {} });
+        const text = result.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n');
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: text, ...(result.isError ? { is_error: true } : {}) });
+      } catch (err) {
+        // A JSON-RPC error, not a tool's refusal: the client tells the model the call failed.
+        errors.push('mcp_error');
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: String(err), is_error: true });
+      }
     }
     messages.push({ role: 'user', content: results });
   }
   log.tail = messages;
   await client.close();
-  return { world, catalogue, errors, drafts: [], cards: [] };
+  return { world, discovery, errors, drafts: [], cards: [] };
 }
 
-/** A drawer turn's server-sent events. */
-const eventsOf = async (res: Response): Promise<{ type: string; name?: string; value?: any; code?: string }[]> =>
+/** What a check reads of the drawer's answer card: the changes it drafted. */
+const draft = z.object({ tool: z.string(), input: z.record(z.string(), z.unknown()), target: z.object({ kind: z.string(), id: z.string() }).nullable() });
+type Draft = z.infer<typeof draft>;
+/** What a check reads of a confirmation card: its tool, its token (null when refused) and why it was refused. */
+const card = z.object({ tool: z.string(), token: z.string().nullable(), why: z.string().nullable() });
+type Card = z.infer<typeof card>;
+
+/** The drawer's events this harness reads, parsed as they arrive; the rest are skipped. */
+const event = z.union([
+  z.object({ type: z.literal('RUN_ERROR'), code: z.string() }),
+  z.object({ type: z.literal('CUSTOM'), name: z.literal(CHAT_EVENTS.confirm), value: card }),
+  z.object({ type: z.literal('CUSTOM'), name: z.literal(CHAT_EVENTS.answer), value: z.object({ drafts: z.array(draft) }) }),
+]);
+
+/** A drawer turn's server-sent events that this harness reads. */
+const eventsOf = async (res: Response) =>
   (await res.text())
     .split('\n\n')
     .filter((e) => e.startsWith('data: '))
-    .map((e) => JSON.parse(e.slice('data: '.length)));
+    .flatMap((e) => {
+      const parsed = event.safeParse(JSON.parse(e.slice('data: '.length)));
+      return parsed.success ? [parsed.data] : [];
+    });
 
 /** A turn as the drawer's ChatClient asks it; `confirm` presses a card. */
 const turnBody = (text: string, confirm?: string) => ({
@@ -439,23 +500,27 @@ const turnBody = (text: string, confirm?: string) => ({
 
 /** Where a drawer turn's other fetches go (an address card's DNS and reads): nowhere. */
 const NO_REACH = { fetch: async () => new Response('no', { status: 404 }), resolve: async () => ['93.184.215.14'] };
+/** A scripted run's model deadline: never, so a slow machine never times a call out. */
+const NO_DEADLINE = () => new AbortController().signal;
 
 /** The drawer arm: its chat route as the member, the org's model being `model`; a card the turn stops at pressed when the task says so. */
-async function inDrawer(task: Task, model: Model, log: ModelLog) {
+async function inDrawer(task: Task, model: Model, log: ModelLog): Promise<Ran> {
   // The model is the world's: a scripted one names its rows, which exist only once the org is seeded.
   let inner: typeof fetch = () => Promise.reject(new Error('the model was asked before the org was seeded'));
-  const t = testApp({ agent: { reach: { fetch: log.wrap((input, init) => inner(input, init)), guards: NO_REACH }, ...(model.now ? { now: model.now } : {}) } });
+  const { clock } = model;
+  const reach = { fetch: log.wrap((input, init) => inner(input, init)), guards: clock === undefined ? NO_REACH : { ...NO_REACH, deadline: NO_DEADLINE } };
+  const t = testApp({ agent: { reach, ...(clock === undefined ? {} : { now: () => clock }) } });
   const { owner, member, world } = await team(t, task.role);
   inner = model.fetchFor(world);
   await saveProvider(owner, model.id, model.key);
   const errors: string[] = [];
-  const cards: ConfirmCard[] = [];
-  let drafts: ProposedCall[] = [];
+  const cards: Card[] = [];
+  let drafts: Draft[] = [];
   const read = (all: Awaited<ReturnType<typeof eventsOf>>) => {
     for (const e of all) {
-      if (e.type === 'RUN_ERROR') errors.push(e.code ?? 'run_error');
-      if (e.name === CHAT_EVENTS.confirm) cards.push(e.value);
-      if (e.name === CHAT_EVENTS.answer) drafts = (e.value as AnswerCard).drafts;
+      if (e.type === 'RUN_ERROR') errors.push(e.code);
+      else if (e.name === CHAT_EVENTS.confirm) cards.push(e.value);
+      else drafts = e.value.drafts;
     }
   };
   const asked = await member.post('/api/agent/chat', turnBody(task.prompt));
@@ -468,45 +533,67 @@ async function inDrawer(task: Task, model: Model, log: ModelLog) {
     else read(await eventsOf(pressed));
   }
   await member.settled();
-  const first = log.exchanges[0]?.body.tools ?? [];
-  const catalogue = catalogueSize(first.map(({ name, description, input_schema }) => ({ name, description, input_schema })));
-  return { world, catalogue, errors, drafts, cards };
+  return { world, errors, drafts, cards };
 }
 
 /**
- * Runs `task` in `arm` once with `model`, and checks it. A tool call is one the model asked for: the drawer's card
- * pause counts once, its press does not again. A refused call is a tool result marked as an error.
+ * Runs `task` in `arm` once with `model`, and checks it; every attempt gives a record, one the harness itself failed
+ * included. A tool call is one the model asked for: the drawer's card pause counts once, its press does not again. A
+ * refused call is a tool result marked as an error, or a card refused to the member. It succeeds only when the check
+ * passes and the run completed.
  */
-export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1): Promise<RunRecord> {
+export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, script?: (w: World) => Step[]): Promise<RunRecord> {
   const log = new ModelLog();
-  const ran = arm === 'mcp' ? await overMcp(task, model, log) : await inDrawer(task, model, log);
-  const answers = await Promise.all(log.exchanges.map((e) => e.answered));
-  const results = log.results();
-  const outcome: Outcome = { arm, world: ran.world, scope: testScope(env.DB, ran.world.orgId), results, drafts: ran.drafts, cards: ran.cards };
-  const why = await task.check(outcome);
-  return {
-    task: task.id,
-    arm,
-    role: task.role,
-    run: runNo,
-    model: model.label,
-    success: why === undefined,
-    ...(why === undefined ? {} : { why }),
-    toolCalls: answers.reduce((n, a) => n + a.toolUses.length, 0),
-    refusedCalls: results.filter((r) => !r.ok).length,
-    modelCalls: log.exchanges.length,
-    inputTokens: answers.reduce((n, a) => n + a.input, 0),
-    outputTokens: answers.reduce((n, a) => n + a.output, 0),
-    catalogue: ran.catalogue,
-    errors: ran.errors,
-  };
+  const base = { task: task.id, arm, role: task.role, run: runNo, model: model.label };
+  const chosen: Model = script ? { ...model, fetchFor: (w) => scripted(script(w), arm) } : model;
+  if (model.clock !== undefined) vi.setSystemTime(model.clock);
+  try {
+    const ran = arm === 'mcp' ? await overMcp(task, chosen, log) : await inDrawer(task, chosen, log);
+    const answers = await Promise.all(log.exchanges.map((e) => e.answered));
+    const results = log.results();
+    const outcome: Outcome = { arm, world: ran.world, scope: testScope(env.DB, ran.world.orgId), results, drafts: ran.drafts, cards: ran.cards };
+    const why = await task.check(outcome);
+    const errors = [...answers.flatMap((a) => (a.problem ? [a.problem] : [])), ...ran.errors];
+    return {
+      ...base,
+      success: why === undefined && errors.length === 0,
+      checked: why === undefined,
+      ...(why === undefined ? {} : { why }),
+      toolCalls: answers.reduce((n, a) => n + a.toolUses.length, 0),
+      refusedCalls: results.filter((r) => !r.ok).length + ran.cards.filter((c) => c.why !== null).length,
+      modelCalls: log.exchanges.length,
+      inputTokens: answers.reduce((n, a) => n + a.input, 0),
+      outputTokens: answers.reduce((n, a) => n + a.output, 0),
+      catalogue: catalogueSize(log.exchanges[0]?.body.tools ?? []),
+      ...(ran.discovery ? { discovery: ran.discovery } : {}),
+      errors,
+    };
+  } catch (err) {
+    const none = catalogueSize([]);
+    return {
+      ...base,
+      success: false,
+      checked: false,
+      why: 'the harness failed',
+      toolCalls: 0,
+      refusedCalls: 0,
+      modelCalls: log.exchanges.length,
+      inputTokens: 0,
+      outputTokens: 0,
+      catalogue: none,
+      errors: [`harness: ${err instanceof Error ? err.message : String(err)}`],
+    };
+  } finally {
+    if (model.clock !== undefined) vi.useRealTimers();
+  }
 }
 
-/** The scripted model for `task` in `arm`: its script's turns, then its answer, on a fixed clock. */
-export function scriptedModel(task: Task, arm: Arm, now: () => number, turns = task.script[arm]): Model {
+/** The scripted model for `task` in `arm`: its script's turns, then its answer, at `clock`. */
+export function scriptedModel(task: Task, arm: Arm, clock: number): Model {
+  const turns = task.script[arm];
   if (!turns) throw new Error(`${task.id} does not run in ${arm}`);
-  return { id: SCRIPTED_AS, label: 'scripted', key: SCRIPTED_KEY, now, fetchFor: (w) => scripted(turns(w), arm) };
+  return { id: SCRIPTED_AS, label: 'scripted', key: SCRIPTED_KEY, clock, fetchFor: (w) => scripted(turns(w), arm) };
 }
 
-/** A live model on Anthropic's API with `key`, on the real clock: a turn's time budget is the drawer's own. */
+/** A live model on Anthropic's API with `key`, on the real clock: a turn's time budget and the model deadline are the drawer's own. */
 export const liveModel = (id: string, key: string): Model => ({ id, label: id, key, fetchFor: () => live(key) });

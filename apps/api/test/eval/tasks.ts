@@ -11,32 +11,87 @@ const WEEKDAYS = [1, 2, 3, 4, 5];
 /** The same script in both arms. */
 const both = (script: (w: World) => Step[]) => ({ mcp: script, drawer: script });
 
-/** A read passed when one successful output of `tools` names everything in `facts`. */
-const found =
-  (tools: readonly string[] | null, ...facts: ((w: World) => string)[]) =>
-  (o: Outcome) =>
-    o.results.some((r) => r.ok && (tools === null || tools.includes(r.tool)) && facts.every((f) => r.text.includes(f(o.world))))
-      ? undefined
-      : `no ${tools ? tools.join(' or ') : 'tool'} output named ${facts.map((f) => f(o.world)).join(', ')}`;
+/** A successful tool result as JSON: the drawer's comes fenced as data, and one cut short reads as nothing. */
+function parsed(text: string): unknown {
+  const fenced = /^<data>\n([\s\S]*)\n<\/data>$/.exec(text);
+  try {
+    return JSON.parse(fenced ? (fenced[1] ?? '').replace(/&lt;(\s*\/?\s*data)/gi, '<$1') : text);
+  } catch {
+    return undefined;
+  }
+}
 
-/** The drawer's draft of `tool` on `id`, if it made one. */
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Every object in `v`, however deep. */
+const objectsIn = (v: unknown): Record<string, unknown>[] =>
+  Array.isArray(v) ? v.flatMap(objectsIn) : isObject(v) ? [v, ...Object.values(v).flatMap(objectsIn)] : [];
+
+/** What the model read about each record, by id: the fields of every successful result that showed it, merged. */
+function records(o: Outcome): Map<string, Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const r of o.results) if (r.ok) for (const x of objectsIn(parsed(r.text))) if (typeof x.id === 'string') byId.set(x.id, { ...byId.get(x.id), ...x });
+  return byId;
+}
+
+/**
+ * A read passed when what the model read, across all its results, shows each record `wanted` names with the fields it
+ * asks for: a value to match, or `true` for any value.
+ */
+const read =
+  (wanted: (w: World) => Record<string, Record<string, unknown>>) =>
+  (o: Outcome): string | undefined => {
+    const seen = records(o);
+    for (const [id, fields] of Object.entries(wanted(o.world))) {
+      const got = seen.get(id);
+      for (const [field, value] of Object.entries(fields))
+        if (got === undefined || !(field in got) || (value !== true && !same(got[field], value)))
+          return `the tools never showed ${id}'s ${field}${value === true ? '' : ` as ${JSON.stringify(value)}`}`;
+    }
+    return undefined;
+  };
+
 const draftOf = (o: Outcome, tool: string, id?: string) => o.drafts.find((d) => d.tool === tool && (id === undefined || d.target?.id === id));
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The org's schedule entry for `playlistId` on `groupId` on weekdays 07:00 to 10:00, as the check of a schedule task wants it. */
-async function weekdayMornings(o: Outcome, playlistId: string, groupId: string) {
+/** Weekdays as a set: an entry's order is not its meaning. */
+const weekdays = (days: unknown) => Array.isArray(days) && days.length === WEEKDAYS.length && WEEKDAYS.every((d) => days.includes(d));
+
+/**
+ * Whether `e` plays `playlistId` on `groupId` every weekday from 07:00 to 10:00, with no dates bounding it: a
+ * schedule entry's fields as the drafting tool takes them.
+ */
+const weekdayMornings = (e: Record<string, unknown> | undefined, playlistId: string, groupId: string) =>
+  e?.playlistId === playlistId &&
+  e.target === 'group' &&
+  e.groupId === groupId &&
+  weekdays(e.days) &&
+  e.from === '07:00' &&
+  e.to === '10:00' &&
+  (e.startDate ?? null) === null &&
+  (e.endDate ?? null) === null;
+
+/** The org's schedule entry for `playlistId` on `groupId` on weekday mornings, read from D1. */
+async function scheduled(o: Outcome, playlistId: string, groupId: string) {
   const entries = await o.scope.scheduleEntries.list();
-  const hit = entries.find(
-    (e) =>
-      e.playlistId === playlistId &&
-      e.target === 'group' &&
-      e.groupId === groupId &&
-      e.daysJson === JSON.stringify(WEEKDAYS) &&
-      e.fromTime === '07:00' &&
-      e.toTime === '10:00',
+  const hit = entries.some((e) =>
+    weekdayMornings(
+      {
+        playlistId: e.playlistId,
+        target: e.target,
+        groupId: e.groupId,
+        days: e.daysJson === null ? null : JSON.parse(e.daysJson),
+        from: e.fromTime,
+        to: e.toTime,
+        startDate: e.startDate,
+        endDate: e.endDate,
+      },
+      playlistId,
+      groupId,
+    ),
   );
-  return hit ? undefined : `no entry playing ${playlistId} on ${groupId} weekdays 07:00-10:00`;
+  return hit ? undefined : `no entry playing ${playlistId} on ${groupId} every weekday 07:00-10:00 with no dates`;
 }
 
 /** The org's playlist named `name`, and the spots it plays. */
@@ -58,81 +113,114 @@ export const TASKS: Task[] = [
     prompt: 'What screens do we have?',
     role: 'viewer',
     script: both(() => [[{ name: 'list_screens', input: {} }]]),
-    check: found(
-      null,
-      () => 'Bayside door',
-      () => 'Bayside till',
-      () => 'Harbor lobby',
-      () => 'Cafe counter',
-    ),
+    check: read((w) => ({
+      [w.screens.baysideDoor]: { name: 'Bayside door' },
+      [w.screens.baysideTill]: { name: 'Bayside till' },
+      [w.screens.harbor]: { name: 'Harbor lobby' },
+      [w.screens.cafe]: { name: 'Cafe counter' },
+    })),
   },
   {
     id: 'read-screen-timezone',
     prompt: 'What time zone is the Harbor lobby screen set to?',
     role: 'viewer',
     script: both(() => [[{ name: 'list_screens', input: {} }]]),
-    check: found(
-      null,
-      (w) => w.screens.harbor,
-      () => 'Europe/London',
-    ),
+    variants: [
+      {
+        name: 'each screen by get_screen',
+        arm: 'mcp',
+        passes: true,
+        script: (w) => [[{ name: 'get_screen', input: { screenId: w.screens.cafe } }], [{ name: 'get_screen', input: { screenId: w.screens.harbor } }]],
+      },
+    ],
+    check: read((w) => ({ [w.screens.harbor]: { name: 'Harbor lobby', timezone: 'Europe/London' } })),
   },
   {
     id: 'read-screen-status',
     prompt: 'Which of our screens are offline right now?',
     role: 'viewer',
-    script: both(() => [[{ name: 'list_screen_status', input: {} }]]),
-    check: found(
-      ['list_screen_status', 'get_screen'],
-      (w) => w.screens.baysideDoor,
-      (w) => w.screens.baysideTill,
-    ),
+    // Every screen's name and state: list_screens has both; list_screen_status has states alone.
+    script: both(() => [[{ name: 'list_screens', input: {} }]]),
+    variants: [
+      {
+        name: 'each screen by get_screen, in separate responses',
+        arm: 'mcp',
+        passes: true,
+        script: (w) => Object.values(w.screens).map((screenId) => [{ name: 'get_screen', input: { screenId } }]),
+      },
+      {
+        name: 'states, then names, in separate responses',
+        arm: 'drawer',
+        passes: true,
+        script: () => [[{ name: 'list_screen_status', input: {} }], [{ name: 'list_screens', input: {} }]],
+      },
+      { name: 'states without names', arm: 'mcp', passes: false, script: () => [[{ name: 'list_screen_status', input: {} }]] },
+      {
+        name: 'two of the four screens',
+        arm: 'mcp',
+        passes: false,
+        script: (w) => [
+          [{ name: 'get_screen', input: { screenId: w.screens.baysideDoor } }],
+          [{ name: 'get_screen', input: { screenId: w.screens.baysideTill } }],
+        ],
+      },
+    ],
+    check: read((w) => Object.fromEntries(Object.values(w.screens).map((id) => [id, { name: true, state: true }]))),
   },
   {
     id: 'read-default-playlist',
     prompt: 'Which playlist plays on our screens when nothing is scheduled?',
     role: 'viewer',
     script: both(() => [[{ name: 'list_playlists', input: { isDefault: true } }]]),
-    check: found(['list_playlists', 'get_playlist', 'get_org_settings'], (w) => w.playlists.lobby),
+    check: read((w) => ({ [w.playlists.lobby]: { name: 'Lobby loop', isDefault: true } })),
   },
   {
     id: 'read-playlist-spots',
     prompt: 'Which spots does the Lobby loop playlist play, in order?',
     role: 'viewer',
-    script: both((w) => [[{ name: 'list_playlists', input: {} }], [{ name: 'get_playlist', input: { playlistId: w.playlists.lobby } }]]),
-    check: found(['list_playlists', 'get_playlist'], (w) => `"spotIds":["${w.spots.breakfast}","${w.spots.weather}"]`),
+    // Its play order, and the names of the spots in it: a playlist lists its spots by id.
+    script: both(() => [[{ name: 'list_playlists', input: {} }], [{ name: 'list_spots', input: {} }]]),
+    variants: [{ name: 'the play order without the spots’ names', arm: 'mcp', passes: false, script: () => [[{ name: 'list_playlists', input: {} }]] }],
+    check: read((w) => ({
+      [w.playlists.lobby]: { name: 'Lobby loop', spotIds: [w.spots.breakfast, w.spots.weather] },
+      [w.spots.breakfast]: { name: 'Breakfast menu' },
+      [w.spots.weather]: { name: 'Weather' },
+    })),
   },
   {
     id: 'read-menu-template',
     prompt: 'Which template should I use to put a menu on a screen?',
     role: 'editor',
     script: both(() => [[{ name: 'list_templates', input: {} }]]),
-    check: found(['list_templates', 'get_template'], (w) => w.templates.menu),
+    check: read((w) => ({ [w.templates.menu]: { name: true } })),
   },
   {
     id: 'read-unpublished',
     prompt: 'What changes have not been published yet?',
     role: 'editor',
     script: both(() => [[{ name: 'list_spots', input: { unpublished: true } }]]),
-    check: found(['list_spots', 'get_spot', 'count_drafts'], (w) => w.spots.lunch),
+    variants: [{ name: 'a count of drafts, naming none', arm: 'drawer', passes: false, script: () => [[{ name: 'count_drafts', input: {} }]] }],
+    check: read((w) => ({ [w.spots.lunch]: { name: 'Lunch specials', draftChanged: true } })),
   },
   {
     id: 'read-audit',
     prompt: 'Who last changed the Lunch specials spot, and what did they change?',
     role: 'owner',
     script: both((w) => [[{ name: 'list_audit_log', input: { target: { kind: 'spot', id: w.spots.lunch } } }]]),
-    check: found(
-      ['list_audit_log'],
-      (w) => w.spots.lunch,
-      () => 'update_spot',
-    ),
+    check(o) {
+      const entries = o.results.flatMap((r) => (r.ok ? objectsIn(parsed(r.text)) : []));
+      const hit = entries.some(
+        (e) => e.action === 'update_spot' && same(e.target, { kind: 'spot', id: o.world.spots.lunch }) && isObject(e.actor) && typeof e.actor.id === 'string',
+      );
+      return hit ? undefined : "the tools never showed who made Lunch specials' update_spot";
+    },
   },
   {
     id: 'read-schedule',
     prompt: 'What is scheduled on the Bayside screens?',
     role: 'viewer',
     script: both(() => [[{ name: 'list_schedule_entries', input: {} }]]),
-    check: found(['list_schedule_entries'], (w) => w.entry),
+    check: read((w) => ({ [w.entry]: { playlistId: w.playlists.breakfast, groupId: w.groups.bayside, days: true, from: true, to: true } })),
   },
 
   // ------------------------------------------------------------------ writes
@@ -216,18 +304,49 @@ export const TASKS: Task[] = [
         },
       ],
     ]),
+    variants: [
+      {
+        name: 'the weekdays in another order',
+        arm: 'drawer',
+        passes: true,
+        script: (w) => [
+          [
+            {
+              name: 'create_schedule_entry',
+              input: { playlistId: w.playlists.breakfast, target: 'group', groupId: w.groups.cafe, days: [5, 4, 3, 2, 1], from: '07:00', to: '10:00' },
+            },
+          ],
+        ],
+      },
+      {
+        name: 'only in January 2000',
+        arm: 'mcp',
+        passes: false,
+        script: (w) => [
+          [
+            {
+              name: 'create_schedule_entry',
+              input: {
+                playlistId: w.playlists.breakfast,
+                target: 'group',
+                groupId: w.groups.cafe,
+                days: WEEKDAYS,
+                from: '07:00',
+                to: '10:00',
+                startDate: '2000-01-01',
+                endDate: '2000-01-31',
+              },
+            },
+          ],
+        ],
+      },
+    ],
     async check(o) {
       if (o.arm === 'drawer') {
         const input = draftOf(o, 'create_schedule_entry')?.input;
-        const ok =
-          input?.playlistId === o.world.playlists.breakfast &&
-          input.groupId === o.world.groups.cafe &&
-          same(input.days, WEEKDAYS) &&
-          input.from === '07:00' &&
-          input.to === '10:00';
-        return ok ? undefined : `drafted ${JSON.stringify(input)}`;
+        return weekdayMornings(input, o.world.playlists.breakfast, o.world.groups.cafe) ? undefined : `drafted ${JSON.stringify(input)}`;
       }
-      return weekdayMornings(o, o.world.playlists.breakfast, o.world.groups.cafe);
+      return scheduled(o, o.world.playlists.breakfast, o.world.groups.cafe);
     },
   },
   {
@@ -264,7 +383,7 @@ export const TASKS: Task[] = [
     async check(o) {
       const made = await playlistNamed(o, 'Morning');
       if (!same(made?.spotIds, [o.world.spots.breakfast, o.world.spots.weather])) return `Morning is ${JSON.stringify(made?.spotIds)}`;
-      return made ? weekdayMornings(o, made.row.id, o.world.groups.cafe) : undefined;
+      return made ? scheduled(o, made.row.id, o.world.groups.cafe) : undefined;
     },
   },
   {
@@ -340,6 +459,7 @@ export const TASKS: Task[] = [
     role: 'viewer',
     // Over /mcp a viewer is offered no publish: the model can only say so. In the drawer it may ask, and the card refuses it.
     script: { mcp: () => [], drawer: () => [[{ name: 'publish', input: {} }]] },
+    refusals: { drawer: 1 },
     async check(o) {
       const publishes = (await o.scope.publishes.list()).length;
       if (publishes !== o.world.publishes) return `the org has ${publishes} publishes`;

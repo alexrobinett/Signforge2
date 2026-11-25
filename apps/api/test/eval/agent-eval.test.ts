@@ -13,7 +13,7 @@ declare module 'vitest' {
   }
 }
 
-/** The scripted runs' clock: the drawer's turn budget never depends on how fast the machine is. */
+/** The scripted runs' clock, the tools' and the drawer's: nothing they see depends on when or how fast they run. */
 const NOON = Date.UTC(2026, 10, 25, 12);
 
 const RUNS = TASKS.flatMap((task) => (Object.keys(task.script) as Arm[]).map((arm) => ({ task, arm })));
@@ -29,34 +29,63 @@ describe.runIf(!MODEL)('the eval with a scripted model', () => {
   });
 
   it.for(RUNS.map((r) => [`${r.task.id} (${r.arm})`, r] as const))('%s: its script passes', async ([, { task, arm }]) => {
-    const record = await runTask(
-      task,
-      arm,
-      scriptedModel(task, arm, () => NOON),
-    );
+    const record = await runTask(task, arm, scriptedModel(task, arm, NOON));
     expect(record.why).toBeUndefined();
     expect(record.errors).toEqual([]);
-    expect(record.refusedCalls).toBe(0);
+    expect(record.success).toBe(true);
+    expect(record.refusedCalls).toBe(task.refusals?.[arm] ?? 0);
     expect(record.catalogue.tokens).toBeGreaterThan(0);
+  });
+
+  const variants = TASKS.flatMap((task) => (task.variants ?? []).map((v) => ({ task, ...v })));
+  it.for(variants.map((v) => [`${v.task.id} (${v.arm}), ${v.name}`, v] as const))('%s: checked as it should be', async ([, v]) => {
+    const record = await runTask(v.task, v.arm, scriptedModel(v.task, v.arm, NOON), 1, v.script);
+    expect(record.errors).toEqual([]);
+    expect(record.success, record.why).toBe(v.passes);
   });
 
   it.for(RUNS.filter((r) => !r.task.id.startsWith('refused-')).map((r) => [`${r.task.id} (${r.arm})`, r] as const))(
     '%s: a model that does nothing fails it',
     async ([, { task, arm }]) => {
-      const record = await runTask(
-        task,
-        arm,
-        scriptedModel(
-          task,
-          arm,
-          () => NOON,
-          () => [],
-        ),
-      );
+      const record = await runTask(task, arm, scriptedModel(task, arm, NOON), 1, () => []);
       expect(record.success).toBe(false);
       expect(record.toolCalls).toBe(0);
     },
   );
+
+  // A run whose model fails is recorded as a failure with why, never dropped and never a success: even a read
+  // whose tools already answered counts only when the turn completed.
+  const reads = TASKS.find((t) => t.id === 'read-screens');
+  const failing: [string, typeof fetch, string[]][] = [
+    ['answers 503', async () => new Response('{"type":"error"}', { status: 503 }), ['model_503']],
+    ['cannot be reached', () => Promise.reject(new Error('connection reset')), ['model_unreachable']],
+  ];
+  it.for(failing)('/mcp, a model that %s: a recorded failure', async ([, answer, errors]) => {
+    if (!reads) throw new Error('no read-screens task');
+    const record = await runTask(reads, 'mcp', { ...scriptedModel(reads, 'mcp', NOON), fetchFor: () => answer });
+    expect(record).toMatchObject({ success: false, errors });
+  });
+
+  it('/mcp, a model that fails after the tools answered: the check passes, the run does not', async () => {
+    if (!reads) throw new Error('no read-screens task');
+    const model = scriptedModel(reads, 'mcp', NOON);
+    const record = await runTask(reads, 'mcp', {
+      ...model,
+      fetchFor: (w) => {
+        const script = model.fetchFor(w);
+        let asked = 0;
+        return (input, init) => (++asked === 1 ? script(input, init) : Promise.resolve(new Response('{}', { status: 503 })));
+      },
+    });
+    expect(record).toMatchObject({ checked: true, success: false, errors: ['model_503'], toolCalls: 1 });
+  });
+
+  it('the drawer, a model that answers 503: a recorded failure', async () => {
+    if (!reads) throw new Error('no read-screens task');
+    const record = await runTask(reads, 'drawer', { ...scriptedModel(reads, 'drawer', NOON), fetchFor: () => failing[0]![1] });
+    expect(record.success).toBe(false);
+    expect(record.errors.length).toBeGreaterThan(0);
+  });
 });
 
 describe.runIf(MODEL)(`the eval with ${MODEL}`, () => {
@@ -67,7 +96,7 @@ describe.runIf(MODEL)(`the eval with ${MODEL}`, () => {
     '%s',
     async ([, { task, arm, n }], { task: test }) => {
       if (MODEL !== 'scripted' && !env.EVAL_KEY) throw new Error('set ANTHROPIC_API_KEY for a live run (test/eval/README.md)');
-      const model = MODEL === 'scripted' ? scriptedModel(task, arm, () => NOON) : liveModel(MODEL, env.EVAL_KEY ?? '');
+      const model = MODEL === 'scripted' ? scriptedModel(task, arm, NOON) : liveModel(MODEL, env.EVAL_KEY ?? '');
       test.meta.eval = await runTask(task, arm, model, n);
     },
   );
