@@ -37,6 +37,19 @@ describe('playlist drafts', () => {
     });
   });
 
+  it('says how many spots the published playlist plays, apart from what its draft holds since (#397)', async () => {
+    const { o, call } = await setup('pl-published-count');
+    const lunch = await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }));
+    expect(lunch.playlist).toMatchObject({ published: false, publishedSpotCount: 0 });
+    await ok(call('publish', {}));
+    const id = idOf(lunch);
+    const { playlist } = (await ok(call('get_playlist', { playlistId: id }))) as { playlist: { version: number } };
+    await ok(call('update_playlist', { playlistId: id, spotIds: [o.imageSpot, o.templateSpot], ifVersion: playlist.version }));
+    expect(await ok(call('get_playlist', { playlistId: id }))).toMatchObject({
+      playlist: { spotIds: [o.imageSpot, o.templateSpot], published: true, draftChanged: true, publishedSpotCount: 1 },
+    });
+  });
+
   it('lists the default playlist alone, or the unpublished ones, and counts every playlist the filters match (#357)', async () => {
     const { o, call } = await setup('pl-filters');
     const lunch = idOf(await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] })));

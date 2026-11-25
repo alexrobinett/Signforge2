@@ -200,7 +200,8 @@ export function PlayerStage({
           </span>
         )}
         <span className="ml-auto text-sm text-stage-muted-foreground tabular-nums">
-          {size.w} × {size.h} · {Math.round(shown * 100)}%
+          {/* The scale only: a screen of any resolution plays the same layout (#463). */}
+          Shown at {Math.round(shown * 100)}%
         </span>
       </div>
       <p className="inline-flex items-center gap-2 text-sm font-semibold text-stage-foreground">

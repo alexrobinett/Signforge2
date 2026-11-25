@@ -28,6 +28,7 @@ const playlist = (id: string, version: number, spotIds: string[]): PlaylistView 
   isDefault: false,
   published: false,
   draftChanged: true,
+  publishedSpotCount: 0,
   publishedAt: null,
   createdAt: 0,
   updatedAt: 0,
