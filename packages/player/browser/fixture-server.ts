@@ -28,7 +28,8 @@ import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { extname, join, normalize } from 'node:path';
-import type { DeviceCommand, DisplayOverride, PlayCount, SyncRequest } from '@signforge/contract';
+import { MAX_SYNC_RESPONSE_BLOBS, type DeviceCommand, type DisplayOverride, type PlayCount, type SyncRequest } from '@signforge/contract';
+import { boundImageHashes, hasBoundListImage, manifestBoundFields } from '@signforge/player-core';
 import type { Content } from './content';
 
 export type Action =
@@ -73,6 +74,7 @@ export class FixtureServer {
   /** Content whose files are served beside the published content's: a screen's last good manifest. */
   private lastGood?: Content;
   private data = new Map<string, unknown>();
+  private feedBlobs = new Map<string, { body: Buffer; type: string }>();
   private rules: { match: RegExp; action: Action }[] = [];
   private server = createServer((req, res) => this.handle(req, res));
   private sockets = new Set<Socket>();
@@ -166,6 +168,16 @@ export class FixtureServer {
   /** Serve this snapshot at `/content/data/<id>.json`, and send it on sync to a screen that holds an older one. */
   setData(id: string, snapshot: unknown): void {
     this.data.set(id, snapshot);
+  }
+
+  /** Serve a feed-image blob at `/content/blobs/<sha>` (as R2's feed prefix does). */
+  setFeedBlob(sha: string, body: Buffer, type = 'image/png'): void {
+    this.feedBlobs.set(sha, { body, type });
+  }
+
+  /** Remove a feed-image blob from `/content/blobs/<sha>`. */
+  deleteFeedBlob(sha: string): void {
+    this.feedBlobs.delete(sha);
   }
 
   /** Answer requests whose path matches with `action` instead. Returns a function that removes the rule. */
@@ -312,12 +324,27 @@ export class FixtureServer {
             this.acked.set(sync.epoch, sync.seq);
           }
           const held = sync.snapshots ?? {};
-          const all = [...this.data.values()] as { id: string; version: number; checkedAt: string }[];
+          const all = [...this.data.values()] as { id: string; version: number; checkedAt: string; data?: unknown }[];
           const snapshots = all.filter((snap) => snap.version > (held[snap.id] ?? -1));
           // As the API does: when each snapshot the screen holds at its version was last checked.
           const checked = Object.fromEntries(
             all.filter((snap) => snap.version === held[snap.id]).map((snap) => [snap.id, { version: snap.version, checkedAt: snap.checkedAt }]),
           );
+          const haveBlobs = new Set(sync.blobs ?? []);
+          const missingBlobs = new Set<string>();
+          if (c) {
+            const bySource = manifestBoundFields(c.manifest);
+            for (const snap of all) {
+              const bound = bySource.get(snap.id) ?? [];
+              if (!hasBoundListImage(bound)) continue;
+              for (const sha of boundImageHashes(bound, snap.data)) {
+                if (haveBlobs.has(sha)) continue;
+                missingBlobs.add(sha);
+                if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
+              }
+              if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
+            }
+          }
           const reply = {
             serverTime: new Date(Date.now() + this.serverOffsetMs).toISOString(),
             nextSyncS: this.nextSyncS,
@@ -326,6 +353,7 @@ export class FixtureServer {
             ...(c ? { desiredManifest: c.manifest.id } : {}),
             snapshots,
             checked,
+            ...(missingBlobs.size ? { blobs: [...missingBlobs] } : {}),
             socketTicket: `ticket-${this.syncs.length}`,
             commands: [...this.commands.splice(0), ...this.overrideCommand(sync.display.override)],
           };
@@ -346,7 +374,9 @@ export class FixtureServer {
       const blob = /^blobs\/([0-9a-f]{64})$/.exec(rest);
       if (blob) {
         const body = c?.blobs.get(blob[1]!) ?? this.lastGood?.blobs.get(blob[1]!);
-        return body ? send(200, body) : send(404, '');
+        if (body) return send(200, body);
+        const feed = this.feedBlobs.get(blob[1]!);
+        return feed ? send(200, feed.body, feed.type) : send(404, '');
       }
       const data = /^data\/([^/]+)\.json$/.exec(rest);
       if (data && this.data.has(data[1]!)) return send(200, JSON.stringify(this.data.get(data[1]!)), 'application/json');

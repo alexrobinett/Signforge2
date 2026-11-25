@@ -77,6 +77,7 @@ function Mapping({ field, def, binding, columns, onChange }: { field: string; de
       <legend className="mb-1 text-sm font-medium">Columns for each item</legend>
       <div className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
         {Object.entries(def.item).map(([prop, d]) => {
+          if (d.type === 'image') return null;
           const current = table.columns[prop];
           const id = `map-${field}-${prop}`;
           return (

@@ -35,7 +35,7 @@ import {
 } from '@signforge/db';
 import type { ParsedNews } from '@signforge/feeds';
 import { readImageInfo } from '@signforge/media/image-info';
-import type { BoundField } from '@signforge/player-core';
+import { type BoundField, hasBoundListImage } from '@signforge/player-core';
 import { workerFetch } from '../connectors';
 import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedImageFetch } from './fetch';
 
@@ -127,27 +127,15 @@ export interface PhotoPlan {
   fresh: string[];
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-
 /**
- * Whether any published spot binding this source uses an `image` field or a `list` whose items
- * hold an `image` property (such as News 2.0, #196/#202). Sources bound only by text-only templates
- * (News 1.4.1, Info frame's crawl) or unbound sources skip photo work altogether.
+ * Start the photo half of a poll: only RSS sources take a read token and check whether any published spot shows photos,
+ * by the rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose
+ * rows declare an `image` property. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no
+ * photo work.
  */
-function usesPhotos(bound: readonly BoundField[]): boolean {
-  return bound.some(({ fields, field }) => {
-    if (!isObject(fields)) return false;
-    const def = fields[field];
-    if (!isObject(def)) return false;
-    if (def.type === 'image') return true;
-    return def.type === 'list' && isObject(def.item) && Object.values(def.item).some((p) => isObject(p) && p.type === 'image');
-  });
-}
-
-/** Start the photo half of a poll: only RSS sources take a read token and check whether any published spot shows photos. */
 export function startPhotoPoll(row: DataSourceRow, bound: readonly BoundField[], now: number): PhotoPoll | undefined {
   if (row.format !== 'rss') return undefined;
-  const shown = row.photos && usesPhotos(bound);
+  const shown = row.photos && hasBoundListImage(bound);
   return { shown, read: photoRead(row, shown, now) };
 }
 

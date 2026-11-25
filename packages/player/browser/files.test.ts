@@ -1,9 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { crc32, deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { Spot } from '@signforge/contract';
 import type { Content } from './content';
-import { spotsPlayed, useHarness, type Player } from './harness';
+import { png, spotsPlayed, useHarness, type Player } from './harness';
 
 const h = useHarness();
 const BLOBS = /^\/content\/blobs\//;
@@ -12,29 +11,6 @@ const BLOBS = /^\/content\/blobs\//;
 const assetOf = (c: Content, id: string) => (c.manifest.spots[id] as Extract<Spot, { kind: 'template' }>).assets.file!;
 /** Every key in the player's file cache. */
 const cached = (p: Player) => p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
-
-/** A `w`x`h` grey PNG. */
-function png(w: number, h: number): Buffer {
-  const chunk = (type: string, data: Buffer) => {
-    const body = Buffer.concat([Buffer.from(type), data]);
-    const out = Buffer.alloc(body.length + 8);
-    out.writeUInt32BE(data.length);
-    body.copy(out, 4);
-    out.writeUInt32BE(crc32(body), body.length + 4);
-    return out;
-  };
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(w);
-  header.writeUInt32BE(h, 4);
-  header.set([8, 0, 0, 0, 0], 8);
-  const rows = Buffer.concat(Array.from({ length: h }, () => Buffer.from([0, ...Array(w).fill(128)])));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(rows)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
 
 describe('content files', () => {
   it("hands a template an image's sample beside the image, and none to one without", async () => {

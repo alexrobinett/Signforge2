@@ -8,6 +8,7 @@
     "./contrast": "./src/contrast.ts",
     "./backdrop": "./src/backdrop.ts",
     "./qr": "./src/qr.ts",
+    "./rows": "./src/rows.ts",
     "./wall-time": "./src/wall-time.ts"
   },
   "scripts": {

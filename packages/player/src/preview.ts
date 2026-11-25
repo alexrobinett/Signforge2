@@ -22,6 +22,7 @@ import {
   type PreviewPlayerMessage,
   type ScreenManifest,
 } from '@signforge/contract';
+import { manifestSnapshotFiles } from '@signforge/player-core';
 import { Sha256 } from '@signforge/player-core/sha256';
 import { usePostedData } from './data';
 import { readFilesFrom } from './source';
@@ -69,11 +70,14 @@ export function startPreview(hooks: PreviewHooks): Preview {
     return blob;
   });
 
-  /** Every file of the draft, from what was posted, held, or the CMS blob route. */
+  /** Every file of the draft, from what was posted, held, or the CMS blob route, plus snapshot feed images best-effort. */
   async function gather(msg: PreviewDraftMessage): Promise<Map<string, Blob>> {
     const out = new Map<string, Blob>();
-    await Promise.all(
-      [...requiredFiles(msg.manifest)].map(async (sha) => {
+    const required = requiredFiles(msg.manifest);
+    const postedData = new Map((msg.data ?? []).map((s) => [s.id, s]));
+    const feed = [...manifestSnapshotFiles([msg.manifest], postedData)].filter((sha) => !required.has(sha));
+    await Promise.all([
+      ...[...required].map(async (sha) => {
         const posted = msg.files?.[sha];
         // A file is used under its hash, and the player keeps work per hash (a bundle's frames): posted
         // bytes must be those of the hash they come under. Our own SHA-256: WebCrypto needs a secure context.
@@ -87,7 +91,17 @@ export function startPreview(hooks: PreviewHooks): Preview {
         }
         out.set(sha, blob);
       }),
-    );
+      ...feed.map(async (sha) => {
+        let blob = files.get(sha) ?? previous.get(sha);
+        if (!blob) {
+          const res = await fetch(`${CMS_ORIGIN}${sessionBlobPath(sha)}`, { credentials: 'include', signal: AbortSignal.timeout(20_000) }).catch(
+            () => undefined,
+          );
+          if (res?.ok) blob = await res.blob().catch(() => undefined);
+        }
+        if (blob) out.set(sha, blob);
+      }),
+    ]);
     return out;
   }
 

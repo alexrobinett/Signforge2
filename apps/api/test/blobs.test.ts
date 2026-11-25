@@ -4,6 +4,7 @@ import { seedBaseTemplate } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { feedBlobKey } from '../src/data/feed-photos';
 import { baseBlobKey, orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
@@ -14,6 +15,8 @@ const sha = (c: string) => c.repeat(64);
 const A_FILE = sha('1');
 const B_FILE = sha('2');
 const A_SVG = sha('4');
+const A_FEED = sha('5');
+const B_FEED = sha('6');
 /** seedBaseTemplate's clock bundle. */
 const BASE_HTML = sha('e');
 /** Under the shared prefix but no base template's bundle. */
@@ -32,6 +35,8 @@ beforeAll(async () => {
     httpMetadata: { contentType: 'image/svg+xml' },
   });
   await env.BLOBS.put(orgBlobKey(orgB, B_FILE), 'org b secret', { httpMetadata: { contentType: 'image/png' } });
+  await env.BLOBS.put(feedBlobKey(orgA, A_FEED), 'org a feed photo', { httpMetadata: { contentType: 'image/jpeg' } });
+  await env.BLOBS.put(feedBlobKey(orgB, B_FEED), 'org b feed photo', { httpMetadata: { contentType: 'image/webp' } });
   await env.BLOBS.put(baseBlobKey(BASE_HTML), '<!doctype html>', { httpMetadata: { contentType: 'text/html' } });
   await env.BLOBS.put(baseBlobKey(STRAY), 'not a template');
   await env.BLOBS.put(baseBlobKey(FONT), 'wOF2 font', { httpMetadata: { contentType: 'font/woff2' } });
@@ -103,5 +108,19 @@ describe('GET /api/blobs/v2/:sha256', () => {
   it('refuses a request without a session, and a malformed hash', async () => {
     expect((await new Client(t).get(`/api/blobs/v2/${A_FILE}`)).status).toBe(401);
     expect((await alice.get('/api/blobs/v2/not-a-hash')).status).toBe(404);
+  });
+
+  it("serves the org's own feed image blobs for the editor preview, and never another org's (#196)", async () => {
+    const res = await alice.get(`/api/blobs/v2/${A_FEED}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    expect(res.headers.get('cache-control')).toBe('private, no-cache');
+    expect(res.headers.get('etag')).toBe(`"${A_FEED}"`);
+    expect(await res.text()).toBe('org a feed photo');
+
+    expect((await alice.get(`/api/blobs/v2/${A_FEED}`, { 'if-none-match': `"${A_FEED}"` })).status).toBe(304);
+    expect((await alice.get(`/api/blobs/v2/${B_FEED}`)).status).toBe(404);
+    expect(await (await bob.get(`/api/blobs/v2/${B_FEED}`)).text()).toBe('org b feed photo');
+    expect((await bob.get(`/api/blobs/v2/${A_FEED}`)).status).toBe(404);
   });
 });

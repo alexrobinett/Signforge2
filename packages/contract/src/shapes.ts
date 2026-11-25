@@ -17,8 +17,11 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      refuses such a template, so the server tells it to reload, as for 4.
  *   7  a template's `live` may name several sources (`sources`, #193). A player that knows only 5
  *      and 6 refuses such a template, so the server tells it to reload, as for 4.
+ *   8  a `list` field's `item` may declare an `image` property, carrying a `NewsImage` (#196). A
+ *      player that knows only 6 and 7 refuses such a template, so the server tells it to reload,
+ *      as for 4.
  */
-export const MANIFEST_SCHEMA = 7;
+export const MANIFEST_SCHEMA = 8;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -81,11 +84,14 @@ export type ScalarFieldDef =
  */
 export const MAX_URL_BYTES = 2048;
 
+/** Field types a list row (`FieldDef` of type `list`) may declare: any scalar, or an optional image (`NewsImage`). */
+export type ListItemFieldDef = ScalarFieldDef | { type: 'image'; label: string };
+
 export type FieldDef =
   | ScalarFieldDef
   | { type: 'image'; label: string }
-  /** Repeating rows, such as menu items or calendar events. Each row is an object of scalar fields. */
-  | { type: 'list'; label: string; item: Record<string, ScalarFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
+  /** Repeating rows, such as menu items, calendar events or news stories. Each row holds scalar fields and optional image fields. */
+  | { type: 'list'; label: string; item: Record<string, ListItemFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
 
 /** `template.json`, written by the template author. */
 export interface TemplateManifest {
@@ -522,8 +528,10 @@ export interface FrameTheme {
 export interface InitPayload {
   data: Record<string, unknown>;
   /**
-   * Image fields, by field name, and under `sampleAsset(field)` the sample of a field's image when
-   * its file has one (`ManifestFile.sample`). The SDK turns each into an object URL.
+   * Image fields, by field name; under `sampleAsset(field)` the sample of a field's image when
+   * its file has one (`ManifestFile.sample`); and under `rowAsset(field, index, prop)` (and
+   * `rowAsset(field, index, prop, 'thumb')`) a list row's image blobs when held. The SDK turns
+   * each into an object URL.
    */
   assets: Record<string, Blob>;
   /** How long this play lasts. The template fits its outro to it. */
@@ -944,6 +952,15 @@ export const MAX_SYNC_PLAY_COUNTS = 500;
  */
 export const MAX_SYNC_SOURCES = 256;
 
+/** The most held feed-image blob hashes a screen may report in `SyncRequest.blobs`. */
+export const MAX_SYNC_BLOBS = 256;
+
+/**
+ * The most missing feed-image blob hashes one `SyncResponse.blobs` asks a screen to fetch (one
+ * full 10-story news source's lead files and thumbnails); any more arrive on the next sync.
+ */
+export const MAX_SYNC_RESPONSE_BLOBS = 20;
+
 /**
  * The largest `POST /v1/device/sync` body the server reads, in bytes; a larger one is refused (413)
  * before it is parsed. A sync holds at most MAX_SYNC_PLAY_COUNTS counts (about 50 kB). A player
@@ -986,6 +1003,8 @@ export interface SyncRequest {
   snapshots: Record<string, number>;
   /** Live values and snapshots refused since the player started, by source id: a broken feed shows here. */
   dataRejected?: Record<string, number>;
+  /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
+  blobs?: Sha256[];
 }
 
 export interface SyncResponse {
@@ -1009,6 +1028,11 @@ export interface SyncResponse {
    * does not go stale and the data is not sent again.
    */
   checked?: Record<string, { version: number; checkedAt: string }>;
+  /**
+   * Feed image blob hashes referenced by the screen's snapshots that it did not report holding in
+   * `SyncRequest.blobs`, at most `MAX_SYNC_RESPONSE_BLOBS`. Fetched from `/v1/device/blobs/:sha256`.
+   */
+  blobs?: Sha256[];
   /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */
   socketTicket: string;
   commands: DeviceCommand[];
