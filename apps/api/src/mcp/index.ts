@@ -77,7 +77,8 @@ const RATE_LIMITED = -32000;
 const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 
 const INSTRUCTIONS = `SignForge runs digital signage. You act as one member in one organization, with the scopes they granted; the tools listed are the ones you may use.
-- Changes are drafts. Screens show them only once published; without content:publish, ask a person with request_publish, pinning each draft at the version you read, and follow it with get_publish_request.
+- Changes are drafts. Screens show them only once published; without content:publish, ask a person with request_publish, pinning each draft at the version you read, and follow it with read({ type: 'publish_request', ids }).
+- Read anything with read: a type, and ids or a filter. describe(type) gives a type's filters and fields, once per type before you filter it.
 - Updates take ifVersion: send the version you read. A conflict means someone changed it since: read it again, then decide.
 - Creating tools take an optional idempotencyKey: send the same key when you retry a creation, and a new one for each new thing.
 - Limits per grant: 120 calls a minute (tools/list included), 30 changes a minute and 2,000 a UTC day. Over one, a call is refused with rate_limited and retryAfterSeconds; wait that long.

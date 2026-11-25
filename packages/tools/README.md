@@ -48,6 +48,10 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 
 ## The tools
 
+### `read` and `describe` (#345)
+
+Agents read every type with one tool, `read({ type, ids?, filter?, query?, detail?, fields?, limit?, cursor? })`, and learn a type with `describe({ type })`. Each type is read by today's own read tools (`READ_TYPES` in `src/read.ts`), run in the same call through `ctx.run`: with the dispatcher's role and scope check and input parse, through the same scoped repositories, and one count against an agent's limits. `ids` (up to 50) reads by the type's get tool, each row in full with `detail: "full"`; without them, the list tool's page. `detail` is `summary` by default, a fixed field list per type (a template's: its key, name, and its latest approved version's id, orientations and field names). A filter, field, query or `ids` the type does not take is refused with `invalid_input` naming the right ones. Listings narrow `type` to what the caller's role may read (`listedInput`). Today's read tools stay in the registry for the CMS and for clients that call them by name; `/mcp` and the drawer list `read` and `describe` in their place (`READ_TOOLS`).
+
 | Name | Scope | Min role | Input | Output |
 | --- | --- | --- | --- | --- |
 | `list_screens` | content:read | viewer | `{ selector?, limit?, cursor? }` | `{ screens: Screen[], next }`, by id; only those the selector matches |

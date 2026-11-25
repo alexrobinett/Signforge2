@@ -20,6 +20,7 @@ import { memberTools } from './members';
 import { pairingTools } from './pairing';
 import { agentDraftTools } from './agent-drafts';
 import { playlistTools } from './playlists';
+import { readTools } from './read';
 import { publishRequestTools } from './publish-requests';
 import { publishTools } from './publish';
 import { scheduleTools } from './schedule';
@@ -30,7 +31,8 @@ import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
 import { videoTools } from './videos';
 
-export const TOOLS: readonly AnyTool[] = [
+/** Every tool but `read` and `describe`, which read and describe these. */
+const BASE_TOOLS: readonly AnyTool[] = [
   ...screenTools,
   ...pairingTools,
   ...groupTools,
@@ -67,6 +69,8 @@ function build<D extends DataScope>(tools: readonly AnyTool<D>[]): ReadonlyMap<s
   }
   return map;
 }
+
+export const TOOLS: readonly AnyTool[] = [...BASE_TOOLS, ...readTools(build(BASE_TOOLS))];
 
 export const registry = build(TOOLS);
 export const platformRegistry = build(PLATFORM_TOOLS);

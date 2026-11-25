@@ -11,6 +11,7 @@ import { type AgentCall, type AgentUsage, type AiProviderName, CMS_AGENT_CLIENT_
 
 export { CMS_AGENT_CLIENT_ID };
 import type { UploadSigner } from './upload';
+import type { Grant } from './dispatch';
 
 export { SCOPES };
 export type Scope = (typeof SCOPES)[number];
@@ -319,6 +320,12 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
    * refused `forbidden` with `why` unless the caller may publish now, and the right held to the commit as a publish's is.
    */
   publishRight: (why: string) => void;
+  /**
+   * Run another read tool for this caller, as the dispatcher would (its role and scope checked, its input parsed, the
+   * services it needs there), inside this call: no other count against an agent's limits, the same D1 budget (#345,
+   * `read`). Refused with the `ToolError` dispatch would answer.
+   */
+  run: (name: string, input: unknown) => Promise<unknown>;
 }
 
 /**
@@ -435,6 +442,8 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
   needs?: readonly N[];
   input: S;
+  /** The input as a caller with `grant` is listed it, when narrower than `input` (read's types, #345); `input` still checks every call. */
+  listedInput?: (grant: Grant) => z.ZodType;
   /**
    * What the tool returns. Shown to agents as JSON Schema, and checked against every output in
    * tests (./output.ts); production trusts the handler. A list tool pages (./paging.ts).

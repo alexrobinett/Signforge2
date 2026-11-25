@@ -1,6 +1,6 @@
 // The registry as `/mcp` lists it, and what a call answers (M4-06): every tool, for every role and
 // scope, as pure functions, with no request. mcp.test.ts runs a few through the route.
-import { type DispatchResult, describeTools, type Grant, type Members, ROLES, registry, SCOPES, type ToolServices } from '@signforge/tools';
+import { type DispatchResult, describeTools, type Grant, type Members, READ_TOOLS, ROLES, registry, SCOPES, type ToolServices } from '@signforge/tools';
 import { createExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -45,7 +45,8 @@ describe('tools/list', () => {
       const permitted = describeTools(registry, grant).map((t) => t.name);
       const listed = listedTools(grant, AGENT);
       // Only the member tools and the people-only ones drop out: a tool needing any other service would be listed, so losing one fails here.
-      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members') || registry.get(name)?.people);
+      // And each type's own read, listed as `read` (#345).
+      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members') || registry.get(name)?.people || READ_TOOLS.has(name));
       expect(
         listed.map((t) => t.name),
         `${grant.role} ${grant.editorsPublish}`,
@@ -94,7 +95,7 @@ describe('tools/list', () => {
     for (const name of ['roll_back_publish', 'end_takeover', 'disconnect'])
       expect(listedTools(owner, AGENT).find((t) => t.name === name)?.annotations?.destructiveHint, name).toBe(true);
     const hints = (name: string) => listedTools(owner, AGENT).find((t) => t.name === name)?.annotations;
-    expect(hints('list_screens')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
+    expect(hints('read')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('cancel_invitation')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
@@ -103,7 +104,7 @@ describe('tools/list', () => {
   it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound (mcp.test.ts: a call still checks them)', () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
     const listed = listedTools(owner, AGENT);
-    expect(listed.find((t) => t.name === 'list_screens')?.title).toBe('List screens');
+    expect(listed.find((t) => t.name === 'check_publish_request')?.title).toBe('Check publish request');
     for (const t of listed) {
       expect(t.title, t.name).toMatch(/^[A-Z][a-z0-9 ]+$/);
       const json = JSON.stringify(t.inputSchema);

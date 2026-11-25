@@ -4,11 +4,11 @@
 // request declares; any other call refused unrun; tool outputs and earlier cards fenced as data; the turn
 // and the rate limit before any model call; each budget ending the turn with a sentence; and a turn the
 // browser abandons stopped. No network: the model and DNS are stubbed.
-import { describeTools, grantOf, registry } from '@signforge/tools';
+import { describeTools, grantOf, READ_TOOLS, registry, toolsOf } from '@signforge/tools';
 import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
+import { drawerReadTypes, drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
 import { CLIENT_SAYS, plant, reads, SAYS } from './planted';
 import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
 import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ConfirmCard, type ToolCard } from '../src/agent/chat-shapes';
@@ -100,7 +100,7 @@ async function setup(
     guards?: FetchGuards;
   } = {},
 ) {
-  const m = model(options.steps ?? [{ calls: [{ name: 'list_screen_status', input: {} }] }, ANSWER]);
+  const m = model(options.steps ?? [{ calls: [{ name: 'read', input: { type: 'screen_status' } }] }, ANSWER]);
   const guards: FetchGuards = options.guards ?? { fetch: async () => new Response('no', { status: 404 }), resolve: async () => [PUBLIC] };
   const t = testApp({ agent: { reach: { fetch: m.fetch, guards }, now: options.now ?? (() => NOON) } });
   const owner = new Client(t);
@@ -172,7 +172,15 @@ describe('the tools the drawer offers', () => {
 
   it('are, for each role, its reads less every tool that reaches an address or only a person sets: find_places stays, read_table does not', async () => {
     for (const role of ['viewer', 'editor', 'owner'] as const) {
-      const names = drawerTools(await grant(role)).map((t) => t.name);
+      const offered = drawerTools(await grant(role)).map((t) => t.name);
+      // Each type is read through `read` (#345): what the drawer reads is its tools and the tools of its read types.
+      const types = drawerReadTypes(await grant(role));
+      const names = [...offered.filter((n) => n !== 'read' && n !== 'describe'), ...types.flatMap(toolsOf)];
+      expect(offered, role).toEqual(expect.arrayContaining(['read', 'describe']));
+      expect(
+        offered.filter((n) => READ_TOOLS.has(n)),
+        role,
+      ).toEqual([]);
       for (const name of names) {
         const tool = registry.get(name);
         expect(tool?.mutates, `${role}: ${name}`).toBe(false);
@@ -183,7 +191,8 @@ describe('the tools the drawer offers', () => {
         expect(tool?.people, `${role}: ${name}`).not.toBe(true);
       }
       expect(names, role).toContain('find_places');
-      expect(names, role).toContain('list_screen_status');
+      expect(types, role).toContain('screen_status');
+      for (const type of ['connection', 'alert_delivery', 'alert_channels'] as const) expect(types, `${role}: ${type}`).not.toContain(type);
       for (const name of [
         'read_table',
         'get_alert_channels',
@@ -196,14 +205,14 @@ describe('the tools the drawer offers', () => {
       ])
         expect(names, `${role}: ${name}`).not.toContain(name);
       // The pending invitations, and their addresses, are an owner's to read, as the tool says (#425).
-      expect(names.includes('list_invitations'), role).toBe(role === 'owner');
+      expect(types.includes('invitation'), role).toBe(role === 'owner');
     }
   });
 });
 
 describe('POST /api/agent/chat', () => {
   it('answers a question with a card, through read tools as the member via cms-agent, streaming each call, writing nothing', async () => {
-    const s = await setup({ steps: [{ calls: [{ name: 'list_screens', input: {} }] }, ANSWER] });
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }, ANSWER] });
     const before = await s.scope.auditLog.list({ limit: 50 });
     const res = await s.ask();
     expect(res.status).toBe(200);
@@ -293,12 +302,13 @@ describe('POST /api/agent/chat', () => {
       );
       for (const name of [...reads.map((t) => t.name), ...draftTools(grant).map((t) => t.name), ...Object.keys(CONFIRMABLE)])
         expect(TOOL_CARDS[name]?.title, `${role}: ${name}`).toBeTruthy();
-      expect(drawerTools(grant).map((t) => t.name)).toEqual(reads.filter((t) => !(t.name in CONFIRMABLE)).map((t) => t.name));
+      // Each type's own read is reached through `read` (#345), and keeps its card for it.
+      expect(drawerTools(grant).map((t) => t.name)).toEqual(reads.filter((t) => !(t.name in CONFIRMABLE) && !READ_TOOLS.has(t.name)).map((t) => t.name));
     }
   });
 
   it('stops a turn the browser abandons: its model call aborted, and no tool runs after it (#335)', async () => {
-    const s = await setup({ steps: [{ calls: [{ name: 'list_screens', input: {} }] }, { hang: true }, ANSWER] });
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }, { hang: true }, ANSWER] });
     const before = await s.scope.auditLog.list({ limit: 50 });
     const reader = (await s.ask()).body!.getReader();
     // Read until the first tool's card: the second model call is then waiting on its answer.
@@ -324,7 +334,7 @@ describe('POST /api/agent/chat', () => {
 
   it("streams only the card's text, after a tool step too, then the card as the server parsed it: never a preamble, `{` first or not (review of #402)", async () => {
     for (const preamble of ['Let me check the screens first, PREAMBLE.', '{Note to self: PREAMBLE, then call the tool}']) {
-      const s = await setup({ steps: [{ text: preamble, calls: [{ name: 'list_screens', input: {} }] }, ANSWER] });
+      const s = await setup({ steps: [{ text: preamble, calls: [{ name: 'read', input: { type: 'screen' } }] }, ANSWER] });
       const all = await raw(await s.ask());
       expect(JSON.stringify(all), preamble).not.toContain('PREAMBLE');
       expect(
@@ -363,7 +373,7 @@ describe('POST /api/agent/chat', () => {
       resolve: async () => [PUBLIC],
       fetch: async () =>
         ++n === 1
-          ? completionStream({ reasoning: 'SECRET-REASONING', toolCalls: [{ id: 'c1', name: 'list_screens', arguments: '{}' }] }, 'tool_calls')
+          ? completionStream({ reasoning: 'SECRET-REASONING', toolCalls: [{ id: 'c1', name: 'read', arguments: '{"type":"screen"}' }] }, 'tool_calls')
           : completionStream({ reasoning: 'SECRET-REASONING', content: JSON.stringify(CARD) }, 'stop'),
     };
     const s = await setup({ guards, save: ENDPOINT });
@@ -391,7 +401,7 @@ describe('POST /api/agent/chat', () => {
 
   describe('ends a turn over its budget with a sentence', () => {
     it(`at more than ${MAX_CALLS} tool calls, running no more than ${MAX_CALLS}`, async () => {
-      const s = await setup({ steps: [{ calls: Array.from({ length: MAX_CALLS + 1 }, () => ({ name: 'list_screens', input: {} })) }] });
+      const s = await setup({ steps: [{ calls: Array.from({ length: MAX_CALLS + 1 }, () => ({ name: 'read', input: { type: 'screen' } })) }] });
       const lines = await events(await s.ask());
       expect(lines.filter((e) => e.type === 'call')).toHaveLength(MAX_CALLS);
       expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
@@ -402,13 +412,13 @@ describe('POST /api/agent/chat', () => {
     it('at 25 seconds, on the clock it is given', async () => {
       let t = NOON;
       // Each reading of the clock is 10 seconds on: the third model call would start past 25.
-      const s = await setup({ now: () => (t += 10_000), steps: [{ calls: [{ name: 'list_screens', input: {} }] }] });
+      const s = await setup({ now: () => (t += 10_000), steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }] });
       const lines = await events(await s.ask());
       expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('longer than 25 seconds') });
     });
 
     it("at more D1 statements than its tools' 40: reading every template's versions", async () => {
-      const s = await setup({ steps: [{ calls: [{ name: 'list_templates', input: {} }] }, ANSWER] });
+      const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'template' } }] }, ANSWER] });
       for (let i = 0; i < 45; i++) await s.scope.templates.insert({ key: `t${i}`, name: `T${i}` });
       expect((await events(await s.ask())).at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more reading') });
     });
@@ -424,7 +434,7 @@ describe('POST /api/agent/chat', () => {
           if (url.endsWith('/r1')) return Response.redirect(`${base}/r2`, 307);
           if (url.endsWith('/r2')) return Response.redirect(`${base}/r3`, 307);
           n++;
-          return completionStream({ toolCalls: [{ id: `c${n}`, name: 'list_screens', arguments: '{}' }] }, 'tool_calls');
+          return completionStream({ toolCalls: [{ id: `c${n}`, name: 'read', arguments: '{"type":"screen"}' }] }, 'tool_calls');
         },
       };
       const s = await setup({
@@ -552,8 +562,8 @@ describe('POST /api/agent/chat', () => {
       steps: [
         {
           calls: [
-            { name: 'list_screen_status', input: {} },
-            { name: 'list_publishes', input: {} },
+            { name: 'read', input: { type: 'screen_status' } },
+            { name: 'read', input: { type: 'publish' } },
           ],
         },
         ANSWER,
@@ -738,7 +748,7 @@ describe('confirmation cards (#269)', () => {
   });
 
   it('goes on from the turn it paused, with what it had spent: a press gets no new budget (review of #406)', async () => {
-    const reads = Array.from({ length: MAX_CALLS - 1 }, () => ({ name: 'list_screens', input: {} }));
+    const reads = Array.from({ length: MAX_CALLS - 1 }, () => ({ name: 'read', input: { type: 'screen' } }));
     const ask: { called?: Record<string, unknown> } = {};
     let n = 0;
     const s = await setup({
@@ -749,7 +759,7 @@ describe('confirmation cards (#269)', () => {
           ? { calls: reads }
           : n === 2
             ? { calls: [{ name: 'start_takeover', input: ask.called }] }
-            : { calls: [{ name: 'list_screens', input: {} }] };
+            : { calls: [{ name: 'read', input: { type: 'screen' } }] };
       },
     });
     const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
@@ -808,7 +818,7 @@ describe('confirmation cards (#269)', () => {
     const s = await setup({
       steps: (body) => {
         const n = body.messages.length;
-        if (n === 1) return { calls: [{ name: 'list_invitations', input: {} }] };
+        if (n === 1) return { calls: [{ name: 'read', input: { type: 'invitation' } }] };
         if (n === 3) return { calls: [{ name: 'cancel_invitation', input: { invitationId: ask.id } }] };
         return ANSWER;
       },
@@ -828,7 +838,7 @@ describe('confirmation cards (#269)', () => {
   });
 
   it('offers an editor no list of invitations: a call to it is refused unrun, and no invitee reaches the model or the browser (#425)', async () => {
-    const s = await setup({ role: 'editor', steps: [{ calls: [{ name: 'list_invitations', input: {} }] }, ANSWER] });
+    const s = await setup({ role: 'editor', steps: [{ calls: [{ name: 'read', input: { type: 'invitation' } }] }, ANSWER] });
     await s.owner.ok('/api/auth/organization/invite-member', { email: 'hidden-425@signforge.test', role: 'viewer' });
     const all = await raw(await s.ask('Who is invited?'));
     expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('list_invitations');
@@ -838,7 +848,7 @@ describe('confirmation cards (#269)', () => {
   });
 
   it("lists the invitations within the turn's budget (#425)", async () => {
-    const s = await setup({ steps: [{ calls: [{ name: 'list_invitations', input: {} }] }, ANSWER] });
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'invitation' } }] }, ANSWER] });
     for (const n of [1, 2, 3]) await s.owner.ok('/api/auth/organization/invite-member', { email: `budget-425-${n}@signforge.test`, role: 'viewer' });
     const turn = () =>
       measure(async (b) => {
@@ -1018,11 +1028,11 @@ describe('confirmation cards (#269)', () => {
   });
 
   it('tells the model a read has a malformed id, before it runs: no card, and no call of the turn spent', async () => {
-    const s = await setup({ steps: [{ calls: [{ name: 'get_screen', input: { screenId: 'bad id!' } }] }, ANSWER] });
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'screen', ids: ['bad id!'] } }] }, ANSWER] });
     const lines = await events(await s.ask());
     const told = s.model.asked[1].messages.at(-1).content[0];
     expect(told).toMatchObject({ type: 'tool_result', is_error: true });
-    expect(JSON.stringify(told.content)).toContain('not a valid screen id');
+    expect(JSON.stringify(told.content)).toContain('not a valid record id');
     expect(lines).toEqual([{ type: 'answer', card: { ...CARD, trace: [], drafts: [] } }]);
   });
 
@@ -1381,7 +1391,7 @@ describe('the drawer drafting changes (#268)', () => {
   it('proposes a change with what it changes and its ifVersion, writing nothing until the person saves it, as the member via cms-agent', async () => {
     const d = await drafting({
       script: ({ spot }) => [
-        { calls: [{ name: 'get_spot', input: { spotId: spot } }] },
+        { calls: [{ name: 'read', input: { type: 'spot', ids: [spot] } }] },
         {
           calls: [
             {
@@ -1675,7 +1685,22 @@ describe('prompt injection through content, in the drawer (#122)', () => {
     });
     const { user } = (await s.owner.session()).body;
     const planted = await plant(s.owner.t, s.owner, user.id, s.org.id);
-    const calls = [...reads(planted), ['get_spot', { spotId: 'spt_missing' }] as const].map(([name, input]) => ({ name, input }));
+    // Each through `read` (#345), in full, as the drawer reads them.
+    const asRead: Record<string, (input: Record<string, unknown>) => Record<string, unknown>> = {
+      list_spots: () => ({ type: 'spot' }),
+      list_playlists: () => ({ type: 'playlist' }),
+      list_members: () => ({ type: 'member' }),
+      list_assets: () => ({ type: 'asset' }),
+      get_data_source: (i) => ({ type: 'data_source', ids: [i.dataSourceId] }),
+      list_templates: () => ({ type: 'template' }),
+      get_publish_request: (i) => ({ type: 'publish_request', ids: [i.publishRequestId] }),
+      get_agent_draft: (i) => ({ type: 'agent_draft', filter: i }),
+      list_audit_log: () => ({ type: 'audit_entry' }),
+    };
+    const calls = [
+      ...reads(planted).map(([name, input]) => ({ name: 'read', input: { ...asRead[name]?.(input), detail: 'full' } })),
+      { name: 'read', input: { type: 'spot', ids: ['spt_missing'] } },
+    ];
     groups = Array.from({ length: Math.ceil(calls.length / 3) }, (_, i) => calls.slice(i * 3, i * 3 + 3));
     const streamed: string[] = [];
     for (const i of groups.keys()) streamed.push(JSON.stringify(await raw(await s.ask(`group-${i}`))));

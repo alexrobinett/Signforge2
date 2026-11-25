@@ -339,6 +339,41 @@ async function dispatchCall<D extends DataScope>(
     holdsPublish = true;
   };
 
+  const runRead = async (name: string, input: unknown): Promise<unknown> => {
+    const other = registry.get(name);
+    if (!other || other.mutates || other.people || tool.mutates) throw new Error(`${tool.name} cannot run ${name}`);
+    if (!permits(grant, other)) throw new ToolError('forbidden', `${name} needs the ${other.scope} scope and at least the ${other.minRole} role`);
+    const args = other.input.safeParse(input ?? {});
+    if (!args.success)
+      throw new ToolError(
+        'invalid_input',
+        z.prettifyError(args.error),
+        args.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      );
+    if (!provides(services, other.needs ?? [])) {
+      const lacking = (other.needs ?? []).filter((n) => services[n] === undefined).map((n) => SERVICE_WORDS[n]);
+      throw new ToolError('forbidden', `${name} needs ${lacking.join(' and ')}, and this caller has none`);
+    }
+    const output = await other.handler({
+      org: caller.org,
+      actor: caller.actor,
+      role: caller.role,
+      scopes: effectiveScopes(grant),
+      confirmed: caller.confirmed !== undefined,
+      input: args.data,
+      blobs: caller.blobs,
+      services,
+      write,
+      notify,
+      deliverNow,
+      onDiscard,
+      publishRight,
+      run: runRead,
+    });
+    checkOutput(other, output);
+    return output;
+  };
+
   const run = async (): Promise<DispatchResult> => {
     let output: unknown;
     holdsPublish = false;
@@ -357,6 +392,7 @@ async function dispatchCall<D extends DataScope>(
         deliverNow,
         onDiscard,
         publishRight,
+        run: runRead,
       });
     } catch (err) {
       if (err instanceof ToolError) {
@@ -557,7 +593,7 @@ export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant
       scope: t.scope,
       minRole: t.minRole,
       mutates: t.mutates,
-      inputSchema: new ListedInput(t.input),
+      inputSchema: new ListedInput(t.listedInput?.(grant) ?? t.input),
       outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));

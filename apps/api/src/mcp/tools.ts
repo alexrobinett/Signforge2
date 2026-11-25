@@ -3,7 +3,7 @@
  * give, so every tool's listing is tested without a request (test/mcp-tools.test.ts).
  */
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
-import { type DispatchResult, describeTools, type Grant, registry, type ToolServices } from '@signforge/tools';
+import { type DispatchResult, describeTools, type Grant, READ_TOOLS, registry, type ToolServices } from '@signforge/tools';
 
 /** Tools that take something away for good: a person should look before an agent runs them. */
 const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
@@ -25,7 +25,8 @@ export function listedTools(grant: Grant, services: ToolServices): Tool[] {
   return describeTools(registry, grant).flatMap((described): Tool[] => {
     const tool = registry.get(described.name);
     const runnable = (tool?.needs ?? []).every((need) => services[need] !== undefined);
-    if (!tool || tool.people || !runnable || !isObjectSchema(described.inputSchema)) return [];
+    // Each type's own read is listed as `read` (#345); called by name, it still answers.
+    if (!tool || tool.people || READ_TOOLS.has(tool.name) || !runnable || !isObjectSchema(described.inputSchema)) return [];
     return [
       {
         name: described.name,
