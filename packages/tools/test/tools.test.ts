@@ -1,8 +1,10 @@
 // What each tool does in its own org.
-import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+import { scoped, STORAGE_GRACE_MS } from '@signforge/db';
+import { queueDeletedFiles, seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller } from '../src';
+import { racing } from './calls';
 import { memberOf } from './member';
 
 let o: SeededOrg;
@@ -114,6 +116,43 @@ describe('publish_manifest_to_screen', () => {
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: true });
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: false });
     expect((await call('get_screen', { screenId: o.screen })).screen).toMatchObject({ desiredManifestId: m2, previousManifestId: m1 });
+  });
+
+  it('refuses a manifest naming a file the storage sweep deleted after the push checked it, until the push uploads it again (#432)', async () => {
+    const AT = Date.UTC(2026, 4, 1, 9);
+    vi.useFakeTimers({ toFake: ['Date'], now: AT });
+    try {
+      const file = '7'.repeat(64);
+      const manifestId = '3'.repeat(64);
+      await env.BLOBS.put(manifestKey(o.orgId, o.screen, manifestId), JSON.stringify({ files: { [file]: {} } }));
+      await queueDeletedFiles(env.DB, o.orgId, [file], AT - STORAGE_GRACE_MS);
+      const sweep = scoped(env.DB, o.orgId);
+      // The seeded org's kept manifests looked for, as the sweep does first: stored nowhere here.
+      const unindexed = await sweep.storage.unindexed(AT, 100);
+      await sweep.commit(
+        sweep.storage.stage.index(
+          unindexed.map((k) => ({ screenId: k.screenId, id: k.manifestId, files: null })),
+          AT,
+        ).writes,
+      );
+      // Between the tool's reads and its batch, the sweep claims the file, deletes it and forgets its claim.
+      const raced = racing(owner, async () => {
+        expect(await sweep.storage.lease('sweep', AT)).toBe(true);
+        const due = await sweep.storage.claim('sweep', AT, 90);
+        expect(due.files).toEqual([file]);
+        await sweep.commit(sweep.storage.stage.forget(due, 'sweep', AT).writes);
+      });
+      const input = { screenId: o.screen, manifestId };
+      expect(await dispatch(registry, 'publish_manifest_to_screen', input, raced)).toMatchObject({ ok: false, error: 'conflict' });
+      expect((await call('get_screen', { screenId: o.screen })).screen.desiredManifestId).not.toBe(manifestId);
+      // Pushed again, its read finds the deletion and says so.
+      expect(await refusal('publish_manifest_to_screen', input)).toMatchObject({ ok: false, error: 'conflict', details: { deleted: [file] } });
+      // Uploaded again (/admin clears the tombstone as it stores the bytes): published.
+      await sweep.commit(sweep.storage.stage.restored([file], AT + 1, AT + 1));
+      expect(await call('publish_manifest_to_screen', input)).toMatchObject({ changed: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('will not publish a manifest uploaded for another screen', async () => {

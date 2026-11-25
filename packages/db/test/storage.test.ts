@@ -6,7 +6,7 @@
 // a publish's guards; and lists past D1's 100 bound values.
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { orgsWithStorageDue, scoped, STORAGE_GRACE_MS, STORAGE_LEASE_MS, StaleVersionError } from '../src/index';
+import { nothingDue, orgsWithStorageDue, scoped, STORAGE_GRACE_MS, STORAGE_LEASE_MS, StaleVersionError } from '../src/index';
 import { queueDeletedFiles, runSql, seedOrganization, testScope } from '../src/testing';
 
 const T0 = Date.UTC(2026, 0, 1);
@@ -54,6 +54,8 @@ async function claimed(orgId: string, at: number, owner = 'sweep-a') {
 }
 const queuedAt = async (orgId: string, hash: string) =>
   (await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ q: number }>())?.q;
+const deletedAt = async (orgId: string, hash: string) =>
+  (await env.DB.prepare('SELECT deleted_at AS d FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ d: number | null }>())?.d;
 const m = (c: string) => `m${c.repeat(63)}`;
 /** Each pointer by which a screen keeps a manifest: its column, and the SQL that sets it to a bound id. */
 const POINTERS: [string, string][] = [
@@ -262,7 +264,8 @@ describe("the sweep's lease and claims (review of #429, 7)", () => {
     ).rejects.toBeInstanceOf(StaleVersionError);
     expect(await queuedAt(orgId, sha('1'))).toBe(T0);
     await org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-b', DUE + STORAGE_LEASE_MS).writes);
-    expect(await queuedAt(orgId, sha('1'))).toBeUndefined();
+    // Its object deleted: kept as a tombstone, at the time it was forgotten (#432).
+    expect(await deletedAt(orgId, sha('1'))).toBe(DUE + STORAGE_LEASE_MS);
     const [row] = (await org.auditLog.list({ limit: 5 })).filter((e) => e.action === 'sweep_storage');
     expect(row).toMatchObject({ actorKind: 'system', actorId: 'storage-sweep', clientId: null, at: DUE + STORAGE_LEASE_MS });
   });
@@ -578,15 +581,16 @@ describe("the storage sweep's queries (review of #431, round 2)", () => {
         .bind(...q.binds)
         .all<{ detail: string }>()
     ).results.map((r) => r.detail);
-  /** Its reads of stored_manifests: each through the live rows' index, never a scan of the table. */
-  const throughLiveIndex = (details: string[]) => {
-    const reads = details.filter((d) => /^(?:SCAN|SEARCH) (?:stored_manifests|m)\b/.test(d));
+  /** Its reads of `table` (or its alias): one through `index` at least, and none a scan of the table. */
+  const searchedThrough = (details: string[], table: string, alias: string, index: string) => {
+    const reads = details.filter((d) => new RegExp(`^(?:SCAN|SEARCH) (?:${table}|${alias})\\b`).test(d));
     expect(
-      reads.some((d) => d.includes('USING INDEX stored_manifests_live_idx')),
+      reads.some((d) => d.includes(`USING INDEX ${index}`) || d.includes(`USING COVERING INDEX ${index}`)),
       details.join('\n'),
     ).toBe(true);
     for (const d of reads) expect(d.startsWith('SCAN'), d).toBe(false);
   };
+  const throughLiveIndex = (details: string[]) => searchedThrough(details, 'stored_manifests', 'm', 'stored_manifests_live_idx');
 
   it('finds orgs with old manifests, and an org’s due manifests, through the live rows’ partial index', async () => {
     const { orgId, screens } = await fresh(1);
@@ -607,6 +611,36 @@ describe("the storage sweep's queries (review of #431, round 2)", () => {
     // The claim's and the release's look for due manifests.
     expect(touching).toHaveLength(2);
     for (const q of touching) throughLiveIndex(await plan(q));
+  });
+
+  it('finds orgs with due files or unfinished uploads, and an org’s own, through org-led indexes (#433)', async () => {
+    const { orgId } = await fresh();
+    await queueDeletedFiles(env.DB, orgId, [sha('p')], T0);
+    // A tombstone too (#432): outside the due files' index, inside the tombstones'.
+    await run('INSERT INTO blob_deletes (org_id, sha256, queued_at, deleted_at) VALUES (?, ?, ?, ?)', orgId, sha('o'), T0, T0);
+    const upload = await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Left', sha256: sha('q'), type: 'video/mp4', size: 1 });
+    await run('UPDATE assets SET created_at = ? WHERE id = ?', T0, upload.id);
+    const orgs = recording(env.DB);
+    expect(await orgsWithStorageDue(orgs.proxy, DUE, 1000)).toContain(orgId);
+    const listing = await plan(orgs.seen[0]!);
+    searchedThrough(listing, 'blob_deletes', 'b', 'blob_deletes_due_idx');
+    searchedThrough(listing, 'blob_deletes', 't', 'blob_deletes_tombstone_idx');
+    searchedThrough(listing, 'assets', 'a', 'assets_pending_idx');
+    throughLiveIndex(listing);
+    // The org's own claim: its due files and its unfinished uploads.
+    const sweep = recording(env.DB);
+    const scope = scoped(sweep.proxy, orgId);
+    expect(await scope.storage.lease('sweep-a', DUE)).toBe(true);
+    const due = await scope.storage.claim('sweep-a', DUE, 90);
+    expect(due).toMatchObject({ files: [sha('p')], uploads: [{ assetId: upload.id }] });
+    const claimFiles = sweep.seen.find((q) => q.query.startsWith('update "blob_deletes" set "claim_owner"'));
+    const pending = sweep.seen.find((q) => q.query.startsWith('select "id", "kind", "sha256" from "assets"'));
+    searchedThrough(await plan(claimFiles!), 'blob_deletes', 'blob_deletes', 'blob_deletes_due_idx');
+    searchedThrough(await plan(pending!), 'assets', 'assets', 'assets_pending_idx');
+    // Its release prunes old tombstones through theirs (review of #434, 5).
+    await scope.commit(scope.storage.stage.release('sweep-a', DUE).writes);
+    const prune = sweep.seen.find((q) => q.query.startsWith('delete from "blob_deletes" where ("blob_deletes"."org_id", "blob_deletes"."sha256") IN'));
+    searchedThrough(await plan(prune!), 'blob_deletes', 'blob_deletes', 'blob_deletes_tombstone_idx');
   });
 
   it('starts a manifest’s grace period when a real store replaces a look that found no object', async () => {
@@ -658,5 +692,90 @@ describe('the guards a manifest writer holds to its commit (#235)', () => {
       .bind(orgId, s, m('o'))
       .first<{ t: number }>();
     expect(row?.t).toBe(DUE + 4);
+  });
+});
+
+describe('a deleted file’s tombstone (#432)', () => {
+  /** Queues `hashes` at T0, then claims, "deletes" and forgets them at DUE + 1: tombstones from then on. */
+  async function swept(orgId: string, hashes: string[]) {
+    const org = scoped(env.DB, orgId);
+    await queueDeletedFiles(env.DB, orgId, hashes, T0);
+    const due = await claimed(orgId, DUE);
+    expect(due.files.toSorted()).toEqual(hashes.toSorted());
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 1).writes);
+  }
+  const AFTER = DUE + DAY;
+
+  it('is never claimed or listed again, refuses a writer naming it, and goes when the bytes are stored again', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('t')]);
+    expect(await deletedAt(orgId, sha('t'))).toBe(DUE + 1);
+    expect(await orgsWithStorageDue(env.DB, AFTER, 1000)).not.toContain(orgId);
+    expect((await claimed(orgId, AFTER)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', AFTER).writes);
+    // Named again by an asset, it stays: the object is gone until a writer stores the bytes.
+    await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Again', sha256: sha('t'), type: 'video/mp4', size: 1 });
+    expect((await claimed(orgId, AFTER + DAY)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', AFTER + DAY).writes);
+    expect(await org.storage.deleted([sha('t'), sha('w')], AFTER)).toEqual([sha('t')]);
+    await expect(org.commit(org.storage.stage.notDeleted([sha('w'), sha('t')], AFTER))).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit(org.storage.stage.notDeleted([sha('w')], AFTER));
+    // Stored again by a writer that started after the deletion: the tombstone goes, and the writer passes.
+    await org.commit(org.storage.stage.restored([sha('t'), sha('w')], AFTER, DUE + 2));
+    expect(await org.storage.deleted([sha('t')], AFTER)).toEqual([]);
+    await org.commit(org.storage.stage.notDeleted([sha('t')], AFTER));
+  });
+
+  it('is kept from a writer that started before it, and refuses one while the sweep claims the bytes (review of #434, 1)', async () => {
+    const { orgId, org } = await fresh();
+    // The writer started at DUE (before the sweep deleted at DUE + 1): its copy may be the one deleted. Refused, kept.
+    await swept(orgId, [sha('x')]);
+    await expect(org.commit(org.storage.stage.restored([sha('x')], AFTER, DUE))).rejects.toBeInstanceOf(StaleVersionError);
+    await expect(org.commit(org.storage.stage.restored([sha('x')], AFTER, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await deletedAt(orgId, sha('x'))).toBe(DUE + 1);
+    // A claim on the bytes as the writer commits: refused, whenever it started.
+    await queueDeletedFiles(env.DB, orgId, [sha('y')], T0);
+    expect((await claimed(orgId, DUE)).files).toEqual([sha('y')]);
+    await expect(org.commit(org.storage.stage.restored([sha('y')], DUE + 1, DUE + 1))).rejects.toBeInstanceOf(StaleVersionError);
+  });
+
+  it('says nothing once a week old, whether or not it was pruned (review of #434, 3)', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('z')]);
+    const weekOn = DUE + 1 + 7 * DAY;
+    expect(await org.storage.deleted([sha('z')], weekOn - 1)).toEqual([sha('z')]);
+    expect(await org.storage.deleted([sha('z')], weekOn)).toEqual([]);
+    await org.commit(org.storage.stage.notDeleted([sha('z')], weekOn));
+  });
+
+  it('is pruned a week on, in a quiet org too, a bounded number a sweep (review of #434, 5)', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('v')]);
+    // 600 more, deleted at DUE + 1 too: past the 500 one sweep prunes.
+    await run(
+      `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 599)
+       INSERT INTO blob_deletes (org_id, sha256, queued_at, deleted_at) SELECT ?, printf('%064d', i), ?, ? FROM n`,
+      orgId,
+      T0,
+      DUE + 1,
+    );
+    const count = async () => (await env.DB.prepare('SELECT count(*) AS n FROM blob_deletes WHERE org_id = ?').bind(orgId).first<{ n: number }>())?.n;
+    const weekOn = DUE + 1 + 7 * DAY;
+    // Nothing else is due, yet the org is listed for its old tombstones, and its sweep prunes them.
+    expect(await orgsWithStorageDue(env.DB, weekOn - 1, 1000)).not.toContain(orgId);
+    for (const left of [101, 0]) {
+      expect(await orgsWithStorageDue(env.DB, weekOn, 1000)).toContain(orgId);
+      expect(nothingDue(await claimed(orgId, weekOn))).toBe(true);
+      await org.commit(org.storage.stage.release('sweep-a', weekOn).writes);
+      expect(await count()).toBe(left);
+    }
+    expect(await orgsWithStorageDue(env.DB, weekOn, 1000)).not.toContain(orgId);
+  });
+
+  it('is queued afresh when its bytes are deleted again', async () => {
+    const { orgId } = await fresh();
+    await swept(orgId, [sha('u')]);
+    await queueDeletedFiles(env.DB, orgId, [sha('u')], DUE + 2);
+    expect({ queued: await queuedAt(orgId, sha('u')), deleted: await deletedAt(orgId, sha('u')) }).toEqual({ queued: DUE + 2, deleted: null });
   });
 });

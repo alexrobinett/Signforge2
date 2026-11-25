@@ -1,7 +1,7 @@
 // Asset tools: upload targets, the server's check of what landed in R2, usage and delete.
 // The files here are image headers only: the server reads type and size from the header and never
 // decodes. Real images through the browser and real presigned PUTs: packages/media/test/upload.test.ts.
-import { claimFileForSweep, seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg, testScope, tombstoneFile } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
@@ -479,6 +479,39 @@ describe('the storage sweep and uploads (#235, review of #429, 6)', () => {
     expect(await call('delete_asset', { assetId: pending.id })).toEqual({ deleted: pending.id });
     const row = await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(o.orgId, sha).first<{ q: number }>();
     expect(row?.q).toBe(AT);
+  });
+
+  const tombstone = (sha: string, at: number) => tombstoneFile(env.DB, o.orgId, sha, at);
+  const tombstoned = async (sha: string) => (await testScope(env.DB, o.orgId).storage.deleted([sha], AT)).length > 0;
+
+  it('reuses a held file only if the sweep has not deleted it, and is refused if it does before the commit (review of #434, 4)', async () => {
+    const files = await pair(40);
+    const [l, lc] = files.landscape;
+    await env.BLOBS.put(orgBlobKey(o.orgId, lc.sha256), l);
+    const input = (name: string) => ({ name, renditions: { landscape: files.landscape[1], portrait: files.portrait[1] } });
+    // Held: no URL for it. The sweep deletes it between the read and the commit: refused.
+    const raced = racing(owner, () => tombstone(lc.sha256, AT));
+    expect(await dispatch(registry, 'create_asset_upload', input('Raced'), raced)).toMatchObject({ ok: false, error: 'conflict' });
+    // Deleted (a copy is back under the key): uploaded again all the same.
+    const again = await call('create_asset_upload', input('Again'));
+    expect(again.uploads.map((u: { sha256: string }) => u.sha256)).toContain(lc.sha256);
+  });
+
+  it('clears a tombstone when it finishes an upload of those bytes, but not one stamped while it read them (review of #434, 3)', async () => {
+    const files = await pair(42);
+    const [, lc] = files.landscape;
+    await tombstone(lc.sha256, AT - 1);
+    const made = await upload('Re-uploaded', files);
+    expect(made.uploads.map((u: { sha256: string }) => u.sha256)).toContain(lc.sha256);
+    // The sweep deletes the bytes again as finalize reads them: refused, and the tombstone stays.
+    const raced = racing(owner, () => tombstone(lc.sha256, AT));
+    expect(await dispatch(registry, 'finalize_asset', { assetId: made.asset.id }, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await tombstoned(lc.sha256)).toBe(true);
+    // Uploaded again after that: verified, and its tombstone gone.
+    await tombstone(lc.sha256, AT - 1);
+    const retry = await upload('Re-uploaded again', files);
+    expect((await call('finalize_asset', { assetId: retry.asset.id })).asset.status).toBe('verified');
+    expect(await tombstoned(lc.sha256)).toBe(false);
   });
 
   it('refuses to start an upload of bytes the sweep has claimed, and starts it once the claim has run out', async () => {
