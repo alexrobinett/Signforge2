@@ -397,6 +397,18 @@ export async function createOrg(page: Page, name: string, address: string) {
   await hydrated(page);
 }
 
+/** A page's title as laid out: its lines, whether they are balanced, and whether any of it spills sideways (#382). */
+export async function titleLayout(page: Page) {
+  return page.getByRole('heading', { level: 1 }).evaluate((h) => {
+    const style = getComputedStyle(h);
+    return {
+      lines: Math.round(h.getBoundingClientRect().height / Number.parseFloat(style.lineHeight)),
+      balanced: style.textWrapStyle === 'balance',
+      spills: h.scrollWidth > h.clientWidth,
+    };
+  });
+}
+
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
 export const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotId}')`;
 

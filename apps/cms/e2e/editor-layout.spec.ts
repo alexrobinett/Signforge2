@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, newSpot, shots, signInAs } from './helpers';
+import { axe, createOrg, hydrated, newSpot, shots, signInAs, titleLayout } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.150';
@@ -53,6 +53,17 @@ test('at 1440×900 the stage is in the first viewport, in the spot and playlist 
   expect(playlist.y + playlist.height).toBeLessThanOrEqual(900);
   expect(playlist.gap).toBeLessThanOrEqual(2);
   await shots(page, '91-playlist-editor-stage-top');
+});
+
+test("a long name wraps in the editor's header, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
+  // It was cut to one line with an ellipsis, the end of the name lost.
+  await newSpot(page, 'Announcement', 'Harvest Night at the Riverside Market: lanterns, cider and a band');
+  expect(await titleLayout(page)).toEqual({ lines: 1, balanced: true, spills: false });
+  await axe(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await titleLayout(page)).toEqual({ lines: 2, balanced: true, spills: false });
+  await axe(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
 });
 
 test('the sidebar folds to an icon rail and back, by keyboard, with names and tooltips, and remembers it (#260)', async () => {
