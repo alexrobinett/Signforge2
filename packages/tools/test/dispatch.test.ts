@@ -194,10 +194,7 @@ describe('the registry', () => {
     ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
-      const schema = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === name)!.inputSchema as {
-        properties: Record<string, unknown>;
-        required?: string[];
-      };
+      const schema = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === name)!.inputSchema;
       expect(schema.properties, name).toHaveProperty('idempotencyKey');
       expect(schema.required ?? [], name).not.toContain('idempotencyKey');
     }

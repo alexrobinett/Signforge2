@@ -1,8 +1,8 @@
 {
   "id": "news",
-  "version": "1.4.2",
+  "version": "2.0.0",
   "name": "News",
-  "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
+  "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
   "fields": {
     "title": { "type": "text", "label": "Title", "default": "Latest news", "maxLength": 32 },
     "source": { "type": "text", "label": "Source credit", "default": "", "maxLength": 40 },
@@ -14,16 +14,23 @@
       "item": {
         "title": { "type": "text", "label": "Headline", "maxLength": 200 },
         "published": { "type": "text", "label": "Published (ISO time)", "default": "" },
-        "source": { "type": "text", "label": "Source", "default": "" }
+        "source": { "type": "text", "label": "Source", "default": "" },
+        "summary": { "type": "text", "label": "Summary", "default": "", "maxLength": 240 },
+        "image": { "type": "image", "label": "Photo" }
       }
     },
     "language": { "type": "text", "label": "Feed language (BCP 47, e.g. fr-FR)", "default": "", "maxLength": 35 },
-    "accent": { "type": "color", "label": "Accent colour", "default": "$brand.accent" },
-    "crawlSpeed": { "type": "number", "label": "Crawl speed (screen widths per minute)", "default": 6, "min": 2, "max": 20 }
+    "rotationSeconds": { "type": "number", "label": "Seconds per lead story", "default": 8, "min": 4, "max": 30 },
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "showImages": { "type": "boolean", "label": "Show photos", "default": true },
+    "showSummary": { "type": "boolean", "label": "Show the summary", "default": true },
+    "showList": { "type": "boolean", "label": "Show the story list", "default": true },
+    "showMeta": { "type": "boolean", "label": "Show the source and age", "default": true },
+    "showCrawl": { "type": "boolean", "label": "Show the crawl", "default": true }
   },
-  "duration": { "defaultMs": 15000, "minMs": 6000, "maxMs": 300000 },
+  "duration": { "defaultMs": 32000, "minMs": 6000, "maxMs": 300000 },
   "orientations": ["landscape", "portrait"],
   "uses": [],
-  "background": "#0b0d12",
+  "background": "#000000",
   "live": { "source": "rss", "fields": { "items": "items", "language": "language" } }
 }

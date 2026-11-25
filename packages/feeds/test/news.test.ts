@@ -1,3 +1,4 @@
+import { NEWS_SUMMARY_MAX } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews } from '../src/index';
@@ -28,6 +29,8 @@ describe('NPR RSS 2.0', () => {
       title: 'Trump is in Asia ahead of Xi, Putin summit. And, tech leaders want Huang back at Nvidia',
       published: '2026-11-17T12:20:57+00:00',
       source: 'NPR Topics: News',
+      summary:
+        "Trump says he plans to discuss Ukraine during his Asia trip, which contradicts what the White House previously announced. And, Silicon Valley leaders are pushing for Jensen Huang's return to Nvidia.",
     });
     const times = feed.items.map((i) => Date.parse(i.published));
     expect(times).toEqual([...times].sort((a, b) => b - a));
@@ -45,15 +48,58 @@ describe('Atom', () => {
           title: 'Skating rink opens Saturday – free rentals all weekend',
           published: '2026-11-17T12:30:00+00:00',
           source: 'Parks & Recreation Department: Updates',
+          summary: 'The Riverside rink opens for the season on Saturday.',
         },
         {
           title: 'Leaf collection: the last pickup for the north side is Nov 20',
           published: '2026-11-14T08:00:00+00:00',
           source: 'Parks & Recreation Department: Updates',
         },
-        { title: 'Winter hours start December 1', published: '2026-11-10T14:00:00+00:00', source: 'Parks & Recreation Department: Updates' },
+        {
+          title: 'Winter hours start December 1',
+          published: '2026-11-10T14:00:00+00:00',
+          source: 'Parks & Recreation Department: Updates',
+          summary: 'Recreation centres close at 8 p.m. through February.',
+        },
       ],
     });
+  });
+});
+
+describe('summaries (#202)', () => {
+  const summaries = (descriptions: string[], title = 'Story') =>
+    parseNews(rss(descriptions.map((d) => `<item><title>${title}</title><description><![CDATA[${d}]]></description></item>`).join(''))).items.map(
+      (i) => i.summary,
+    );
+
+  it('reads the description as plain text: tags, scripts and styles dropped, references read, spaces collapsed', () => {
+    expect(
+      summaries([
+        '<p>Crews&nbsp;cleared the <b>north&nbsp;ramp</b> &mdash; reopening at 6&nbsp;p.m.</p><script>track()</script><style>p{}</style><p>Drive &amp; walk&hellip;</p>',
+      ]),
+    ).toEqual(['Crews cleared the north ramp — reopening at 6 p.m. Drive & walk…']);
+  });
+
+  it('leaves out a description that is empty, only markup, or the title again', () => {
+    expect(summaries(['', '<img src="a.jpg"><br/>', ' story '], 'Story')).toEqual([undefined, undefined, undefined]);
+  });
+
+  it(`cuts a long description on a word at ${NEWS_SUMMARY_MAX} characters, ending in an ellipsis`, () => {
+    const [cut] = summaries([`${'word '.repeat(100)}end`]);
+    expect(cut!.length).toBeLessThanOrEqual(NEWS_SUMMARY_MAX);
+    expect(cut).toMatch(/^(word )+word…$/);
+  });
+
+  it('reads an Atom summary, else its content', () => {
+    const atomFeed = (body: string) =>
+      `<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title><entry><title>Story</title><updated>2026-11-17T12:00:00Z</updated>${body}</entry></feed>`;
+    expect(parseNews(atomFeed('<summary type="html">&lt;p&gt;Short one&lt;/p&gt;</summary><content>Long one</content>')).items[0]!.summary).toBe('Short one');
+    expect(parseNews(atomFeed('<content type="html">&lt;p&gt;Long one&lt;/p&gt;</content>')).items[0]!.summary).toBe('Long one');
+  });
+
+  it('reads a description of unclosed scripts and tags in linear time', () => {
+    for (const body of ['<script '.repeat(100_000), '<script>'.repeat(100_000), '<p '.repeat(150_000)])
+      expect(inLinearTime(() => parseNews(rss(`<item><title>x</title><description><![CDATA[${body}]]></description></item>`)))).toBe(true);
   });
 });
 

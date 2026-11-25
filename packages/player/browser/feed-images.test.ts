@@ -7,7 +7,7 @@
 // - cleanup while falling back keeps the synced manifest's files
 // - images still arrive while the manifest cannot be fetched
 // - editor preview shows snapshot images and tolerates missing blobs
-// - the shipped news, text only, plays unchanged with image-bearing snapshots
+// - the shipped news (2.0) plays the feed's photos, a story without one with its initial
 import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { buildTemplate } from '@signforge/template-build';
@@ -400,14 +400,12 @@ describe('feed images on screens (#196)', () => {
     expect(msgs.some((m) => m.type === 'error')).toBe(false);
   }, 30_000);
 
-  it('plays the shipped news template, text only, unchanged when its snapshot carries NewsImage hashes', async () => {
+  it("plays the shipped news template with the feed's photos, a story without one with its initial", async () => {
     const built = await buildTemplate(resolve(import.meta.dirname, '../../../templates/news'));
-    // Text only: its rows declare no image, so it asks for none.
-    const items = built.manifest.fields.items;
-    expect(items?.type === 'list' && Object.values(items.item).some((d) => d.type === 'image')).toBe(false);
     const htmlBuf = Buffer.from(built.html);
     const htmlSha = sha256(htmlBuf);
     const key = templateKey(built.manifest);
+    const [lead, thumb] = [png(32, 18, 200), png(16, 9, 120)];
     const body: Omit<ScreenManifest, 'id'> = {
       schema: MANIFEST_SCHEMA,
       generatedAt: new Date().toISOString(),
@@ -421,7 +419,19 @@ describe('feed images on screens (#196)', () => {
           kind: 'template',
           template: key,
           durationMs: 10_000,
-          data: { title: 'Headlines', source: '', items: [], language: '', accent: '#f59e0b', crawlSpeed: 6 },
+          data: {
+            title: 'Headlines',
+            source: '',
+            items: [],
+            language: '',
+            rotationSeconds: 30,
+            look: 'pop',
+            showImages: true,
+            showSummary: true,
+            showList: true,
+            showMeta: true,
+            showCrawl: true,
+          },
           assets: {},
           bindings: { items: { source: 'feed', path: 'items' }, language: { source: 'feed', path: 'language' } },
         },
@@ -436,6 +446,8 @@ describe('feed images on screens (#196)', () => {
 
     const p = await h.openPlayer((s) => {
       s.publish(content);
+      s.setFeedBlob(sha256(lead), lead);
+      s.setFeedBlob(sha256(thumb), thumb);
       s.setData('feed', {
         id: 'feed',
         version: 1000,
@@ -445,7 +457,7 @@ describe('feed images on screens (#196)', () => {
           title: 'NPR',
           language: 'en-US',
           items: [
-            { title: 'Lead story with photo', published: new Date().toISOString(), source: 'NPR', image: { file: 'a'.repeat(64), thumb: 'b'.repeat(64) } },
+            { title: 'Lead story with photo', published: new Date().toISOString(), source: 'NPR', image: { file: sha256(lead), thumb: sha256(thumb) } },
             { title: 'Second headline', published: new Date().toISOString(), source: 'NPR' },
           ],
         },
@@ -455,17 +467,18 @@ describe('feed images on screens (#196)', () => {
     await p.until((s) => s.played >= 1);
     expect((await p.state()).skipped).toBe(0);
     expect((await p.state()).dataRejected).toEqual({});
-
-    const readLead = async () => {
-      for (const frame of p.page.frames()) {
-        if (frame === p.page.mainFrame()) continue;
-        const lead = await frame.evaluate(() => document.getElementById('lead')?.textContent ?? '').catch(() => '');
-        if (lead) return lead;
-      }
-      return '';
+    const shown = async () => {
+      const frame = await visibleFrame(p.page, 'leads');
+      return frame?.evaluate(() => ({
+        lead: document.querySelector('.headline')!.textContent,
+        photo: document.querySelector<HTMLImageElement>('.story .photo')?.naturalWidth ?? 0,
+        thumbs: [...document.querySelectorAll('.row')].map(
+          (r) => r.querySelector<HTMLImageElement>('img')?.naturalWidth ?? r.querySelector('.initial')!.textContent,
+        ),
+      }));
     };
-    await expect.poll(readLead, { timeout: 10_000 }).toBe('Lead story with photo');
-    // The shipped news has no image property in list.item, so no feed image blobs were requested.
-    expect(p.server.requestsTo(/^\/content\/blobs\//).filter((r) => !r.path.endsWith(htmlSha))).toEqual([]);
+    await expect.poll(shown, { timeout: 10_000 }).toEqual({ lead: 'Lead story with photo', photo: 32, thumbs: [16, 'N'] });
+    // Each photo fetched once.
+    for (const sha of [sha256(lead), sha256(thumb)]) expect(requestsFor(p, sha), sha).toHaveLength(1);
   }, 30_000);
 });

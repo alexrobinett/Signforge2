@@ -48,8 +48,8 @@ interface Made {
 interface Confirmable {
   /** The registry tools a press runs, whose rights the member needs. */
   tools: readonly string[];
-  /** The model's input, as it is offered (a registry tool's, unless the tool is the drawer's own). */
-  schema: () => Record<string, unknown>;
+  /** The model's input, as it is offered and checked before a card is made (a registry tool's, unless the tool is the drawer's own). */
+  input: () => z.ZodType;
   description: () => string;
   /**
    * Whether this call needs the right to publish though its tool's scope is less: the press would be refused without it,
@@ -75,7 +75,7 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const ofRegistry = (name: string) => () => {
   const tool = registry.get(name);
   if (!tool) throw new Error(`no registry tool ${name}`);
-  return z.toJSONSchema(tool.input, { io: 'input', unrepresentable: 'any' });
+  return tool.input;
 };
 const describedAs = (name: string) => () => registry.get(name)?.description ?? '';
 const run = (name: string) => (caller: Caller, input: Row) => dispatch(registry, name, input, caller);
@@ -174,7 +174,7 @@ const addressOf = (url: unknown, fetches: string) => {
 export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   publish: {
     tools: ['publish'],
-    schema: ofRegistry('publish'),
+    input: ofRegistry('publish'),
     description: describedAs('publish'),
     async make(org, called, at) {
       const { pins, names } = await pinsOf(org, called.drafts);
@@ -223,7 +223,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   start_takeover: {
     tools: ['publish_takeover'],
-    schema: ofRegistry('start_takeover'),
+    input: ofRegistry('start_takeover'),
     description: () => `${registry.get('start_takeover')?.description ?? ''} From the drawer it is published at once when the person presses its card.`,
     async make(org, called, at) {
       const playlist = await org.playlists.get(str(called.playlistId));
@@ -280,7 +280,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   end_takeover: {
     tools: ['end_takeover'],
-    schema: ofRegistry('end_takeover'),
+    input: ofRegistry('end_takeover'),
     description: describedAs('end_takeover'),
     async make(org, called) {
       const entry = await org.scheduleEntries.get(str(called.scheduleEntryId));
@@ -307,7 +307,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   delete_playlist: {
     tools: ['delete_playlist'],
-    schema: ofRegistry('delete_playlist'),
+    input: ofRegistry('delete_playlist'),
     description: describedAs('delete_playlist'),
     async make(org, called) {
       const playlist = await org.playlists.get(str(called.playlistId));
@@ -333,7 +333,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   delete_schedule_entry: {
     tools: ['delete_schedule_entry'],
-    schema: ofRegistry('delete_schedule_entry'),
+    input: ofRegistry('delete_schedule_entry'),
     description: describedAs('delete_schedule_entry'),
     async make(org, called) {
       const entry = await org.scheduleEntries.get(str(called.scheduleEntryId));
@@ -356,7 +356,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   // An invitation cancelled cannot be undone by the agent: only a person invites again (#321).
   cancel_invitation: {
     tools: ['cancel_invitation'],
-    schema: ofRegistry('cancel_invitation'),
+    input: ofRegistry('cancel_invitation'),
     description: describedAs('cancel_invitation'),
     async make(org, called) {
       const invitation = await org.invitations.get(str(called.invitationId));
@@ -380,7 +380,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   revoke_screen_credential: {
     tools: ['revoke_screen_credential'],
-    schema: ofRegistry('revoke_screen_credential'),
+    input: ofRegistry('revoke_screen_credential'),
     description: describedAs('revoke_screen_credential'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
@@ -400,7 +400,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   set_display_override: {
     tools: ['set_display_override'],
-    schema: ofRegistry('set_display_override'),
+    input: ofRegistry('set_display_override'),
     description: describedAs('set_display_override'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
@@ -425,7 +425,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   restart_screen: {
     tools: ['restart_screen'],
-    schema: ofRegistry('restart_screen'),
+    input: ofRegistry('restart_screen'),
     description: describedAs('restart_screen'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
@@ -445,7 +445,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   identify_screen: {
     tools: ['identify_screen'],
-    schema: ofRegistry('identify_screen'),
+    input: ofRegistry('identify_screen'),
     description: describedAs('identify_screen'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
@@ -465,7 +465,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   read_table: {
     tools: ['read_table'],
-    schema: ofRegistry('read_table'),
+    input: ofRegistry('read_table'),
     description: describedAs('read_table'),
     async make(_org, called) {
       return {
@@ -484,7 +484,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   create_data_source: {
     tools: ['create_data_source'],
-    schema: ofRegistry('create_data_source'),
+    input: ofRegistry('create_data_source'),
     description: describedAs('create_data_source'),
     needsPublish: (called) => called.format === 'provider',
     async make(_org, called) {
@@ -509,7 +509,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   update_data_source: {
     tools: ['update_data_source'],
-    schema: ofRegistry('update_data_source'),
+    input: ofRegistry('update_data_source'),
     description: describedAs('update_data_source'),
     needsPublish: reachesScreens,
     async make(org, called) {
@@ -539,12 +539,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
   set_spot_url: {
     tools: ['update_spot'],
-    schema: () => ({
-      type: 'object',
-      properties: { spotId: { type: 'string', description: 'The web page spot' }, url: { type: 'string', description: 'The https address it shows' } },
-      required: ['spotId', 'url'],
-      additionalProperties: false,
-    }),
+    input: () => z.object({ spotId: z.string().describe('The web page spot'), url: z.string().describe('The https address it shows') }).strict(),
     description: () =>
       "Set a web page spot's address: the page its stage and screens open. From the drawer the person sees the address in full and presses to save it as the spot's draft.",
     async make(org, called) {
@@ -567,6 +562,13 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   },
 };
 
+/** Whether `grant` may press `name`'s card for some input: it permits every tool the card runs. */
+export const pressable = (grant: Grant, name: string) =>
+  (CONFIRMABLE[name]?.tools ?? []).every((t) => {
+    const tool = registry.get(t);
+    return tool !== undefined && permits(grant, tool);
+  });
+
 /** Who may press the card: null when `grant` permits every tool it runs, else who to ask. */
 export function whyNot(grant: Grant, name: string, called: Row): string | null {
   const tools = (CONFIRMABLE[name]?.tools ?? []).flatMap((t) => registry.get(t) ?? []);
@@ -575,7 +577,7 @@ export function whyNot(grant: Grant, name: string, called: Row): string | null {
       ? 'Only owners publish in this organization: screens follow this change with no publish. Ask an owner.'
       : 'You can view only: ask an editor.';
   }
-  if (tools.every((t) => permits(grant, t))) return null;
+  if (pressable(grant, name)) return null;
   if (tools.some((t) => t.minRole === 'owner')) return 'Only owners can do this: ask an owner.';
   if (tools.some((t) => t.scope === 'content:publish') && grant.role === 'editor') return 'Only owners publish in this organization: ask an owner.';
   return 'You can view only: ask an editor.';
