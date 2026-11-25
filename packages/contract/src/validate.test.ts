@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   bundleScripts,
   readCss,
+  STYLE_ADDRESS,
+  withoutComments,
   IMAGE_SAMPLE_CELL,
   MANIFEST_SCHEMA,
   MAX_URL_BYTES,
@@ -1548,6 +1550,48 @@ describe('network check', () => {
 
     it('refuses each the third review found', () => {
       for (const html of fetchedThird) expect(problems(html), html).toEqual(refused);
+    });
+
+    // The fourth review of #438: a literal <select in an attribute value or a comment cut a select's text short.
+    it('reads a <select>’s text past "<select" in an attribute value or a comment', () => {
+      for (const html of [
+        `<select><div title="<select"><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></div></select>`,
+        `<select><!-- <select --><style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style></select>`,
+      ])
+        expect(problems(html), html).toEqual(refused);
+      const scripts = checkTemplateBundle({
+        manifest: template,
+        html: `<select><div title="<select"><script>"use strict";a()</script></div></select>`,
+        sources: { 'main.ts': '' },
+      }).checks.find((c) => c.check === 'scripts')?.problems;
+      expect(scripts).toEqual([expect.stringMatching(/^a <select> may not hold a script/)]);
+    });
+
+    // In source order, as the walk went before it kept a stack of its own (review of #438, round 4).
+    it('lists the styles in the order they are written', () => {
+      const { styles, styleAttributes } = bundleScripts(
+        '<style>a</style><div style="x:1"><style>b</style><p style="x:2"></p></div><svg><style>c<style>d</style></style></svg><style>e</style>',
+      );
+      expect(styles.map((style) => style.text)).toEqual(['a', 'b', 'c', 'd', 'e']);
+      expect(styleAttributes).toEqual(['x:1', 'x:2']);
+    });
+
+    // High of the fourth review: `url\(\s*["']?\s*` backtracked over every split of a long run of whitespace. No pattern
+    // the styles lint runs has two whitespace runs either side of an optional item, which is what made it quadratic.
+    it('finds addresses with patterns whose quantifiers cannot share the same characters', () => {
+      const ambiguous = /\\s\*(?:\[[^\]]*\]|\(\?:[^)]*\)|\\.|[^\\(])\?\\s\*/;
+      expect(ambiguous.test(String.raw`url\(\s*["']?\s*(?:https?:)?[/\\]{2}`)).toBe(true);
+      for (const [name, pattern] of Object.entries(STYLE_ADDRESS)) expect(ambiguous.test(pattern.source), name).toBe(false);
+      expect(STYLE_ADDRESS.url.test(`url(${' '.repeat(100_000)})`)).toBe(false);
+      expect(STYLE_ADDRESS.url.test(`url(${' '.repeat(100_000)}"//t.example/p.gif")`)).toBe(true);
+    });
+
+    // The author's sources lose their comments in one pass, as the regex took them out (review of #438, round 4).
+    it('takes the comments out of an author’s source, a URL’s // and an unclosed /* kept', () => {
+      expect(withoutComments('a /* fetch */ b // fetch(x)\nc')).toBe('a  b \nc');
+      expect(withoutComments('const u = "https://example.com"; // note')).toBe('const u = "https://example.com"; ');
+      expect(withoutComments('a /* never closed\nfetch(x)')).toBe('a /* never closed\nfetch(x)');
+      expect(withoutComments('a /* one */ b /* two')).toBe('a  b /* two');
     });
 
     it('refuses an @import in a <select>’s <style> as forbidden CSS', () => {

@@ -51,13 +51,52 @@ const JAVASCRIPT = new Set([
 ]);
 const OTHER_SCRIPTS = new Set(['module', 'importmap', 'speculationrules']);
 
+const asciiSpace = (c: string | undefined) => c === '\t' || c === '\n' || c === '\f' || c === '\r' || c === ' ';
+/** ASCII whitespace off both ends, as the HTML standard strips it: by index, linear however long the run (review of #438). */
+function asciiTrim(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && asciiSpace(text[start])) start += 1;
+  while (end > start && asciiSpace(text[end - 1])) end -= 1;
+  return text.slice(start, end);
+}
+
+/**
+ * Where each `<select` and `</select` tag starts, in one pass: not one inside a comment or a quoted attribute value,
+ * where it is no tag (review of #438, round 4).
+ */
+function selectTagsOf(html: string): number[] {
+  const at: number[] = [];
+  for (let i = 0; i < html.length; ) {
+    if (html.startsWith('<!--', i)) {
+      const end = html.indexOf('-->', i + 4);
+      i = end < 0 ? html.length : end + 3;
+      continue;
+    }
+    if (html[i] !== '<' || !/[a-z/!?]/i.test(html[i + 1] ?? '')) {
+      i += 1;
+      continue;
+    }
+    if (/^<\/?select/i.test(html.slice(i, i + 8))) at.push(i);
+    // To the tag's end, its quoted values whole.
+    let quote = '';
+    for (i += 1; i < html.length && (quote || html[i] !== '>'); i += 1) {
+      if (quote) {
+        if (html[i] === quote) quote = '';
+      } else if (html[i] === '"' || html[i] === "'") quote = html[i]!;
+    }
+    i += 1;
+  }
+  return at;
+}
+
 /** A script element's type string, as the HTML standard's "prepare the script element" computes it, lowercased. */
 function typeOf(el: Tree.Element): string {
   const attr = (name: string) => el.attrs.find((a) => a.name === name && !a.prefix)?.value;
   const type = attr('type');
   const language = attr('language');
   if (type === '' || (type === undefined && !language)) return 'text/javascript';
-  return (type ?? `text/${language}`).replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '').toLowerCase();
+  return asciiTrim(type ?? `text/${language}`).toLowerCase();
 }
 
 function classify(el: Tree.Element, html: string): BundleScript {
@@ -94,9 +133,18 @@ export interface BundleStyle {
  * our own, not recursion, as a tree can be deeper than the call stack (an SVG's `<style>`s nest, review of #438).
  */
 function eachElement<F>(root: Tree.ParentNode, flag: F, visit: (element: Tree.Element, flag: F) => F) {
-  const stack: [Tree.ParentNode, F][] = [[root, flag]];
+  // Each element visited as it is taken off the stack, its children pushed last first: in source order, as recursion went.
+  const stack: [Extract<Tree.ChildNode, { tagName: string }>, F][] = [];
+  const push = (node: Tree.ParentNode, f: F) => {
+    for (let i = node.childNodes.length - 1; i >= 0; i -= 1) {
+      const child = node.childNodes[i]!;
+      if ('tagName' in child) stack.push([child, f]);
+    }
+  };
+  push(root, flag);
   for (let top = stack.pop(); top; top = stack.pop()) {
-    for (const child of top[0].childNodes) if ('tagName' in child) stack.push(['content' in child ? child.content : child, visit(child, top[1])]);
+    const [element, f] = top;
+    push('content' in element ? element.content : element, visit(element, f));
   }
 }
 
@@ -126,7 +174,7 @@ export function bundleScripts(bundle: string): { html: string; scripts: BundleSc
   const styles: BundleStyle[] = [];
   const styleAttributes: string[] = [];
   // Where each <select and </select starts, found once: a select's text ends at the next one.
-  const selectTags = [...html.matchAll(/<\/?select/gi)].map((m) => m.index);
+  const selectTags = selectTagsOf(html);
   const nextSelectTag = (from: number) => {
     let low = 0;
     let high = selectTags.length;

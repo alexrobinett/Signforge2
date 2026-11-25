@@ -1205,6 +1205,49 @@ export function readCss(text: string): string {
 }
 
 /**
+ * The patterns the styles lint finds a network address with: a quoted string that starts with one, as read (`quoted`)
+ * and as written (`written`, where a quote after a backslash is escaped and starts no string: `"say \"//hi\""`), and
+ * a url() (`url`). `image-set("//x" 1x)` is fetched with no url() around it. A backslash counts as a slash: the URL
+ * parser reads "\" as "/" in an http(s) address (#326); two backslashes or slashes at a string's start are refused even
+ * where they are a path, as no template has a reason to write that. No two quantifiers in one can match the same
+ * characters side by side: each is linear, whatever a bundle holds (review of #438, round 4).
+ */
+export const STYLE_ADDRESS = {
+  quoted: /["']\s*(?:https?:)?[/\\]{2}/i,
+  written: /(?<!\\)["']\s*(?:https?:)?[/\\]{2}/i,
+  url: /url\(\s*(?:["']\s*)?(?:https?:)?[/\\]{2}/i,
+};
+
+const lineEnd = (c: string | undefined) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+
+/**
+ * An author's source with its comments taken out, so a note about `fetch` is not a call to it: `/* … *\/` closed, and
+ * `//` to the line's end where no colon is before it (`//` after a colon is a URL, and is kept). An unclosed `/*` is
+ * kept, with what follows. One pass, linear (review of #438, round 4): once no `*\/` is left, none is looked for again.
+ */
+export function withoutComments(text: string): string {
+  let out = '';
+  let closes = true;
+  for (let i = 0; i < text.length; ) {
+    if (closes && text[i] === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end >= 0) {
+        i = end + 2;
+        continue;
+      }
+      closes = false;
+    }
+    if (text[i] === '/' && text[i + 1] === '/' && text[i - 1] !== ':') {
+      while (i < text.length && !lineEnd(text[i])) i += 1;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
+
+/**
  * Lint a built template: the manifest, the forbidden CSS list, the size budget and network
  * references are checked on the bundle; the forbidden-code list on the author's own source files
  * (`index.html`, `style.css`, `main.ts`), because the bundle holds the SDK, which itself calls
@@ -1233,14 +1276,7 @@ function checkBundle(input: { manifest: unknown; html: string; sources: Record<s
 
   const network: string[] = [];
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
-  // In the bundle's styles, any quoted string that is a network address: `image-set("//x" 1x)` is
-  // fetched with no url() around it. A backslash counts as a slash: the URL parser reads "\" as "/"
-  // in an http(s) address (#326). Two backslashes or slashes at a string's start are refused even
-  // where they are a path: no template has a reason to write that.
-  const quotedAddress = /["']\s*(?:https?:)?[/\\]{2}/i;
-  // As written, a quote right after a backslash is escaped: no string starts there (`"say \"//hi\""`).
-  const writtenAddress = /(?<!\\)["']\s*(?:https?:)?[/\\]{2}/i;
-  const urlAddress = /url\(\s*["']?\s*(?:https?:)?[/\\]{2}/i;
+  const { quoted: quotedAddress, written: writtenAddress, url: urlAddress } = STYLE_ADDRESS;
   // Read twice, from the HTML parser's tree (`bundleScripts`): as written, comments that quote an
   // address left in sight, so a reading out of step with the browser's cannot hide one; and as the
   // browser reads it (`readCss`): the parser's text of each <style> and style attribute, with CSS
@@ -1250,7 +1286,8 @@ function checkBundle(input: { manifest: unknown; html: string; sources: Record<s
   const asWritten = blocks
     .map((text) =>
       text.replace(
-        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?\*\//g,
+        // An unclosed comment runs to the end, as in CSS: one match, not a scan to the end from each /* (review of #438).
+        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?(?:\*\/|$)/g,
         (c, string?: string) => string ?? (writtenAddress.test(c) ? c : ''),
       ),
     )
@@ -1267,9 +1304,7 @@ function checkBundle(input: { manifest: unknown; html: string; sources: Record<s
     network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
-  const authored = Object.values(sources)
-    .map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, ''))
-    .join('\n');
+  const authored = Object.values(sources).map(withoutComments).join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
   // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
