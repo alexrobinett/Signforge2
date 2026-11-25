@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./frame": "./src/frame.ts",
+    "./row-asset": "./src/row-asset.ts",
     "./sample": "./src/sample.ts"
   },
   "scripts": {

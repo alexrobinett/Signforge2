@@ -87,7 +87,15 @@ const templateManifest: TemplateManifest = {
     label: { type: 'text', label: 'Label', maxLength: 40 },
     mode: { type: 'text', label: 'Mode' },
     target: { type: 'text', label: 'Target' },
-    items: { type: 'list', label: 'Items', maxItems: 3, default: [], item: { title: { type: 'text', label: 'Title' } } },
+    // Each row may hold a photo, as News 2.0's do (#196), so every browser test's template takes
+    // list-row images; a row without one is as before.
+    items: {
+      type: 'list',
+      label: 'Items',
+      maxItems: 3,
+      default: [],
+      item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } },
+    },
   },
   // Up to an hour: a takeover test jumps the clock past a takeover's end without reaching a spot's.
   duration: { defaultMs: 1000, minMs: 100, maxMs: 3_600_000 },

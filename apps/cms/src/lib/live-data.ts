@@ -105,6 +105,7 @@ export function guessMapping(def: ListDef, columns: readonly string[]): TableMap
   const taken = new Set<string>();
   const mapped: Record<string, string> = {};
   for (const [prop, d] of Object.entries(def.item)) {
+    if (d.type === 'image') continue;
     // Own keys only: an org template's item may have a property named `constructor`.
     const words = new Set([prop, d.label, ...(Object.hasOwn(ALSO, prop) ? (ALSO[prop] ?? []) : [])].map(squash));
     const named = columns.find((c) => !taken.has(c) && words.has(squash(c)));
@@ -112,7 +113,7 @@ export function guessMapping(def: ListDef, columns: readonly string[]): TableMap
   }
   for (const c of Object.values(mapped)) taken.add(c);
   for (const [prop, d] of Object.entries(def.item)) {
-    if (mapped[prop] || d.default !== undefined) continue;
+    if (d.type === 'image' || mapped[prop] || d.default !== undefined) continue;
     const free = columns.find((c) => !taken.has(c));
     if (free === undefined) continue;
     mapped[prop] = free;

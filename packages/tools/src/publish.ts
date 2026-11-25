@@ -24,7 +24,7 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { publishOrg, type DraftPin, type SampleAck } from './publishing';
+import { publishOrg, type DraftKind, type DraftPin, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
@@ -32,7 +32,7 @@ import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
 import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
-import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
+import { draftRef, outputs, publishChanges, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -113,10 +113,12 @@ async function switchScreens(
   revision: number,
   rows: { screenId: string; manifestId: string }[],
   restoresId?: string,
+  changes?: PublishView['changes'],
 ) {
   const { org, actor, write, notify } = ctx;
   const [previous] = await org.publishes.history({ limit: 1 });
-  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId }));
+  const changesJson = changes ? JSON.stringify(changes) : null;
+  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson }));
   write(org.publishes.stage.addScreens(made.id, rows));
   for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId));
   if (rows.length) notify((screens) => screens.manifests(rows));
@@ -206,10 +208,37 @@ export async function runPublish(
     .map((d) => d.id)
     .sort();
   write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
+  // What it made live and removed (#370), named as screens have them after it: a draft made live by its draft, which
+  // becomes the published one; a schedule entry by its playlist as published after this publish (its draft only when
+  // this publish makes that live too); one removed by what was published, as it played.
+  const spots = new Map(result.read.spots.map((s) => [s.id, s]));
+  const playlists = new Map(result.read.playlists.map((p) => [p.id, p]));
+  const entries = new Map(result.read.entries.map((e) => [e.id, e]));
+  const promotedPlaylists = new Set(result.drafts.promoted.flatMap((d) => (d.kind === 'playlist' ? [d.id] : [])));
+  // Every draft it reports is one this publish read. `live`: the name screens have, not the draft's.
+  const playlistName = (id: string, live: boolean) => {
+    const p = playlists.get(id);
+    if (!p) return '';
+    return (live ? published(p)?.name : undefined) ?? p.name;
+  };
+  const nameOf = (d: { kind: DraftKind; id: string }, removed: boolean) => {
+    if (d.kind === 'spot') return spots.get(d.id)?.name ?? '';
+    if (d.kind === 'playlist') return playlistName(d.id, false);
+    const e = entries.get(d.id);
+    if (!e) return '';
+    const playlistId = (removed ? published(e)?.playlistId : undefined) ?? e.playlistId;
+    return playlistName(playlistId, removed || !promotedPlaylists.has(playlistId));
+  };
+  const changes = summarizeChanges([
+    ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
+    ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d, true), removed: true })),
+  ]);
   const made = await switchScreens(
     ctx,
     result.revision + 1,
     changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+    undefined,
+    changes,
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -405,6 +434,46 @@ const rollBackPublish = defineTool({
 
 type PublishView = z.output<typeof publishOutput>;
 
+/** Names kept per kind, at most; then fewer while the whole is over `CHANGES_BYTES`. */
+const CHANGES_NAMES = 10;
+/** The most a publish's changes may take on its row, as JSON: D1 refuses a value over 2 MB, and the page shows a line. */
+export const CHANGES_BYTES = 4096;
+
+/**
+ * What a publish changed, by kind (#370): exact counts, and the first names of each, each once, while the whole is
+ * under `CHANGES_BYTES`. A publish of thousands of drafts with long names keeps its counts and a few of them.
+ */
+export function summarizeChanges(items: readonly { kind: DraftKind; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
+  const groups = (['spot', 'playlist', 'schedule_entry'] as const).flatMap((kind) =>
+    [false, true].flatMap((removed) => {
+      const these = items.filter((i) => i.kind === kind && i.removed === removed);
+      if (!these.length) return [];
+      const distinct = [...new Set(these.map((i) => i.name))];
+      const names = distinct.slice(0, CHANGES_NAMES);
+      return [{ kind, removed, count: these.length, names, omitted: distinct.length - names.length }];
+    }),
+  );
+  const bytes = () => new TextEncoder().encode(JSON.stringify(groups)).length;
+  while (bytes() > CHANGES_BYTES) {
+    const longest = groups.reduce((a, b) => (b.names.length > a.names.length ? b : a));
+    if (!longest.names.length) break;
+    longest.names.pop();
+    longest.omitted += 1;
+  }
+  return groups;
+}
+
+/** A publish's changes as its row keeps them: none when it has none, or when what is there is not that shape. */
+function changesOf(json: string | null): PublishView['changes'] {
+  if (json === null) return null;
+  try {
+    const read = publishChanges.safeParse(JSON.parse(json));
+    return read.success ? read.data : null;
+  } catch {
+    return null;
+  }
+}
+
 const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => {
   const { screens, playing, replaced, open } = tally(h.rollout);
   return {
@@ -421,6 +490,7 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
     playing,
     replaced,
     open,
+    changes: changesOf(h.changesJson),
   };
 };
 

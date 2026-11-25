@@ -13,6 +13,7 @@ import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { byWord, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { PublishChanges } from '~/components/publishes/changes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
@@ -123,7 +124,16 @@ function PublishesPage() {
                 >
                   {versionName(p)}
                 </Link>
-                <span className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">{about(p, me)}</span>
+                <span className="flex min-w-0 flex-[1_1_14rem] flex-col gap-0.5 text-sm">
+                  <span className="text-muted-foreground">{about(p, me)}</span>
+                  {/* What it changed, so a roll back to it is to something seen, not remembered (#370). */}
+                  {/* A roll back says what it put back (review of #455). */}
+                  {p.restoresRevision !== null ? (
+                    <span id={`${p.id}-changes`}>Restores {versionName({ revision: p.restoresRevision })}</span>
+                  ) : (
+                    p.changes && <PublishChanges id={`${p.id}-changes`} changes={p.changes} />
+                  )}
+                </span>
                 <span aria-hidden className="h-2 w-32 overflow-hidden rounded-full bg-muted">
                   <span className={cn('block h-full', movedOn ? 'bg-border-strong' : 'bg-chart-1')} style={{ width: `${share}%` }} />
                 </span>
@@ -132,13 +142,24 @@ function PublishesPage() {
                   <span className="flex w-40 justify-end">
                     {p.id !== latest?.id &&
                       (now <= p.rollBackUntil ? (
-                        <Button variant="outline" className="sm:h-8" disabled={pending} onClick={() => void rollBack(orgId, p)}>
+                        <Button
+                          variant="outline"
+                          className="sm:h-8"
+                          disabled={pending}
+                          aria-describedby={p.changes || p.restoresRevision !== null ? `${p.id}-changes` : undefined}
+                          onClick={() => void rollBack(orgId, p)}
+                        >
                           Roll back to <span className="font-mono">{versionName(p)}</span>
                         </Button>
                       ) : (
                         // Older than the storage clean-up keeps files for (owner decision on #235): unavailable, and why.
                         <span className="flex flex-col items-end gap-1">
-                          <Button variant="outline" className="sm:h-8" disabled aria-describedby={`${p.id}-too-old`}>
+                          <Button
+                            variant="outline"
+                            className="sm:h-8"
+                            disabled
+                            aria-describedby={[p.changes || p.restoresRevision !== null ? `${p.id}-changes` : '', `${p.id}-too-old`].join(' ').trim()}
+                          >
                             Roll back to <span className="font-mono">{versionName(p)}</span>
                           </Button>
                           <span id={`${p.id}-too-old`} className="text-right text-meta text-muted-foreground">

@@ -81,6 +81,8 @@ export interface PlaybackOptions {
   playing(arrived: ScreenManifest): ScreenManifest;
   /** Resolves once these data sources have had their first load, or the data wait is over. */
   dataSettled(sources: string[]): Promise<void>;
+  /** Extra files a spot reads beyond the manifest's own (such as its bound snapshots' feed images). */
+  extraFiles?(spot: Spot, manifest: ScreenManifest): Iterable<string>;
 }
 
 /** What the player is doing, for the frame monitor and `__sf`. */
@@ -247,7 +249,7 @@ export class Playback {
     const tr = step.playlist.transition;
     const fadeMs = tr.type === 'crossfade' ? tr.ms : tr.type === 'fade' ? tr.ms / 2 : 0;
     // Pinned before the first await: a sync that replaces `m` meanwhile must not delete these files.
-    pins.hold('preparing', spotFiles(step.spot, m));
+    pins.hold('preparing', this.filesFor(step.spot, m));
     this.activity.phase = 'prepare';
     this.activity.preparing = step.spot.id;
     // A spot's data is fixed for its play: let its feeds finish their first load before it starts.
@@ -290,8 +292,8 @@ export class Playback {
     const { started, done } = slots.show(slot, prev ? this.#front : undefined, tr);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
-    const playing = spotFiles(step.spot, m);
-    pins.hold('playing', prev ? [...playing, ...spotFiles(prev.spot, prev.manifest)] : playing);
+    const playing = this.filesFor(step.spot, m);
+    pins.hold('playing', prev ? [...playing, ...this.filesFor(prev.spot, prev.manifest)] : playing);
     pins.release('preparing');
     this.#front = slot;
     this.#onScreen = { spot: step.spot, manifest: m, startedAt };
@@ -312,6 +314,12 @@ export class Playback {
     this.#failedInManifest = 0;
     this.record(step, m.id, shownAt);
     this.promote(step.spot, m.id);
+  }
+
+  private filesFor(spot: Spot, manifest: ScreenManifest): Set<string> {
+    const out = spotFiles(spot, manifest);
+    if (this.o.extraFiles) for (const sha of this.o.extraFiles(spot, manifest)) out.add(sha);
+    return out;
   }
 
   private wait(ms: number): Promise<void> {

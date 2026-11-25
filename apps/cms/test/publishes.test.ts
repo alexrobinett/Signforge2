@@ -67,6 +67,7 @@ describe('a rollout', () => {
       rollBackUntil: 0,
       screens: 2,
       open: 0,
+      changes: null,
     };
     // Played by both, then a later publish switched them: complete, though none plays it now.
     expect(standing({ ...p, finishedAt: 10, reached: 2, playing: 0, replaced: 2 })).toBe('complete');
