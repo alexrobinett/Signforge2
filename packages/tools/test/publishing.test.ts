@@ -908,12 +908,30 @@ describe('the publish tools (M3-18)', () => {
     });
   });
 
+  it("names a schedule entry made live by its playlist as screens will have it, not that playlist's unpublished draft (review of #455)", async () => {
+    const { org } = await seedSmallOrg('tool-changes-entry-name');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    await ok(p.call('publish', {}));
+    // Main is published; its draft renamed, not published. The entry is pointed at Main and published alone.
+    await org.playlists.update(x('main'), { name: 'Unpublished Main' });
+    const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
+    const edited = (await ok(call('update_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }))).entry as {
+      version: number;
+    };
+    await ok(p.call('publish', { drafts: [{ kind: 'schedule_entry', id: entry.id, version: edited.version }] }));
+    expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toEqual([
+      { kind: 'schedule_entry', removed: false, count: 1, names: ['Main'], omitted: 0 },
+    ]);
+  });
+
   it('reads a summary not of its shape as none, so the history still lists the publish (review of #455)', async () => {
     const { org } = await seedSmallOrg('tool-changes-bad');
     const p = publisher(org);
     const call = editorCalls(org);
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
-    for (const bad of ['{}', 'not json', '[{"kind":"spot"}]']) {
+    const negative = '[{"kind":"spot","removed":false,"count":-1,"names":[],"omitted":0}]';
+    for (const bad of ['{}', 'not json', '[{"kind":"spot"}]', negative]) {
       await env.DB.prepare('UPDATE publishes SET changes_json = ? WHERE id = ?').bind(bad, first.publish!.id).run();
       expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes, bad).toBeNull();
     }

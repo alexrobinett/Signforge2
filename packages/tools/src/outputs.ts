@@ -243,9 +243,9 @@ export const publishChanges = z.array(
   z.object({
     kind: z.enum(DRAFT_KINDS),
     removed: z.boolean().describe('Schedule entries this publish deleted; false for drafts it made live'),
-    count: z.number().int().describe('How many drafts, exactly'),
+    count: z.number().int().nonnegative().describe('How many drafts, exactly'),
     names: z.array(z.string()).describe("Some of their names, each once, as published: a schedule entry's is its playlist's"),
-    omitted: z.number().int().describe('Names left out of names, for the size'),
+    omitted: z.number().int().nonnegative().describe('Names left out of names, for the size'),
   }),
 );
 

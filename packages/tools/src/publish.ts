@@ -209,11 +209,13 @@ export async function runPublish(
     .sort();
   write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
   // What it made live and removed (#370), named as screens have them after it: a draft made live by its draft, which
-  // becomes the published one; a schedule entry by its playlist; one removed by what was published, as it played.
+  // becomes the published one; a schedule entry by its playlist as published after this publish (its draft only when
+  // this publish makes that live too); one removed by what was published, as it played.
   const spots = new Map(result.read.spots.map((s) => [s.id, s]));
   const playlists = new Map(result.read.playlists.map((p) => [p.id, p]));
   const entries = new Map(result.read.entries.map((e) => [e.id, e]));
-  // Every draft it reports is one this publish read.
+  const promotedPlaylists = new Set(result.drafts.promoted.flatMap((d) => (d.kind === 'playlist' ? [d.id] : [])));
+  // Every draft it reports is one this publish read. `live`: the name screens have, not the draft's.
   const playlistName = (id: string, live: boolean) => {
     const p = playlists.get(id);
     if (!p) return '';
@@ -224,7 +226,8 @@ export async function runPublish(
     if (d.kind === 'playlist') return playlistName(d.id, false);
     const e = entries.get(d.id);
     if (!e) return '';
-    return playlistName((removed ? published(e)?.playlistId : undefined) ?? e.playlistId, removed);
+    const playlistId = (removed ? published(e)?.playlistId : undefined) ?? e.playlistId;
+    return playlistName(playlistId, removed || !promotedPlaylists.has(playlistId));
   };
   const changes = summarizeChanges([
     ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
