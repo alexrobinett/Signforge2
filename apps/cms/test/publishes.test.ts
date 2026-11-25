@@ -1,6 +1,6 @@
 // A rollout in words: the parts of the bar, in order, each with why its screens wait.
 import { describe, expect, it } from 'vitest';
-import { byWord, type PublishView, rolloutComplete, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
+import { byWord, changesText, type PublishView, rolloutComplete, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<RolloutScreen> = {}): RolloutScreen => ({
@@ -67,6 +67,7 @@ describe('a rollout', () => {
       rollBackUntil: 0,
       screens: 2,
       open: 0,
+      changes: null,
     };
     // Played by both, then a later publish switched them: complete, though none plays it now.
     expect(standing({ ...p, finishedAt: 10, reached: 2, playing: 0, replaced: 2 })).toBe('complete');
@@ -86,5 +87,28 @@ describe('who made a publish (#253)', () => {
     expect(byWord(by({ kind: 'user', id: 'usr_kim', name: 'kim' }), 'usr_me')).toBe('kim');
     expect(byWord(by({ kind: 'user', id: 'usr_gone', name: null }), 'usr_me')).toBe('a member');
     expect(byWord(by({ kind: 'agent', id: 'agt_1', name: null }), 'usr_me')).toBe('an agent');
+  });
+});
+
+describe('what a publish changed, in words (#370)', () => {
+  const change = (kind: 'spot' | 'playlist' | 'schedule_entry', name: string, removed = false) => ({ kind, name, removed });
+  it('names its spots and playlists, the playlists it scheduled and took off the schedule', () => {
+    expect(changesText([change('spot', 'Lunch special')])).toBe('Spot Lunch special');
+    expect(
+      changesText([
+        change('spot', 'Opening'),
+        change('spot', 'Lunch special'),
+        change('playlist', 'Lunch loop'),
+        change('schedule_entry', 'Lunch loop'),
+        change('schedule_entry', 'Storm notice', true),
+      ]),
+    ).toBe('Spots Opening and Lunch special; playlist Lunch loop; the schedule for Lunch loop; took Storm notice off the schedule');
+  });
+  it('names three at most, then how many more; a playlist scheduled twice once', () => {
+    expect(changesText(['A', 'B', 'C', 'D', 'E'].map((n) => change('spot', n)))).toBe('Spots A, B and 3 more');
+    expect(changesText([change('schedule_entry', 'Lunch loop'), change('schedule_entry', 'Lunch loop')])).toBe('The schedule for Lunch loop');
+  });
+  it('says so when it changed no draft and only compiled the screens again', () => {
+    expect(changesText([])).toBe('No draft changed: the screens were compiled again');
   });
 });

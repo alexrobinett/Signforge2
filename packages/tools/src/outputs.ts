@@ -263,6 +263,12 @@ export const publishOutput = z.object({
     .describe(
       'Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished',
     ),
+  changes: z
+    .array(
+      z.object({ kind: z.enum(DRAFT_KINDS), name: z.string().describe("Its name as published; a schedule entry's is its playlist's"), removed: z.boolean() }),
+    )
+    .nullable()
+    .describe('What it made live, and the schedule entries it removed (removed: true); null for a roll back, and for a publish made before these were kept'),
 });
 
 export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;

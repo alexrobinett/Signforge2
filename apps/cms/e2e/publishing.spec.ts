@@ -150,7 +150,13 @@ test('a publish made more than 90 days ago can no longer be rolled back to, and 
   await hydrated(page);
   const old = page.getByRole('button', { name: 'Roll back to v1' });
   await expect(old).toBeDisabled();
-  await expect(old).toHaveAccessibleDescription('Over 90 days old: its files are no longer kept.');
+  // What each publish changed, so a roll back is to something seen, not remembered (#370): v1 made the spot and the
+  // playlist live; v2 only compiled the screens again, for the new default; v3 published the spot's edit.
+  const history = page.getByRole('region', { name: 'Publish history' });
+  await expect(history.getByRole('listitem').filter({ hasText: /^v1/ })).toContainText('Spot Deal; playlist Main');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v2/ })).toContainText('No draft changed: the screens were compiled again');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v3/ })).toContainText('Spot Deal');
+  await expect(old).toHaveAccessibleDescription('Spot Deal; playlist Main Over 90 days old: its files are no longer kept.');
   await expect(page.getByRole('button', { name: 'Roll back to v2' })).toBeEnabled();
   // The tool refuses it too, and says why.
   const { publishes } = await tool(page, 'list_publishes', {});

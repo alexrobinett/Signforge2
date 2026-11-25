@@ -832,6 +832,27 @@ describe('the publish tools (M3-18)', () => {
     expect(await call('get_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
+  it('says what each publish changed, by name as published; a roll back, which changed no draft, says nothing (#370)', async () => {
+    const { org } = await seedSmallOrg('tool-changes');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    const made = (await ok(call('get_publish', {}))).publish as { changes: { kind: string; name: string; removed: boolean }[] };
+    expect(made.changes).toHaveLength(first.promoted.length);
+    expect(made.changes.every((c) => c.name !== '' && !c.removed)).toBe(true);
+
+    const deal = (await org.spots.get(x('deal')))!;
+    await org.spots.update(deal.id, { name: 'Deal of the week', dataJson: JSON.stringify({ title: 'Three for $5' }) });
+    await ok(p.call('publish', {}));
+    const page = await ok(call('list_publishes', {}));
+    expect((page.publishes as { revision: number; changes: unknown }[]).map((x) => [x.revision, x.changes])).toEqual([
+      [2, [{ kind: 'spot', name: 'Deal of the week', removed: false }]],
+      [1, made.changes],
+    ]);
+    await ok(p.call('roll_back_publish', { publishId: first.publish!.id }));
+    expect((await ok(call('get_publish', {}))).publish).toMatchObject({ revision: 3, changes: null });
+  });
+
   it('is refused at its commit when an asset its manifests name is deleted while it compiles, and runs again without it (review of #429, 5)', async () => {
     const { org, lobby } = await seedSmallOrg('tool-pub-logo-race');
     const logo = await addImage(org, sha('e'), sha('f'));

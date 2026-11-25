@@ -24,7 +24,7 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { publishOrg, type DraftPin, type SampleAck } from './publishing';
+import { publishOrg, type DraftKind, type DraftPin, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
@@ -113,10 +113,12 @@ async function switchScreens(
   revision: number,
   rows: { screenId: string; manifestId: string }[],
   restoresId?: string,
+  changes?: PublishView['changes'],
 ) {
   const { org, actor, write, notify } = ctx;
   const [previous] = await org.publishes.history({ limit: 1 });
-  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId }));
+  const changesJson = changes ? JSON.stringify(changes) : null;
+  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson }));
   write(org.publishes.stage.addScreens(made.id, rows));
   for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId));
   if (rows.length) notify((screens) => screens.manifests(rows));
@@ -206,10 +208,22 @@ export async function runPublish(
     .map((d) => d.id)
     .sort();
   write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
+  // What it made live and removed, named as published (#370): a schedule entry by its playlist.
+  const spotNames = new Map(result.read.spots.map((s) => [s.id, s.name]));
+  const playlistNames = new Map(result.read.playlists.map((p) => [p.id, p.name]));
+  const entryPlaylists = new Map(result.read.entries.map((e) => [e.id, e.playlistId]));
+  const nameOf = (d: { kind: DraftKind; id: string }) =>
+    (d.kind === 'spot' ? spotNames.get(d.id) : playlistNames.get(d.kind === 'playlist' ? d.id : (entryPlaylists.get(d.id) ?? ''))) ?? '';
+  const changes = [
+    ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d), removed: false })),
+    ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d), removed: true })),
+  ];
   const made = await switchScreens(
     ctx,
     result.revision + 1,
     changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+    undefined,
+    changes,
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -421,6 +435,8 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
     playing,
     replaced,
     open,
+    // Written by switchScreens, from this output's own shape.
+    changes: h.changesJson === null ? null : JSON.parse(h.changesJson),
   };
 };
 

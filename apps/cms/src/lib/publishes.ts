@@ -29,6 +29,33 @@ export function standing(p: PublishView): string {
 /** Whether a rollout is over, as its page says "complete": it switched screens, and each plays it, was replaced or was revoked. */
 export const rolloutComplete = (p: Pick<PublishView, 'screens' | 'open'>) => p.screens > 0 && p.open === 0;
 
+/** Names in a sentence: three at most, then how many more. */
+function named(names: readonly string[]): string {
+  const shown = names.length > 3 ? [...names.slice(0, 2), `${names.length - 2} more`] : names;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}` : (shown[0] ?? '');
+}
+
+/**
+ * What a publish changed, in words (#370): the spots and playlists it made live, the playlists whose
+ * schedule entries it made live, and those it took off the schedule. A roll back's, and one made before
+ * these were kept, is null: the page says nothing then.
+ */
+export function changesText(changes: NonNullable<PublishView['changes']>): string {
+  const of = (kind: string, removed: boolean) => [...new Set(changes.filter((c) => c.kind === kind && c.removed === removed).map((c) => c.name))];
+  const spots = of('spot', false);
+  const playlists = of('playlist', false);
+  const scheduled = of('schedule_entry', false);
+  const unscheduled = of('schedule_entry', true);
+  const parts = [
+    spots.length ? `${spots.length === 1 ? 'spot' : 'spots'} ${named(spots)}` : '',
+    playlists.length ? `${playlists.length === 1 ? 'playlist' : 'playlists'} ${named(playlists)}` : '',
+    scheduled.length ? `the schedule for ${named(scheduled)}` : '',
+    unscheduled.length ? `took ${named(unscheduled)} off the schedule` : '',
+  ].filter(Boolean);
+  const text = parts.join('; ');
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : 'No draft changed: the screens were compiled again';
+}
+
 /** A publish's name as people say it. */
 export const versionName = (p: { revision: number }) => `v${p.revision}`;
 
