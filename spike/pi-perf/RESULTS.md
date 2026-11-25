@@ -895,6 +895,134 @@ The re-check of #222 found the fade above had taken Poster's ink wipe away: the 
 - Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
 - Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
 
+## The Alert's 40vmin QR code (issue #230, 2026-11-25)
+
+`templates/alert` 1.1.0 at `05ca4db`: the QR tile grown from 23vmin to 40vmin so a 200-character link scans from 2 m. Each severity was a 10 s spot with its defaults and the longest link allowed (200 characters, version 10), played on its own, 3 runs each. This branch's player and content were in `~/signforge/www` (the original restored afterwards), content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the Alert above: `device/pi/isolate.py`, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared before each spec, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. The first prepare follows a cold load.
+
+| Orientation | Transition | Severity | Overall (3 runs) | Playing | Loading next | Worst frame | First prepares (ms) | Later prepares, median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.22, 0.11, 0.17% | 0.00% | 5.3 to 10.8% | 33 ms | 343, 350, 342 | 198 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 356, 355, 364 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 364, 359, 372 | 179 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 365, 353, 358 | 180 ms |
+| | fade | emergency | 0.17, 0.17, 0.11% | 0.00% | 5.4 to 8.3% | 33 ms | 339, 359, 356 | 196 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 366, 369, 356 | 177 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 346, 358, 359 | 180 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 357, 358, 342 | 179 ms |
+| portrait | cut | emergency | 0.22, 0.22, 0.78% | 0.00, 0.00, 0.63% | 6.2 to 8.5% | 200 ms (one, in run 3) | 333, 357, 364 | 261 ms |
+| | | warning | 0.00, 0.11, 0.00% | 0.00% | 0.0 to 5.6% | 33 ms | 370, 380, 367 | 194 ms |
+| | | advisory | 0.00, 0.06, 0.17% | 0.00% | 0.0 to 7.9% | 33 ms | 374, 372, 368 | 192 ms |
+| | | notice | 0.06, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 377, 367, 379 | 184 ms |
+| | fade | emergency | 0.22, 0.33, 0.17% | 0.00% | 6.7 to 10.6% | 50 ms | 349, 362, 361 | 251 ms |
+| | | warning | 0.17, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 355, 365, 363 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 368, 360, 372 | 194 ms |
+| | | notice | 0.06, 0.89, 0.00% | 0.00% | 0.0 to 5.7% | 250 ms (one, in run 2, in the transition) | 355, 351, 354 | 194 ms |
+
+- Every run is under the 1% budget: at most 0.89% overall and 0.63% while playing. Nothing was skipped.
+- Two single stalls broke the 50 ms frame rule once each: 200 ms while portrait emergency played (cut, run 3) and 250 ms in portrait notice's fade (run 2). Neither came back in 5 more runs of each spec straight after: portrait cut emergency 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms; portrait fade notice 0.00%, worst 17 ms. They are read as the Pi's own noise, not the larger tile.
+- Against the 23vmin code (the Alert above) nothing moved beyond run-to-run noise: emergency still drops a little while the next spot loads, as its pulse keeps two layers animating, and prepares are close: first 333 to 380 ms (315 to 476 before), later medians 177 to 198 ms in landscape (about 165 before) and 180 to 261 ms in portrait (175 to 230 before), portrait emergency the highest in both. All are well inside the 500 ms budget.
+
+### The stalls, A/B: 23vmin against 40vmin (review of #448, 2026-11-25)
+
+The same build and session, at `67e74d6`, differing only in the tile: A with `--qr` at 23vmin, B at 40vmin, each at its own content path (`?content=/ab/A`, `/ab/B`), with a 213-byte link and default copy. Portrait, run in turn A then B, 5 runs each of the two specs that stalled once: emergency on a cut and notice on a fade. Method as above.
+
+| Spec | Tile | Overall (5 runs) | Playing | Worst frame | Later prepares, median |
+| --- | --- | --- | --- | --- | --- |
+| emergency, cut | A 23vmin | 0.17, 0.17, 0.28, 0.44, 0.22% | 0.00, 0.00, 0.00, 0.17, 0.00% | 33, 33, 50, 67, 50 ms | 266 ms |
+| | B 40vmin | 0.22, 0.22, 0.28, **1.22**, 0.17% | 0.00, 0.00, 0.00, **0.97**, 0.00% | 50, 50, 50, **300**, 50 ms | 270 ms |
+| notice, fade | A 23vmin | 0.00% | 0.00% | 17 ms | 179 ms |
+| | B 40vmin | 0.00, 0.06, 0.11, 0.00, 0.06% | 0.00% | 17 to 33 ms | 196 ms |
+
+- **B had one more stall.** Its run 4 of emergency on a cut held a 300 ms frame while playing, 1.22% overall, over the 1% budget. A's worst was a 67 ms frame in the same run (run 4), over the 50 ms rule too, but nothing like it.
+- **Not settled by this many runs.** Counting every portrait run of these two specs, stalls of 200 ms or more came 3 times in 26 runs with the 40vmin tile (above and here) and never in 10 with the 23vmin one. With so few, that difference could be chance (Fisher's exact test, p ≈ 0.5). Every stall came in a spec where emergency's pulse or a fade was moving. The code itself is still once drawn, but a 40vmin tile has more than three times the area of a 23vmin one, so a link to the bigger tile cannot be ruled out. Telling the two apart would take about 30 runs of each.
+- Notice's fade and the prepares barely move. Notice is 0.00 to 0.11% against 0.00%. Later prepares are 266 against 270 ms for emergency, and 179 against 196 ms for notice.
+
+### Regions and scaled text (review of #448, 2026-11-25)
+
+`templates/alert` at `da00cc7`. The body is three regions, text scales to fit its region, and each text box clips its ink (Alert above, and `docs/template-spec.md`, Alert). Measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first), the player and content served from one origin by `packages/cli/bench/feed-images/serve.py`, the supervisor and the soak logger stopped. Each severity was a 10 s spot with default copy and a 213-byte link, 3 runs.
+
+| Orientation | Transition | Severity | Overall | Playing | Worst frame | Prepares, median (range) |
+| --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.11, 0.22, 0.17% | 0.00% | 33 ms | 231 ms (199-248) |
+| | | warning | 0.06, 0.00, 0.00% | 0.00% | 33 ms | 195 ms (180-212) |
+| | | advisory | 0.00, 0.06, 0.11% | 0.00% | 33 ms | 204 ms (189-212) |
+| | | notice | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 198 ms (178-208) |
+| | fade | emergency | 0.22, 0.17, 0.06% | 0.00% | 33 ms | 211 ms (194-245) |
+| | | warning | 0.00% | 0.00% | 17 ms | 189 ms (175-214) |
+| | | advisory | 0.00% | 0.00% | 17 ms | 195 ms (181-228) |
+| | | notice | 0.00% | 0.00% | 17 ms | 195 ms (177-227) |
+| portrait | cut | emergency | 0.28, **1.00**, 0.28% | 0.00, **0.80**, 0.00% | **250 ms** (one, run 2, playing) | 282 ms (268-314) |
+| | | warning | 0.17, 0.06, 0.11% | 0.00% | 33 ms | 209 ms (199-230) |
+| | | advisory | 0.06, 0.11, 0.00% | 0.00% | 33 ms | 212 ms (205-226) |
+| | | notice | 0.06, 0.11, 0.06% | 0.00% | 33 ms | 210 ms (208-227) |
+| | fade | emergency | 0.28, 0.22, 0.22% | 0.00% | 50 ms | 288 ms (261-300) |
+| | | warning | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 196 ms (192-245) |
+| | | advisory | 0.00, 0.06, 0.00% | 0.00% | 33 ms | 201 ms (194-214) |
+| | | notice | 0.06% | 0.00% | 33 ms | 211 ms (192-221) |
+
+- **The two specs that stalled before, 5 more runs each, in the same session.** Portrait emergency on a cut: 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms. Portrait notice on a fade: 0.00 to 0.06%, worst 17 to 33 ms. Neither stalled. With the 250 ms frame above, portrait emergency on a cut has now stalled (200 ms or more) in 3 of its 21 runs with the 40vmin tile, always while playing, against none in 5 with 23vmin (A/B above): it is the spec to watch.
+- **Realistic copy prepares as before.** It fits at full size in one measuring layout. Medians are 189 to 231 ms in landscape and 196 to 288 ms in portrait; portrait emergency is the highest, as before (about 265 ms then).
+- **Worst-case copy over budget cold.** Every field at its limit in `﷽`, so both fit searches run in full (eight halvings each), timed from load to `ready` from a cold start (cache and storage cleared, 25 s, every prepare):
+
+  | Orientation | Cold (first prepare) | Warm (later prepares) |
+  | --- | --- | --- |
+  | landscape | 590, 544, 541 ms | 347, 331, 328, 362, 360, 345 ms |
+  | portrait | 566, 533, 564 ms | 462, 449, 468, 432, 475, 437 ms |
+
+  The cold prepare is 533 to 590 ms, over the 500 ms budget by up to 90 ms, and inside the 2 s ready timeout. Warm prepares are within it: 328 to 362 ms landscape, 432 to 475 ms portrait. Such copy cannot be realistic: 40 of `﷽` in the headline. Fewer halvings would bring it in, at a coarser fit.
+
+  **Brought under the budget** (the same session's tools, later that day, the Pi otherwise as above). Without any search (the scale left at 1), the cold prepare of that copy is 373 to 394 ms, about default copy's (323 to 397 ms): the search was what took it over, 14 layouts of reshaped text. Step by step, 3 runs each orientation:
+
+  | Search | Layouts | Cold, landscape | Cold, portrait | Warm |
+  | --- | --- | --- | --- | --- |
+  | 8 halvings, each scale in turn | 18 | 541-590 ms | 533-566 ms | 328-475 ms |
+  | 6 halvings, each scale in turn | 14 | 458-579 ms | 471-541 ms | 296-417 ms |
+  | 6 halvings, both scales sharing each layout | 7 | 441-491 ms | 492-510 ms | 278-412 ms |
+  | Estimate, a stride, then halves to 1/64, sharing layouts (shipped) | 5 | 407-466 ms | 452-487 ms | 244-380 ms |
+
+  The last was run twice, 6 runs each orientation: every cold prepare under 500 ms (407 to 487 ms), every warm one 244 to 380 ms. The estimate is taken in the layout at full size, from what the text needs: height about as the square of the scale, the regions that share a column together. In the cases tried (W, W words, Japanese, `﷽`, `⸻` and `ﷺ` at every limit, with and without the code, both orientations) it came within 0.07 of the answer in all but one (0.14, portrait without the code, W words), and four probes found the scale in all but that one (six).
+
+### The headline's room and a search that always reaches 1/64 (review of #448, round 5, 2026-11-25)
+
+`b400dee`: the headline keeps room below its line for real scripts' marks (`padding-bottom: 0.25em`, measured by the fit), and the search may take eight probes (it stops at 1/64, four as a rule). Worst-case prepares, cold (first) and warm, with the tools above:
+
+| Copy | Orientation | Cold | Warm |
+| --- | --- | --- | --- |
+| `﷽` in every field (4 probes) | landscape | 517, 408, 475, 439, 433, 438 ms | 255-287 ms |
+| | portrait | 498, 450, 455, 444, 483, 426 ms | 314-371 ms |
+| W words in every field, no code (6 probes, the most seen) | landscape | 332, 343, 320 ms | 178-197 ms |
+| | portrait | 354, 342, 338 ms | 247-281 ms |
+
+- **One cold prepare over 500 ms in 12:** 517 ms, the session's first run (landscape, `﷽`). The other eleven were 408 to 498 ms; the same search at `5ec7a79` gave 407 to 487 ms in 12. The probe cap is not what it costs: `﷽` takes four probes, as before.
+- The case that takes the most probes (six) has light text, and its cold prepare is 320 to 354 ms.
+
+### A close first step, and the first prepare after a kiosk restart (review of #448, 2026-11-25)
+
+`98cb08b`: after probing the estimated scale, the search steps 1/64 from it when that probe's own layout puts the answer that close, so two probes bracket it (`﷽` in every field, with the code, takes two in landscape and four in portrait). Worst-case cold prepares, 6 per orientation, the first straight after `systemctl restart signforge-kiosk` (the supervisor, which the kiosk's unit wants and so starts again, stopped at once; in portrait the panel is turned right after the restart, which the kiosk's start resets):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **543 ms** | 446, 450, 450, 471, 434 ms | 263-299 ms |
+| portrait | **516 ms** | 441, 436, 447, 433, 427 ms | 314-363 ms |
+
+- **Every cold prepare is under 500 ms but the first after a kiosk restart, which is 516 to 543 ms.**
+- **A stated exception, accepted for #448:** worst-case input (`﷽` in every field at its limit), and only the first prepare after a kiosk restart, may take up to about 545 ms, well inside the 2 s ready timeout. Realistic copy fits at full size and runs no search, and the 1/64 fit is kept, which needs the two probes.
+- That first prepare without any search (the scale left at 1) is 419 and 423 ms for the same copy, and 410 ms for default copy. So in a freshly started Chromium the search's two probes, each a layout of the reshaped `﷽` text, cost about 100 to 120 ms. The 1/64 guarantee needs at least two probes.
+- An earlier attempt at this measurement is discarded: restarting the kiosk had started the supervisor again, which restarted the kiosk every 50 s for want of the bench page's heartbeat. That cut some runs short and put the panel back to landscape.
+
+### The headline's line height at 1.3 (review of #448, round 6, 2026-11-25)
+
+`a9d5e33`: the headline's line height goes from 1.02 to 1.3, so a wrapped line's marks stay off the line above. The same worst case, the same way (6 per orientation, the first straight after a kiosk restart, the supervisor stopped):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **502 ms** | 413, 418, 391, 432, 407 ms | 247-282 ms |
+| portrait | **502 ms** | 458, 461, 399, 440, 411 ms | 316-363 ms |
+
+- **Within the accepted exception:** the first prepare after a restart is 502 ms in both orientations (543 and 516 ms before), and every other cold prepare is under 500 ms.
+- No slower than at 1.02. With one restart per orientation, read the lower first prepare as no cost, not as a gain.
+- **Reverted** after the review's round 7: the headline is back at 1.02 (the owner put the demo's English look first and left other scripts' line spacing for a follow-up), so the section above holds for what ships.
+
 ## Feed images on sync and prepare (issue #196, 2026-11-25)
 
 This branch (`e558986`) against master's player (`dc1244b`), both served beside the content from one origin by `packages/cli/bench/feed-images/serve.py`, measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first; 10 s to settle, 30 s measured; prepares printed after). Content from `packages/cli/bench/feed-images/make.ts`: the bench template over ten stories, `text` with no images and `photos` with each story's 1920x1080 photo and 480x270 thumbnail (20 seeded JPEGs, 4,933 kB). The stress set's `news` and `photo-kitchen` were built by master's `sf build` (schema 7, which both players play), with the bench's ten stories as `news`'s snapshot. 3 runs of each spec, cut and fade, landscape and portrait (`wlr-randr --transform 90`); the supervisor and the soak logger stopped.

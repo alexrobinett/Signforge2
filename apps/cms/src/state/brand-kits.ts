@@ -14,18 +14,7 @@
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
 import { PREVIEW_PROTOCOL, type BrandColor, type ScreenManifest } from '@signforge/contract';
 import { toast } from 'sonner';
-import {
-  draftColors,
-  duplicateInput,
-  knownFont,
-  kitDraftOf,
-  pairFix,
-  shownColors,
-  updateInput,
-  withDraftKit,
-  type BrandKitView,
-  type KitDraft,
-} from '~/lib/brand-kits';
+import { draftColors, duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
@@ -84,6 +73,8 @@ export interface BrandKitsSlice {
   editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft, undo?: { said: string; change: (d: KitDraft) => KitDraft }) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
   fixKitPair: (orgId: string, kitId: string, fg: BrandColor, bg: BrandColor) => void;
+  /** Saves the kit's edit now: after a save that failed (no answer, a refusal), Try again. */
+  retryKitSave: (kitId: string) => Promise<void>;
   /** After a refused save: reads the kits again and drops the kit's draft. */
   reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
@@ -147,9 +138,8 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       ]);
       return { version };
     },
-    // A kit the server would refuse as it is (no name, a colour not yet a colour, a font not in the catalogue) is
-    // marked, not sent, as an editor's is.
-    invalid: ({ edit }) => !edit.name.trim() || draftColors(edit) === null || !knownFont(edit.displayFontId) || !knownFont(edit.bodyFontId),
+    // A kit the server would refuse as it is (no name, a colour not yet a colour) is marked, not sent, as an editor's is.
+    invalid: ({ edit }) => !edit.name.trim() || draftColors(edit) === null,
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
@@ -334,6 +324,10 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
         said: 'Contrast fixed',
         change: (d) => ({ ...d, colors: { ...d.colors, [fg]: was } }),
       });
+    },
+
+    async retryKitSave(kitId) {
+      await drafts.save(kitId);
     },
 
     async reloadKit(orgId, kitId) {

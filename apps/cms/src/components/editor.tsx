@@ -79,15 +79,20 @@ export function EditorHeader({
 }
 
 /** A save that failed, under the header; a refused one (`stale`: someone else changed it) offers a reload. */
-export function SaveAlert({ error, stale, onReload }: { error: string | null; stale: boolean; onReload: () => void }) {
+export function SaveAlert({ error, stale, onReload, onRetry }: { error: string | null; stale: boolean; onReload: () => void; onRetry: () => void }) {
   if (!stale && !error) return null;
   return (
     <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
       <AlertDescription className="flex flex-wrap items-center gap-3">
         {error}
-        {stale && (
+        {stale ? (
           <Button size="sm" variant="outline" onClick={onReload}>
             Reload
+          </Button>
+        ) : (
+          // Not a conflict (no answer, a refusal): the edit is still here, and saves when tried again (review of #461).
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Try again
           </Button>
         )}
       </AlertDescription>

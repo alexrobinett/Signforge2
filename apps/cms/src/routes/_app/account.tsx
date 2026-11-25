@@ -6,7 +6,7 @@ import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
-import { EditorFields } from '~/components/editor';
+import { EditorFields, saveWord } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -39,6 +39,7 @@ function AccountPage() {
   const { user } = app.useLoaderData();
   const id = useId();
   const running = useRunning({ page: 'account', orgId: null });
+  const savedAt = useAppStore((s) => s.settings.savedAt.profile ?? null);
   const busy = running !== undefined;
   const saveProfile = useAppStore((s) => s.saveProfile);
   const signOutSession = useAppStore((s) => s.signOutSession);
@@ -89,7 +90,7 @@ function AccountPage() {
             </div>
             <ActionError at="profile" />
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              {running === 'profile' ? 'Saving…' : 'Changes save as you make them.'}
+              {running === 'profile' ? 'Saving…' : savedAt ? saveWord('saved', savedAt) : 'Changes save as you make them.'}
             </p>
           </EditorFields>
         </form>

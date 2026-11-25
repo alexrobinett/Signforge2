@@ -375,6 +375,8 @@ export interface SyncWrite {
   at: number;
   playerVersion: string;
   heartbeatJson: string;
+  /** The manifest the heartbeat says it fell back from, if any: `fallback_since` moves only when this changes. */
+  fallbackFrom: string | null;
   /** The manifest the heartbeat says is playing, if any. */
   active?: string;
   /** When the screen observed `active`, on the server's clock; absent if its clock is untrusted. */
@@ -866,10 +868,13 @@ export function scoped(d1: D1Database, orgId: string) {
               };
         const update = d1
           .prepare(
-            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?${report.sql}
+            // The SET's right sides read the row as it was: the stored heartbeat is the last sync's.
+            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
+               fallback_since = CASE WHEN ? IS NULL THEN NULL
+                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, ?) ELSE ? END${report.sql}
              WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, ...report.args, orgId, screenId, ...markArgs);
+          .bind(v.at, v.playerVersion, v.heartbeatJson, v.fallbackFrom, v.fallbackFrom, v.at, v.at, ...report.args, orgId, screenId, ...markArgs);
         const results = await d1.batch([...inserts, advance, update]);
         const row = results.at(-1)!.results[0] as { ack_seq: number } | undefined;
         if (!row) return undefined;
@@ -1854,6 +1859,22 @@ export function scoped(d1: D1Database, orgId: string) {
         // The page is every publish between its revisions: a range, past the 100-parameter limit.
         const counts = await rolloutCounts(db, and(eq(p.orgId, orgId), gte(p.revision, oldest.revision), lte(p.revision, newest.revision)));
         return page.map((h) => ({ ...h, rollout: counts.get(h.id) ?? [] }));
+      },
+      /**
+       * The latest publish at or before `atOrBefore` that gave `screenId` the manifest `manifestId` (#367): the one a
+       * screen fell back from, made before it said so (a roll back that sent the same manifest later is not it). For
+       * its page to link to; undefined when none did.
+       */
+      ofManifest: (screenId: string, manifestId: string, atOrBefore: number) => {
+        const p = s.publishes;
+        return db
+          .select({ id: p.id, revision: p.revision })
+          .from(ps)
+          .innerJoin(p, and(eq(p.orgId, ps.orgId), eq(p.id, ps.publishId)))
+          .where(and(eq(ps.orgId, orgId), eq(ps.screenId, screenId), eq(ps.manifestId, manifestId), lte(p.createdAt, atOrBefore)))
+          .orderBy(desc(p.revision))
+          .limit(1)
+          .get();
       },
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>

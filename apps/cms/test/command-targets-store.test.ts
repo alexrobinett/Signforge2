@@ -171,7 +171,7 @@ describe("⌘K's actions open the page's own dialogs (#358)", () => {
     };
     const dialogs = {
       openNewSpot: vi.fn(),
-      openNewPlaylist: vi.fn(),
+      startNewPlaylist: vi.fn(async () => {}),
       openNewEntry: vi.fn(),
       openTakeover: vi.fn(),
       askPublishAll: vi.fn(async () => {}),
@@ -211,9 +211,9 @@ describe("⌘K's actions open the page's own dialogs (#358)", () => {
     await store.getState().chooseCommand(action('new-spot'));
     expect(router.navigate).toHaveBeenLastCalledWith({ to: '/spots' });
     expect(dialogs.openNewSpot).toHaveBeenCalledWith(true);
+    // New playlist through the editor's own start, which leaves no dialog asked for with no spot (review of #458).
     await store.getState().chooseCommand(action('new-playlist'));
-    expect(router.navigate).toHaveBeenLastCalledWith({ to: '/playlists' });
-    expect(dialogs.openNewPlaylist).toHaveBeenCalledWith(true);
+    expect(dialogs.startNewPlaylist).toHaveBeenCalledWith('org_1');
   });
 
   it('Add to the schedule, Take over and Publish all open the shell dialogs, for the org on screen, and call no tool', async () => {

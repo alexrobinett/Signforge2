@@ -150,7 +150,7 @@ function SpotEditor() {
         )}
         {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} onRetry={() => void save(spotId)} />
       {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
       <ProposalPanel
         orgId={orgId}

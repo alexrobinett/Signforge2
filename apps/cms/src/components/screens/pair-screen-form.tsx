@@ -14,7 +14,8 @@ import { NativeSelect } from '~/components/ui/select';
 import { isOrientation, type GroupView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
 import { useAppStore } from '~/state/provider';
-import { DisplayHoursEditor, hoursProblems } from './display-hours-editor';
+import { hoursProblems } from '~/lib/screen-types';
+import { DisplayHoursEditor } from './display-hours-editor';
 import { normaliseCode, PAIRING_CODE_LENGTH, PairingCodeInput } from './pairing-code-input';
 
 function timezones(): string[] {

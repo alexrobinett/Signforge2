@@ -85,9 +85,11 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
     await page.context().addCookies(session);
   }
 
-  // From Overview, follow the link to Spots.
+  // From Overview, follow the link to Spots, once Overview's own reads (what screens are doing, #357) have answered:
+  // the link, not one of them, is what finds the session ended (#397).
   await page.goto('/');
   await hydrated(page);
+  await expect.poll(() => open.size).toBe(0);
   await ends(() => spotsLink.click(), '/spots');
 
   // From Spots, open the editor.
