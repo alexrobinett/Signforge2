@@ -3,8 +3,9 @@
  * one no screen can be published to. When it has one never published (#393), the dialog says so and
  * publishes it too only if the person ticks that: nothing goes live they were not shown. An entry on every screen at all hours makes its playlist the
  * default as it publishes (the `publish` tool's `madeDefault`), and the dialog says so. For a takeover
- * or a narrower entry (owner decision) the dialog asks for one instead, prefilled with its playlist:
- * Save and publish, or Take over, makes it the default first (`set_default_playlist`).
+ * or a narrower entry (owner decision) the dialog says, once, that its playlist also becomes the
+ * default, with Change for another or none (#371): Save and publish, or Take over, makes it the
+ * default first (`set_default_playlist`).
  */
 import { useId } from 'react';
 import { NativeSelect } from '~/components/ui/select';
@@ -24,20 +25,40 @@ export function FirstDefaultNote({ playlists, playlistId, action }: { playlists:
   );
 }
 
-/** For a takeover or a narrower entry: which playlist to make the default first, or none. */
+/** Given focus as it is drawn: the choice Change opened (#371). Defined once, so React calls it on mount only. */
+const focusOnMount = (el: HTMLSelectElement | null) => el?.focus();
+
+/**
+ * For a takeover or a narrower entry: the entry's playlist also becomes the default, said once (#371);
+ * Change opens the choice of another, or none. `changing`: the person pressed Change (the draft's
+ * `firstDefault` is set); until then the default follows the entry's playlist.
+ */
 export function FirstDefaultChoice({
   playlists,
   value,
+  changing,
   onChange,
   action,
 }: {
   playlists: PlaylistView[];
   value: string;
+  changing: boolean;
   onChange: (playlistId: string) => void;
   action: string;
 }) {
   const id = useId();
   if (playlists.some((p) => p.isDefault)) return null;
+  const chosen = playlists.find((p) => p.id === value);
+  if (chosen && !changing) {
+    return (
+      <p className={BOX}>
+        <bdi className="font-medium">{chosen.name}</bdi> also becomes the default playlist: every screen plays it when nothing is scheduled.{' '}
+        <button type="button" onClick={() => onChange(value)} className="font-medium underline underline-offset-4">
+          Change<span className="sr-only"> the default playlist</span>
+        </button>
+      </p>
+    );
+  }
   return (
     <div className={`grid gap-1.5 ${BOX}`}>
       <label htmlFor={id} className="font-medium">
@@ -47,7 +68,14 @@ export function FirstDefaultChoice({
         This organization has no default playlist yet: every screen plays it when nothing is scheduled, and until there is one, screens this does not cover get
         nothing. {action} makes the one chosen here the default first.
       </p>
-      <NativeSelect id={id} aria-describedby={`${id}-help`} value={value} onChange={(e) => onChange(e.target.value)} className="bg-background">
+      <NativeSelect
+        id={id}
+        ref={changing ? focusOnMount : undefined}
+        aria-describedby={`${id}-help`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-background"
+      >
         <option value="">No default for now</option>
         {playlists.map((p) => (
           <option key={p.id} value={p.id}>

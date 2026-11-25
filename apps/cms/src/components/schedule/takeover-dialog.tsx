@@ -94,7 +94,13 @@ export function TakeoverDialog({
             <Input id={`${id}-until`} type="datetime-local" value={d.until} onChange={(e) => edit({ until: e.target.value })} className="w-60 tabular-nums" />
             <p className="text-xs text-muted-foreground">In your time zone. At most 24 hours from now.</p>
           </div>
-          <FirstDefaultChoice playlists={playlists} value={firstDefaultOf(d)} onChange={(firstDefault) => edit({ firstDefault })} action="Taking over" />
+          <FirstDefaultChoice
+            playlists={playlists}
+            value={firstDefaultOf(d)}
+            changing={d.firstDefault !== undefined}
+            onChange={(firstDefault) => edit({ firstDefault })}
+            action="Taking over"
+          />
           <UnpublishedDefault playlists={playlists} checked={d.publishDefault === true} onChange={(publishDefault) => edit({ publishDefault })} />
           {(error || problem) && (
             <div role="alert" className="text-sm text-destructive">

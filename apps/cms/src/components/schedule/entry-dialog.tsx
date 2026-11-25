@@ -118,6 +118,7 @@ export function EntryDialog({
               <FirstDefaultChoice
                 playlists={playlists}
                 value={firstDefaultOf(d)}
+                changing={d.firstDefault !== undefined}
                 onChange={(firstDefault) => edit({ firstDefault })}
                 action="Save and publish"
               />

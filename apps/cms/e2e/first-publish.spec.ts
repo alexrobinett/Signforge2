@@ -46,11 +46,17 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
 
   await page.goto(`/screens/${paired.id}`);
   await hydrated(page);
-  // A takeover asks for a default first, prefilled with its playlist (owner decision on #243).
+  // A takeover makes its playlist the default first (owner decision on #243), said once, not asked again (#371).
   await page.getByRole('button', { name: 'Take over this screen…' }).click();
   const takeover = page.getByRole('dialog', { name: 'Take over screens' });
   await takeover.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Opening week' });
-  await expect(takeover.getByLabel('Default playlist', { exact: true })).toHaveValue(opening);
+  await expect(takeover.getByText('Opening week also becomes the default playlist', { exact: false })).toBeVisible();
+  await expect(takeover.getByLabel('Default playlist', { exact: true })).toHaveCount(0);
+  // Change opens the choice, its focus in it, with another playlist or none.
+  await takeover.getByRole('button', { name: 'Change the default playlist' }).click();
+  const takeoverChoice = takeover.getByLabel('Default playlist', { exact: true });
+  await expect(takeoverChoice).toBeFocused();
+  await expect(takeoverChoice).toHaveValue(opening);
   await expect(takeover.getByText('Taking over makes the one chosen here the default first.')).toBeVisible();
   await takeover.getByRole('button', { name: 'Cancel' }).click();
 
@@ -58,9 +64,8 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await page.getByRole('button', { name: 'Play on this screen…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
   await dialog.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Opening week' });
-  const choice = dialog.getByLabel('Default playlist', { exact: true });
-  await expect(choice).toHaveValue(opening);
-  await expect(choice).toHaveAccessibleDescription(/no default playlist yet.*Save and publish makes the one chosen here the default first/);
+  await expect(dialog.getByText('Opening week also becomes the default playlist', { exact: false })).toBeVisible();
+  await expect(dialog.getByLabel('Default playlist', { exact: true })).toHaveCount(0);
   await axe(page);
   await shots(page, '58-first-publish-default');
   await page.setViewportSize({ width: 390, height: 844 });
