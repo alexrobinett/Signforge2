@@ -57,41 +57,49 @@ function measure(region: Element, side: Side): { fits: boolean; height: number; 
 
 /**
  * Sets each scale (`name` on the root) to the largest, from 1 down with no floor, at which its regions' text fits: 1 when
- * it fits as it is (one layout, as realistic copy does). Else it probes the scale estimated from that layout, then one
- * STRIDE from it towards the answer, then halves what is left until it is within PRECISION: five layouts as a rule,
- * never more than PROBES and one, and it keeps the largest scale seen to fit. The regions are independent, so their searches share each layout: every
- * step sets every scale and one layout answers every check. Small text beats hidden or covered text in an emergency
- * (review of #448).
+ * it fits as it is (one layout, as realistic copy does). Else it probes the scale estimated from that layout, then a step
+ * from it towards the answer (PRECISION when that probe's layout puts the answer that close, else STRIDE), then halves
+ * what is left until it is within PRECISION: three to five layouts as a rule, never more than PROBES and one, and it
+ * keeps the largest scale seen to fit. The regions are independent, so their searches share each layout: every step
+ * sets every scale and one layout answers every check. Small text beats hidden or covered text in an emergency (review
+ * of #448).
  */
 function fitScales(root: HTMLElement, scales: [name: string, groups: [Element, Side][][]][]): void {
-  // The scale estimated to fit: wrapped text needs height about as the square of the scale, and a glyph too wide to wrap
-  // needs width as the scale. Over each group of regions together, as one may take room from another (the meta line's
-  // row grows into the copy's when they share a column), and the smallest of the groups'.
+  // By how much the scale laid out would have to change to fit: wrapped text needs height about as the square of the
+  // scale, and a glyph too wide to wrap needs width as the scale. Over each group of regions together, as one may take
+  // room from another (the meta line's row grows into the copy's when they share a column), and the smallest of the
+  // groups'.
   const check = (groups: [Element, Side][][]) => {
-    let [fits, estimate] = [true, 1];
+    let [fits, factor] = [true, Infinity];
     for (const group of groups) {
       const all = group.map(([el, side]) => measure(el, side));
       const sum = (k: 'height' | 'room') => all.reduce((n, m) => n + m[k], 0);
       fits &&= all.every((m) => m.fits);
-      estimate = Math.min(estimate, Math.sqrt(sum('room') / sum('height')), ...all.map((m) => m.across));
+      factor = Math.min(factor, Math.sqrt(sum('room') / sum('height')), ...all.map((m) => m.across));
     }
-    return { fits, estimate };
+    return { fits, factor };
   };
   for (const [name] of scales) root.style.setProperty(name, '1');
   const open = scales.flatMap(([name, regions]) => {
-    const { fits, estimate } = check(regions);
-    return fits ? [] : [{ name, regions, low: 0, high: 1, next: estimate, probed: 0 }];
+    const { fits, factor } = check(regions);
+    return fits ? [] : [{ name, regions, low: 0, high: 1, next: Math.min(1, factor), probed: 0, close: false }];
   });
   for (let i = 0; i < PROBES && open.some((s) => s.high - s.low > PRECISION); i++) {
     const live = open.filter((s) => s.high - s.low > PRECISION);
     for (const s of live) root.style.setProperty(s.name, String(s.next));
     for (const s of live) {
       const at = s.next;
-      if (check(s.regions).fits) s.low = at;
+      const { fits, factor } = check(s.regions);
+      if (fits) s.low = at;
       else s.high = at;
       s.probed += 1;
-      // From the estimate a stride towards the answer, then halves; a step that would leave the bracket halves it.
-      const step = s.probed === 1 ? (s.low === at ? at + STRIDE : at - STRIDE) : (s.low + s.high) / 2;
+      // From the estimate, a step towards the answer: PRECISION when the estimate's own layout puts the answer that close
+      // (two probes then bracket it), else STRIDE, and STRIDE after a close step that did not bracket it; then halves. A
+      // step that would leave the bracket halves it.
+      const close = s.probed === 1 && Math.abs(Math.min(1, at * factor) - at) < PRECISION;
+      const stride = (s.probed === 1 && !close) || (s.probed === 2 && s.close && s.high - s.low > STRIDE);
+      s.close = close;
+      const step = close ? (fits ? at + PRECISION : at - PRECISION) : stride ? (fits ? at + STRIDE : at - STRIDE) : (s.low + s.high) / 2;
       s.next = step > s.low && step < s.high ? step : (s.low + s.high) / 2;
     }
   }
