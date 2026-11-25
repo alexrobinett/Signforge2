@@ -1314,9 +1314,35 @@ describe('brand colour lint', () => {
     ])
       expect(brandColourWarnings({ 'a.css': css }), css.slice(0, 8)).toEqual([]);
     expect(brandColourWarnings({ 'a.css': 'a:b;\n'.repeat(50_000) })).toEqual([]);
-    expect(brandColourWarnings({ 'a.css': `color:${'rgb(1,2,3) '.repeat(20_000)};` })).toHaveLength(20_000);
     for (const html of ['<style>'.repeat(30_000), `${'<style'.repeat(30_000)}</style>`, '<style>a:b</style>'.repeat(10_000)])
       expect(brandColourWarnings({ 'a.html': html }), html.slice(0, 8)).toEqual([]);
+  });
+
+  // A nested or unclosed call quoted the rest of its value in each warning: n warnings of up to n characters (#446).
+  it('keeps the report to a small multiple of the stylesheet, however its calls nest', () => {
+    for (const css of [
+      `color:${'rgb('.repeat(100_000)};`,
+      `color:${'rgb('.repeat(50_000)}${')'.repeat(50_000)};`,
+      `color:${'rgb(1,2,3) '.repeat(20_000)};`,
+      `${'a'.repeat(100_000)}:red;`.repeat(5),
+    ]) {
+      const warnings = brandColourWarnings({ 'a.css': css });
+      expect(warnings.join('\n').length, css.slice(0, 12)).toBeLessThanOrEqual(css.length);
+    }
+  });
+
+  it('reports the outermost of nested calls, quotes at most 80 characters, and counts past the first 20', () => {
+    const warning = (colour: string, prop = 'color') => `a.css:1: literal colour ${colour} in ${prop}; use var(--sf-*) with it as the fallback`;
+    expect(brandColourWarnings({ 'a.css': '.a{color: rgb(from hsl(0 0% 0%) r g b) hsl(1 2% 3%)}' })).toEqual([
+      warning('rgb(from hsl(0 0% 0%) r g b)'),
+      warning('hsl(1 2% 3%)'),
+    ]);
+    const long = `rgb(${'1 '.repeat(50)})`;
+    expect(brandColourWarnings({ 'a.css': `.a{color:${long}}` })).toEqual([warning(`${long.slice(0, 79)}…`)]);
+    expect(brandColourWarnings({ 'a.css': `.a{${'b'.repeat(100)}-color:red}` })).toEqual([warning('red', `${'b'.repeat(79)}…`)]);
+    const many = brandColourWarnings({ 'a.css': `.a{color:${'red '.repeat(23)}}` });
+    expect(many).toEqual([...Array.from({ length: 20 }, () => warning('red')), 'and 3 more literal colours']);
+    expect(brandColourWarnings({ 'a.css': `.a{color:${'red '.repeat(21)}}` }).at(-1)).toBe('and 1 more literal colour');
   });
 });
 

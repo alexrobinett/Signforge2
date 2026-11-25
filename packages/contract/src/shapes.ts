@@ -379,22 +379,33 @@ const COLOUR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi;
 /** Properties where a bare word may be a colour; anywhere else `white` could be a name. */
 const COLOUR_PROPERTY = /color|background|border|outline|shadow|fill|stroke|text-decoration|column-rule|^--/i;
 
+/** Just past the `)` that balances the `(` at `open` in `text`, or the end of `text` when none does. */
+function callEnd(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
+
 /** `text` with every `name(...)` call (balanced) replaced by spaces, so offsets stay put. */
 function blankCalls(text: string, name: RegExp): string {
   let out = '';
   for (const m of text.matchAll(name)) {
     // A call inside one already blanked closes inside it too; scanning it again would be quadratic.
     if (m.index < out.length) continue;
-    let depth = 0;
-    let i = m.index + m[0].length - 1;
-    for (; i < text.length; i++) {
-      if (text[i] === '(') depth++;
-      else if (text[i] === ')' && --depth === 0) break;
-    }
-    out += text.slice(out.length, m.index) + ' '.repeat(Math.min(i + 1, text.length) - m.index);
+    out += text.slice(out.length, m.index) + ' '.repeat(callEnd(text, m.index + m[0].length - 1) - m.index);
   }
   return out + text.slice(out.length);
 }
+
+/**
+ * The brand colour lint's limits: an author needs the first few warnings, and a stylesheet of nested or unclosed calls
+ * would otherwise make a report its length squared (#446). Past `warnings`, one more says how many were left out.
+ */
+const COLOUR_LINT = { warnings: 20, quote: 80 };
+const clip = (text: string) => (text.length > COLOUR_LINT.quote ? `${text.slice(0, COLOUR_LINT.quote - 1)}…` : text);
 
 /**
  * The brand colour lint: colours in a template's CSS should come from `var(--sf-*)` or be built on
@@ -406,6 +417,7 @@ function blankCalls(text: string, name: RegExp): string {
  */
 export function brandColourWarnings(sources: Record<string, string>): string[] {
   const warnings: string[] = [];
+  let more = 0;
   for (const [name, text] of Object.entries(sources)) {
     let css: string;
     if (name.endsWith('.css')) css = text;
@@ -450,23 +462,24 @@ export function brandColourWarnings(sources: Record<string, string>): string[] {
       const found: { at: number; text: string }[] = [];
       for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index, text: m[0] });
       const calls = blankCalls(value, COLOUR_FUNCTION);
-      // A call's text runs to the first character its blanking left. Calls only move forward, so the search does too.
-      const unblanked = /\S/g;
-      let end = -1;
+      // Each call to its own `)`; one nested in it is part of its text, not another literal.
+      let end = 0;
       for (const m of value.matchAll(COLOUR_FUNCTION)) {
-        if (end < m.index) {
-          unblanked.lastIndex = m.index;
-          end = unblanked.exec(calls)?.index ?? calls.length;
-        }
+        if (m.index < end) continue;
+        end = callEnd(value, m.index + m[0].length - 1);
         found.push({ at: m.index, text: d[2]!.slice(m.index, end).trim() });
       }
       if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index, text: m[0] });
       line += css.slice(counted, offset + d.index).split('\n').length - 1;
       counted = offset + d.index;
-      for (const f of found.sort((a, b) => a.at - b.at))
-        warnings.push(`${name}:${line}: literal colour ${f.text} in ${prop}; use var(--sf-*) with it as the fallback`);
+      for (const f of found.sort((a, b) => a.at - b.at)) {
+        if (warnings.length < COLOUR_LINT.warnings)
+          warnings.push(`${name}:${line}: literal colour ${clip(f.text)} in ${clip(prop)}; use var(--sf-*) with it as the fallback`);
+        else more += 1;
+      }
     }
   }
+  if (more) warnings.push(`and ${more} more literal colour${more === 1 ? '' : 's'}`);
   return warnings;
 }
 
