@@ -75,27 +75,33 @@ function fontFiles() {
   return JSON.stringify(Object.fromEntries(paths.map((p) => [p, readFileSync(`${root}${p}`).toString('base64')])));
 }
 
-export default defineConfig({
-  plugins: [
-    cloudflareTest(async () => ({
-      wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
-      miniflare: {
-        bindings: {
-          ADMIN_TOKEN: 'test-admin-token',
-          // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
-          GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
-          // Every feed fetch (the poller's default guards, read_table): a closed port too.
-          FEED_STUB_URL: 'http://127.0.0.1:9',
-          TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
-          TEMPLATE_BUILDS: await templateBuilds(),
-          FONT_FILES: fontFiles(),
-          RATE_LIMITS: rateLimits(),
-        },
-        serviceBindings: { TEMPLATE_CHECK: templateCheck },
+/** The workerd pool with the test bindings, and `extra` over them: the agent eval's live model (vitest.eval.config.ts). */
+export const workers = (extra: Record<string, string> = {}) =>
+  cloudflareTest(async () => ({
+    wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
+    miniflare: {
+      bindings: {
+        ADMIN_TOKEN: 'test-admin-token',
+        // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
+        GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
+        // Every feed fetch (the poller's default guards, read_table): a closed port too.
+        FEED_STUB_URL: 'http://127.0.0.1:9',
+        TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
+        TEMPLATE_BUILDS: await templateBuilds(),
+        FONT_FILES: fontFiles(),
+        RATE_LIMITS: rateLimits(),
+        ...extra,
       },
-    })),
-  ],
+      serviceBindings: { TEMPLATE_CHECK: templateCheck },
+    },
+  }));
+
+/** What every run of these tests sets, the eval's too. */
+export const testOptions = {
+  setupFiles: ['test/setup.ts'],
   // No module cache on disk: with it, a worker that starts after another gets every cached module inlined
   // into one message, over workerd's 32 MiB limit, and dies (docs/ci.md, "The API's workerd tests").
-  test: { setupFiles: ['test/setup.ts'], fsModuleCache: false },
-});
+  fsModuleCache: false,
+};
+
+export default defineConfig({ plugins: [workers()], test: testOptions });
