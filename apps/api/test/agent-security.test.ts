@@ -9,7 +9,7 @@ import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mcp } from '../src/mcp';
 import { ORIGIN } from './client';
-import { measure } from './counting';
+import { as, measure } from './counting';
 import { CLIENT_SAYS, plant, reads, SAYS, SOURCES_SAY } from './planted';
 import { agentToken, authorize, check, form, mcpRpc, mcpTool, REDIRECT, RESOURCE, register, sha256Base64Url, team } from './oauth';
 
@@ -255,6 +255,26 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
       address: { statements: 5, queries: 3, rpcs: ['write'] },
       refresh: { statements: 5, queries: 3, rpcs: ['write'] },
       name: { statements: 4, queries: 3, rpcs: ['write'] },
+    });
+  });
+
+  it("changes a feed as a person within the budget, the right to publish held to the batch as an agent's is (#424)", async () => {
+    const { owner } = await team();
+    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
+    const measured = (input: Record<string, unknown>) =>
+      measure(async (b) => {
+        expect((await as(owner, b).tool('update_data_source', { dataSourceId: 'menu', ...input })).status).toBe(200);
+      });
+    const refresh = await measured({ refreshS: 600 });
+    const name = await measured({ name: 'Menu board' });
+    // Measured, as the most each may take: the session and its member's role, the source, then one batch; a change but the
+    // name holds the right to publish to that batch, one statement more than a name alone. A new statement fails this on
+    // purpose: look at the budget, then raise it.
+    expect({ refresh, name }).toEqual({
+      refresh: { statements: 6, queries: 4, rpcs: [] },
+      name: { statements: 5, queries: 4, rpcs: [] },
     });
   });
 });
