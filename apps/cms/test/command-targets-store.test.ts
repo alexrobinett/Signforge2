@@ -166,7 +166,7 @@ describe("⌘K's actions open the page's own dialogs (#358)", () => {
     const router = {
       navigate: vi.fn(async () => {}),
       invalidate: vi.fn(async () => {}),
-      state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }] },
+      state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' } } }], location: { pathname: '/spots' } },
     };
     const dialogs = {
       openNewSpot: vi.fn(),
@@ -190,12 +190,19 @@ describe("⌘K's actions open the page's own dialogs (#358)", () => {
     keywords: [],
   });
 
-  it('Pair a screen opens the Screens page with its dialog, through the URL', async () => {
+  it("Pair a screen opens the Screens page with its dialog, through the URL, keeping Screens' own search when already there", async () => {
     const { store, router } = actionStore();
     store.getState().openCommandMenu();
     await store.getState().chooseCommand(action('pair'));
-    expect(router.navigate).toHaveBeenCalledWith({ to: '/screens', search: { pair: true } });
+    const [from] = router.navigate.mock.calls.at(-1) as unknown as [{ to: string; search: (prev: object) => object }];
+    expect(from.to).toBe('/screens');
+    // From another page, its search is not carried: Screens opens plain, with the dialog.
+    expect(from.search({ o: 'portrait' })).toEqual({ pair: true });
     expect(store.getState().commandMenu.open).toBe(false);
+    router.state.location.pathname = '/screens';
+    await store.getState().chooseCommand(action('pair'));
+    const [on] = router.navigate.mock.calls.at(-1) as unknown as [{ search: (prev: object) => object }];
+    expect(on.search({ view: 'table', q: 'lobby' })).toEqual({ view: 'table', q: 'lobby', pair: true });
   });
 
   it('New spot and New playlist open their pages and their dialogs', async () => {

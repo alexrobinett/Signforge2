@@ -239,7 +239,8 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const playlists = useQuery({ ...playlistsQuery(orgId), enabled: false });
   // Publish all is offered while there is something to publish: the sidebar's own count, read on opening.
   const counts = useQuery({ ...navCountsQuery(orgId, false, false), enabled: orgId !== '' && canPublish, refetchOnMount: 'always' });
-  const drafts = counts.data ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
+  // Read again on each opening: a count from before is not trusted until this opening's read lands.
+  const drafts = counts.isFetchedAfterMount && counts.data ? counts.data.spots + counts.data.playlists + counts.data.schedule > 0 : false;
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
   const shownSelection = selectedItem(selection, found, moved);
@@ -367,7 +368,8 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
           </CommandGroup>
         )}
         {/* Typed: every action allowed, then the pages and the org commands, which the sidebar lists already (#358). */}
-        {searching && actions.length > 0 && <CommandGroup heading="Actions">{[...actions, agentEntry].map(item)}</CommandGroup>}
+        {/* Ask the agent… is everyone's, a viewer's too, whatever actions the role has. */}
+        {searching && <CommandGroup heading="Actions">{[...actions, agentEntry].map(item)}</CommandGroup>}
         {searching && <CommandGroup heading="Go to">{pages.map(item)}</CommandGroup>}
         {searching && <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>}
         {asked && !sentence && <CommandGroup heading="Agent">{item(asked)}</CommandGroup>}

@@ -21,7 +21,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
@@ -121,13 +121,24 @@ function ScreensPage() {
   });
   const shown = sortScreens(matching, sort);
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  // With no screen yet the page is its own pairing form: ⌘K's Pair a screen focuses its code instead of a dialog (#358).
+  const takePair = useCallback(
+    (form: HTMLDivElement | null) => {
+      if (!form || !search.pair) return;
+      form.querySelector('input')?.focus();
+      void navigate({ search: (prev) => ({ ...prev, pair: undefined }), replace: true });
+    },
+    [search.pair, navigate],
+  );
 
   if (!screens.length) {
     return (
       <div className="space-y-6">
         <PageHeader title="Screens" description="No screens here yet." />
         {/* The player build on this site (vite.config.ts), with the device API on this origin too. */}
-        <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        <div ref={takePair}>
+          <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        </div>
       </div>
     );
   }

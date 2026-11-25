@@ -28,6 +28,16 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   const listReadsDone = () => expect.poll(() => reading.size).toBe(0);
   const forThisPage = menu.getByRole('group', { name: 'For this page' });
 
+  // A new org has no screen: the Screens page is its own pairing form, so Pair a screen focuses its code there,
+  // with no dialog to open, and leaves no pair in the URL (#358).
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('pair a screen');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('Pair a screen…');
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Character 1 of 6')).toBeFocused();
+  await expect(page).toHaveURL(/\/screens$/);
+
   // A screen to pair, and one paired by a player's code, so the Screens page has its Pair dialog.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.14' } });
   const { code, pollToken } = (await start.json()) as { code: string; pollToken: string };

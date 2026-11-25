@@ -87,9 +87,12 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     const orgId = orgOnScreen(router);
     set((s) => ({ commandMenu: closed(s.commandMenu) }));
     switch (action) {
-      case 'pair':
-        await router.navigate({ to: '/screens', search: { pair: true } });
+      case 'pair': {
+        // Already on Screens, its view and search stay under the dialog; from elsewhere it opens plain.
+        const onScreens = router.state.location.pathname === '/screens';
+        await router.navigate({ to: '/screens', search: (prev) => (onScreens ? { ...prev, pair: true as const } : { pair: true as const }) });
         return;
+      }
       case 'new-spot':
         await router.navigate({ to: '/spots' });
         get().openNewSpot(true);
