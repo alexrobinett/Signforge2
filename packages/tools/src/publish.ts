@@ -69,6 +69,10 @@ const publishManifestToScreen = defineTool({
       // sweep keeps them from the commit on (#235, review of #429, round 2).
       const files = Object.keys((await stored.json<Pick<ScreenManifest, 'files'>>()).files);
       await clearOfSweep(org, write, files);
+      // A file the sweep deleted since the push checked it was there (#432): refused, from a read and at the commit.
+      const deleted = await org.storage.deleted(files);
+      if (deleted.length) throw new ToolError('conflict', 'the storage clean-up deleted files this manifest names: push again to upload them', { deleted });
+      write({ row: undefined, writes: org.storage.stage.notDeleted(files) });
       write(org.storage.stage.index([{ screenId: screen.id, id: input.manifestId, files }], Date.now()));
       write({ row: undefined, writes: org.storage.stage.manifestsStored([at], since, since) });
       write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));

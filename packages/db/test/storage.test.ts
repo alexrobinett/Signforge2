@@ -54,6 +54,8 @@ async function claimed(orgId: string, at: number, owner = 'sweep-a') {
 }
 const queuedAt = async (orgId: string, hash: string) =>
   (await env.DB.prepare('SELECT queued_at AS q FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ q: number }>())?.q;
+const deletedAt = async (orgId: string, hash: string) =>
+  (await env.DB.prepare('SELECT deleted_at AS d FROM blob_deletes WHERE org_id = ? AND sha256 = ?').bind(orgId, hash).first<{ d: number | null }>())?.d;
 const m = (c: string) => `m${c.repeat(63)}`;
 /** Each pointer by which a screen keeps a manifest: its column, and the SQL that sets it to a bound id. */
 const POINTERS: [string, string][] = [
@@ -262,7 +264,8 @@ describe("the sweep's lease and claims (review of #429, 7)", () => {
     ).rejects.toBeInstanceOf(StaleVersionError);
     expect(await queuedAt(orgId, sha('1'))).toBe(T0);
     await org.commit(org.storage.stage.forget({ files: [sha('1')], uploads: [], manifests: [] }, 'sweep-b', DUE + STORAGE_LEASE_MS).writes);
-    expect(await queuedAt(orgId, sha('1'))).toBeUndefined();
+    // Its object deleted: kept as a tombstone, at the time it was forgotten (#432).
+    expect(await deletedAt(orgId, sha('1'))).toBe(DUE + STORAGE_LEASE_MS);
     const [row] = (await org.auditLog.list({ limit: 5 })).filter((e) => e.action === 'sweep_storage');
     expect(row).toMatchObject({ actorKind: 'system', actorId: 'storage-sweep', clientId: null, at: DUE + STORAGE_LEASE_MS });
   });
@@ -682,5 +685,48 @@ describe('the guards a manifest writer holds to its commit (#235)', () => {
       .bind(orgId, s, m('o'))
       .first<{ t: number }>();
     expect(row?.t).toBe(DUE + 4);
+  });
+});
+
+describe('a deleted file’s tombstone (#432)', () => {
+  /** Queues `hashes` at T0, then claims, "deletes" and forgets them at DUE + 1: tombstones from then on. */
+  async function swept(orgId: string, hashes: string[]) {
+    const org = scoped(env.DB, orgId);
+    await queueDeletedFiles(env.DB, orgId, hashes, T0);
+    const due = await claimed(orgId, DUE);
+    expect(due.files.toSorted()).toEqual(hashes.toSorted());
+    await org.commit(org.storage.stage.forget(due, 'sweep-a', DUE + 1).writes);
+  }
+
+  it('is never claimed or listed again, refuses a writer naming it, and goes when the bytes are stored again', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('t')]);
+    expect(await deletedAt(orgId, sha('t'))).toBe(DUE + 1);
+    expect(await orgsWithStorageDue(env.DB, DUE + DAY, 1000)).not.toContain(orgId);
+    expect((await claimed(orgId, DUE + DAY)).files).toEqual([]);
+    await org.commit(org.storage.stage.release('sweep-a', DUE + DAY).writes);
+    // Named again by an asset, it stays: the object is gone until a writer stores the bytes.
+    await testScope(env.DB, orgId).assets.insert({ kind: 'video', name: 'Again', sha256: sha('t'), type: 'video/mp4', size: 1 });
+    expect((await claimed(orgId, DUE + 2 * DAY)).files).toEqual([]);
+    expect(await org.storage.deleted([sha('t'), sha('w')])).toEqual([sha('t')]);
+    await expect(org.commit(org.storage.stage.notDeleted([sha('w'), sha('t')]))).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit(org.storage.stage.notDeleted([sha('w')]));
+    // Stored again (an /admin upload): the tombstone goes, and the writer passes.
+    await org.commit(org.storage.stage.restored([sha('t'), sha('w')]).writes);
+    expect(await org.storage.deleted([sha('t')])).toEqual([]);
+    await org.commit(org.storage.stage.notDeleted([sha('t')]));
+  });
+
+  it('is queued afresh when its bytes are deleted again, and pruned a week after', async () => {
+    const { orgId, org } = await fresh();
+    await swept(orgId, [sha('u'), sha('v')]);
+    // u's bytes stored again and deleted again: queued afresh, at that time.
+    await queueDeletedFiles(env.DB, orgId, [sha('u')], DUE + 2);
+    expect({ queued: await queuedAt(orgId, sha('u')), deleted: await deletedAt(orgId, sha('u')) }).toEqual({ queued: DUE + 2, deleted: null });
+    // A sweep a week after v's deletion prunes it.
+    expect(await org.storage.lease('sweep-b', DUE + 1 + 7 * DAY)).toBe(true);
+    await org.commit(org.storage.stage.forget({ files: [], uploads: [], manifests: [] }, 'sweep-b', DUE + 1 + 7 * DAY).writes);
+    expect(await deletedAt(orgId, sha('v'))).toBeUndefined();
+    expect(await queuedAt(orgId, sha('u'))).toBe(DUE + 2);
   });
 });

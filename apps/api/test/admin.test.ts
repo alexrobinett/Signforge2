@@ -265,6 +265,22 @@ describe('the storage sweep (#235, review of #429, round 2)', () => {
       .first<{ f: string }>();
     expect(JSON.parse(row!.f)).toEqual(Object.keys(b.manifest.files).sort());
   });
+
+  it('uploads again a file the sweep deleted, though a copy is back, which clears its tombstone (#432)', async () => {
+    const b = await build('tombstoned');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    await client(b, org.screen).run();
+    // The sweep deleted the image's earlier copy (its tombstone), and a copy is back in R2 since.
+    await env.DB.prepare('INSERT INTO blob_deletes (org_id, sha256, queued_at, deleted_at) VALUES (?, ?, 0, ?)')
+      .bind(org.orgId, image, AT - 1)
+      .run();
+    const missing = await admin('POST', `/screens/${org.screen}/missing`, b.manifestText);
+    expect(((await missing.json()) as { missing: { sha256: string }[] }).missing).toEqual([{ sha256: image, scope: 'org' }]);
+    const again = client(b, org.screen);
+    expect(await again.run()).toMatchObject({ manifestId: b.manifest.id, uploaded: 1 });
+    expect(again.puts).toEqual([expect.stringContaining(image)]);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([image])).toEqual([]);
+  });
 });
 
 describe('manifest upload', () => {

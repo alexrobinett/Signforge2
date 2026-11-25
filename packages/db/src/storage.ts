@@ -29,9 +29,11 @@
  * asset's file is refused at its commit (`stage.filesLive`). A writer that stores a manifest again or points a screen at
  * one (a publish, `publish_manifest_to_screen`, a roll back) is refused while the sweep claims it, or if it deleted it
  * after the writer started (`stage.manifestsStored`). The sweep deletes objects only while its lease holds, and its last
- * batch, guarded by that lease, forgets only its own claims. A run that fails part-way is taken up by the next.
+ * batch, guarded by that lease, turns only its own claims into tombstones, kept a week (#432): an `/admin` push naming a
+ * deleted file is refused at its commit (`stage.notDeleted`) until it uploads the file again, which clears the tombstone
+ * (`stage.restored`). A run that fails part-way is taken up by the next.
  */
-import { and, eq, inArray, lte, type SQL, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, type SQL, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { newId } from './ids';
 import * as s from './schema';
@@ -45,6 +47,8 @@ const DAY_MS = 24 * 60 * 60_000;
 export const STORAGE_GRACE_MS = 90 * DAY_MS;
 /** An org's sweep lease: longer than one org's sweep takes; its claims expire with it. */
 export const STORAGE_LEASE_MS = 10 * 60_000;
+/** How long a deleted file's tombstone is kept (#432): longer than any push takes from its missing-files check to its commit. */
+const TOMBSTONE_MS = 7 * DAY_MS;
 /** D1 binds at most 100 values a statement: lists go in chunks under it. */
 const CHUNK = 90;
 /** A manifest index written in a publish's batch: its JSON in parts of at most this many characters, each one statement. */
@@ -172,7 +176,7 @@ export async function orgsWithStorageDue(d1: D1Database, now: number, limit: num
   const rows = await drizzle(d1).all<{ orgId: string }>(sql`
     SELECT o.id AS orgId FROM organization o LEFT JOIN storage_sweeps w ON w.org_id = o.id
     WHERE coalesce(w.lease_until, 0) <= ${now} AND (
-      EXISTS (SELECT 1 FROM blob_deletes b WHERE b.org_id = o.id AND b.queued_at <= ${cutoff} AND b.claim_until <= ${now})
+      EXISTS (SELECT 1 FROM blob_deletes b WHERE b.org_id = o.id AND b.queued_at <= ${cutoff} AND b.claim_until <= ${now} AND b.deleted_at IS NULL)
       OR EXISTS (SELECT 1 FROM assets a WHERE a.org_id = o.id AND a.status = 'pending' AND a.created_at <= ${cutoff})
       OR (coalesce(w.manifests_checked_at, 0) <= ${now - STORAGE_RECHECK_MS}
         AND EXISTS (SELECT 1 FROM stored_manifests m WHERE m.org_id = o.id AND m.files_json IS NOT NULL AND m.deleted_at IS NULL
@@ -222,7 +226,7 @@ export function storage(db: Db, orgId: string) {
       const due = db
         .select({ sha256: bd.sha256 })
         .from(bd)
-        .where(and(mine, lte(bd.queuedAt, cutoff), lte(bd.claimUntil, now), sql`NOT ${named}`, sql`NOT ${inKept(orgId, cutoff)}`))
+        .where(and(mine, isNull(bd.deletedAt), lte(bd.queuedAt, cutoff), lte(bd.claimUntil, now), sql`NOT ${named}`, sql`NOT ${inKept(orgId, cutoff)}`))
         .orderBy(bd.queuedAt, bd.sha256)
         .limit(limit);
       const [claimed, manifests] = await db.batch([
@@ -244,7 +248,8 @@ export function storage(db: Db, orgId: string) {
             ),
           )
           .returning({ screenId: sm.screenId, manifestId: sm.manifestId }),
-        db.delete(bd).where(and(mine, sql`${named}`)),
+        // A tombstone stays, named or not: it says the object is gone until a writer stores the bytes again.
+        db.delete(bd).where(and(mine, isNull(bd.deletedAt), sql`${named}`)),
       ]);
       const pending = await db
         .select({ id: a.id, kind: a.kind, sha256: a.sha256 })
@@ -293,6 +298,20 @@ export function storage(db: Db, orgId: string) {
             .where(and(eq(sm.orgId, orgId), storedAs(stored), gone(now, since)))
             .all()
         : [],
+    /**
+     * Of these hashes, the ones whose objects the sweep deleted and no writer has stored again since (tombstones, #432): a
+     * push that names one uploads it again first.
+     */
+    deleted: async (shas: readonly string[]): Promise<string[]> =>
+      shas.length
+        ? (
+            await db
+              .select({ sha256: bd.sha256 })
+              .from(bd)
+              .where(and(eq(bd.orgId, orgId), sql`${bd.sha256} IN ${anyOf(shas)}`, sql`${bd.deletedAt} IS NOT NULL`))
+              .all()
+          ).map((row) => row.sha256)
+        : [],
     /** Whether any of these hashes is claimed by a sweep at `now`: a writer about to reuse them says so before it starts. */
     claimed: async (shas: readonly string[], now: number) =>
       shas.length > 0 &&
@@ -303,18 +322,27 @@ export function storage(db: Db, orgId: string) {
         .limit(1)
         .get()) !== undefined,
     stage: {
-      /** A deleted asset's files, queued at `now` (`delete_asset`): one already queued keeps the later of its times. */
+      /**
+       * A deleted asset's files, queued at `now` (`delete_asset`): one already queued keeps the later of its times, and a
+       * tombstone is queued afresh (its bytes were stored again since, or they would not be named).
+       */
       queue: (shas: readonly string[], now: number): Staged => ({
         row: undefined,
-        // Five bound values a row (every column, defaults too): 18 rows a statement.
-        writes: chunks([...new Set(shas)], 18).flatMap(
+        // Six bound values a row (every column, defaults too): 16 rows a statement.
+        writes: chunks([...new Set(shas)], 16).flatMap(
           (part) =>
             staged(
               undefined,
               db
                 .insert(bd)
                 .values(part.map((sha256) => ({ orgId, sha256, queuedAt: now })))
-                .onConflictDoUpdate({ target: [bd.orgId, bd.sha256], set: { queuedAt: sql`max(${bd.queuedAt}, excluded.queued_at)` } }),
+                .onConflictDoUpdate({
+                  target: [bd.orgId, bd.sha256],
+                  set: {
+                    queuedAt: sql`CASE WHEN ${bd.deletedAt} IS NULL THEN max(${bd.queuedAt}, excluded.queued_at) ELSE excluded.queued_at END`,
+                    deletedAt: null,
+                  },
+                }),
             ).writes,
         ),
       }),
@@ -335,6 +363,26 @@ export function storage(db: Db, orgId: string) {
               ),
             ]
           : [],
+      /**
+       * Refuses the batch if the sweep deleted any of these hashes' objects and no writer has stored them again (#432): a
+       * push that checked its files were there before the sweep removed one never makes a screen want it.
+       */
+      notDeleted: (shas: readonly string[]): Write[] =>
+        shas.length
+          ? [
+              staleGuard(
+                db,
+                orgId,
+                'deleted file',
+                0,
+                sql`NOT EXISTS (SELECT 1 FROM ${bd} WHERE ${bd.orgId} = ${orgId} AND ${bd.sha256} IN ${anyOf(shas)} AND ${bd.deletedAt} IS NOT NULL)`,
+                async () => 0,
+              ),
+            ]
+          : [],
+      /** These hashes' objects stored again (`/admin`): their tombstones go. */
+      restored: (shas: readonly string[]): Staged =>
+        staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), sql`${bd.sha256} IN ${anyOf(shas)}`, sql`${bd.deletedAt} IS NOT NULL`))),
       /**
        * Refuses a publish whose manifests name a deleted asset's file that nothing of the org names (review of #429): the
        * asset was deleted while it compiled. It runs again from a fresh read.
@@ -422,8 +470,9 @@ export function storage(db: Db, orgId: string) {
       },
       /**
        * Once the claimed objects are deleted, in a batch refused unless `owner` still holds the org's lease at `now`: its
-       * own claims forgotten, the uploads' assets deleted while still pending (one finished meanwhile stays) with the hashes
-       * they named queued again, one audit row as the system, and the lease released with the org marked swept.
+       * own claimed files kept as tombstones for a week, its manifests marked deleted, the uploads' assets deleted while
+       * still pending (one finished meanwhile stays) with the hashes they named queued again, one audit row as the system,
+       * and the lease released with the org marked swept.
        */
       forget: (due: StorageDue, owner: string, now: number): Staged => {
         const mine = and(eq(sm.orgId, orgId), eq(sm.claimOwner, owner));
@@ -431,13 +480,22 @@ export function storage(db: Db, orgId: string) {
         const requeued = [...new Set(due.uploads.flatMap((u) => u.files))];
         const writes: Write[] = [
           staleGuard(db, orgId, 'storage sweep', 0, leased(owner, now), async () => 0),
-          ...staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), eq(bd.claimOwner, owner)))).writes,
+          // Queued before the tombstones below: a hash an upload named that the sweep also deleted stays a tombstone.
+          ...storage(db, orgId).stage.queue(requeued, now).writes,
+          // Its claimed files kept as tombstones, at a time after their objects went (#432), and tombstones past a week pruned.
+          ...staged(
+            undefined,
+            db
+              .update(bd)
+              .set({ claimOwner: null, claimUntil: 0, deletedAt: now })
+              .where(and(eq(bd.orgId, orgId), eq(bd.claimOwner, owner))),
+          ).writes,
+          ...staged(undefined, db.delete(bd).where(and(eq(bd.orgId, orgId), lte(bd.deletedAt, now - TOMBSTONE_MS)))).writes,
           // Its manifests marked deleted, at a time after their objects went: a writer that started since stores them afresh.
           ...staged(undefined, db.update(sm).set({ claimOwner: null, claimUntil: 0, deletedAt: now }).where(mine)).writes,
           ...chunks(uploads).flatMap(
             (ids) => staged(undefined, db.delete(a).where(and(eq(a.orgId, orgId), inArray(a.id, ids), eq(a.status, 'pending')))).writes,
           ),
-          ...storage(db, orgId).stage.queue(requeued, now).writes,
           ...staged(
             undefined,
             db.insert(s.auditLog).values({

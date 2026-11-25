@@ -1257,6 +1257,13 @@ export const feedImageDeletes = sqliteTable(
   (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
 
+/** A row for an R2 object the storage sweep deletes (#235): its claim while it deletes it (owner, until when), and when it did. */
+const sweptObject = () => ({
+  claimOwner: text('claim_owner'),
+  claimUntil: integer('claim_until').notNull().default(0),
+  deletedAt: integer('deleted_at'),
+});
+
 /**
  * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete_asset` in its batch for the storage sweep (#235),
  * which deletes one past the grace period once nothing the org keeps names its bytes (packages/db `storage.ts`).
@@ -1269,11 +1276,21 @@ export const blobDeletes = sqliteTable(
     orgId: orgId(),
     sha256: text('sha256').notNull(),
     queuedAt: integer('queued_at').notNull(),
-    claimOwner: text('claim_owner'),
-    claimUntil: integer('claim_until').notNull().default(0),
+    // Once its object is deleted, kept a week as a tombstone: a writer that names the hash after it checked the file was
+    // there finds out at its commit (#432). `deleted_at` null while queued.
+    ...sweptObject(),
   },
-  // The storage sweep's due files, by age (#433).
-  (t) => [primaryKey({ columns: [t.orgId, t.sha256] }), index('blob_deletes_due_idx').on(t.orgId, t.queuedAt, t.claimUntil)],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.sha256] }),
+    // The storage sweep's due files, by age (#433): queued rows only, tombstones outside (#432).
+    index('blob_deletes_due_idx')
+      .on(t.orgId, t.queuedAt, t.claimUntil)
+      .where(sql`deleted_at IS NULL`),
+    // The tombstones, by age: what is pruned, and what a writer may be refused by (#432).
+    index('blob_deletes_tombstone_idx')
+      .on(t.orgId, t.deletedAt)
+      .where(sql`deleted_at IS NOT NULL`),
+  ],
 );
 
 /**
@@ -1291,10 +1308,7 @@ export const storedManifests = sqliteTable(
     manifestId: text('manifest_id').notNull(),
     filesJson: text('files_json'),
     storedAt: integer('stored_at').notNull(),
-    // The storage sweep's claim while it deletes the manifest's object, and when it did (#235).
-    claimOwner: text('claim_owner'),
-    claimUntil: integer('claim_until').notNull().default(0),
-    deletedAt: integer('deleted_at'),
+    ...sweptObject(),
   },
   (t) => [
     primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] }),
