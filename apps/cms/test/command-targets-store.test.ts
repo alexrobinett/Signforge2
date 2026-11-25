@@ -10,12 +10,13 @@ import { toast } from 'sonner';
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
+vi.mock('~/server/nav-counts.functions', () => ({ getNavCounts: vi.fn(async () => ({ spots: 0, playlists: 0, schedule: 0 })) }));
 
 let calls: { name: string; input: unknown }[] = [];
 let reply: { status: number; body: unknown } = { status: 200, body: {} };
 
 function menuStore() {
-  const router = { navigate: vi.fn(async () => {}), invalidate: vi.fn(async () => {}) };
+  const router = { navigate: vi.fn(async () => {}), invalidate: vi.fn(async () => {}), state: { matches: [] } };
   const store = createStore<CommandMenuSlice & { ui: object }>()((set, get) => ({
     ui: {},
     ...createCommandMenuSlice(set as never, get as never, { router } as never),
@@ -236,7 +237,7 @@ describe('asking the agent from the menu (#270)', () => {
       ui: {},
       openAgentDrawer: () => void asked.opened++,
       askAgent: async (q: string) => void asked.questions.push(q),
-      ...createCommandMenuSlice(set as never, get as never, { router: { navigate: vi.fn(), invalidate: vi.fn() } } as never),
+      ...createCommandMenuSlice(set as never, get as never, { router: { navigate: vi.fn(), invalidate: vi.fn(), state: { matches: [] } } } as never),
     }));
     return { store, asked };
   }

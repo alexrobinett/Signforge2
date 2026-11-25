@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import type { CommandEntry, CommandTarget, PeopleAction, Selection, TargetAction } from '~/lib/command-menu';
 import { orgOnScreen } from '~/lib/live';
 import { callTool, toolMessage } from '~/lib/tools';
-import { navCountsQuery } from '~/queries/nav-counts';
+import { getNavCounts } from '~/server/nav-counts.functions';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
@@ -82,27 +82,25 @@ const CLOSED: CommandMenuState = {
 /** The menu closed: what outlives an opening (a call on its way, the count) stays. */
 const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening });
 
-export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router, queryClient }) => {
+export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
   /** What had focus as the menu opened: outside state, nothing renders it. */
   let opener: Element | null = null;
   /** The count read the latest opening sent: only its answer, for that opening, may offer Publish all. */
   let draftsRead: Promise<unknown> | null = null;
   /**
-   * Reads the count of unpublished changes for opening `from`. A read already on its way was sent before
-   * this opening (by the one before, held up): it is cancelled, not joined, as its answer may predate a
-   * change since (a draft deleted). Whatever is cached is not trusted either.
+   * Reads the count of unpublished changes for opening `from`, as its own request: not the sidebar's
+   * cached count, nor a read of it in flight, which may have been sent before a change (a draft deleted)
+   * and is joined by the cache, not repeated.
    */
-  const readDrafts = async (orgId: string, from: number) => {
-    const query = navCountsQuery(orgId, false, false);
-    await queryClient.cancelQueries({ queryKey: query.queryKey, exact: true });
-    const read = queryClient.fetchQuery({ ...query, staleTime: 0 });
+  const readDrafts = async (from: number) => {
+    const read = getNavCounts({ data: { fleet: false, approvals: false } });
     draftsRead = read;
     const drafts = await read.then(
       (c) => c.spots + c.playlists + c.schedule > 0,
       () => false,
     );
     if (draftsRead !== read) return;
-    set((s) => (s.commandMenu.open && s.commandMenu.opening === from ? { commandMenu: { ...s.commandMenu, drafts } } : s));
+    set((s) => (s.commandMenu.open && s.commandMenu.opening === from && s.commandMenu.drafts !== drafts ? { commandMenu: { ...s.commandMenu, drafts } } : s));
   };
   /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
   const start = () => {
@@ -157,8 +155,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
         commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 },
         ui: { ...s.ui, drawerOpen: false },
       }));
-      const orgId = orgOnScreen(router);
-      if (orgId) void readDrafts(orgId, get().commandMenu.opening);
+      if (orgOnScreen(router)) void readDrafts(get().commandMenu.opening);
     },
     menuFocusBack(e) {
       e.preventDefault();
