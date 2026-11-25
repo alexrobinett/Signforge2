@@ -895,6 +895,33 @@ The re-check of #222 found the fade above had taken Poster's ink wipe away: the 
 - Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
 - Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
 
+## The Alert's 40vmin QR code (issue #230, 2026-11-25)
+
+`templates/alert` 1.1.0 at `05ca4db`: the QR tile grown from 23vmin to 40vmin so a 200-character link scans from 2 m. Each severity was a 10 s spot with its defaults and the longest link allowed (200 characters, version 10), played on its own, 3 runs each. This branch's player and content were in `~/signforge/www` (the original restored afterwards), content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the Alert above: `device/pi/isolate.py`, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared before each spec, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. The first prepare follows a cold load.
+
+| Orientation | Transition | Severity | Overall (3 runs) | Playing | Loading next | Worst frame | First prepares (ms) | Later prepares, median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.22, 0.11, 0.17% | 0.00% | 5.3 to 10.8% | 33 ms | 343, 350, 342 | 198 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 356, 355, 364 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 364, 359, 372 | 179 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 365, 353, 358 | 180 ms |
+| | fade | emergency | 0.17, 0.17, 0.11% | 0.00% | 5.4 to 8.3% | 33 ms | 339, 359, 356 | 196 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 366, 369, 356 | 177 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 346, 358, 359 | 180 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 357, 358, 342 | 179 ms |
+| portrait | cut | emergency | 0.22, 0.22, 0.78% | 0.00, 0.00, 0.63% | 6.2 to 8.5% | 200 ms (one, in run 3) | 333, 357, 364 | 261 ms |
+| | | warning | 0.00, 0.11, 0.00% | 0.00% | 0.0 to 5.6% | 33 ms | 370, 380, 367 | 194 ms |
+| | | advisory | 0.00, 0.06, 0.17% | 0.00% | 0.0 to 7.9% | 33 ms | 374, 372, 368 | 192 ms |
+| | | notice | 0.06, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 377, 367, 379 | 184 ms |
+| | fade | emergency | 0.22, 0.33, 0.17% | 0.00% | 6.7 to 10.6% | 50 ms | 349, 362, 361 | 251 ms |
+| | | warning | 0.17, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 355, 365, 363 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 368, 360, 372 | 194 ms |
+| | | notice | 0.06, 0.89, 0.00% | 0.00% | 0.0 to 5.7% | 250 ms (one, in run 2, in the transition) | 355, 351, 354 | 194 ms |
+
+- Every run is under the 1% budget: at most 0.89% overall and 0.63% while playing. Nothing was skipped.
+- Two single stalls broke the 50 ms frame rule once each: 200 ms while portrait emergency played (cut, run 3) and 250 ms in portrait notice's fade (run 2). Neither came back in 5 more runs of each spec straight after: portrait cut emergency 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms; portrait fade notice 0.00%, worst 17 ms. They are read as the Pi's own noise, not the larger tile.
+- Against the 23vmin code (the Alert above) nothing moved beyond run-to-run noise: emergency still drops a little while the next spot loads, as its pulse keeps two layers animating, and prepares are close: first 333 to 380 ms (315 to 476 before), later medians 177 to 198 ms in landscape (about 165 before) and 180 to 261 ms in portrait (175 to 230 before), portrait emergency the highest in both. All are well inside the 500 ms budget.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
