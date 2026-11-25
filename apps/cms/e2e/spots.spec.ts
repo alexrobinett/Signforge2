@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { png } from '@signforge/media/testing';
 import { axe, createOrg, hydrated, innerCorner, shots, signInAs, stageShows, tool } from './helpers';
@@ -357,7 +358,7 @@ test('every base template can be configured and previewed', async () => {
   // The News spot's actions, its longest row, wrap inside a phone's width: the editor's frame would clip them.
   await page.goto(newsSpot);
   await hydrated(page);
-  for (const name of ['Fill from a flyer', 'Save draft', 'Delete', 'Publish']) {
+  for (const name of ['Fill from a flyer', 'Save draft', 'Publish', 'More actions: delete']) {
     const box = await page
       .locator('header')
       .filter({ has: page.getByRole('heading', { level: 1 }) })
@@ -594,13 +595,45 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
 
 const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
 
-/** The spot's editor, with Delete pressed: its confirmation. */
+/** Delete…, from the editor's ⋯ menu (#378), away from Save draft and Publish. */
+async function chooseDelete() {
+  await page.getByRole('button', { name: 'More actions: delete' }).click();
+  await page.getByRole('menuitem', { name: 'Delete…' }).click();
+}
+
+/** The spot's editor, with Delete chosen: its confirmation. */
 async function askToDelete(spotId: string) {
   await page.goto(`/spots/${spotId}`);
   await hydrated(page);
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await chooseDelete();
   return page.getByRole('alertdialog');
 }
+
+test('the delete question, opened from ⋯ by keyboard, gives focus back to ⋯ on Escape and on Cancel (#378)', async () => {
+  // Radix gave it back once the question's closing had played, the page's body focused until then.
+  const spotId = await site('Keyboard spot');
+  await page.goto(`/spots/${spotId}`);
+  await hydrated(page);
+  const more = page.getByRole('button', { name: 'More actions: delete' });
+  const question = page.getByRole('alertdialog');
+  for (const close of ['Escape', 'Cancel'] as const) {
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question).toBeVisible();
+    // Read, as a person would: the menu has gone by then, and its Delete… item with it.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    if (close === 'Cancel') {
+      await question.getByRole('button', { name: 'Cancel' }).focus();
+      await page.keyboard.press('Enter');
+    } else await page.keyboard.press('Escape');
+    // At once, in the key's own event: not after the question's closing has played, with the body focused meanwhile.
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), close).toBe('More actions: delete');
+    await expect(question).toBeHidden();
+    await expect(more, close).toBeFocused();
+  }
+});
 
 test('a spot no playlist plays is deleted after its confirmation, at desktop and phone width (#242)', async () => {
   const spotId = await site('Old opening hours');
@@ -609,12 +642,29 @@ test('a spot no playlist plays is deleted after its confirmation, at desktop and
   await axe(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
-  // Cancel leaves it.
+  // Cancel leaves it, and gives focus back to the menu it came from.
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
-  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.getByRole('button', { name: 'More actions: delete' })).toBeFocused();
+  // The ⋯ menu, open, at phone and desktop width, light and dark. Axe looks at the menu alone: a modal
+  // menu hides the page behind it with aria-hidden while it holds focus, which axe reads as focusable
+  // content hidden (aria-hidden-focus), as on a screen's ⋯ menu.
+  await page.getByRole('button', { name: 'More actions: delete' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeVisible();
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 720 });
+    for (const dark of [false, true]) {
+      await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
+      expect((await new AxeBuilder({ page }).include('[role="menu"]').analyze()).violations).toEqual([]);
+    }
+  }
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toBeHidden();
+  // Delete is not between Save draft and Publish: the header's buttons end with Publish, then ⋯ (#378).
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await chooseDelete();
   await dialog.getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/spots$/);
   await hydrated(page);

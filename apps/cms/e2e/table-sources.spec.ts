@@ -182,8 +182,8 @@ test("the editor's fields and Publish are disabled in the server's HTML: a choic
   // The spot editor is a route chunk that hydrates after the page (body[data-hydrated]); a select changed in
   // between was set back by React to its value, and the choice dropped (CI run 44652707436).
   const spotId = await newSpot(page, 'Menu Board', 'Server menu');
-  // The header's Save draft, Delete and Publish (#127, #242) too: a click there before the editor hydrates would go nowhere.
-  const names = ['Duration', 'Save draft', 'Delete', 'Publish'];
+  // The header's Save draft, Publish and the ⋯ that holds Delete (#127, #242, #378) too: a click there before the editor hydrates would go nowhere.
+  const names = ['Duration', 'Save draft', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, `/spots/${spotId}`, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Loaded from the server, they are enabled once the editor has hydrated (Save draft waits for a change).
   await page.reload();

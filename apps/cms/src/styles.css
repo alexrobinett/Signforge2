@@ -293,6 +293,12 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  /* A title that wraps does so in lines of even length, not one word left alone on the last (#382). */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

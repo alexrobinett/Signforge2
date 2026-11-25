@@ -376,6 +376,9 @@ async function reopenRefusal(org: OrgScope, row: PublishRequestRow, now: number)
   return undefined;
 }
 
+/** A request's status as putting it back reads it: past its expiry it could not be decided again, whatever it was. */
+const reopenStatus = (row: PublishRequestRow, now: number) => (row.expiresAt <= now ? 'expired' : statusOf(row, now));
+
 const reopenPublishRequest = defineTool({
   name: 'reopen_publish_request',
   description:
@@ -394,8 +397,7 @@ const reopenPublishRequest = defineTool({
     const now = Date.now();
     const row = await org.publishRequests.get(input.publishRequestId);
     if (!row) throw notFound('publish request', input.publishRequestId);
-    // Past its expiry it could not be decided again: said so, whatever it was.
-    const status = row.expiresAt <= now ? 'expired' : statusOf(row, now);
+    const status = reopenStatus(row, now);
     if (status !== 'declined') throw new ToolError('conflict', `publish request ${row.id} is ${status}`, { status });
     if (row.decidedBy !== actor.id) {
       if (!approves(role, (await orgSettings(org)).editorsPublish))
@@ -417,8 +419,9 @@ const reopenPublishRequest = defineTool({
     const role = await org.members.roleOf(actor.id);
     if (row.decidedBy !== actor.id && !approves(role ?? '', (await orgSettings(org)).editorsPublish))
       return new ToolError('forbidden', 'only the person who declined it, or someone who may publish, can put it back');
-    if (row.status !== 'declined' || row.expiresAt <= now)
-      return new ToolError('conflict', `publish request ${row.id} is ${row.expiresAt <= now ? 'expired' : statusOf(row, now)}`, { status: statusOf(row, now) });
+    // The status the message gives, in details too (#411): one that expired meanwhile is expired, not declined.
+    const status = reopenStatus(row, now);
+    if (status !== 'declined') return new ToolError('conflict', `publish request ${row.id} is ${status}`, { status });
     return reopenRefusal(org, row, now);
   },
 });

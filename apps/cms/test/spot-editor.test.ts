@@ -548,7 +548,10 @@ describe('deleting a spot (#242)', () => {
     return (body: unknown, status = 200) => pending.shift()?.(new Response(JSON.stringify(body), { status }));
   };
 
-  /** Spot A open with an edit waiting to save, and Delete confirmed: the call on its way. */
+  /**
+   * Spot A open with an edit waiting to save, and Delete confirmed: the edit's save goes first (#355), answered at
+   * version 5, and then the delete is on its way.
+   */
   async function deleting() {
     const d = deletable();
     const reply = withStatus();
@@ -558,23 +561,52 @@ describe('deleting a spot (#242)', () => {
     d.store.getState().askDeleteSpot(true);
     void d.store.getState().deleteSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([{ name: 'update_spot', input: expect.objectContaining({ spotId: 'spt_a', name: 'Renamed', ifVersion: 4 }) }]);
+    reply({ spot: { ...a, name: 'Renamed', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
     return { ...d, reply, a };
   }
 
-  it('deletes it, drops the edit waiting to save, and goes to the spot library', async () => {
+  it('saves the edit waiting to save, deletes it at the version that made, and goes to the spot library (#355)', async () => {
     const { store, queryClient, went, reply, a } = await deleting();
-    // At the version the editor loaded.
-    expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 4 } }]);
+    // At the version its own save left, not the one the editor loaded: no "someone saved this" for its own edit.
+    expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });
     reply({ deleted: 'spt_a' });
     await vi.advanceTimersByTimeAsync(0);
     expect(went).toEqual(['/spots']);
     expect(queryClient.getQueryData(spotKeys.one(ORG, a.id))).toBeUndefined();
-    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [] });
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [], savedSince: false });
     await vi.advanceTimersByTimeAsync(5000);
-    expect(calls.map((c) => c.name)).toEqual(['delete_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['update_spot', 'delete_spot']);
   });
 
-  it('names the playlists that play it when refused, and keeps the edit waiting to save', async () => {
+  it('waits for an autosave already on its way, and deletes at the version it made (#355)', async () => {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    // The autosave's second passes: its save is sent, not yet answered, when Delete is pressed.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.map((c) => c.name)).toEqual(['update_spot']);
+    void d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.map((c) => c.name)).toEqual(['update_spot']);
+    reply({ spot: { ...a, name: 'Renamed', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });
+  });
+
+  it('sends no delete without a version: a spot not loaded here is refused before any call (#355)', async () => {
+    const d = deletable();
+    withStatus();
+    d.store.getState().askDeleteSpot(true);
+    expect(await d.store.getState().deleteSpot(ORG, 'spt_unread')).toBe(false);
+    expect(calls).toEqual([]);
+    expect(d.store.getState().spotEditor.deleting).toMatchObject({ open: true, pending: false, error: expect.stringMatching(/not loaded here/) });
+  });
+
+  it('names the playlists that play it when refused', async () => {
     const { store, went, reply } = await deleting();
     reply(
       {
@@ -598,10 +630,9 @@ describe('deleting a spot (#242)', () => {
         { id: 'pls_lunch', name: 'Lunch' },
         { id: 'pls_main', name: 'Main' },
       ],
+      savedSince: false,
     });
     expect(went).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { spotId: 'spt_a', name: 'Renamed' } });
   });
 
   it('says someone saved it since, when the delete is refused at its version', async () => {
@@ -612,16 +643,18 @@ describe('deleting a spot (#242)', () => {
       open: true,
       error: expect.stringMatching(/^Someone saved this spot since you opened it/),
       playlists: [],
+      savedSince: true,
     });
     expect(went).toEqual([]);
   });
 
-  it("deletes a fill's first try on Try another template, then opens New spot with the same material", async () => {
-    const { store, queryClient, went } = deletable();
+  /** A fill's first try, spot A at version 1, and Try another template pressed: its delete on its way. */
+  async function tryingAnother() {
+    const d = deletable();
     const reply = withStatus();
     const a = spot('spt_a', 1);
-    queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
-    store.setState(
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.setState(
       (s) =>
         ({
           agent: {
@@ -630,8 +663,13 @@ describe('deleting a spot (#242)', () => {
           },
         }) as never,
     );
-    void store.getState().fillWithAnother(ORG, a.id);
+    void d.store.getState().fillWithAnother(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
+    return { ...d, reply, a };
+  }
+
+  it("deletes a fill's first try on Try another template, then opens New spot with the same material", async () => {
+    const { store, went, reply } = await tryingAnother();
     expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 1 } }]);
     reply({ deleted: 'spt_a' });
     await vi.advanceTimersByTimeAsync(0);
@@ -643,26 +681,20 @@ describe('deleting a spot (#242)', () => {
   });
 
   it('says the first try was kept, and why, when Try another template cannot delete it, then opens New spot', async () => {
-    const { store, queryClient, went } = deletable();
-    const reply = withStatus();
-    const a = spot('spt_a', 1);
-    queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
-    store.setState(
-      (s) =>
-        ({
-          agent: {
-            ...s.agent,
-            filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } },
-          },
-        }) as never,
-    );
-    void store.getState().fillWithAnother(ORG, a.id);
-    await vi.advanceTimersByTimeAsync(0);
+    const { store, went, reply } = await tryingAnother();
     reply({ error: 'conflict', message: 'spot spt_a is in a playlist: "Lunch"', details: { playlists: [{ id: 'pls_lunch', name: 'Lunch' }] } }, 409);
     await vi.advanceTimersByTimeAsync(0);
     expect(toasts.error).toHaveBeenCalledWith('The first try was kept', { description: expect.stringMatching(/^Playlists play this spot.* Lunch\.$/) });
-    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [] });
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [], savedSince: false });
     expect(store.getState().spotEditor.newSpot.open).toBe(true);
     expect(went).toEqual(['/spots']);
+  });
+
+  it('says where the first try is when someone saved it since: not to reload it, since they are on the spot library (#355)', async () => {
+    const { reply } = await tryingAnother();
+    reply({ error: 'conflict', message: 'spot spt_a changed since; it is at version 2', details: { id: 'spt_a', version: 2 } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.error).toHaveBeenCalledWith('The first try was kept', { description: expect.stringMatching(/find it in the spot library/) });
+    expect(toasts.error.mock.calls[0]?.[1]?.description).not.toMatch(/Reload/);
   });
 });
