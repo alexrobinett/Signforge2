@@ -11,29 +11,49 @@ const OUT = new URL('./out/', import.meta.url).pathname;
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
-/** One row per task and arm: every attempt, its success (the check passed and the run completed), and the means of the rest. */
+/**
+ * One row of the table: every attempt's success (the check passed and the run completed) and check, and the means of
+ * the completed runs alone, so a failed run's zeros pull no mean down; "-" when none completed.
+ */
+function row(label: string, arm: string, role: string, runs: readonly RunRecord[], catalogue: boolean): string {
+  const completed = runs.filter((r) => r.errors.length === 0);
+  const of = (pick: (r: RunRecord) => number, digits: number) => (completed.length ? mean(completed.map(pick)).toFixed(digits) : '-');
+  const failed = [...new Set(runs.flatMap((r) => (r.why ? [r.why] : [])))].join('; ');
+  const errors = [...new Set(runs.flatMap((r) => r.errors))].join('; ');
+  return [
+    label,
+    arm,
+    role,
+    `${runs.filter((r) => r.success).length}/${runs.length}`,
+    `${runs.filter((r) => r.checked).length}/${runs.length}`,
+    `${completed.length}/${runs.length}`,
+    of((r) => r.toolCalls, 1),
+    of((r) => r.refusedCalls, 1),
+    of((r) => r.inputTokens, 0),
+    of((r) => r.outputTokens, 0),
+    catalogue ? (completed[0]?.catalogue.tokens ?? '-') : '',
+    failed,
+    errors,
+  ].join(' | ');
+}
+
+/** One row per task and arm, then one per arm over all its runs. */
 export function table(records: readonly RunRecord[]): string {
   const keys = [...new Set(records.map((r) => `${r.task}\t${r.arm}`))];
   const rows = keys.map((key) => {
     const runs = records.filter((r) => `${r.task}\t${r.arm}` === key);
-    const [task, arm] = key.split('\t');
-    const failed = runs.flatMap((r) => (r.why ? [r.why] : []));
-    const errors = runs.flatMap((r) => r.errors);
-    return `| ${task} | ${arm} | ${runs[0]?.role} | ${runs.filter((r) => r.success).length}/${runs.length} | ${runs.filter((r) => r.checked).length}/${runs.length} | ${mean(runs.map((r) => r.toolCalls)).toFixed(1)} | ${mean(runs.map((r) => r.refusedCalls)).toFixed(1)} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | ${runs[0]?.catalogue.tokens} | ${[...new Set(failed)].join('; ')} | ${[...new Set(errors)].join('; ')} |`;
+    const [task = '', arm = ''] = key.split('\t');
+    return `| ${row(task, arm, runs[0]?.role ?? '', runs, true)} |`;
   });
-  const total = (arm: string) => {
+  const totals = ['mcp', 'drawer'].flatMap((arm) => {
     const runs = records.filter((r) => r.arm === arm);
-    if (!runs.length) return [];
-    return [
-      `| **all** | ${arm} | | ${runs.filter((r) => r.success).length}/${runs.length} | ${runs.filter((r) => r.checked).length}/${runs.length} | ${mean(runs.map((r) => r.toolCalls)).toFixed(1)} | ${mean(runs.map((r) => r.refusedCalls)).toFixed(1)} | ${Math.round(mean(runs.map((r) => r.inputTokens)))} | ${Math.round(mean(runs.map((r) => r.outputTokens)))} | | | ${runs.filter((r) => r.errors.length).length} runs with errors |`,
-    ];
-  };
+    return runs.length ? [`| ${row('**all**', arm, '', runs, false)} |`] : [];
+  });
   return [
-    '| Task | Arm | Role | Success | Check passed | Tool calls | Refused | Input tokens | Output tokens | Catalogue tokens | Check failures | Errors |',
-    '|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|',
+    '| Task | Arm | Role | Success | Check passed | Completed | Tool calls | Refused | Input tokens | Output tokens | Catalogue tokens | Check failures | Errors |',
+    '|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|',
     ...rows,
-    ...total('mcp'),
-    ...total('drawer'),
+    ...totals,
   ].join('\n');
 }
 

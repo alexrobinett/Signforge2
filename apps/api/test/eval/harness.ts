@@ -281,6 +281,8 @@ const live =
 /** What a task's check reads: the org after the run, what the tools gave the model, and the drawer's drafts and card presses. */
 export interface Outcome {
   arm: Arm;
+  /** The day the run's check runs, YYYY-MM-DD in UTC: a schedule may start on it. */
+  today: string;
   world: World;
   scope: ReturnType<typeof testScope>;
   /** Each tool result the model read: its tool, whether it was a refusal, and its text. */
@@ -336,6 +338,8 @@ export interface Task {
 
 /** The most model turns the /mcp loop takes, as a client would cut a run off. */
 const MCP_TURNS = 20;
+/** How long a live /mcp run's model calls may take in all: under the eval's test timeout (vitest.eval.config.ts). */
+const RUN_MS = 300_000;
 const MAX_TOKENS = 2048;
 
 const SYSTEM = [
@@ -422,6 +426,8 @@ async function overMcp(task: Task, model: Model, log: ModelLog): Promise<Ran> {
   const ask = log.wrap(model.fetchFor(world));
   const messages: { role: 'user' | 'assistant'; content: unknown }[] = [{ role: 'user', content: task.prompt }];
   const errors: string[] = [];
+  // A live run's model calls end by RUN_MS together, so a hung call is a recorded failure, not a test timeout. A scripted run has no deadline.
+  const deadline = model.clock === undefined ? AbortSignal.timeout(RUN_MS) : undefined;
   for (let turn = 0; ; turn++) {
     if (turn === MCP_TURNS) {
       errors.push('out_of_turns');
@@ -433,14 +439,25 @@ async function overMcp(task: Task, model: Model, log: ModelLog): Promise<Ran> {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({ model: model.id, max_tokens: MAX_TOKENS, system, tools: defs, messages }),
+        ...(deadline ? { signal: deadline } : {}),
       });
     } catch {
-      errors.push('model_unreachable');
+      errors.push(deadline?.aborted ? 'model_timeout' : 'model_unreachable');
       break;
     }
     // The answer's own failure (its status, or a body that does not read) is recorded with its exchange.
     if (!res.ok) break;
-    const msg: { content: { type: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string } = await res.json();
+    let msg: { content: { type: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string };
+    try {
+      msg = await res.json();
+    } catch {
+      break;
+    }
+    // A reply cut off or refused is no finished turn, whatever its tools already showed.
+    if (msg.stop_reason === 'max_tokens' || msg.stop_reason === 'refusal') {
+      errors.push(`model_${msg.stop_reason}`);
+      break;
+    }
     messages.push({ role: 'assistant', content: msg.content });
     const uses = msg.content.filter((b) => b.type === 'tool_use');
     if (!uses.length) break;
@@ -551,7 +568,15 @@ export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, scr
     const ran = arm === 'mcp' ? await overMcp(task, chosen, log) : await inDrawer(task, chosen, log);
     const answers = await Promise.all(log.exchanges.map((e) => e.answered));
     const results = log.results();
-    const outcome: Outcome = { arm, world: ran.world, scope: testScope(env.DB, ran.world.orgId), results, drafts: ran.drafts, cards: ran.cards };
+    const outcome: Outcome = {
+      arm,
+      today: new Date().toISOString().slice(0, 10),
+      world: ran.world,
+      scope: testScope(env.DB, ran.world.orgId),
+      results,
+      drafts: ran.drafts,
+      cards: ran.cards,
+    };
     const why = await task.check(outcome);
     const errors = [...answers.flatMap((a) => (a.problem ? [a.problem] : [])), ...ran.errors];
     return {

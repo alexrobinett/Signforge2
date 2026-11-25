@@ -66,7 +66,18 @@ describe.runIf(!MODEL)('the eval with a scripted model', () => {
     expect(record).toMatchObject({ success: false, errors });
   });
 
-  it('/mcp, a model that fails after the tools answered: the check passes, the run does not', async () => {
+  // After list_screens has answered, the model's second reply is one of these: the check passes, the run does not.
+  const afterTools: [string, Response, string][] = [
+    ['answers 503', new Response('{}', { status: 503 }), 'model_503'],
+    [
+      'is cut off at max_tokens',
+      Response.json({ content: [{ type: 'text', text: 'The screens are' }], stop_reason: 'max_tokens', usage: {} }),
+      'model_max_tokens',
+    ],
+    ['refuses', Response.json({ content: [], stop_reason: 'refusal', usage: {} }), 'model_refusal'],
+    ['answers 200 with a body that is not JSON', new Response('<html>gateway</html>', { status: 200 }), 'model_unreadable'],
+  ];
+  it.for(afterTools)('/mcp, a model that %s after the tools answered: checked, but no success', async ([, reply, error]) => {
     if (!reads) throw new Error('no read-screens task');
     const model = scriptedModel(reads, 'mcp', NOON);
     const record = await runTask(reads, 'mcp', {
@@ -74,10 +85,10 @@ describe.runIf(!MODEL)('the eval with a scripted model', () => {
       fetchFor: (w) => {
         const script = model.fetchFor(w);
         let asked = 0;
-        return (input, init) => (++asked === 1 ? script(input, init) : Promise.resolve(new Response('{}', { status: 503 })));
+        return (input, init) => (++asked === 1 ? script(input, init) : Promise.resolve(reply.clone()));
       },
     });
-    expect(record).toMatchObject({ checked: true, success: false, errors: ['model_503'], toolCalls: 1 });
+    expect(record).toMatchObject({ checked: true, success: false, errors: [error], toolCalls: 1 });
   });
 
   it('the drawer, a model that answers 503: a recorded failure', async () => {

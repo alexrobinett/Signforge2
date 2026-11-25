@@ -55,44 +55,42 @@ const draftOf = (o: Outcome, tool: string, id?: string) => o.drafts.find((d) => 
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Weekdays as a set: an entry's order is not its meaning. */
-const weekdays = (days: unknown) => Array.isArray(days) && days.length === WEEKDAYS.length && WEEKDAYS.every((d) => days.includes(d));
-
 /**
- * Whether `e` plays `playlistId` on `groupId` every weekday from 07:00 to 10:00, with no dates bounding it: a
- * schedule entry's fields as the drafting tool takes them.
+ * Whether `entries`, a schedule entry's fields as the drafting tool takes them, play `playlistId` on `groupId` from
+ * 07:00 to 10:00 on exactly the five weekdays, together: every entry in that window counts, with no end date and none
+ * starting after `today`, and the union of their days must be Monday to Friday, no more and no less. An entry with no
+ * days plays every day.
  */
-const weekdayMornings = (e: Record<string, unknown> | undefined, playlistId: string, groupId: string) =>
-  e?.playlistId === playlistId &&
-  e.target === 'group' &&
-  e.groupId === groupId &&
-  weekdays(e.days) &&
-  e.from === '07:00' &&
-  e.to === '10:00' &&
-  (e.startDate ?? null) === null &&
-  (e.endDate ?? null) === null;
-
-/** The org's schedule entry for `playlistId` on `groupId` on weekday mornings, read from D1. */
-async function scheduled(o: Outcome, playlistId: string, groupId: string) {
-  const entries = await o.scope.scheduleEntries.list();
-  const hit = entries.some((e) =>
-    weekdayMornings(
-      {
-        playlistId: e.playlistId,
-        target: e.target,
-        groupId: e.groupId,
-        days: e.daysJson === null ? null : JSON.parse(e.daysJson),
-        from: e.fromTime,
-        to: e.toTime,
-        startDate: e.startDate,
-        endDate: e.endDate,
-      },
-      playlistId,
-      groupId,
-    ),
-  );
-  return hit ? undefined : `no entry playing ${playlistId} on ${groupId} every weekday 07:00-10:00 with no dates`;
+function weekdayMornings(entries: readonly Record<string, unknown>[], playlistId: string, groupId: string, today: string) {
+  const mine = entries.filter((e) => e.playlistId === playlistId && e.target === 'group' && e.groupId === groupId && e.from === '07:00' && e.to === '10:00');
+  if (!mine.length) return false;
+  if (mine.some((e) => (e.endDate ?? null) !== null || (typeof e.startDate === 'string' && e.startDate > today))) return false;
+  const days = new Set(mine.flatMap((e) => (Array.isArray(e.days) ? e.days : [0, 1, 2, 3, 4, 5, 6])));
+  return days.size === WEEKDAYS.length && WEEKDAYS.every((d) => days.has(d));
 }
+
+/** The org's schedule for `playlistId` on `groupId` on weekday mornings, read from D1. */
+async function scheduled(o: Outcome, playlistId: string, groupId: string) {
+  const entries = (await o.scope.scheduleEntries.list()).map((e) => ({
+    playlistId: e.playlistId,
+    target: e.target,
+    groupId: e.groupId,
+    days: e.daysJson === null ? null : JSON.parse(e.daysJson),
+    from: e.fromTime,
+    to: e.toTime,
+    startDate: e.startDate,
+    endDate: e.endDate,
+  }));
+  return weekdayMornings(entries, playlistId, groupId, o.today)
+    ? undefined
+    : `the schedule does not play ${playlistId} on ${groupId} on exactly the weekdays 07:00-10:00, open-ended`;
+}
+
+/** A schedule entry playing Breakfast on the Cafe group on `days`, 07:00 to 10:00. */
+const breakfastOnCafe = (w: World, days: number[]) => ({
+  name: 'create_schedule_entry',
+  input: { playlistId: w.playlists.breakfast, target: 'group', groupId: w.groups.cafe, days, from: '07:00', to: '10:00' },
+});
 
 /** The org's playlist named `name`, and the spots it plays. */
 async function playlistNamed(o: Outcome, name: string) {
@@ -318,6 +316,18 @@ export const TASKS: Task[] = [
           ],
         ],
       },
+      ...(['drawer', 'mcp'] as const).map((arm) => ({
+        name: 'Monday to Wednesday, then Thursday and Friday',
+        arm,
+        passes: true,
+        script: (w: World) => [[breakfastOnCafe(w, [1, 2, 3]), breakfastOnCafe(w, [4, 5])]],
+      })),
+      {
+        name: 'the weekdays, and the weekend too',
+        arm: 'mcp',
+        passes: false,
+        script: (w) => [[breakfastOnCafe(w, WEEKDAYS), breakfastOnCafe(w, [0, 6])]],
+      },
       {
         name: 'only in January 2000',
         arm: 'mcp',
@@ -343,8 +353,8 @@ export const TASKS: Task[] = [
     ],
     async check(o) {
       if (o.arm === 'drawer') {
-        const input = draftOf(o, 'create_schedule_entry')?.input;
-        return weekdayMornings(input, o.world.playlists.breakfast, o.world.groups.cafe) ? undefined : `drafted ${JSON.stringify(input)}`;
+        const drafted = o.drafts.filter((d) => d.tool === 'create_schedule_entry').map((d) => d.input);
+        return weekdayMornings(drafted, o.world.playlists.breakfast, o.world.groups.cafe, o.today) ? undefined : `drafted ${JSON.stringify(drafted)}`;
       }
       return scheduled(o, o.world.playlists.breakfast, o.world.groups.cafe);
     },

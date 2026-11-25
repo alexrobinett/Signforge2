@@ -9,7 +9,7 @@ A fixed set of agent tasks, run against SignForge's agent tools, so the tool con
 - **Two arms:**
   - **/mcp**: the MCP SDK's own client (`@modelcontextprotocol/client`) with an OAuth token the member consented to, and a plain loop over Anthropic's Messages API. The system prompt holds the server's instructions, as a client such as Claude Code does.
   - **The drawer**: `POST /api/agent/chat` as the member. The org's model is the one under test. When a task says so, the confirmation card the turn stops at is pressed.
-- **Checks** read the org after the run, or the tool results the model was sent. They never read the model's own words. A read check parses every successful result and merges what it shows of each record, across responses, then requires the fields the question asks for on the right records. So `get_screen` on each screen passes, and a list of states without names fails. A schedule check compares weekdays as a set and refuses date bounds. The drawer only drafts, so a drawer write is checked against the drafts in its answer card.
+- **Checks** read the org after the run, or the tool results the model was sent. They never read the model's own words. A read check parses every successful result and merges what it shows of each record, across responses, then requires the fields the question asks for on the right records. So `get_screen` on each screen passes, and a list of states without names fails. A schedule check judges the whole schedule. It takes every entry, or every draft, for that playlist and group in the asked window. Each must have no end date and must not start after the run's day. Together their days must be exactly Monday to Friday, so a split Mon–Wed plus Thu–Fri passes and an extra weekend entry fails. The drawer only drafts, so a drawer write is checked against the drafts in its answer card.
 - **Variants**: some tasks carry other scripts that CI runs: valid alternate paths that must pass, and incomplete ones that must fail.
 
 ## What it records
@@ -19,7 +19,7 @@ Every attempt gives a record, including one where the model failed or the harnes
 - **success**: the check passed and the run completed with no execution error. A read whose tools answered, followed by a model that failed, is a check pass but not a success.
 - **checked**: whether the check passed.
 - **why**: why the check failed.
-- **errors**: the model's failures (`model_503`, `model_unreachable`, an unreadable answer), the drawer's run errors, /mcp's protocol errors or its loop running out of turns, and the harness's own.
+- **errors**: the model's failures, the drawer's run errors, /mcp's protocol errors or its loop running out of turns, and the harness's own. The model's failures are `model_503` and other statuses, `model_unreachable`, `model_unreadable`, a reply cut off (`model_max_tokens`) or refused (`model_refusal`), and `model_timeout` once a live /mcp run's model calls pass 300 s.
 - tool calls, refused calls, model calls, input and output tokens, and catalogue size.
 
 All of it is measured from the model's side, so both arms count the same way:
@@ -45,7 +45,7 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 ```
 
 - The key goes only into the test worker's bindings. The drawer seals it as the org's key, as Settings does.
-- Results are written to `test/eval/out/<model>-<commit>.json` and `.md` (gitignored), and the table is printed. Post the table on the PR.
+- Results are written to `test/eval/out/<model>-<commit>.json` and `.md` (gitignored), and the table is printed. Success and checks count every attempt. Tool calls, refusals and tokens are means over the completed runs, those with no errors, with the count of completed runs beside them. Post the table on the PR.
 - A full run is 38 task-arm pairs × 3 runs, about 7M input tokens. That is under $1 on Haiku 5.5 and about $15 on Sonnet 5.5, at list prices without caching.
 - The default model is `claude-haiku-5-5`. It is the cheapest model, and the demo model is a fast model of its class. Run Sonnet 5.5 too when a change touches how the drawer's capable model chooses tools.
 
