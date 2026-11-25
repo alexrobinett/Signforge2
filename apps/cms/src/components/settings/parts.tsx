@@ -19,8 +19,8 @@ const ORG_PAGES = [
   { to: '/settings/brand-kits', label: 'Brand kits' },
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
-  { to: '/settings/ai', label: 'AI & agents' },
-  { to: '/settings/api', label: 'API & agents' },
+  { to: '/settings/ai', label: 'AI model' },
+  { to: '/settings/api', label: 'Connected agents (MCP)' },
 ] as const;
 
 export function SettingsNav() {

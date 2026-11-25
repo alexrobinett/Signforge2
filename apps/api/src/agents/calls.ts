@@ -1,6 +1,6 @@
 /**
  * Agents' calls over /mcp (M4-08): one Workers Analytics Engine data point each, written by the
- * adapter (src/mcp), and the reads Settings › API & agents makes of them (`get_agent_grant_usage`).
+ * adapter (src/mcp), and the reads Settings › Connected agents (MCP) makes of them (`get_agent_grant_usage`).
  * Owner decision on #113: Analytics Engine for calls, the audit log for changes. No D1 write per
  * call. Analytics Engine keeps data three months; the pages read the last 7 days.
  *

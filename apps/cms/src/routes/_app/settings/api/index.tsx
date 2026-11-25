@@ -1,5 +1,5 @@
 /**
- * Settings, API & agents (M4-07, canvas board SettingsApi): how an agent connects (the MCP server's
+ * Settings, Connected agents (MCP) (M4-07, canvas board SettingsApi): how an agent connects (the MCP server's
  * address and three steps), the agents connected to this org with Manage on each, what each scope
  * allows, and the tool reference. An owner sees every member's agents, anyone else their own
  * (`list_agent_grants`), with each one's calls and changes over the last 7 days (M4-08).
@@ -22,7 +22,7 @@ import { getAgents } from '~/server/agents.functions';
 
 export const Route = createFileRoute('/_app/settings/api/')({
   loader: () => getAgents(),
-  head: () => ({ meta: [{ title: 'API & agents · SignForge' }] }),
+  head: () => ({ meta: [{ title: 'Connected agents (MCP) · SignForge' }] }),
   component: ApiSettings,
 });
 
@@ -40,7 +40,7 @@ function ApiSettings() {
   return (
     <>
       <PageHeader
-        title="API & agents"
+        title="Connected agents (MCP)"
         description="Agents use the same tools as this app, with the scopes you grant. Every change they make is in the audit log."
       />
       <ConnectSteps mcpUrl={mcpUrl} />

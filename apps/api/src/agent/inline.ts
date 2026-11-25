@@ -126,7 +126,7 @@ const STATUSES: Record<InlineProblem, 400 | 403 | 409 | 422 | 429 | 502 | 503> =
   busy: 503,
 };
 
-const SETTINGS = 'Settings, AI & agents';
+const SETTINGS = 'Settings, AI model';
 
 const refuse = (c: Context<ApiEnv>, error: InlineProblem, message: string) => c.json({ error, message }, STATUSES[error]);
 

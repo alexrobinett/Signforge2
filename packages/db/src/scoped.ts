@@ -2148,7 +2148,7 @@ export function scoped(d1: D1Database, orgId: string) {
           .all(),
       /**
        * The grants not revoked, newest first, each with its client's registered redirect URIs (the
-       * provider's `oauthClient`, reached only through a grant here): what Settings › API & agents
+       * provider's `oauthClient`, reached only through a grant here): what Settings › Connected agents (MCP)
        * lists (M4-07). `userId` keeps one member's; `grantId` one grant.
        */
       connected: (filter: { userId?: string; grantId?: string } = {}) =>

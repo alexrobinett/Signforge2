@@ -223,7 +223,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
         )}
       </main>
       <p className="max-w-[520px] text-center text-meta text-muted-foreground">
-        You can change these scopes or disconnect <ClientName client={client} /> at any time in Settings › API &amp; agents.
+        You can change these scopes or disconnect <ClientName client={client} /> at any time in Settings › Connected agents (MCP).
       </p>
     </>
   );
