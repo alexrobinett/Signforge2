@@ -229,8 +229,6 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   let running: ChatClient | null = null;
   /** The conversation's thread, for every turn of it; a new one once forgotten. */
   let thread: string | null = null;
-  /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
-  let conversation = 0;
   /**
    * The confirmation cards waiting for a press (#269), by token: the question and context of the turn that
    * paused at each, which its press sends again with the token. Held until pressed, let go, or the drawer is forgotten.
@@ -309,11 +307,14 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     turn.dispose();
   }
 
-  /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
-  const drafts = (index: number, change: (d: Drafts) => Drafts) =>
+  /**
+   * The drafts of the answer whose card is `card`, changed. By the card, not its place: work that ends after the org
+   * switched finds the conversation forgotten, and changes nothing in the next one's card at that place (#344).
+   */
+  const drafts = (card: AnswerCard, change: (d: Drafts) => Drafts) =>
     drawer((d) => ({
       ...d,
-      messages: d.messages.map((m, i) => (i === index && m.role === 'assistant' && m.drafts ? { ...m, drafts: change(m.drafts) } : m)),
+      messages: d.messages.map((m) => (m.role === 'assistant' && m.card === card && m.drafts ? { ...m, drafts: change(m.drafts) } : m)),
     }));
   const draftsAt = (index: number) => {
     const m = get().agentDrawer.messages[index];
@@ -329,11 +330,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     const orgId = orgOnScreen(router);
     if (!at || !orgId) return;
     const calls = at.card.drafts;
-    // Only this conversation's: a drawer forgotten meanwhile (the org switched) holds another, or none.
-    const asked = conversation;
-    const write = (change: (d: Drafts) => Drafts) => {
-      if (conversation === asked) drafts(index, change);
-    };
+    const write = (change: (d: Drafts) => Drafts) => drafts(at.card, change);
     write((d) => ({ ...d, shown: { state: 'working' } }));
     try {
       const [fleet, schedule, playlists, spots, templates] = await Promise.all([
@@ -417,7 +414,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // Not before the card shows every change it would write.
       const { shown } = at?.drafts ?? {};
       if (!at || !orgId || at.drafts.status !== 'proposed' || shown?.state !== 'shown' || shown.summaries.length !== at.card.drafts.length) return;
-      drafts(index, (d) => ({ ...d, status: 'saving', error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'saving', error: null }));
       try {
         const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
         const calls = at.card.drafts.map(({ tool, input }) => ({ tool, input }));
@@ -444,7 +441,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (saved && typeof saved.version === 'number') versions[String(saved.id)] = saved.version;
         }
-        drafts(index, (d) => ({
+        drafts(at.card, (d) => ({
           ...d,
           results: answer.results,
           versions,
@@ -452,7 +449,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           error: refused?.message ?? null,
         }));
       } catch (err) {
-        drafts(index, (d) => ({ ...d, status: 'proposed', error: toolMessage(err) }));
+        drafts(at.card, (d) => ({ ...d, status: 'proposed', error: toolMessage(err) }));
       }
     },
 
@@ -461,7 +458,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const orgId = orgOnScreen(router);
       const was = at?.drafts.status;
       if (!at || !orgId || (was !== 'saved' && was !== 'refused')) return;
-      drafts(index, (d) => ({ ...d, status: 'undoing', error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'undoing', error: null }));
       let { undone, versions } = at.drafts;
       try {
         // The last saved first: what each put back is what it found. One put back already, by an Undo that stopped, is skipped.
@@ -476,25 +473,28 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
             if (now !== undefined) versions = { ...versions, [id]: now };
           }
           undone = [...undone, i];
-          drafts(index, (d) => ({ ...d, undone, versions }));
+          drafts(at.card, (d) => ({ ...d, undone, versions }));
           const spot = call?.tool === 'update_spot' ? call.target?.id : undefined;
           if (spot) set((s) => ({ agent: { ...s.agent, filled: Object.fromEntries(Object.entries(s.agent.filled).filter(([k]) => k !== spot)) } }));
         }
-        drafts(index, (d) => ({ ...d, status: 'undone' }));
+        drafts(at.card, (d) => ({ ...d, status: 'undone' }));
       } catch (err) {
-        drafts(index, (d) => ({ ...d, status: was, error: toolMessage(err) }));
+        drafts(at.card, (d) => ({ ...d, status: was, error: toolMessage(err) }));
       }
       await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
       for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
     },
 
-    confirmPublish: (index, confirming) => drafts(index, (d) => ({ ...d, confirming })),
+    confirmPublish(index, confirming) {
+      const at = draftsAt(index);
+      if (at) drafts(at.card, (d) => ({ ...d, confirming }));
+    },
 
     async publishDrafts(index) {
       const at = draftsAt(index);
       const orgId = orgOnScreen(router);
       if (!at || !orgId || at.drafts.status !== 'saved') return;
-      drafts(index, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
       // All of them in one publish, after one question about sample text (#360): all go live, or none does.
       const items = at.drafts.results.flatMap((r) => {
         const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
@@ -510,10 +510,10 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       });
       // Not published (Edit first on sample text, or a refusal the toast told): nothing went live, the drafts stay saved, and the card says so.
       if (!(await get().publishTogether(orgId, items))) {
-        drafts(index, (d) => ({ ...d, status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' }));
+        drafts(at.card, (d) => ({ ...d, status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' }));
         return;
       }
-      drafts(index, (d) => ({ ...d, status: 'published' }));
+      drafts(at.card, (d) => ({ ...d, status: 'published' }));
     },
 
     openAgentDrawer(opener) {
@@ -526,7 +526,6 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running?.stop();
       running = null;
       thread = null;
-      conversation++;
       // The cards still waiting for a press were the old org's: they go, and their tokens run out unused.
       waiting.clear();
       const { open } = get().agentDrawer;

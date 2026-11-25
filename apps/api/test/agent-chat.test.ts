@@ -1476,6 +1476,23 @@ describe('the drawer drafting changes (#268)', () => {
     expect(row).toMatchObject({ name: 'Breakfast', durationMs: 12_000, rowVersion: was.version! + 1 });
   });
 
+  it("joins an entry's new aim over its earlier one whole: aimed at a group, then the org, saves aimed at the org (#344)", async () => {
+    const calls: NonNullable<Step['calls']> = [];
+    const d = await drafting({ script: () => [{ calls }, ANSWER] });
+    const playlist = await d.scope.playlists.insert({ name: 'Breakfast', transitionJson: CUT });
+    const group = await d.scope.screenGroups.insert({ name: 'Bayside' });
+    const entry = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
+    calls.push(
+      { name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, target: 'group', groupId: group.id, priority: 2 } },
+      { name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, target: 'org' } },
+    );
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts.map((c) => c.input)).toEqual([{ scheduleEntryId: entry.id, priority: 2, target: 'org', ifVersion: entry.rowVersion }]);
+    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await d.scope.scheduleEntries.get(entry.id)).toMatchObject({ target: 'org', groupId: null, priority: 2 });
+  });
+
   it('reads a schedule entry it drafts by its id, whatever page of the schedule it is on; a deleted one is not found', async () => {
     // The model's calls, filled in once the entries are made.
     const first: NonNullable<Step['calls']> = [];
@@ -1525,12 +1542,18 @@ describe('the drawer drafting changes (#268)', () => {
     it('each drafting tool saved alone within what it is costed at', async () => {
       const d = await drafting({ role: 'editor', script: () => [ANSWER] });
       const { playlist, entry, screen, spotIds } = await content(d, 30);
+      const group = await d.scope.screenGroups.insert({ name: 'Bayside' });
+      const aimed = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'group', groupId: group.id });
       const calls = [
         { tool: 'update_spot', input: { spotId: d.spot.id, name: 'Breakfast', ifVersion: (await d.stored()).version } },
         { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds, ifVersion: playlist.rowVersion } },
         { tool: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 3, ifVersion: entry.rowVersion } },
         { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'org', idempotencyKey: 'budget-create-1' } },
         { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        // Aimed at a group or a screen, the save reads it too (review of #341, #344).
+        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'group', groupId: group.id, idempotencyKey: 'budget-create-2' } },
+        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'screen', screenId: screen.id, idempotencyKey: 'budget-create-3' } },
+        { tool: 'update_schedule_entry', input: { scheduleEntryId: aimed.id, priority: 2, ifVersion: aimed.rowVersion } },
       ];
       for (const call of calls) {
         const { status, body, statements } = await measured(d, [call]);

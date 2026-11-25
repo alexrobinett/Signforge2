@@ -50,7 +50,7 @@ vi.mock('~/lib/tools', async (actual) => ({
 
 const sent: { path: string; body: any }[] = [];
 /** The API's answers, in order: a turn's events are made for its request, which names its run. */
-const answers: (Response | ((body: any) => Response))[] = [];
+const answers: (Response | ((body: any) => Response | Promise<Response>))[] = [];
 beforeEach(() => {
   sent.length = 0;
   answers.length = 0;
@@ -217,6 +217,23 @@ describe("the drawer's drafts, in the store", () => {
     ]);
     expect(at().drafts.status).toBe('undone');
     expect(store.getState().agent.filled.spt_1).toBeUndefined();
+  });
+
+  it("a save answered after the org switched changes nothing in the next org's card at its place (#344)", async () => {
+    const { store, at } = draftsStore();
+    answers.push(turn());
+    await store.getState().askAgent('Punchier');
+    let answerSave: (r: Response) => void = () => {};
+    answers.push(() => new Promise<Response>((r) => (answerSave = r)));
+    const saving = store.getState().saveDrafts(1);
+    await vi.waitFor(() => expect(sent.at(-1)?.path).toBe('/api/agent/apply'));
+    // The org switches while the save is on its way, and the next org's question has its own drafts, at the same place.
+    store.getState().forgetAgentDrawer();
+    answers.push(turn());
+    await store.getState().askAgent('Punchier, here');
+    answerSave(savedBoth());
+    await saving;
+    expect(at().drafts).toMatchObject({ status: 'proposed', error: null });
   });
 
   it('shows a refused save as the refused call, overwriting nothing: someone saved the spot since', async () => {
