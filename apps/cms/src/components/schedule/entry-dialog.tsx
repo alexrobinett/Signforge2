@@ -248,7 +248,7 @@ function Field({ label, type, value, onChange }: { label: string; type: 'time' |
         step={type === 'time' ? 60 : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full font-mono"
+        className="w-full tabular-nums"
       />
     </div>
   );

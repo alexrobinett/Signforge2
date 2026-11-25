@@ -129,7 +129,7 @@ function ScalarInput({
           value={typeof value === 'string' ? value : ''}
           // An unfinished entry is '', which the contract asks to be finished.
           onChange={(e) => onChange(e.target.value)}
-          className="max-w-60 font-mono"
+          className="max-w-60 tabular-nums"
           {...aria}
         />
       );
@@ -145,7 +145,7 @@ function ScalarInput({
           value={typeof value === 'number' || typeof value === 'string' ? value : ''}
           // A box left empty keeps its text, so the contract says it must be a number.
           onChange={(e) => onChange(Number.isNaN(e.target.valueAsNumber) ? e.target.value : e.target.valueAsNumber)}
-          className="max-w-40 font-mono"
+          className="max-w-40 tabular-nums"
           {...aria}
         />
       );
@@ -301,7 +301,7 @@ function ListField({
       <legend className="mb-1.5 font-medium">
         {def.label}
         {def.maxItems !== undefined && (
-          <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+          <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
             {rows.length}/{def.maxItems}
           </span>
         )}
@@ -463,7 +463,7 @@ export function FieldForm({
               <span className="flex items-center gap-2">
                 {mark && <MarkPill mark={mark} />}
                 {def.type === 'text' && def.maxLength !== undefined && (
-                  <span className={p ? 'font-mono text-xs font-semibold text-destructive' : 'font-mono text-xs text-muted-foreground'}>
+                  <span className={p ? 'text-xs font-semibold text-destructive tabular-nums' : 'text-xs text-muted-foreground tabular-nums'}>
                     {typeof value === 'string' ? value.length : 0}/{def.maxLength}
                   </span>
                 )}

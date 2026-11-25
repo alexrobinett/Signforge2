@@ -199,7 +199,7 @@ export function PlayerStage({
             </NativeSelect>
           </span>
         )}
-        <span className="ml-auto font-mono text-sm text-stage-muted-foreground">
+        <span className="ml-auto text-sm text-stage-muted-foreground tabular-nums">
           {size.w} × {size.h} · {Math.round(shown * 100)}%
         </span>
       </div>

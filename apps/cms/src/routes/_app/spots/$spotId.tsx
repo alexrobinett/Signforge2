@@ -315,7 +315,7 @@ function SpotEditor() {
                     step="any"
                     value={seconds(draft.durationMs)}
                     onChange={(e) => set({ durationMs: Number.isNaN(e.target.valueAsNumber) ? 0 : Math.round(e.target.valueAsNumber * 1000) })}
-                    className="w-24 text-center font-mono"
+                    className="w-24 text-center tabular-nums"
                     aria-invalid={durationBad || undefined}
                     aria-describedby="spot-duration-help"
                   />

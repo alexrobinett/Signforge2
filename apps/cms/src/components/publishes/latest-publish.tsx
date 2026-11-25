@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getRouteApi, Link } from '@tanstack/react-router';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { useHydrated } from '~/lib/hydrated';
-import { byWord, publishTitle } from '~/lib/publishes';
+import { byWord, type PublishView, versionName } from '~/lib/publishes';
 import { publishQuery } from '~/queries/publishes';
 
 const app = getRouteApi('/_app');
@@ -24,7 +24,9 @@ export function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
     <section aria-label="Latest publish" className="flex flex-col gap-3.5 rounded-xl border bg-card px-5 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <p className="text-base">
-          <strong className="font-semibold">{publishTitle(publish)}</strong>{' '}
+          <strong className="font-semibold">
+            <PublishTitle publish={publish} />
+          </strong>{' '}
           <span className="text-muted-foreground">
             · {publish.restoresId ? 'rolled back' : 'published'}
             {at} by {byWord(publish, me)}
@@ -43,5 +45,19 @@ export function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
         <p className="text-sm text-muted-foreground">It changed what no screen plays.</p>
       )}
     </section>
+  );
+}
+
+/** A publish's name, its versions in mono as identifiers (#375): "v4", or "v4: back to v2" for a roll back. */
+export function PublishTitle({ publish }: { publish: Pick<PublishView, 'revision' | 'restoresRevision'> }) {
+  return (
+    <>
+      <span className="font-mono">{versionName(publish)}</span>
+      {publish.restoresRevision !== null && (
+        <>
+          : back to <span className="font-mono">{versionName({ revision: publish.restoresRevision })}</span>
+        </>
+      )}
+    </>
   );
 }

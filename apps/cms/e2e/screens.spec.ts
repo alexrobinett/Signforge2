@@ -82,6 +82,26 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
+  // Nothing published is said by the thumbnail alone: no caption under it (#374).
+  await expect(page.locator('figcaption')).toHaveCount(0);
+
+  // Live seconds do not move the page (#375): heard 1 s, then 8 s ago, at phone width. The page's clock
+  // (10 s steps, never before its load) is fixed an hour ahead, past any run; the sync is set before it.
+  const lobbyId = new URL(page.url()).pathname.split('/').at(-1);
+  const step = Math.ceil(Date.now() / 10_000) * 10_000 + 3_600_000;
+  await page.clock.setFixedTime(step);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const heardLine = page.getByText(/^last heard \d+ s ago$/);
+  const boxes = () => Promise.all([heardLine.boundingBox(), page.getByRole('button', { name: 'Sleep now' }).boundingBox()]);
+  const heardAgo = async (seconds: number) => {
+    await d1(`UPDATE screens SET last_seen_at = ${step - seconds * 1000} WHERE id = '${lobbyId}'`);
+    await page.reload();
+    await hydrated(page);
+    await expect(heardLine).toHaveText(`last heard ${seconds} s ago`);
+    return boxes();
+  };
+  expect(await heardAgo(8)).toEqual(await heardAgo(1));
+  await page.setViewportSize({ width: 1280, height: 720 });
   // Its tile says nothing published once, in the thumbnail, not again under it (#374).
   await page.goto('/screens');
   await hydrated(page);

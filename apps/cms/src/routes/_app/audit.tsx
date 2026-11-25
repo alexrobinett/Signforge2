@@ -204,7 +204,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
   const detail = detailText(e);
   return (
     <tr className={cn('border-t align-top', e.detail.refused !== undefined && 'bg-accent/50')}>
-      <td className="px-3 py-2 font-mono text-meta whitespace-nowrap text-muted-foreground">
+      <td className="px-3 py-2 text-meta whitespace-nowrap text-muted-foreground tabular-nums">
         <time dateTime={new Date(e.at).toISOString()}>{time}</time>
       </td>
       <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>
@@ -212,7 +212,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
         {whatText(e)}
         {/* In <bdi>: what a tool was given (an agent's reason for its publish request) cannot reorder the row around it. */}
         {detail && (
-          <span className="mt-0.5 block font-mono text-meta break-all text-muted-foreground">
+          <span className="mt-0.5 block text-meta break-all text-muted-foreground">
             <bdi>{detail}</bdi>
           </span>
         )}

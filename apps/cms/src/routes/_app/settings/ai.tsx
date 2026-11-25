@@ -341,7 +341,7 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
                 inputMode="numeric"
                 min={1}
                 defaultValue={provider.dailyTurnCeiling ?? ''}
-                className="w-28 font-mono"
+                className="w-28 tabular-nums"
               />
               <span className="text-sm text-muted-foreground">agent turns a day, then it pauses until midnight. Empty for none.</span>
             </div>

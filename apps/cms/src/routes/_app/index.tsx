@@ -181,7 +181,10 @@ const LIST = 'divide-y overflow-hidden rounded-xl border bg-card';
 function NeedsYou({ screens, now }: { screens: ScreenView[]; now: number }) {
   const needing = screens.filter((s) => s.state.kind === 'needs_you');
   return (
-    <Section id="needs-you" title={needing.length ? <span className="text-status-needs-you-foreground">Needs you · {needing.length}</span> : 'Needs you'}>
+    <Section
+      id="needs-you"
+      title={needing.length ? <span className="text-status-needs-you-foreground tabular-nums">Needs you · {needing.length}</span> : 'Needs you'}
+    >
       {needing.length ? (
         <ul className={LIST}>
           {needing.map((s) => (
@@ -194,7 +197,7 @@ function NeedsYou({ screens, now }: { screens: ScreenView[]; now: number }) {
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground">
+        <p className="text-muted-foreground tabular-nums">
           {screens.length ? `Nothing needs you. ${summarise(screens)}.` : 'Nothing needs you. No screens are paired yet.'}
         </p>
       )}
@@ -218,7 +221,7 @@ function PlayingNow({ rows, anyScreen }: { rows: Playing[]; anyScreen: boolean }
                 <SpotThumb spot={r.spot} />
                 <span className="space-y-0.5 px-4 py-3">
                   <span className="block truncate font-medium group-hover:underline">{r.spot.name}</span>
-                  <span className="block truncate text-sm text-muted-foreground">
+                  <span className="block truncate text-sm text-muted-foreground tabular-nums">
                     On {r.screens === 1 ? '1 screen' : `${r.screens} screens`}
                     {r.playlist && ` · ${r.playlist}`}
                   </span>
