@@ -340,6 +340,7 @@ const updateSpot = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
   input: z
     .object({
       spotId: id('spot'),

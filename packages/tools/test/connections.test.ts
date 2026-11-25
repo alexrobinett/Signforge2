@@ -154,7 +154,7 @@ describe('connecting an account', () => {
     expect(await result('start_connection', { provider: 'fake' }, agent)).toMatchObject({
       ok: false,
       error: 'forbidden',
-      message: expect.stringContaining('signed in to the CMS'),
+      message: expect.stringContaining('for people only'),
     });
     expect((await owner.org.connections.authorizations.list()).length).toBe(before);
   });

@@ -14,7 +14,7 @@ import type { OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { id } from './fields';
 import { page, pageInput } from './paging';
-import { type Actor, defineTool, isAgent, notFound, ROLES, type Role, ToolError } from './tool';
+import { defineTool, notFound, ROLES, type Role, ToolError } from './tool';
 import { outputs } from './outputs';
 
 const roleOf = (role: string | null): Role => z.enum(ROLES).parse(role);
@@ -38,11 +38,6 @@ async function requireMember(org: OrgScope, memberId: string) {
   if (!row) throw notFound('member', memberId);
   return row;
 }
-
-const refuseAgent = (actor: Actor, what: string) => {
-  // The in-CMS agent acts as its member, but a member's role and place are a person's choice too (docs/proposals/cms-agent.md).
-  if (isAgent(actor)) throw new ToolError('forbidden', `an agent cannot ${what}: ask an owner to do it in the CMS`);
-};
 
 const role = z.enum(ROLES).describe('One role per member: owner, editor or viewer');
 
@@ -125,12 +120,13 @@ const updateMemberRole = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // A person's: a misled agent could otherwise lock people out.
+  people: true,
   needs: ['members'],
   input: z.object({ memberId: id('member'), role }),
   output: outputs.update_member_role,
   example: { memberId: 'mem_0123456789abcdef', role: 'viewer' },
-  handler: async ({ org, actor, input, services: { members } }) => {
-    refuseAgent(actor, "change a member's role");
+  handler: async ({ org, input, services: { members } }) => {
     await requireMember(org, input.memberId);
     await members.updateRole(input.memberId, input.role);
     return { member: memberView(await requireMember(org, input.memberId)) };
@@ -143,12 +139,13 @@ const removeMember = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // A person's: a misled agent could otherwise lock people out.
+  people: true,
   needs: ['members'],
   input: z.object({ memberId: id('member') }),
   output: outputs.remove_member,
   example: { memberId: 'mem_0123456789abcdef' },
-  handler: async ({ org, actor, input, services: { members } }) => {
-    refuseAgent(actor, 'remove a member');
+  handler: async ({ org, input, services: { members } }) => {
     await requireMember(org, input.memberId);
     await members.remove(input.memberId);
     return { removed: input.memberId };

@@ -229,6 +229,22 @@ describe("an owner's agent", () => {
       await setRole('owner');
     }
     expect(await statusOf(id)).toBe('pending');
+
+    // Demoted, and the invitation accepted too, both meanwhile: still forbidden, never masked as a conflict (#417).
+    const both = racing({ ...as('owner', members, manager), member: inviter }, async () => {
+      await setRole('editor');
+      await env.DB.prepare("UPDATE invitation SET status = 'accepted' WHERE id = ?").bind(id).run();
+    });
+    try {
+      expect(await dispatch(registry, 'cancel_invitation', { invitationId: id }, both)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+        message: expect.stringContaining('at least the owner role'),
+      });
+    } finally {
+      await setRole('owner');
+    }
+    expect(await statusOf(id)).toBe('accepted');
   });
 
   it('never invites, changes a role or removes a member', async () => {

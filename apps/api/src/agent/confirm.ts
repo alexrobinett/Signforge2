@@ -18,10 +18,12 @@ import {
   dispatch,
   type DispatchResult,
   type DraftPin,
+  effectiveScopes,
   type Grant,
   OVERRIDE_LIMIT_MS,
   permits,
   dryPublish,
+  reachesScreens,
   refusedPress,
   registry,
   sha256Hex,
@@ -49,6 +51,11 @@ interface Confirmable {
   /** The model's input, as it is offered (a registry tool's, unless the tool is the drawer's own). */
   schema: () => Record<string, unknown>;
   description: () => string;
+  /**
+   * Whether this call needs the right to publish though its tool's scope is less: the press would be refused without it,
+   * so the card says who may instead (review of #419). As the tool's handler asks it of an agent, the drawer's included.
+   */
+  needsPublish?: (called: Row) => boolean;
   /** The card, read from the org now; a refusal (thrown `CardProblem`) when it cannot be one. */
   make: (org: OrgScope, called: Row, at: When) => Promise<Made>;
   /** What a press runs, with the input the card fixed. */
@@ -479,6 +486,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     tools: ['create_data_source'],
     schema: ofRegistry('create_data_source'),
     description: describedAs('create_data_source'),
+    needsPublish: (called) => called.format === 'provider',
     async make(_org, called) {
       const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
       return {
@@ -503,6 +511,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     tools: ['update_data_source'],
     schema: ofRegistry('update_data_source'),
     description: describedAs('update_data_source'),
+    needsPublish: reachesScreens,
     async make(org, called) {
       const source = await org.dataSources.get(str(called.dataSourceId));
       if (!source) throw new CardProblem(`no data source ${str(called.dataSourceId)}`);
@@ -559,8 +568,13 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
 };
 
 /** Who may press the card: null when `grant` permits every tool it runs, else who to ask. */
-export function whyNot(grant: Grant, name: string): string | null {
+export function whyNot(grant: Grant, name: string, called: Row): string | null {
   const tools = (CONFIRMABLE[name]?.tools ?? []).flatMap((t) => registry.get(t) ?? []);
+  if (CONFIRMABLE[name]?.needsPublish?.(called) && !effectiveScopes(grant).includes('content:publish')) {
+    return grant.role === 'editor' && !grant.editorsPublish
+      ? 'Only owners publish in this organization: screens follow this change with no publish. Ask an owner.'
+      : 'You can view only: ask an editor.';
+  }
   if (tools.every((t) => permits(grant, t))) return null;
   if (tools.some((t) => t.minRole === 'owner')) return 'Only owners can do this: ask an owner.';
   if (tools.some((t) => t.scope === 'content:publish') && grant.role === 'editor') return 'Only owners publish in this organization: ask an owner.';
