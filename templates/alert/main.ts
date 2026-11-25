@@ -14,11 +14,13 @@ const SEVERITIES: Record<string, { label: string; ground: string; ink: string }>
 };
 
 /**
- * Probes of the search for the largest scale at which text fits its region, after the one at full size: seven layouts at
- * most, and within 1/64 of the scale. A search of eight halvings for each region in turn took a cold prepare of the
- * widest copy to 590 ms on the Pi, over the 500 ms budget (review of #448).
+ * The most probes of the search for the largest scale at which text fits its region, after the one at full size. Eight
+ * always find it within PRECISION: the estimate and the stride leave a bracket narrower than 1, and six halvings take
+ * any such to 1/64 (six probes could stop short, review of #448, round 5). The search stops as soon as every bracket is
+ * that narrow, five layouts as a rule. A search of eight halvings for each region in turn took a cold prepare of the
+ * widest copy to 590 ms on the Pi, over the 500 ms budget.
  */
-const PROBES = 6;
+const PROBES = 8;
 /** How close the scale is found, and the first step from the estimate. */
 const PRECISION = 1 / 64;
 const STRIDE = 1 / 16;
@@ -56,8 +58,8 @@ function measure(region: Element, side: Side): { fits: boolean; height: number; 
 /**
  * Sets each scale (`name` on the root) to the largest, from 1 down with no floor, at which its regions' text fits: 1 when
  * it fits as it is (one layout, as realistic copy does). Else it probes the scale estimated from that layout, then one
- * STRIDE from it towards the answer, then halves what is left: five layouts as a rule, never more than PROBES and one,
- * and it keeps the largest scale seen to fit. The regions are independent, so their searches share each layout: every
+ * STRIDE from it towards the answer, then halves what is left until it is within PRECISION: five layouts as a rule,
+ * never more than PROBES and one, and it keeps the largest scale seen to fit. The regions are independent, so their searches share each layout: every
  * step sets every scale and one layout answers every check. Small text beats hidden or covered text in an emergency
  * (review of #448).
  */

@@ -299,25 +299,93 @@ describe('alert (#200)', () => {
         }
       }, 120_000);
 
-    // Clipping must take no ink a written language needs: Vietnamese stacks two marks on a capital, Thai three.
-    for (const orientation of ['landscape', 'portrait'] as const)
-      it(`clips none of the ink of real accents, ${orientation}`, async () => {
-        const k = await alertFrame(orientation);
-        const f = await k.play({
+    // Clipping must take no ink a written language needs, in the headline above all, whose line is tight (review of
+    // #448, round 5): Vietnamese stacks two marks on a capital, Thai a vowel and a tone mark, Arabic its vowel marks above
+    // and below, pointed Hebrew its points and cantillation.
+    const scripts: [string, Data][] = [
+      [
+        'Vietnamese',
+        {
           headline: 'ẾỂ ỄỆ ỘỚ ỜỞ ỠỢ ỨỪ ỬỮ ỰẤ',
-          instructions: 'Đi cầu thang gần nhất. Không dùng thang máy. น้ำใจผู้ใหญ่ที่นี่ ปั้นญี่ปุ่น',
+          instructions: 'Đi cầu thang gần nhất. Không dùng thang máy.',
           issuedBy: 'Ban An toàn Tòa nhà ỆỘ',
           qrLabel: 'Quét mã để cập nhật ẾỆ',
-        });
-        const clipped = await shot(k, f, '.body');
-        await f.evaluate(() => {
-          const style = document.createElement('style');
-          style.textContent = '.headline, .instructions, .meta p, .qr figcaption { overflow: visible !important; }';
-          document.head.append(style);
-        });
-        expect((await shot(k, f, '.body')).equals(clipped)).toBe(true);
+        },
+      ],
+      ['Thai', { headline: 'หนีไฟไปทางนี้', instructions: 'น้ำใจผู้ใหญ่ที่นี่ ปั้นญี่ปุ่น ใช้บันไดหนีไฟ ห้ามใช้ลิฟต์', issuedBy: 'ฝ่ายความปลอดภัยอาคาร', qrLabel: 'สแกนเพื่อดูข้อมูลล่าสุด' }],
+      ['Arabic', { headline: 'إِخْلَاءُ الْمَبْنَى اَلْآنَ', instructions: 'اِسْتَخْدِمِ الدَّرَجَ الْأَقْرَبَ، وَلَا تَسْتَخْدِمِ الْمِصْعَدَ.', issuedBy: 'إِدَارَةُ السَّلَامَةِ', qrLabel: 'اِمْسَحِ الرَّمْزَ' }],
+      ['Hebrew', { headline: 'חַיִּ֣ים וְשָׁל֑וֹם', instructions: 'הִשְׁתַּמְּשׁוּ בַּמַּדְרֵגוֹת הַקְּרוֹבוֹת', issuedBy: 'מַחְלֶקֶת בְּטִיחוּת', qrLabel: 'סִרְקוּ לְעִדְכּוּנִים' }],
+    ];
+    for (const orientation of ['landscape', 'portrait'] as const)
+      it(`clips none of the ink of real marks, in the headline and every other box, ${orientation}`, async () => {
+        const k = await alertFrame(orientation);
+        const cut: string[] = [];
+        for (const [name, text] of scripts) {
+          const f = await k.play(text);
+          const clipped = await shot(k, f, '.body');
+          const style = await f.evaluate(() => {
+            const el = document.createElement('style');
+            el.textContent = '.headline, .instructions, .meta p, .qr figcaption { overflow: visible !important; clip-path: none !important; }';
+            document.head.append(el);
+            return true;
+          });
+          if (style && !(await shot(k, f, '.body')).equals(clipped)) cut.push(name);
+        }
+        expect(cut).toEqual([]);
       });
   });
+
+  // The search finds each scale within 1/64 (review of #448, round 5: `﷽⁠` seven times stopped at 0.7557 where 0.7905 fit).
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`finds each scale within 1/64 of the largest that fits, ${orientation}`, async () => {
+      const k = await alertFrame(orientation);
+      const found: string[] = [];
+      for (const [name, text] of [
+        ['﷽⁠ caption', { qrLabel: '﷽⁠'.repeat(7) }],
+        ['﷽', filled((n) => '﷽'.repeat(n))],
+        ['⸻', filled((n) => '⸻'.repeat(n))],
+        ['W', filled((n) => 'W'.repeat(n))],
+      ] as const) {
+        const f = await k.play({ ...text, qrUrl: longestLinks[0] });
+        const misses = await f.evaluate(() => {
+          const root = document.documentElement;
+          // As main.ts measures: across by each line, down by the blocks, within half a pixel.
+          const fits = (region: Element, side: 'top' | 'bottom') => {
+            const box = region.getBoundingClientRect();
+            const range = document.createRange();
+            const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+            for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+              range.selectNodeContents(n);
+              for (const r of range.getClientRects()) if (r.left < box.left - 0.5 || r.right > box.right + 0.5) return false;
+            }
+            for (const b of region.children) {
+              const r = b.getBoundingClientRect();
+              if (side === 'bottom' ? r.bottom > box.bottom + 0.5 : r.top < box.top - 0.5) return false;
+            }
+            return true;
+          };
+          const checks: [string, () => boolean][] = [
+            ['--fit', () => fits(document.querySelector('.copy')!, 'bottom') && fits(document.querySelector('.meta')!, 'top')],
+            ['--cap-fit', () => fits(document.querySelector('.qr figcaption')!, 'bottom')],
+          ];
+          root.dataset.measuring = '';
+          const out: string[] = [];
+          for (const [name, check] of checks) {
+            const at = Number(root.style.getPropertyValue(name));
+            if (!check()) out.push(`${name} ${at} does not fit`);
+            if (at < 1) {
+              root.style.setProperty(name, String(Math.min(1, at + 1 / 64)));
+              if (check()) out.push(`${name} ${at} is short of ${at + 1 / 64}, which fits`);
+              root.style.setProperty(name, String(at));
+            }
+          }
+          delete root.dataset.measuring;
+          return out;
+        });
+        for (const m of misses) found.push(`${name}: ${m}`);
+      }
+      expect(found).toEqual([]);
+    });
 
   it('marks each toggle on the root and removes what is off; without the QR code the type steps up', async () => {
     const k = await alertFrame();

@@ -101,6 +101,10 @@
     }
   },
   "files": {
+    "06067c2e8302f4249644c516e1a366fa4b772be31525e60e480dde0fc26d161f": {
+      "size": 125215,
+      "type": "text/html"
+    },
     "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
       "size": 401879,
       "type": "text/html"
@@ -159,10 +163,6 @@
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
-      "type": "text/html"
-    },
-    "ed540214d45208ba4c58cbd83b262b689827a1c70a4e43aa0048e50885310fed": {
-      "size": 125147,
       "type": "text/html"
     },
     "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c": {
@@ -595,7 +595,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "ed540214d45208ba4c58cbd83b262b689827a1c70a4e43aa0048e50885310fed"
+      "html": "06067c2e8302f4249644c516e1a366fa4b772be31525e60e480dde0fc26d161f"
     },
     "base/info-frame@1.0.2": {
       "manifest": {
@@ -1289,5 +1289,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "51a9d3fd92cb36138a190f7436625d799db9bd5ac6d492c4b1e445f307b697de"
+  "id": "fcabf64df5f7570a2e9a5b0d74ba1fad42b61ced36b38a3f91517c3f55254eb5"
 }

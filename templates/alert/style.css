@@ -282,11 +282,17 @@ body {
    line, though the line fits its region, so each text box clips its paint a little past its edges, less than half the gap
    to the next box (3.7vmin between rows and columns, 1.48vmin between the code and its caption). An accent keeps its ink;
    no stack of marks reaches the next box, or the code. Layout is untouched: the regions are measured as before. */
-.headline,
 .instructions,
 .meta p {
   overflow: clip;
   overflow-clip-margin: 1.8vmin;
+}
+/* The headline's line is tight (1.02), so a script's marks stand well past it (Thai tone marks, Arabic and Hebrew points;
+   review of #448, round 5). Below, towards what to do, it keeps room for them in its own box, which the fit counts, and
+   clips 1.8vmin past that; above, where only the body's padding is (7.4vmin), and at the sides, it clips further out. */
+.headline {
+  padding-bottom: 0.25em;
+  clip-path: inset(-6vmin -3vmin -1.8vmin -3vmin);
 }
 .qr figcaption {
   overflow: clip;
