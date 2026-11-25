@@ -6,7 +6,7 @@
 // where only owners publish sees the default as an owner's step; a failing poll says so. Axe at
 // desktop and phone width, light and dark.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, joinAsEditor, shots, signInAs, tool, toolResponse } from './helpers';
 
 /** This spec's own client address, so its sign-ins and claims have their own rate limits. */
 const ADDRESS = '192.0.2.211';
@@ -93,10 +93,7 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   const screen = await (await browser.newContext()).newPage();
   await screen.goto('/test-screen/?kind=browser&content=/v1/device');
   await expect.poll(async () => (await player(screen)).pairing, { timeout: 20_000 }).not.toBe('');
-  const claimed = await page.request.post('/api/tools/claim_screen', {
-    headers: { 'cf-connecting-ip': ADDRESS },
-    data: { code: (await player(screen)).pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' },
-  });
+  const claimed = await toolResponse(page, 'claim_screen', { code: (await player(screen)).pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   const { screen: door } = (await claimed.json()) as { screen: { id: string } };
   await page.reload();

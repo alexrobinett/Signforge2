@@ -3,7 +3,7 @@
 // playlist (owner decision); Save and publish makes it the default, publishes, and reaches the screen,
 // which plays it, instead of compiling no manifest and leaving it blank. Axe at desktop and phone.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs, tool, toolResponse } from './helpers';
 
 /** This spec's own client address, so its sign-ins have their own rate limits. */
 const ADDRESS = '192.0.2.181';
@@ -40,10 +40,7 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
   // Claimed from this spec's own address: `tool` posts from the one every spec shares, and claims
   // are limited per address (10 a minute), which the specs running beside this one use up.
-  const claimed = await page.request.post('/api/tools/claim_screen', {
-    headers: { 'cf-connecting-ip': ADDRESS },
-    data: { code: (await playing(screen))!.pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' },
-  });
+  const claimed = await toolResponse(page, 'claim_screen', { code: (await playing(screen))!.pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   const { screen: paired } = (await claimed.json()) as { screen: { id: string } };
 
