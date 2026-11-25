@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, createOrg, d1, disabledOnServer, hydrated, publishImage, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, innerCorner, publishImage, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -81,6 +81,9 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
+  // The thumbnail's corner fits the stage around it: the stage's radius less its padding (#383).
+  const stageCorner = await innerCorner(page.getByRole('img', { name: 'Nothing published yet' }));
+  expect(stageCorner.radius).toBe(stageCorner.fits);
   await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
   // Nothing published is said by the thumbnail alone: no caption under it (#374).
   await expect(page.locator('figcaption')).toHaveCount(0);

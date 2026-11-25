@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, request as playwrightRequest, type Frame, type Page, type Route } from '@playwright/test';
+import { expect, request as playwrightRequest, type Frame, type Locator, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
 import { slugify } from '../src/lib/paths';
@@ -395,6 +395,20 @@ export async function createOrg(page: Page, name: string, address: string) {
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
   // A fresh load, as the page's own create was not: a click before this would go nowhere.
   await hydrated(page);
+}
+
+/**
+ * A box's corner and the corner that fits it inside its parent (#383): the parent's radius less its
+ * padding, so the two curves keep one distance apart. In px.
+ */
+export async function innerCorner(inner: Locator) {
+  return inner.evaluate((e) => {
+    const outer = getComputedStyle(e.parentElement!);
+    return {
+      radius: Number.parseFloat(getComputedStyle(e).borderTopLeftRadius),
+      fits: Number.parseFloat(outer.borderTopLeftRadius) - Number.parseFloat(outer.paddingTop),
+    };
+  });
 }
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */

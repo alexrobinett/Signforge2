@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { png } from '@signforge/media/testing';
-import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, hydrated, innerCorner, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.130';
@@ -30,6 +30,9 @@ test('with no spots, the empty state has New spot and the template gallery under
   const gallery = page.getByRole('region', { name: 'Templates' });
   const clock = gallery.getByRole('button', { name: 'Clock', exact: true });
   await expect(clock.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  // The thumbnail's corner fits the tile's: its radius less its padding (#383).
+  const galleryCorner = await innerCorner(clock.locator('img'));
+  expect(galleryCorner.radius).toBe(galleryCorner.fits);
   await axe(page);
   await shots(page, '28-spots-gallery');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -67,6 +70,9 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
       .evaluate((l) => getComputedStyle(l).borderTopWidth);
   expect(await cardEdge(0)).not.toBe(await cardEdge(1));
   await page.emulateMedia({ forcedColors: 'none' });
+  // A thumbnail's corner fits its card's: the card's radius less its padding (#383).
+  const tileCorner = await innerCorner(dialog.getByRole('group', { name: 'Template' }).locator('label').first().locator('img'));
+  expect(tileCorner.radius).toBe(tileCorner.fits);
   const base = readdirSync(TEMPLATES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d): { id: string; name: string } => JSON.parse(readFileSync(join(TEMPLATES_DIR, d.name, 'template.json'), 'utf8')));

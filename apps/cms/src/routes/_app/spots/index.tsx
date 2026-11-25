@@ -88,7 +88,8 @@ function Gallery({ templates }: { templates: TemplateView[] }) {
               onClick={(e) => start(version.id, e.currentTarget)}
               className="flex w-full flex-col gap-2 rounded-xl border bg-card p-2 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <TemplateThumb version={version} />
+              {/* Its corner inside the card's (#383): 14 px less the 8 px padding. */}
+              <TemplateThumb version={version} className="rounded-sm" />
               <span className="line-clamp-2 px-1 pb-1">{version.manifest.name}</span>
             </button>
           </li>
