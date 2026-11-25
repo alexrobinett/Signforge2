@@ -1010,6 +1010,18 @@ The same build and session, at `67e74d6`, differing only in the tile: A with `--
 - That first prepare without any search (the scale left at 1) is 419 and 423 ms for the same copy, and 410 ms for default copy. So in a freshly started Chromium the search's two probes, each a layout of the reshaped `﷽` text, cost about 100 to 120 ms. The 1/64 guarantee needs at least two probes.
 - An earlier attempt at this measurement is discarded: restarting the kiosk had started the supervisor again, which restarted the kiosk every 50 s for want of the bench page's heartbeat. That cut some runs short and put the panel back to landscape.
 
+### The headline's line height at 1.3 (review of #448, round 6, 2026-11-25)
+
+`a9d5e33`: the headline's line height goes from 1.02 to 1.3, so a wrapped line's marks stay off the line above. The same worst case, the same way (6 per orientation, the first straight after a kiosk restart, the supervisor stopped):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **502 ms** | 413, 418, 391, 432, 407 ms | 247-282 ms |
+| portrait | **502 ms** | 458, 461, 399, 440, 411 ms | 316-363 ms |
+
+- **Within the accepted exception:** the first prepare after a restart is 502 ms in both orientations (543 and 516 ms before), and every other cold prepare is under 500 ms.
+- No slower than at 1.02. With one restart per orientation, read the lower first prepare as no cost, not as a gain.
+
 ## Feed images on sync and prepare (issue #196, 2026-11-25)
 
 This branch (`e558986`) against master's player (`dc1244b`), both served beside the content from one origin by `packages/cli/bench/feed-images/serve.py`, measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first; 10 s to settle, 30 s measured; prepares printed after). Content from `packages/cli/bench/feed-images/make.ts`: the bench template over ten stories, `text` with no images and `photos` with each story's 1920x1080 photo and 480x270 thumbnail (20 seeded JPEGs, 4,933 kB). The stress set's `news` and `photo-kitchen` were built by master's `sf build` (schema 7, which both players play), with the bench's ten stories as `news`'s snapshot. 3 runs of each spec, cut and fade, landscape and portrait (`wlr-randr --transform 90`); the supervisor and the soak logger stopped.
