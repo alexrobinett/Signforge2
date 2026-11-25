@@ -214,7 +214,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         </aside>
         {/* The agent's drawer sits beside the page on a wide screen, not over it. */}
         <div className={cn('flex min-w-0 flex-col', agentOpen && 'lg:pr-[400px]')}>
-          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/90 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 lg:hidden">
+          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background px-2 lg:hidden">
             <Sheet open={drawerOpen} onOpenChange={(open) => (open ? openDrawer() : closeDrawer())}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label="Open navigation">
