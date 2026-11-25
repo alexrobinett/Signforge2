@@ -15,6 +15,7 @@ import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ConfirmCard, type Too
 import { CONFIRM_MS, CONFIRMABLE } from '../src/agent/confirm';
 import type { FetchGuards } from '../src/data/fetch';
 import { Client, clockLimits, email, testApp } from './client';
+import { as, measure } from './counting';
 import { anthropicStream, completionStream } from './model-streams';
 
 const NOON = Date.UTC(2026, 10, 23, 12);
@@ -175,7 +176,8 @@ describe('the tools the drawer offers', () => {
       for (const name of names) {
         const tool = registry.get(name);
         expect(tool?.mutates, `${role}: ${name}`).toBe(false);
-        expect(tool?.scope, `${role}: ${name}`).not.toBe('org:manage');
+        // An owner's list of invitations alone (#425).
+        if (name !== 'list_invitations') expect(tool?.scope, `${role}: ${name}`).not.toBe('org:manage');
         expect(NEVER_OFFERED.has(name), `${role}: ${name}`).toBe(false);
         // A tool only people may call refuses the agent: offering it would be a call that always fails (review of #327).
         expect(tool?.people, `${role}: ${name}`).not.toBe(true);
@@ -187,13 +189,14 @@ describe('the tools the drawer offers', () => {
         'get_alert_channels',
         'list_connections',
         'claim_screen',
-        'list_invitations',
         'rename_screen',
         'publish',
         'list_agent_grants',
         'get_agent_grant',
       ])
         expect(names, `${role}: ${name}`).not.toContain(name);
+      // The pending invitations, and their addresses, are an owner's to read, as the tool says (#425).
+      expect(names.includes('list_invitations'), role).toBe(role === 'owner');
     }
   });
 });
@@ -285,7 +288,8 @@ describe('POST /api/agent/chat', () => {
     for (const role of ['viewer', 'editor', 'owner'] as const) {
       const grant = await grantOf({ org: { orgId: 'org_x' } as never, role, scopes: undefined });
       const reads = describeTools(registry, grant).filter(
-        (t) => !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people,
+        // An owner's list of invitations is the one org:manage read it offers (#425).
+        (t) => !t.mutates && (t.scope !== 'org:manage' || t.name === 'list_invitations') && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people,
       );
       for (const name of [...reads.map((t) => t.name), ...draftTools(grant).map((t) => t.name), ...Object.keys(CONFIRMABLE)])
         expect(TOOL_CARDS[name]?.title, `${role}: ${name}`).toBeTruthy();
@@ -806,6 +810,58 @@ describe('confirmation cards (#269)', () => {
       drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }],
       ifDefault: playlist.id,
       allowSample: [{ spotId: spot.id, version: spot.rowVersion, fields: ['headline'] }],
+    });
+  });
+
+  it("lists an owner's pending invitations, fenced as data, and cancels the one asked for on a press of its card (#425)", async () => {
+    const ask: { id?: string } = {};
+    const s = await setup({
+      steps: (body) => {
+        const n = body.messages.length;
+        if (n === 1) return { calls: [{ name: 'list_invitations', input: {} }] };
+        if (n === 3) return { calls: [{ name: 'cancel_invitation', input: { invitationId: ask.id } }] };
+        return ANSWER;
+      },
+    });
+    const invited = await s.owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'list-425@signforge.test', role: 'viewer' });
+    ask.id = invited.id;
+    const all = await raw(await s.ask('Cancel the invitation for list-425'));
+    // The list reached the model as data, its invitee's address with it; the browser got the card saying it listed one.
+    const listed = s.model.asked[1].messages.at(-1).content[0];
+    expect(listed.content).toMatch(/^<data>\n/);
+    expect(listed.content).toContain('list-425@signforge.test');
+    expect(all.filter((e) => e.name === CHAT_EVENTS.call).map((e) => e.value)).toContainEqual(shown('list_invitations', 'Listed 1 pending invitations'));
+    const { card, body } = pressOf(all, 'q');
+    expect(card).toMatchObject({ tool: 'cancel_invitation', token: expect.any(String) });
+    expect(doneOf(await raw(await s.member.post('/api/agent/chat', body)))).toMatchObject({ ok: true });
+    expect(await s.scope.invitations.get(invited.id)).toMatchObject({ status: 'canceled' });
+  });
+
+  it("offers an editor no list of invitations: a call to it is refused unrun, and no invitee reaches the model or the browser (#425)", async () => {
+    const s = await setup({ role: 'editor', steps: [{ calls: [{ name: 'list_invitations', input: {} }] }, ANSWER] });
+    await s.owner.ok('/api/auth/organization/invite-member', { email: 'hidden-425@signforge.test', role: 'viewer' });
+    const all = await raw(await s.ask('Who is invited?'));
+    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('list_invitations');
+    expect(s.model.asked[1].messages.at(-1).content[0]).toMatchObject({ is_error: true });
+    expect(JSON.stringify(s.model.asked)).not.toContain('hidden-425');
+    expect(JSON.stringify(all)).not.toContain('hidden-425');
+  });
+
+  it("lists the invitations within the turn's budget (#425)", async () => {
+    const s = await setup({ steps: [{ calls: [{ name: 'list_invitations', input: {} }] }, ANSWER] });
+    for (const n of [1, 2, 3]) await s.owner.ok('/api/auth/organization/invite-member', { email: `budget-425-${n}@signforge.test`, role: 'viewer' });
+    const turn = () =>
+      measure(async (b) => {
+        expect((await events(await as(s.member, b).post('/api/agent/chat', run('Who is invited?')))).at(-1)).toMatchObject({ type: 'answer' });
+      });
+    // The first turn lists them; the next, its steps run out, only answers.
+    const listing = await turn();
+    const answering = await turn();
+    // Measured, as the most it may take: the list is one statement, however many invitations, on top of the turn's own
+    // reads and its quota's one RPC. Far inside the turn's 40 statements. A new statement fails this on purpose.
+    expect({ listing, answering }).toEqual({
+      listing: { statements: 5, queries: 5, rpcs: ['takeTurn'] },
+      answering: { statements: 4, queries: 4, rpcs: ['takeTurn'] },
     });
   });
 

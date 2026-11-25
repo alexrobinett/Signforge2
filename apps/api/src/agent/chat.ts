@@ -9,8 +9,8 @@
  *
  * What the model may do is decided here, never by the model or the browser:
  *  - it is offered only the registry's read tools that the member's role allows, less every tool that
- *    reaches an address or touches what only a person sets (`NEVER_OFFERED`, `org:manage`, `people`),
- *    and the drafting tools; tools the request declares are never offered;
+ *    reaches an address or touches what only a person sets (`NEVER_OFFERED`, `org:manage` but an owner's
+ *    list of invitations, `people`), and the drafting tools; tools the request declares are never offered;
  *  - it calls them through the dispatcher as the member with the cms-agent client, on the org's
  *    scoped repositories, so it reads what the person could read, and no more;
  *  - its answer must be the card (`answerInput`): a reply that is only prose, or JSON of another
@@ -126,6 +126,7 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   count_drafts: { title: 'Unpublished drafts', did: 'Counted unpublished drafts' },
   list_audit_log: { title: 'Audit log', did: 'Read {n} audit entries' },
   list_members: { title: 'Members', did: 'Listed {n} members' },
+  list_invitations: { title: 'Invitations', did: 'Listed {n} pending invitations' },
   // The drafting tools (#268): a proposal, never a write.
   update_spot: { title: 'Spot change', did: 'Drafted a change to a spot' },
   update_playlist: { title: 'Playlist change', did: 'Drafted a change to a playlist' },
@@ -149,12 +150,25 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   set_spot_url: { title: 'Web page address', did: "Set a web page spot's address" },
 };
 
+/**
+ * The `org:manage` reads the drawer offers all the same, each only to whom its own scope and role allow (`describeTools`):
+ * an owner's pending invitations, so the drawer can name one to cancel (owner decision on #425). Its output, invitees'
+ * addresses among it, reaches the model fenced as data, as every output does.
+ */
+const ORG_READS: ReadonlySet<string> = new Set(['list_invitations']);
+
 /** The tools the drawer offers a caller with `grant`: its role's reads, less those above, and less those only people may call (`people`), which refuse it. */
 export const drawerTools = (grant: Grant) =>
   describeTools(registry, grant).filter(
     (t) =>
-      !t.mutates && t.scope !== 'org:manage' && !NEVER_OFFERED.has(t.name) && !registry.get(t.name)?.people && t.name in TOOL_CARDS && !(t.name in CONFIRMABLE),
+      !t.mutates &&
+      (t.scope !== 'org:manage' || ORG_READS.has(t.name)) &&
+      !NEVER_OFFERED.has(t.name) &&
+      !registry.get(t.name)?.people &&
+      t.name in TOOL_CARDS &&
+      !(t.name in CONFIRMABLE),
   );
+
 
 /** The model's answer, every field required: prose alone, or a lone `{ text }`, is not one (#350). */
 const answerInput = z
