@@ -1,5 +1,5 @@
 /**
- * Settings › API & agents (M4-07): the agents connected to the org, as the signed-in member may see
+ * Settings › Connected agents (MCP) (M4-07): the agents connected to the org, as the signed-in member may see
  * them (an owner every grant, anyone else their own), the tools with their scope and role, each
  * agent's last 7 days of calls (M4-08), and one agent's recent calls and changes. Reads through the
  * tool registry and Better Auth's member list; changes go from the browser (src/state/settings.ts).

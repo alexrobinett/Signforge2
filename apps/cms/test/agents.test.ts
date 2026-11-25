@@ -1,4 +1,4 @@
-// Settings › API & agents' words (M4-07, M4-08): when a grant was made, its last use as /mcp records
+// Settings › Connected agents (MCP)' words (M4-07, M4-08): when a grant was made, its last use as /mcp records
 // it, to the hour, its last 7 days and how each call ended. Times are the test's, never the clock.
 import { describe, expect, it } from 'vitest';
 import { type AgentCall, grantedOn, lastActive, outcome, weekWords } from '../src/lib/agents';

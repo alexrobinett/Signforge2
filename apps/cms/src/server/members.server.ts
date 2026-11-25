@@ -2,7 +2,7 @@
 import type { Member } from '~/lib/settings';
 import { callApi } from './api.server';
 
-/** Members' names by user id: who granted each agent (API & agents), and who did what on an editor's audit strip (#116). */
+/** Members' names by user id: who granted each agent (Connected agents (MCP)), and who did what on an editor's audit strip (#116). */
 export async function names(): Promise<Record<string, string>> {
   const res = await callApi('/api/auth/organization/list-members?limit=200');
   if (!res.ok) throw new Error(`member list failed: ${res.status}`);

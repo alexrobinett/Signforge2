@@ -35,7 +35,7 @@ test('a member fills a new spot from a link and from a photo, checks the marked 
   await page.setViewportSize({ width: 1280, height: 800 });
   await dialog.getByRole('button', { name: 'Fill a new spot' }).click();
   await expect(dialog.getByRole('alert')).toContainText('No model is set up for the agent yet');
-  await expect(dialog.getByRole('link', { name: 'Open Settings, AI & agents' })).toBeVisible();
+  await expect(dialog.getByRole('link', { name: 'Open Settings, AI model' })).toBeVisible();
   await axe(page);
   await dialog.evaluate((el) => el.scrollTo(0, 0));
   await shots(page, '98-fill-dialog');

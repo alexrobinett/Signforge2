@@ -1,5 +1,5 @@
 // The approvals queue (M4-10, #115): an agent without content:publish asks to publish its edit of a
-// spot; the owner sees the count in the sidebar and the banner on API & agents, opens the queue, sees
+// spot; the owner sees the count in the sidebar and the banner on Connected agents (MCP), opens the queue, sees
 // the spot on the real player as screens have it and as approving publishes it, and approves after a
 // confirmation that lists exactly what the request pinned and the sample text it publishes: the
 // rollout starts. A second request is declined, put back with Undo, and declined again: the draft
@@ -66,7 +66,7 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
   // Its greeting still the template's sample text, as the server records it (#360): approving acknowledges it, exactly.
   await d1(`UPDATE spots SET sample_fields_json = '{"texts":["greeting"],"lists":{}}' WHERE id = '${spot.id}'`);
 
-  // The sidebar counts it, and API & agents says it waits, with the way to it.
+  // The sidebar counts it, and Connected agents (MCP) says it waits, with the way to it.
   await page.goto('/settings/api');
   await hydrated(page);
   await expect(page.getByRole('link', { name: /Approvals.*1 waiting/ })).toBeVisible();

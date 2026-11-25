@@ -36,7 +36,7 @@ export const getNotifications = createServerFn({ method: 'GET' }).handler(() =>
   }, null),
 );
 
-/** Settings, AI & agents (#261): the org's own model provider, if it has one, and members' names for who saved its key. */
+/** Settings, AI model (#261): the org's own model provider, if it has one, and members' names for who saved its key. */
 export const getAiSettings = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(async () => {
     const [{ provider }, { members }] = await Promise.all([

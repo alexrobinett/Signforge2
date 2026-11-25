@@ -66,7 +66,7 @@ function AgentPage() {
 function BackLink() {
   return (
     <Link to="/settings/api" className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
-      <ArrowLeftIcon className="size-4" aria-hidden /> API & agents
+      <ArrowLeftIcon className="size-4" aria-hidden /> Connected agents (MCP)
     </Link>
   );
 }

@@ -1,4 +1,4 @@
-// Settings › API & agents' loaders (M4-08, review of #343): the call log failing in any way, the SQL
+// Settings › Connected agents (MCP)' loaders (M4-08, review of #343): the call log failing in any way, the SQL
 // API down, slow, answering nonsense or not configured, or the request to the API failing, never
 // fails a page. Its grants, their scopes and Disconnect still load, and the numbers read as null,
 // which the pages say are not available. A session that has ended still goes to sign-in.
