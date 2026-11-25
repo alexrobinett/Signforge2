@@ -85,6 +85,19 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hydrated(page);
   await expect(page.getByText('Needs you').first()).toBeVisible();
   await expect(page.getByRole('img', { name: 'Nothing published yet' })).toBeVisible();
+  // Why, said once beside its state, with its fix as the page's one filled button (#367).
+  await expect(page.getByText('Nothing is published to it yet.', { exact: true })).toHaveCount(1);
+  const fix = page.getByRole('main').locator('[data-slot="button"][data-variant="default"]');
+  await expect(fix).toHaveAccessibleName('Play on this screen…');
+  await fix.click();
+  await expect(page.getByRole('dialog', { name: 'Schedule a playlist' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // What it plays apart from what is done to the screen now, Play not drawn there again while it is the fix; Take
+  // over said to cut in at once.
+  await expect(page.getByRole('button', { name: 'Play on this screen…' })).toHaveCount(1);
+  await expect(page.getByRole('group', { name: 'What it plays' }).getByRole('button')).toHaveText(['Take over this screen…']);
+  await expect(page.getByRole('group', { name: 'The screen now' }).getByRole('button', { name: 'Identify (10 s)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Take over this screen…' })).toHaveAccessibleDescription('Cuts in at once over whatever the screen plays.');
   // The thumbnail's corner fits the stage around it: the stage's radius less its padding (#383).
   const stageCorner = await innerCorner(page.getByRole('img', { name: 'Nothing published yet' }));
   expect(stageCorner.radius).toBe(stageCorner.fits);
@@ -245,6 +258,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText(/credential was revoked/)).toBeVisible();
   // Its thumbnail does not say it plays anything (#362).
   await expect(page.getByRole('img', { name: 'Revoked: plays nothing' })).toBeVisible();
+  // Its fix beside why: pair it again, on the Screens page's pairing form (#367).
+  await expect(page.getByRole('link', { name: 'Pair it again…' })).toHaveAttribute('href', '/screens?pair=true');
   const refused = await request.post(`${DEVICE}/sync`, { headers: { authorization: `Bearer ${credential}` }, data: {} });
   expect(refused.status()).toBe(401);
 });

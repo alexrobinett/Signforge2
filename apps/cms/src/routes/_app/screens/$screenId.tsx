@@ -8,7 +8,7 @@
 import { Badge } from '~/components/ui/badge';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
-import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
+import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon, ZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
 import { describeHours, DisplayHoursEditor, hoursProblems, WeekBars } from '~/components/screens/display-hours-editor';
@@ -42,6 +42,36 @@ import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
+
+/**
+ * Why the screen needs you, and the one thing that fixes it, beside its state (#367): the page's one filled button.
+ * Nothing published: play something on it. Its latest version played nothing: see that publish. Revoked: pair it
+ * again. Unreachable and behind: nothing here reaches it, so only why, to check its power and network.
+ */
+function NeedsYouFix({ reason, line, canFix, onPlay }: { reason: ScreenView['state']['reason']; line: string; canFix: boolean; onPlay: () => void }) {
+  const fix =
+    reason === 'nothing_published' ? (
+      canFix && <Button onClick={onPlay}>Play on this screen…</Button>
+    ) : reason === 'fallback' ? (
+      <Button asChild>
+        <Link to="/publishes">See the publish</Link>
+      </Button>
+    ) : reason === 'revoked' ? (
+      canFix && (
+        <Button asChild>
+          <Link to="/screens" search={{ pair: true }}>
+            Pair it again…
+          </Link>
+        </Button>
+      )
+    ) : null;
+  return (
+    <div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-2 text-sm text-status-needs-you-foreground">
+      <span className="min-w-0 wrap-anywhere">{line}.</span>
+      {fix}
+    </div>
+  );
+}
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
   loader: async ({ params, context: { queryClient }, parentMatchPromise }) => {
@@ -107,6 +137,7 @@ function ScreenPage() {
 
   const spinner = (label: string, icon: ReactNode) => (busy === label ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : icon);
   const override = screen.displayOverride;
+  const playIsTheFix = screen.state.kind === 'needs_you' && screen.state.reason === 'nothing_published';
 
   return (
     <div className="space-y-5">
@@ -130,78 +161,105 @@ function ScreenPage() {
             {screen.kind === 'browser' && <Badge title="The player in a browser tab">Test screen</Badge>}
             {screen.lastSeenAt && <span className="text-meta text-muted-foreground">last heard {ago(now - screen.lastSeenAt)} ago</span>}
           </span>
+          {screen.state.kind === 'needs_you' && (
+            <NeedsYouFix
+              reason={screen.state.reason}
+              line={d.line}
+              canFix={canManage}
+              onPlay={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}
+            />
+          )}
           {canManage && !revoked && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               <EditorFields>
-                <Button variant="outline" onClick={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}>
-                  Play on this screen…
-                </Button>
-                {canPublish && (
-                  <Button variant="outline" onClick={() => openTakeover(orgId, { target: 'screen', screenId: screen.id })}>
-                    Take over this screen…
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  disabled={!!busy}
-                  onClick={() => run('identify', 'identify_screen', {}, 'Sent. The screen shows its name for 10 seconds, if it is connected.')}
-                >
-                  {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
-                </Button>
-                {/* A restart goes only to a screen in touch (#253): off, with the reason by the actions. */}
-                <Button
-                  variant="outline"
-                  disabled={!!busy || !inTouch}
-                  aria-describedby={inTouch ? undefined : 'restart-off'}
-                  onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
-                >
-                  {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
-                </Button>
-                {/* A browser tab has no panel to power: it ignores wake and sleep. */}
-                {screen.kind === 'browser' ? null : override ? (
-                  <Button
-                    variant="outline"
-                    disabled={!!busy}
-                    onClick={() => run('display', 'set_display_override', { state: null }, 'Back to its display hours.')}
-                  >
-                    {spinner('display', <UndoIcon aria-hidden />)} Back to display hours
-                  </Button>
-                ) : screen.heartbeat?.displayOn === false || screen.state.kind === 'asleep' ? (
-                  <Button
-                    variant="outline"
-                    disabled={!!busy}
-                    onClick={() => run('display', 'set_display_override', { state: 'on' }, 'Waking it until its next scheduled change.')}
-                  >
-                    {spinner('display', <SunIcon aria-hidden />)} Wake now
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    disabled={!!busy}
-                    onClick={() => run('display', 'set_display_override', { state: 'off' }, 'Sleeping it until its next scheduled change.')}
-                  >
-                    {spinner('display', <MoonIcon aria-hidden />)} Sleep now
-                  </Button>
-                )}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" aria-label="More actions: settings, display hours, revoke">
-                      <MoreHorizontalIcon aria-hidden />
+                {/* What it plays, apart from what is done to the screen now (#367). */}
+                <fieldset className="flex flex-wrap gap-2">
+                  <legend className="sr-only">What it plays</legend>
+                  {/* When it is the fix, beside why, it is not drawn twice. */}
+                  {!playIsTheFix && (
+                    <Button variant="outline" onClick={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}>
+                      Play on this screen…
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => openScreenSettings(orgId, screen, groupIds)}>Settings and groups…</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openDisplayHours(orgId, screen)}>Display hours…</DropdownMenuItem>
-                    {owner && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToRevoke(true)}>
-                          Revoke…
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  )}
+                  {canPublish && (
+                    // Disruptive, and marked so: it cuts in at once over whatever the screen plays.
+                    <Button
+                      variant="outline"
+                      className="border-status-updating text-status-updating-foreground hover:bg-status-updating-muted"
+                      aria-describedby="takeover-hint"
+                      onClick={() => openTakeover(orgId, { target: 'screen', screenId: screen.id })}
+                    >
+                      <ZapIcon aria-hidden /> Take over this screen…
+                    </Button>
+                  )}
+                  <span id="takeover-hint" className="sr-only">
+                    Cuts in at once over whatever the screen plays.
+                  </span>
+                </fieldset>
+                <fieldset className="flex flex-wrap gap-2 sm:border-l sm:pl-2">
+                  <legend className="sr-only">The screen now</legend>
+                  <Button
+                    variant="outline"
+                    disabled={!!busy}
+                    onClick={() => run('identify', 'identify_screen', {}, 'Sent. The screen shows its name for 10 seconds, if it is connected.')}
+                  >
+                    {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
+                  </Button>
+                  {/* A restart goes only to a screen in touch (#253): off, with the reason by the actions. */}
+                  <Button
+                    variant="outline"
+                    disabled={!!busy || !inTouch}
+                    aria-describedby={inTouch ? undefined : 'restart-off'}
+                    onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
+                  >
+                    {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
+                  </Button>
+                  {/* A browser tab has no panel to power: it ignores wake and sleep. */}
+                  {screen.kind === 'browser' ? null : override ? (
+                    <Button
+                      variant="outline"
+                      disabled={!!busy}
+                      onClick={() => run('display', 'set_display_override', { state: null }, 'Back to its display hours.')}
+                    >
+                      {spinner('display', <UndoIcon aria-hidden />)} Back to display hours
+                    </Button>
+                  ) : screen.heartbeat?.displayOn === false || screen.state.kind === 'asleep' ? (
+                    <Button
+                      variant="outline"
+                      disabled={!!busy}
+                      onClick={() => run('display', 'set_display_override', { state: 'on' }, 'Waking it until its next scheduled change.')}
+                    >
+                      {spinner('display', <SunIcon aria-hidden />)} Wake now
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      disabled={!!busy}
+                      onClick={() => run('display', 'set_display_override', { state: 'off' }, 'Sleeping it until its next scheduled change.')}
+                    >
+                      {spinner('display', <MoonIcon aria-hidden />)} Sleep now
+                    </Button>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" aria-label="More actions: settings, display hours, revoke">
+                        <MoreHorizontalIcon aria-hidden />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => openScreenSettings(orgId, screen, groupIds)}>Settings and groups…</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => openDisplayHours(orgId, screen)}>Display hours…</DropdownMenuItem>
+                      {owner && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToRevoke(true)}>
+                            Revoke…
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </fieldset>
               </EditorFields>
               {!inTouch && (
                 <p id="restart-off" className="basis-full text-meta text-muted-foreground sm:text-right">
@@ -256,12 +314,14 @@ function ScreenPage() {
                 )}
               </figcaption>
             )}
+            {/* Why it needs you is said once, by its state at the top (#367). */}
             {screen.showing ? (
               <p className="text-meta text-muted-foreground">
-                {d.line}. Worked out from its published manifest, schedule and display hours, as the screen does; not a screenshot.
+                {screen.state.kind === 'needs_you' ? '' : `${d.line}. `}Worked out from its published manifest, schedule and display hours, as the screen does;
+                not a screenshot.
               </p>
             ) : (
-              screen.state.reason !== 'nothing_published' && <p className="text-meta text-muted-foreground">{d.line}.</p>
+              screen.state.kind !== 'needs_you' && <p className="text-meta text-muted-foreground">{d.line}.</p>
             )}
           </figure>
 
