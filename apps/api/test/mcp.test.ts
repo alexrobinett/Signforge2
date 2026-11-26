@@ -102,8 +102,8 @@ describe('the transport', () => {
     };
     const [read, drafted] = await Promise.all([listed(reader), listed(drafter)]);
     expect(read).toContain('read');
-    expect(read).not.toContain('create_spot');
-    expect(drafted).toContain('create_spot');
+    expect(read).not.toContain('save_spot');
+    expect(drafted).toContain('save_spot');
     expect(warn.mock.calls.flat().join(' ')).not.toContain('responseMode');
     warn.mockRestore();
   });
@@ -141,7 +141,7 @@ describe('failures and batches', () => {
   it('refuses a batch with 400 before any of it runs', async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
-    const create = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'create_playlist', arguments: { name: `Batched ${id}` } } });
+    const create = (id: number) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'save_playlist', arguments: { name: `Batched ${id}` } } });
     const res = await post(access_token, [create(1), create(2)]);
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: { code: -32600 } });
@@ -221,7 +221,7 @@ describe('who may call', () => {
     await owner.ok('/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'viewer', organizationId: org.id });
     const names = await toolNames(access_token);
     expect(names).not.toContain('publish');
-    expect(names).not.toContain('create_playlist');
+    expect(names).not.toContain('save_playlist');
     expect(names).toContain('read');
     expect(await call(access_token, 'publish', {})).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
   });
@@ -233,12 +233,12 @@ describe('tools', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'org:manage']);
     const { tools } = (await rpc<{ tools: { name: string; annotations: object }[] }>(access_token, 'tools/list')).result!;
     const names = tools.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(['read', 'describe', 'create_playlist', 'delete_playlist']));
+    expect(names).toEqual(expect.arrayContaining(['read', 'describe', 'save_playlist', 'delete_playlist']));
     expect(names).not.toContain('list_playlists');
     expect(names).not.toContain('publish');
     expect(names).not.toContain('invite_member');
     expect(names).toContain('cancel_invitation');
-    expect(tools.find((tool) => tool.name === 'create_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+    expect(tools.find((tool) => tool.name === 'save_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(tools.find((tool) => tool.name === 'delete_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     // Its link stops working for good: only a person invites again (review of #414).
     expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
@@ -247,7 +247,7 @@ describe('tools', () => {
   it("lists each type's own read as read (#345), and still answers it called by name, with the same rows", async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
-    await call(access_token, 'create_playlist', { name: 'Lobby', idempotencyKey: 'read-same-1' });
+    await call(access_token, 'save_playlist', { name: 'Lobby', idempotencyKey: 'read-same-1' });
     expect(await toolNames(access_token)).not.toContain('list_playlists');
     const old = await call(access_token, 'list_playlists');
     const read = await call(access_token, 'read', { type: 'playlist', detail: 'full' });
@@ -276,12 +276,12 @@ describe('tools', () => {
     const { t, owner, org } = await team();
     const { access_token, clientId } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
     const { grantId } = (await check(access_token))!;
-    const made = await call(access_token, 'create_playlist', { name: 'Agent made', idempotencyKey: 'agent-made-1' });
+    const made = await call(access_token, 'save_playlist', { name: 'Agent made', idempotencyKey: 'agent-made-1' });
     expect(made?.isError).toBeUndefined();
     const playlistId: string = made?.structuredContent.playlist.id;
     const read = await call(access_token, 'get_playlist', { playlistId });
     expect(read?.structuredContent.playlist).toMatchObject({ id: playlistId, name: 'Agent made' });
-    const audit = (await scoped(env.DB, org.id).auditLog.list({ limit: 100 })).filter((e) => e.action === 'create_playlist');
+    const audit = (await scoped(env.DB, org.id).auditLog.list({ limit: 100 })).filter((e) => e.action === 'save_playlist');
     expect(audit).toEqual([expect.objectContaining({ actorKind: 'agent', actorId: grantId, clientId, targetId: playlistId })]);
   });
 
@@ -339,7 +339,7 @@ describe('tools', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
     const other = await owner.createOrg('Other Co');
     await owner.setActive(other.id);
-    const theirs = await owner.ok<{ playlist: { id: string } }>('/api/tools/create_playlist', { name: 'Not the agent’s' });
+    const theirs = await owner.ok<{ playlist: { id: string } }>('/api/tools/save_playlist', { name: 'Not the agent’s' });
     expect(await call(access_token, 'get_playlist', { playlistId: theirs.playlist.id })).toMatchObject({
       isError: true,
       structuredContent: { error: 'not_found' },
@@ -347,7 +347,7 @@ describe('tools', () => {
     const listed = await call(access_token, 'list_playlists');
     expect(listed?.structuredContent.playlists.map((p: { id: string }) => p.id)).not.toContain(theirs.playlist.id);
     // The session's active org is the other one now; the agent still works in its grant's.
-    const made = await call(access_token, 'create_playlist', { name: 'In the grant’s org' });
+    const made = await call(access_token, 'save_playlist', { name: 'In the grant’s org' });
     expect(await scoped(env.DB, org.id).playlists.get(made?.structuredContent.playlist.id)).toBeDefined();
   });
 });

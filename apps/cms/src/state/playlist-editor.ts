@@ -6,7 +6,7 @@
  * and reaches the stage a moment later: the draft is compiled in the browser with each spot's saved
  * draft (`compilePlaylistPreview`) and played by the real player on the spot editor's stage
  * (src/state/spot-editor.ts). Each playlist's draft is a versioned draft (./versioned-draft.ts):
- * its save to the server (`update_playlist`) waits a second after the last edit and sends the whole
+ * its save to the server (`save_playlist`) waits a second after the last edit and sends the whole
  * order with the version the editor opened with as `ifVersion`, so an order made from an old read
  * is refused rather than dropping someone else's change. A playlist's saves run one at a time, each
  * building on the version the one before returned, and a draft waiting to be saved is sent before
@@ -128,7 +128,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     state: { read: () => get().playlistEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
     async save({ key: playlistId, draft: { orgId, edit, version } }) {
       const saved = (
-        await callTool('update_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version })
+        await callTool('save_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version })
       ).playlist;
       const key = playlistKeys.one(orgId, playlistId);
       // A playlist deleted meanwhile has left the cache: it is not written back.
@@ -268,7 +268,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
       const key = get().playlistEditor.newPlaylist.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, key, pending: true, error: null } }));
       try {
-        const made = (await callTool('create_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
+        const made = (await callTool('save_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, made.id), made);
         void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });

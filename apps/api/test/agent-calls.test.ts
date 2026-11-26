@@ -71,7 +71,7 @@ describe('a data point per call', () => {
     const w = watched();
     const SECRET = 'sk-live-do-not-keep';
     await rpc(access_token, 'tools/list', {}, w.bindings);
-    const made = await call(access_token, 'create_playlist', { name: `Menu ${SECRET}`, idempotencyKey: `key-${SECRET}` }, w.bindings);
+    const made = await call(access_token, 'save_playlist', { name: `Menu ${SECRET}`, idempotencyKey: `key-${SECRET}` }, w.bindings);
     const playlistId: string = made.result?.structuredContent.playlist.id;
     await call(access_token, 'get_playlist', { playlistId }, w.bindings);
     await call(access_token, 'get_playlist', { playlistId: `pls_${SECRET}` }, w.bindings);
@@ -81,7 +81,7 @@ describe('a data point per call', () => {
     const tail = [org.id, grantId, clientId];
     expect(w.points).toEqual([
       { indexes: [grantId], blobs: [...tail, 'tools/list', 'ok', '', '', ''], doubles: [expect.any(Number), 0] },
-      { indexes: [grantId], blobs: [...tail, 'create_playlist', 'ok', 'content:draft', 'playlist', playlistId], doubles: [expect.any(Number), 1] },
+      { indexes: [grantId], blobs: [...tail, 'save_playlist', 'ok', 'content:draft', 'playlist', playlistId], doubles: [expect.any(Number), 1] },
       { indexes: [grantId], blobs: [...tail, 'get_playlist', 'ok', 'content:read', '', ''], doubles: [expect.any(Number), 0] },
       { indexes: [grantId], blobs: [...tail, 'get_playlist', 'not_found', 'content:read', '', ''], doubles: [expect.any(Number), 0] },
       { indexes: [grantId], blobs: [...tail, 'update_screen', 'forbidden', 'screens:manage', '', ''], doubles: [expect.any(Number), 1] },
@@ -155,7 +155,7 @@ describe('get_agent_grant_usage', () => {
     const ownerGrant = (await check(ownerAgent.access_token))!.grantId;
     const editorGrant = (await check(editorAgent.access_token))!.grantId;
     await rpc(ownerAgent.access_token, 'tools/list', {});
-    const made = await call(ownerAgent.access_token, 'create_playlist', { name: 'Specials' });
+    const made = await call(ownerAgent.access_token, 'save_playlist', { name: 'Specials' });
     const playlistId: string = made.result?.structuredContent.playlist.id;
     await call(ownerAgent.access_token, 'update_screen', { screenId: 'scr_any', name: 'x' });
     // Not found is a call, not a refusal: only forbidden and rate_limited are.
@@ -179,7 +179,7 @@ describe('get_agent_grant_usage', () => {
     expect(one.recent).toEqual([
       { at: expect.any(Number), tool: 'get_playlist', result: 'not_found', change: false, needs: 'content:read', target: null },
       { at: expect.any(Number), tool: 'update_screen', result: 'forbidden', change: true, needs: 'screens:manage', target: null },
-      { at: expect.any(Number), tool: 'create_playlist', result: 'ok', change: true, needs: 'content:draft', target: { kind: 'playlist', id: playlistId } },
+      { at: expect.any(Number), tool: 'save_playlist', result: 'ok', change: true, needs: 'content:draft', target: { kind: 'playlist', id: playlistId } },
       { at: expect.any(Number), tool: 'tools/list', result: 'ok', change: false, needs: null, target: null },
     ]);
     expect(one.lastRefusal).toMatchObject({ tool: 'update_screen', result: 'forbidden', needs: 'screens:manage' });
@@ -296,7 +296,7 @@ describe('the cost of each path, per call', () => {
         { writes: 0, objects: ['write', 'refused'] },
       ],
       // The change's own writes: the playlist and its audit row, in one batch; the limit's object counts it.
-      ['a change', () => call(access_token, 'create_playlist', { name: 'Budget' }, w.bindings), { writes: 2, objects: ['write'] }],
+      ['a change', () => call(access_token, 'save_playlist', { name: 'Budget' }, w.bindings), { writes: 2, objects: ['write'] }],
     ];
     for (const [path, run, cost] of paths) {
       w.reset();
@@ -349,12 +349,12 @@ describe('the SQL API log', () => {
 
   it('reads recent calls and the last refusal as calls, their timestamps in UTC', async () => {
     const api = sqlApi([
-      { timestamp: '2026-11-23 10:15:00', tool: 'create_playlist', result: 'ok', change: 1, needs: 'content:draft', targetKind: 'playlist', targetId: 'pls_1' },
+      { timestamp: '2026-11-23 10:15:00', tool: 'save_playlist', result: 'ok', change: 1, needs: 'content:draft', targetKind: 'playlist', targetId: 'pls_1' },
     ]);
     const log = agentCallLog(settings, ORG, api.fetcher)!;
     const call = {
       at: Date.UTC(2026, 10, 23, 10, 15),
-      tool: 'create_playlist',
+      tool: 'save_playlist',
       result: 'ok',
       change: true,
       needs: 'content:draft',
@@ -434,13 +434,13 @@ describe('the SQL API log', () => {
         orgId: 'org_a',
         grantId: 'agr_1',
         clientId: 'cli_1',
-        tool: 'create_playlist',
+        tool: 'save_playlist',
         result: 'ok',
         change: true,
         needs: 'content:draft',
         target: { kind: 'playlist', id: 'pls_1' },
         ms: 12,
       }),
-    ).toEqual({ indexes: ['agr_1'], blobs: ['org_a', 'agr_1', 'cli_1', 'create_playlist', 'ok', 'content:draft', 'playlist', 'pls_1'], doubles: [12, 1] });
+    ).toEqual({ indexes: ['agr_1'], blobs: ['org_a', 'agr_1', 'cli_1', 'save_playlist', 'ok', 'content:draft', 'playlist', 'pls_1'], doubles: [12, 1] });
   });
 });

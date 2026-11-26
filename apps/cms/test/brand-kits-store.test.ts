@@ -247,7 +247,7 @@ describe('a kit save (re-check of #103)', () => {
     // Saved a second after the edit, as an editor's (#366).
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await settle();
-    expect(calls).toMatchObject([{ name: 'update_brand_kit', input: { brandKitId: 'bk_a', ifVersion: 1 } }]);
+    expect(calls).toMatchObject([{ name: 'save_brand_kit', input: { brandKitId: 'bk_a', ifVersion: 1 } }]);
     // The page says it in a kit's words (This kit changed since you opened it).
     expect(store.getState().brandKits.drafts.bk_a).toMatchObject({
       stale: true,
@@ -381,7 +381,7 @@ describe('kit actions run one at a time (review of #143)', () => {
     await store.getState().duplicateKit(ORG, a);
     store.getState().nameNewKit('Spring');
     await store.getState().createKit(ORG);
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit']);
     calls[0]!.answer(409, refused);
     await settle();
 
@@ -390,18 +390,18 @@ describe('kit actions run one at a time (review of #143)', () => {
     await settle();
     const duplicating = store.getState().duplicateKit(ORG, a);
     await called(2);
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit', 'save_brand_kit']);
     // An edit while Duplicate runs: its save waits until Duplicate is done.
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#446688' } }));
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await store.getState().createKit(ORG);
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit', 'save_brand_kit']);
     calls[1]!.answer(409, refused);
     await duplicating;
     expect(store.getState().brandKits.pending).toBeNull();
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await called(3);
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit', 'update_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit', 'save_brand_kit', 'save_brand_kit']);
   });
 
   it('Duplicate saves an edit still waiting out its second, then copies the kit as saved (#366)', async () => {
@@ -411,11 +411,11 @@ describe('kit actions run one at a time (review of #143)', () => {
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
     const duplicating = store.getState().duplicateKit(ORG, a);
     await called(1);
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit']);
     calls[0]!.answer(409, refused);
     await duplicating;
     // Its save refused, Duplicate copies nothing: the edit stays, said in place.
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit']);
   });
 
   it('a kit the server would refuse as it is (no name) is marked, not sent', async () => {
@@ -440,7 +440,7 @@ describe('kit actions run one at a time (review of #143)', () => {
     expect(store.getState().brandKits.drafts.bk_a?.edit.colors.muted).toBe('#2a3140');
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS);
     await called(1);
-    expect(calls[0]).toMatchObject({ name: 'update_brand_kit', input: { colors: { muted: '#2a3140' } } });
+    expect(calls[0]).toMatchObject({ name: 'save_brand_kit', input: { colors: { muted: '#2a3140' } } });
   });
 
   it('a request that gets no answer releases the action, with its message', async () => {
@@ -468,7 +468,7 @@ describe('kit actions run one at a time (review of #143)', () => {
     expect(store.getState().brandKits.newKit).toMatchObject({ open: true, pending: true, name: 'One' });
     store.getState().nameNewKit('Two');
     await store.getState().createKit(ORG);
-    expect(calls.map((c) => c.name)).toEqual(['create_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit']);
     calls[0]!.answer(200, { brandKit: { ...kit('bk_one', '#2563eb'), name: 'One' } });
     await creating;
     expect(router.navigate).toHaveBeenCalledTimes(1);
@@ -517,7 +517,7 @@ describe('an edit still waiting when the member leaves the org (review of #461)'
     const switching = store.getState().switchOrg({ id: 'org_2', name: 'Other' } as never, 'switcher');
     await settle();
     // Sent at once, in the org it was made in; the switch has not happened yet.
-    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    expect(calls.map((c) => c.name)).toEqual(['save_brand_kit']);
     expect(switchOrganization).not.toHaveBeenCalled();
     calls[0]!.answer();
     await switching;

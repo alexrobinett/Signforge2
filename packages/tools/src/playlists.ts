@@ -82,7 +82,7 @@ const listPlaylists = defineTool({
 
 const getPlaylist = defineTool({
   name: 'get_playlist',
-  description: "Get one playlist's draft, with its spots in play order. Returns { playlist }; pass its version as ifVersion to update_playlist.",
+  description: "Get one playlist's draft, with its spots in play order. Returns { playlist }; pass its version as ifVersion to save_playlist.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -95,42 +95,37 @@ const getPlaylist = defineTool({
   },
 });
 
-const createPlaylist = defineTool({
-  name: 'create_playlist',
+const savePlaylist = defineTool({
+  name: 'save_playlist',
   description:
-    "Create a playlist as a draft, optionally with its spots in play order (any of the organization's spots, published or not). transition defaults to a 500 ms fade. Nothing reaches a screen until it is published and scheduled, or made the default playlist. Pass an idempotencyKey so a retry cannot create it twice. Returns { playlist }.",
+    "Create a playlist as a draft, or change one's draft. Without playlistId it creates one: a name, optionally its spots in play order (any of the organization's spots, published or not), and transition, by default a 500 ms fade; pass an idempotencyKey so a retry cannot create it twice. With playlistId it changes what you give: name, transition, spotIds (the whole play order, replacing the draft's); pass the version you read as ifVersion so a change made since, such as someone else's reorder, is not overwritten. Nothing reaches a screen until it is published and scheduled, or made the default playlist. Returns { playlist }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z.object({ name: name('playlist'), transition: transition.optional(), spotIds: spotIds.optional(), idempotencyKey }),
-  output: outputs.create_playlist,
-  example: { name: 'Weekend promos', transition: { type: 'fade', ms: 600 }, spotIds: ['spt_example'] },
-  target: (_input, output) => ({ kind: 'playlist', id: output.playlist.id }),
-  handler: async ({ org, input, write }) => {
-    const items = input.spotIds ?? [];
-    const row = write(await org.playlists.stage.insert({ name: input.name, transitionJson: JSON.stringify(input.transition ?? DEFAULT_TRANSITION) }, items));
-    return { playlist: playlistView(row, items, null) };
-  },
-});
-
-const updatePlaylist = defineTool({
-  name: 'update_playlist',
-  description:
-    "Change a playlist's draft. Give only what changes: name, transition, spotIds (the whole play order, replacing the draft's). Screens keep the published version until the next publish. Pass the version you read as ifVersion so a change made since, such as someone else's reorder, is not overwritten. Returns { playlist }.",
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
   partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
-  input: z
-    .object({ playlistId: id('playlist'), name: name('playlist').optional(), transition: transition.optional(), spotIds: spotIds.optional(), ifVersion })
-    .refine((v) => v.name !== undefined || v.transition !== undefined || v.spotIds !== undefined, 'nothing to change'),
-  output: outputs.update_playlist,
-  example: { playlistId: 'pls_example', spotIds: ['spt_example'], ifVersion: 2 },
-  target,
+  input: z.object({
+    playlistId: id('playlist').optional().describe('The playlist to change; omit to create one'),
+    name: name('playlist').optional(),
+    transition: transition.optional(),
+    spotIds: spotIds.optional(),
+    ifVersion,
+    idempotencyKey,
+  }),
+  output: outputs.save_playlist,
+  example: { name: 'Weekend promos', transition: { type: 'fade', ms: 600 }, spotIds: ['spt_example'] },
+  target: (input, output) => ({ kind: 'playlist', id: input.playlistId ?? output.playlist.id }),
   handler: async ({ org, actor, input, write }) => {
-    const current = await requirePlaylist(org, input.playlistId);
-    const patch = { name: input.name, transitionJson: input.transition && JSON.stringify(input.transition) };
+    const { playlistId, name } = input;
+    if (playlistId === undefined) {
+      if (name === undefined) throw new ToolError('invalid_input', 'a new playlist needs a name; give playlistId to change one');
+      const items = input.spotIds ?? [];
+      const row = write(await org.playlists.stage.insert({ name, transitionJson: JSON.stringify(input.transition ?? DEFAULT_TRANSITION) }, items));
+      return { playlist: playlistView(row, items, null) };
+    }
+    if (name === undefined && input.transition === undefined && input.spotIds === undefined) throw new ToolError('invalid_input', 'nothing to change');
+    const current = await requirePlaylist(org, playlistId);
+    const patch = { name, transitionJson: input.transition && JSON.stringify(input.transition) };
     // An agent's edit is its proposal (#116): the draft it replaces, items and all, is kept beside it, so it is held to the version read.
     write(await keptFor(org, actor, 'playlist', current, () => org.playlists.items(current.id)));
     const guard = input.ifVersion ?? (isAgent(actor) ? current.rowVersion : undefined);
@@ -139,7 +134,8 @@ const updatePlaylist = defineTool({
     return { playlist: playlistView(row, items, settings?.defaultPlaylistId) };
   },
   // The order's rows name the playlist: deleted between the read and the commit, they fail the batch.
-  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+  refuseFailedCommit: async ({ org, input }) =>
+    input.playlistId === undefined || (await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId),
 });
 
 /** The playlist at the version shown, or refused as changed since. */
@@ -294,8 +290,7 @@ const setDefaultPlaylist = defineTool({
 export const playlistTools = [
   listPlaylists,
   getPlaylist,
-  createPlaylist,
-  updatePlaylist,
+  savePlaylist,
   revertPlaylistDraft,
   keepPlaylistDraft,
   deletePlaylist,

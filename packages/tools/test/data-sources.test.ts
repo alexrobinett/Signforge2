@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 describe('data sources', () => {
   it('creates a source with its URL sealed, never showing it', async () => {
-    const { dataSource } = await call('create_data_source', {
+    const { dataSource } = await call('save_data_source', {
       id: 'holidays',
       name: 'US holidays',
       format: 'ical',
@@ -44,11 +44,11 @@ describe('data sources', () => {
   });
 
   it('polls a news feed hourly by default, and the rest every five minutes; a person may still choose faster (#339)', async () => {
-    const rss = await call('create_data_source', { name: 'Hourly news', format: 'rss', feedUrl: 'https://news.example.com/hourly' });
+    const rss = await call('save_data_source', { name: 'Hourly news', format: 'rss', feedUrl: 'https://news.example.com/hourly' });
     expect(rss.dataSource).toMatchObject({ format: 'rss', refreshS: 3600 });
-    const json = await call('create_data_source', { name: 'Five-minute data', format: 'json', feedUrl: 'https://data.example.com/five' });
+    const json = await call('save_data_source', { name: 'Five-minute data', format: 'json', feedUrl: 'https://data.example.com/five' });
     expect(json.dataSource).toMatchObject({ format: 'json', refreshS: 300 });
-    const fast = await call('create_data_source', { name: 'Fast news', format: 'rss', feedUrl: 'https://news.example.com/fast', refreshS: 300 });
+    const fast = await call('save_data_source', { name: 'Fast news', format: 'rss', feedUrl: 'https://news.example.com/fast', refreshS: 300 });
     expect(fast.dataSource).toMatchObject({ format: 'rss', refreshS: 300 });
   });
 
@@ -68,7 +68,7 @@ describe('data sources', () => {
     const holidays = dataSources.find((d: { id: string }) => d.id === 'holidays');
     expect(holidays).toMatchObject({ lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
     expect(holidays).not.toHaveProperty('lastFetchedAt');
-    const unpolled = await call('create_data_source', { id: 'unpolled', name: 'Not polled yet', format: 'rss', feedUrl: 'https://news.example.com/rss' });
+    const unpolled = await call('save_data_source', { id: 'unpolled', name: 'Not polled yet', format: 'rss', feedUrl: 'https://news.example.com/rss' });
     expect((await call('list_data_sources', {})).dataSources.find((d: { id: string }) => d.id === unpolled.dataSource.id)).toMatchObject({
       lastCheckedAt: null,
       spots: [],
@@ -79,7 +79,7 @@ describe('data sources', () => {
 
   it('updates, polling a changed URL afresh', async () => {
     await o.scope.dataSources.update('holidays', { etag: '"old"', failures: 3, lastError: 'timeout', nextPollAt: 99 });
-    const { dataSource } = await call('update_data_source', { dataSourceId: 'holidays', feedUrl: 'https://other.example.com/h.ics', horizonDays: null });
+    const { dataSource } = await call('save_data_source', { dataSourceId: 'holidays', feedUrl: 'https://other.example.com/h.ics', horizonDays: null });
     expect(dataSource).toMatchObject({ horizonDays: null, failures: 0, lastError: null });
     expect(await owner.org.dataSources.get('holidays')).toMatchObject({
       etag: null,
@@ -89,16 +89,16 @@ describe('data sources', () => {
   });
 
   it("shows a news feed's photos unless they are switched off, and reads the feed afresh when they are", async () => {
-    const { dataSource } = await call('create_data_source', { id: 'headlines', name: 'Headlines', format: 'rss', feedUrl: 'https://news.example.com/rss' });
+    const { dataSource } = await call('save_data_source', { id: 'headlines', name: 'Headlines', format: 'rss', feedUrl: 'https://news.example.com/rss' });
     expect(dataSource).toMatchObject({ photos: true });
     await o.scope.dataSources.update('headlines', { etag: '"old"', nextPollAt: 99 });
     // Unchanged, it is no reason to read the feed again.
-    await call('update_data_source', { dataSourceId: 'headlines', photos: true });
+    await call('save_data_source', { dataSourceId: 'headlines', photos: true });
     expect(await owner.org.dataSources.get('headlines')).toMatchObject({ etag: '"old"', nextPollAt: 99 });
-    const off = await call('update_data_source', { dataSourceId: 'headlines', photos: false });
+    const off = await call('save_data_source', { dataSourceId: 'headlines', photos: false });
     expect(off.dataSource).toMatchObject({ photos: false });
     expect(await owner.org.dataSources.get('headlines')).toMatchObject({ photos: false, etag: null, nextPollAt: 0 });
-    expect((await call('create_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject(
+    expect((await call('save_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject(
       {
         photos: false,
       },
@@ -108,11 +108,11 @@ describe('data sources', () => {
   });
 
   it('refuses the photos switch on anything but a news feed', async () => {
-    expect(await refusal('create_data_source', { name: 'x', format: 'ical', feedUrl: 'https://a.example.com/c.ics', photos: false })).toMatchObject({
+    expect(await refusal('save_data_source', { name: 'x', format: 'ical', feedUrl: 'https://a.example.com/c.ics', photos: false })).toMatchObject({
       error: 'invalid_input',
     });
-    await call('create_data_source', { id: 'cal', name: 'Cal', format: 'ical', feedUrl: 'https://a.example.com/c.ics' });
-    expect(await refusal('update_data_source', { dataSourceId: 'cal', photos: true })).toMatchObject({
+    await call('save_data_source', { id: 'cal', name: 'Cal', format: 'ical', feedUrl: 'https://a.example.com/c.ics' });
+    expect(await refusal('save_data_source', { dataSourceId: 'cal', photos: true })).toMatchObject({
       error: 'invalid_input',
       message: 'photos is for rss sources only',
     });
@@ -121,22 +121,22 @@ describe('data sources', () => {
 
   it('refuses a feed URL the poller would refuse, before storing it', async () => {
     for (const feedUrl of ['http://feed.example.com/a', 'https://feed.example.com:8443/a', 'https://10.0.0.1/a', 'https://printer.local/a', 'nope'])
-      expect(await refusal('create_data_source', { name: 'x', format: 'rss', feedUrl }), feedUrl).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect(await refusal('save_data_source', { name: 'x', format: 'rss', feedUrl }), feedUrl).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 
   it('refuses a refresh faster than 5 minutes, and a look-ahead on anything but a calendar', async () => {
-    expect(await refusal('create_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/', refreshS: 60 })).toMatchObject({
+    expect(await refusal('save_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/', refreshS: 60 })).toMatchObject({
       error: 'invalid_input',
     });
-    expect(await refusal('create_data_source', { name: 'x', format: 'rss', feedUrl: 'https://a.example.com/', horizonDays: 10 })).toMatchObject({
+    expect(await refusal('save_data_source', { name: 'x', format: 'rss', feedUrl: 'https://a.example.com/', horizonDays: 10 })).toMatchObject({
       error: 'invalid_input',
     });
   });
 
   it('allows 10 sources per org', async () => {
     const have = (await owner.org.dataSources.list()).length;
-    for (let i = have; i < 10; i++) await call('create_data_source', { name: `Feed ${i}`, format: 'json', feedUrl: `https://a.example.com/${i}` });
-    expect(await refusal('create_data_source', { name: 'Eleventh', format: 'json', feedUrl: 'https://a.example.com/11' })).toMatchObject({
+    for (let i = have; i < 10; i++) await call('save_data_source', { name: `Feed ${i}`, format: 'json', feedUrl: `https://a.example.com/${i}` });
+    expect(await refusal('save_data_source', { name: 'Eleventh', format: 'json', feedUrl: 'https://a.example.com/11' })).toMatchObject({
       ok: false,
       error: 'conflict',
     });
@@ -158,13 +158,13 @@ describe('data sources', () => {
 describe('table sources', () => {
   it('adds a csv source, and a json-table source with the path to its rows, which only json-table takes', async () => {
     await call('delete_data_source', {
-      dataSourceId: (await call('create_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
+      dataSourceId: (await call('save_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
     });
     const ids = (await owner.org.dataSources.list()).map((d) => d.id);
     for (const id of ids.slice(0, 2)) await o.scope.dataSources.delete(id);
-    const { dataSource: csv } = await call('create_data_source', { id: 'menu', name: 'Menu', format: 'csv', feedUrl: 'https://menu.example.com/menu.csv' });
+    const { dataSource: csv } = await call('save_data_source', { id: 'menu', name: 'Menu', format: 'csv', feedUrl: 'https://menu.example.com/menu.csv' });
     expect(csv).toMatchObject({ format: 'csv', rowsPath: null });
-    const { dataSource: json } = await call('create_data_source', {
+    const { dataSource: json } = await call('save_data_source', {
       id: 'stock',
       name: 'Stock',
       format: 'json-table',
@@ -172,16 +172,16 @@ describe('table sources', () => {
       rowsPath: 'data.items',
     });
     expect(json).toMatchObject({ format: 'json-table', rowsPath: 'data.items' });
-    expect(await refusal('create_data_source', { name: 'x', format: 'csv', feedUrl: 'https://a.example.com/', rowsPath: 'a' })).toMatchObject({
+    expect(await refusal('save_data_source', { name: 'x', format: 'csv', feedUrl: 'https://a.example.com/', rowsPath: 'a' })).toMatchObject({
       error: 'invalid_input',
       details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
     });
-    expect(await refusal('update_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({ error: 'invalid_input' });
+    expect(await refusal('save_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({ error: 'invalid_input' });
   });
 
   it('polls a json-table source afresh when the path to its rows changes', async () => {
     await o.scope.dataSources.update('stock', { etag: '"e"', failures: 2, lastError: 'not-a-table', nextPollAt: 99 });
-    expect(await call('update_data_source', { dataSourceId: 'stock', rowsPath: null })).toMatchObject({
+    expect(await call('save_data_source', { dataSourceId: 'stock', rowsPath: null })).toMatchObject({
       dataSource: { rowsPath: null, failures: 0, lastError: null },
     });
     expect(await owner.org.dataSources.get('stock')).toMatchObject({ etag: null, nextPollAt: 0 });
@@ -341,7 +341,7 @@ describe("an agent's change that reaches screens with no publish (#122, review o
         ),
       ]);
     for (const id of ['quiet', 'live'])
-      expect(await change('create_data_source', { id, name: id, format: 'json', feedUrl: `https://${id}.example.com/feed.json` })).toMatchObject({ ok: true });
+      expect(await change('save_data_source', { id, name: id, format: 'json', feedUrl: `https://${id}.example.com/feed.json` })).toMatchObject({ ok: true });
     // What screens show of `live`: a published spot binds it.
     const spot = (await a.scope.spots.get(a.templateSpot))!;
     const live = { ...JSON.parse(contentJson(spot)), bindingsJson: JSON.stringify({ title: { source: 'live', path: 'title' } }) };
@@ -351,7 +351,7 @@ describe("an agent's change that reaches screens with no publish (#122, review o
   it("refuses a draft-only agent a source's address, wherever it is bound, keeping the sealed one", async () => {
     for (const id of ['quiet', 'live']) {
       const before = await sealed(id);
-      expect(await change('update_data_source', { dataSourceId: id, feedUrl: 'https://evil.example.com/feed.json' }, agent('owner', drafts))).toMatchObject({
+      expect(await change('save_data_source', { dataSourceId: id, feedUrl: 'https://evil.example.com/feed.json' }, agent('owner', drafts))).toMatchObject({
         ok: false,
         error: 'forbidden',
         message: expect.stringContaining('needs the right to publish'),
@@ -365,12 +365,12 @@ describe("an agent's change that reaches screens with no publish (#122, review o
     // what shows it now decides.
     for (const id of ['quiet', 'live']) {
       for (const input of [{ refreshS: 600 }, { photos: false }, { name: 'Renamed', refreshS: 600 }])
-        expect(await change('update_data_source', { dataSourceId: id, ...input }, agent('owner', drafts)), `${id} ${JSON.stringify(input)}`).toMatchObject({
+        expect(await change('save_data_source', { dataSourceId: id, ...input }, agent('owner', drafts)), `${id} ${JSON.stringify(input)}`).toMatchObject({
           ok: false,
           error: 'forbidden',
           message: expect.stringContaining('Its name alone may change'),
         });
-      expect(await change('update_data_source', { dataSourceId: id, name: `${id} feed` }, agent('owner', drafts))).toMatchObject({ ok: true });
+      expect(await change('save_data_source', { dataSourceId: id, name: `${id} feed` }, agent('owner', drafts))).toMatchObject({ ok: true });
     }
     expect(await person.org.dataSources.get('quiet')).toMatchObject({ refreshS: 300 });
   });
@@ -382,16 +382,16 @@ describe("an agent's change that reaches screens with no publish (#122, review o
       const live = { ...JSON.parse(contentJson(spot)), bindingsJson: JSON.stringify({ title: { source: 'quiet', path: 'title' } }) };
       await env.DB.prepare('UPDATE spots SET published_json = ? WHERE id = ?').bind(JSON.stringify(live), spot.id).run();
     });
-    expect(await change('update_data_source', { dataSourceId: 'quiet', refreshS: 900 }, published)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await change('save_data_source', { dataSourceId: 'quiet', refreshS: 900 }, published)).toMatchObject({ ok: false, error: 'forbidden' });
     expect(await person.org.dataSources.get('quiet')).toMatchObject({ refreshS: 300 });
   });
 
   it('lets an agent that may publish change it, held to the commit: one whose editors stop publishing meanwhile is refused', async () => {
-    expect(await change('update_data_source', { dataSourceId: 'live', refreshS: 900 }, agent('editor', publishes))).toMatchObject({ ok: true });
+    expect(await change('save_data_source', { dataSourceId: 'live', refreshS: 900 }, agent('editor', publishes))).toMatchObject({ ok: true });
     const before = await sealed('live');
     const raced = racing(agent('editor', publishes), async () => person.org.commit((await person.org.settings.stage.set({ editorsPublish: false })).writes));
     try {
-      expect(await change('update_data_source', { dataSourceId: 'live', feedUrl: 'https://other.example.com/feed.json' }, raced)).toMatchObject({
+      expect(await change('save_data_source', { dataSourceId: 'live', feedUrl: 'https://other.example.com/feed.json' }, raced)).toMatchObject({
         ok: false,
         error: 'forbidden',
         message: 'Only owners publish in this organization',
@@ -404,9 +404,9 @@ describe("an agent's change that reaches screens with no publish (#122, review o
 
   it("refuses a draft-only agent a new provider source, which reads a resource through a person's connection; a feed it may add", async () => {
     expect(
-      await change('create_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Payroll!A1:Z99' }, agent('owner', drafts)),
+      await change('save_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Payroll!A1:Z99' }, agent('owner', drafts)),
     ).toMatchObject({ ok: false, error: 'forbidden', message: expect.stringContaining('needs the right to publish') });
-    expect(await change('create_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, agent('owner', drafts))).toMatchObject({
+    expect(await change('save_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, agent('owner', drafts))).toMatchObject({
       ok: true,
     });
   });
@@ -442,7 +442,7 @@ describe("a person's change that reaches screens with no publish (owner decision
       ),
     ]);
     expect(
-      await dispatch(registry, 'create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json' }, editor()),
+      await dispatch(registry, 'save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json' }, editor()),
     ).toMatchObject({
       ok: true,
     });
@@ -453,31 +453,31 @@ describe("a person's change that reaches screens with no publish (owner decision
     try {
       const before = await sealedOf('menu');
       for (const input of [{ feedUrl: 'https://menu.example.com/b.json' }, { refreshS: 900 }])
-        expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', ...input }, editor()), JSON.stringify(input)).toMatchObject({
+        expect(await dispatch(registry, 'save_data_source', { dataSourceId: 'menu', ...input }, editor()), JSON.stringify(input)).toMatchObject({
           ok: false,
           error: 'forbidden',
           message: expect.stringContaining('needs the right to publish'),
         });
       expect(await sealedOf('menu')).toBe(before);
-      expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', name: 'Menu board' }, editor())).toMatchObject({ ok: true });
+      expect(await dispatch(registry, 'save_data_source', { dataSourceId: 'menu', name: 'Menu board' }, editor())).toMatchObject({ ok: true });
       expect(
-        await dispatch(registry, 'create_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Menu!A1:B9' }, editor()),
+        await dispatch(registry, 'save_data_source', { name: 'Sheet', format: 'provider', connectionId: 'con_any', resource: 'Menu!A1:B9' }, editor()),
       ).toMatchObject({ ok: false, error: 'forbidden' });
       // A feed of its own an editor may still add: nothing shows it until a spot binding it is published.
-      expect(await dispatch(registry, 'create_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, editor())).toMatchObject({
+      expect(await dispatch(registry, 'save_data_source', { name: 'News', format: 'rss', feedUrl: 'https://news.example.com/rss' }, editor())).toMatchObject({
         ok: true,
       });
     } finally {
       await setPublish(true);
     }
-    expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', refreshS: 900 }, editor())).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'save_data_source', { dataSourceId: 'menu', refreshS: 900 }, editor())).toMatchObject({ ok: true });
   });
 
   it('holds the right to the commit: editors stopped from publishing between the read and the batch are refused', async () => {
     const before = await sealedOf('menu');
     const raced = racing(editor(), () => setPublish(false));
     try {
-      expect(await dispatch(registry, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/c.json' }, raced)).toMatchObject({
+      expect(await dispatch(registry, 'save_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/c.json' }, raced)).toMatchObject({
         ok: false,
         error: 'forbidden',
         message: 'Only owners publish in this organization',

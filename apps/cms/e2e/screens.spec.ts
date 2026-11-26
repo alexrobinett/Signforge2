@@ -112,7 +112,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByRole('button', { name: 'New playlist' }).first()).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'New playlist' })).toHaveCount(0);
   // With one, it is to play it here.
-  await tool(page, 'create_playlist', { name: 'Arcade loop', spotIds: [] });
+  await tool(page, 'save_playlist', { name: 'Arcade loop', spotIds: [] });
   await page.goto(screenPage);
   await hydrated(page);
   await expect(fix).toHaveAccessibleName('Play on this screen…');
@@ -504,7 +504,7 @@ test("Take over's notice keeps a name with no break inside the dialog at a phone
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   const unbroken = 'Q'.repeat(100);
-  await tool(page, 'create_playlist', { name: unbroken, spotIds: [] });
+  await tool(page, 'save_playlist', { name: unbroken, spotIds: [] });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/screens/${screen.id}`);
   await hydrated(page);

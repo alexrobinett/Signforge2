@@ -1551,7 +1551,7 @@ describe('photos switched off', () => {
   const setPhotos = (dataSourceId: string, photos: boolean) =>
     dispatch(
       registry,
-      'update_data_source',
+      'save_data_source',
       { dataSourceId, photos },
       {
         org: o.scope,

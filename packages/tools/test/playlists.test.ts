@@ -19,7 +19,7 @@ const idOf = (out: Record<string, unknown>) => (out.playlist as { id: string }).
 describe('playlist drafts', () => {
   it('creates a playlist with its spots in order, fading by default, and reads it back', async () => {
     const { o, call } = await setup('pl-create');
-    const made = await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot, o.templateSpot, o.imageSpot], idempotencyKey: 'pl-create-1' }));
+    const made = await ok(call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot, o.templateSpot, o.imageSpot], idempotencyKey: 'pl-create-1' }));
     expect(made.playlist).toMatchObject({
       name: 'Lunch',
       transition: { type: 'fade', ms: 500 },
@@ -32,19 +32,19 @@ describe('playlist drafts', () => {
     expect(await ok(call('get_playlist', { playlistId: id }))).toEqual(made);
     const { playlists } = await ok(call('list_playlists', {}));
     expect(playlists).toContainEqual(made.playlist);
-    expect(await ok(call('create_playlist', { name: 'Empty', transition: { type: 'cut' } }))).toMatchObject({
+    expect(await ok(call('save_playlist', { name: 'Empty', transition: { type: 'cut' } }))).toMatchObject({
       playlist: { spotIds: [], transition: { type: 'cut' } },
     });
   });
 
   it('says how many spots the published playlist plays, apart from what its draft holds since (#397)', async () => {
     const { o, call } = await setup('pl-published-count');
-    const lunch = await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }));
+    const lunch = await ok(call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }));
     expect(lunch.playlist).toMatchObject({ published: false, publishedSpotCount: 0 });
     await ok(call('publish', {}));
     const id = idOf(lunch);
     const { playlist } = (await ok(call('get_playlist', { playlistId: id }))) as { playlist: { version: number } };
-    await ok(call('update_playlist', { playlistId: id, spotIds: [o.imageSpot, o.templateSpot], ifVersion: playlist.version }));
+    await ok(call('save_playlist', { playlistId: id, spotIds: [o.imageSpot, o.templateSpot], ifVersion: playlist.version }));
     expect(await ok(call('get_playlist', { playlistId: id }))).toMatchObject({
       playlist: { spotIds: [o.imageSpot, o.templateSpot], published: true, draftChanged: true, publishedSpotCount: 1 },
     });
@@ -52,7 +52,7 @@ describe('playlist drafts', () => {
 
   it('lists the default playlist alone, or the unpublished ones, and counts every playlist the filters match (#357)', async () => {
     const { o, call } = await setup('pl-filters');
-    const lunch = idOf(await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] })));
+    const lunch = idOf(await ok(call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot] })));
     expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [], total: 0 });
     await ok(call('set_default_playlist', { playlistId: lunch }));
     expect(await ok(call('list_playlists', { isDefault: true }))).toMatchObject({ playlists: [{ id: lunch, isDefault: true }], total: 1 });
@@ -65,9 +65,9 @@ describe('playlist drafts', () => {
 
   it('reorders, renames and changes the transition with ifVersion, and refuses an edit from an old read', async () => {
     const { o, org, call } = await setup('pl-update');
-    const id = idOf(await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot, o.templateSpot] })));
+    const id = idOf(await ok(call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot, o.templateSpot] })));
     const edited = await ok(
-      call('update_playlist', {
+      call('save_playlist', {
         playlistId: id,
         name: 'Dinner',
         transition: { type: 'crossfade', ms: 800 },
@@ -77,25 +77,25 @@ describe('playlist drafts', () => {
     );
     expect(edited.playlist).toMatchObject({ name: 'Dinner', transition: { type: 'crossfade', ms: 800 }, spotIds: [o.templateSpot, o.imageSpot], version: 2 });
 
-    expect(await call('update_playlist', { playlistId: id, spotIds: [o.imageSpot], ifVersion: 1 })).toMatchObject({
+    expect(await call('save_playlist', { playlistId: id, spotIds: [o.imageSpot], ifVersion: 1 })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { id, version: 2 },
     });
     expect(await org.playlists.items(id)).toEqual([o.templateSpot, o.imageSpot]);
     // The order alone is a change: the version moves on.
-    expect(await ok(call('update_playlist', { playlistId: id, spotIds: [], ifVersion: 2 }))).toMatchObject({ playlist: { spotIds: [], version: 3 } });
+    expect(await ok(call('save_playlist', { playlistId: id, spotIds: [], ifVersion: 2 }))).toMatchObject({ playlist: { spotIds: [], version: 3 } });
   });
 
   it('refuses a spot the organization does not have, and a transition a screen would refuse', async () => {
     const { o, call } = await setup('pl-refuse');
     const other = await seedOrg(env.DB, 'pl-refuse-other');
-    expect(await call('create_playlist', { name: 'x', spotIds: [other.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
-    const id = idOf(await ok(call('create_playlist', { name: 'x' })));
-    expect(await call('update_playlist', { playlistId: id, spotIds: [o.imageSpot, 'spt_missing'] })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await call('save_playlist', { name: 'x', spotIds: [other.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
+    const id = idOf(await ok(call('save_playlist', { name: 'x' })));
+    expect(await call('save_playlist', { playlistId: id, spotIds: [o.imageSpot, 'spt_missing'] })).toMatchObject({ ok: false, error: 'not_found' });
     for (const transition of [{ type: 'fade', ms: 0 }, { type: 'crossfade', ms: 20_000 }, { type: 'crossfade' }, { type: 'wipe', ms: 500 }])
-      expect(await call('update_playlist', { playlistId: id, transition }), JSON.stringify(transition)).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await call('update_playlist', { playlistId: id })).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect(await call('save_playlist', { playlistId: id, transition }), JSON.stringify(transition)).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await call('save_playlist', { playlistId: id })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 
   it('deletes a playlist, but not the default playlist or one a schedule entry plays', async () => {
@@ -117,9 +117,9 @@ describe('playlist drafts', () => {
 
   it('refuses an edit read before a delete on a playlist made again with its id, and writes nothing (#64)', async () => {
     const { o, org, call } = await setup('pl-tomb');
-    const made = await ok(call('create_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }));
+    const made = await ok(call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot] }));
     const id = idOf(made);
-    const read = (await ok(call('update_playlist', { playlistId: id, name: 'Lunch, edited', ifVersion: 1 }))).playlist as { version: number };
+    const read = (await ok(call('save_playlist', { playlistId: id, name: 'Lunch, edited', ifVersion: 1 }))).playlist as { version: number };
     expect(read.version).toBe(2);
     expect(await ok(call('delete_playlist', { playlistId: id }))).toEqual({ deleted: id });
 
@@ -128,7 +128,7 @@ describe('playlist drafts', () => {
     const again = await ok(call('get_playlist', { playlistId: id }));
     expect(again.playlist).toMatchObject({ version: 3, name: 'Again', spotIds: [] });
 
-    expect(await call('update_playlist', { playlistId: id, name: 'From the old read', spotIds: [o.templateSpot], ifVersion: read.version })).toMatchObject({
+    expect(await call('save_playlist', { playlistId: id, name: 'From the old read', spotIds: [o.templateSpot], ifVersion: read.version })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { id, version: 3 },
@@ -141,8 +141,8 @@ describe('playlist drafts', () => {
     const viewer = memberOf(org, 'viewer', {}, 'user-2');
     expect(await dispatch(registry, 'get_playlist', { playlistId: o.playlist }, viewer)).toMatchObject({ ok: true });
     for (const [name, input] of [
-      ['create_playlist', { name: 'x' }],
-      ['update_playlist', { playlistId: o.playlist, name: 'x' }],
+      ['save_playlist', { name: 'x' }],
+      ['save_playlist', { playlistId: o.playlist, name: 'x' }],
       ['delete_playlist', { playlistId: o.playlist }],
     ] as const)
       expect(await dispatch(registry, name, input, viewer)).toMatchObject({ ok: false, error: 'forbidden' });
@@ -226,7 +226,7 @@ describe('playlist tools racing another commit (review of #97)', () => {
         },
       },
     };
-    expect(await editorCalls(racing)('update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await editorCalls(racing)('save_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
   });
 });
 

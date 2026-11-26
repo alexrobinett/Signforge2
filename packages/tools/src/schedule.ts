@@ -217,42 +217,10 @@ const listEntries = defineTool({
   },
 });
 
-const createEntry = defineTool({
-  name: 'create_schedule_entry',
-  description:
-    "Schedule a playlist, as a draft: on every screen (target org), a group's screens or one screen, on the dates, weekdays and daily window given (each in the screen's own time zone; omit them for always). From the next publish, where entries overlap the highest priority wins, then the most specific target; where none applies a screen plays the default playlist. For a short interruption that cuts in at once, use start_takeover. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  idempotent: true,
-  input: z.object({ playlistId: id('playlist'), ...aim, priority: priority.optional(), ...when, idempotencyKey }).refine(aimed, AIMED),
-  output: outputs.create_schedule_entry,
-  example: { playlistId: 'pls_example', target: 'group', groupId: 'grp_example', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' },
-  target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
-  handler: async ({ org, input, write }) => {
-    const aimedAt = await requireAim(org, input);
-    const values: Stored = {
-      playlistId: input.playlistId,
-      ...aimedAt,
-      priority: input.priority ?? 0,
-      startDate: input.startDate ?? null,
-      endDate: input.endDate ?? null,
-      daysJson: daysJson(input.days),
-      fromTime: input.from ?? null,
-      toTime: input.to ?? null,
-      startsAt: null,
-      endsAt: null,
-    };
-    check('new', values);
-    return { entry: entryView(write(await org.scheduleEntries.stage.insert(values))) };
-  },
-  refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
-});
-
 const startTakeover = defineTool({
   name: 'start_takeover',
   description:
-    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two takeovers on the same screens, the one that starts later wins, so a new one replaces one running. End one now with end_takeover, or early with update_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
+    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two takeovers on the same screens, the one that starts later wins, so a new one replaces one running. End one now with end_takeover, or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -268,32 +236,56 @@ const startTakeover = defineTool({
 const SCHEDULE_ONLY = ['priority', 'startDate', 'endDate', 'days', 'from', 'to'] as const;
 const TAKEOVER_ONLY = ['startsAt', 'endsAt'] as const;
 
-const updateEntry = defineTool({
-  name: 'update_schedule_entry',
+const saveEntry = defineTool({
+  name: 'save_schedule_entry',
   description:
-    "Change a schedule entry's or takeover's draft. Give only what changes: the playlist, whom it is aimed at (target with groupId or screenId), and for a schedule entry its priority, dates, weekdays and window (null clears one), or for a takeover its startsAt and endsAt (end it early, or extend it to at most 24 hours from its start). Screens keep the published version until the next publish. A takeover's new playlist reaches a screen at the end of the spot on screen; a new takeover (start_takeover) cuts in at once. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { entry }.",
+    "Schedule a playlist, or change a schedule entry's or takeover's draft. Without scheduleEntryId it creates an entry: a playlistId and whom it plays on (target org for every screen, group with groupId, screen with screenId), on the dates, weekdays and daily window given (each in the screen's own time zone; omit them for always); pass an idempotencyKey so a retry cannot create it twice. From the next publish, where entries overlap the highest priority wins, then the most specific target; where none applies a screen plays the default playlist. For a short interruption that cuts in at once, use start_takeover. With scheduleEntryId it changes what you give: the playlist, whom it is aimed at, and for a schedule entry its priority, dates, weekdays and window (null clears one), or for a takeover its startsAt and endsAt (end it early, or extend it to at most 24 hours from its start); a takeover's new playlist reaches a screen at the end of the spot on screen. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  idempotent: true,
   input: z
     .object({
-      scheduleEntryId: id('schedule entry'),
+      scheduleEntryId: id('schedule entry').optional().describe('The entry to change; omit to create one'),
       playlistId: id('playlist').optional(),
       target: scheduleTarget.optional(),
       groupId: aim.groupId,
       screenId: aim.screenId,
       priority: priority.optional(),
       ...when,
-      startsAt: instant("The takeover's start").optional(),
-      endsAt: instant("The takeover's end").optional(),
+      startsAt: instant("A takeover's start").optional(),
+      endsAt: instant("A takeover's end").optional(),
       ifVersion,
+      idempotencyKey,
     })
     .refine(aimed, AIMED),
-  output: outputs.update_schedule_entry,
-  example: { scheduleEntryId: 'sch_example', playlistId: 'pls_example', ifVersion: 1 },
-  target: entryTarget,
+  output: outputs.save_schedule_entry,
+  example: { playlistId: 'pls_example', target: 'group', groupId: 'grp_example', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' },
+  target: (input, output) => ({ kind: 'schedule_entry', id: input.scheduleEntryId ?? output.entry.id }),
   handler: async ({ org, input, write }) => {
-    const current = await requireEntry(org, input.scheduleEntryId);
+    const { scheduleEntryId } = input;
+    if (scheduleEntryId === undefined) {
+      const { playlistId, target } = input;
+      if (playlistId === undefined || target === undefined)
+        throw new ToolError('invalid_input', 'a new entry needs a playlistId and a target; give scheduleEntryId to change one');
+      if (input.startsAt !== undefined || input.endsAt !== undefined) throw new ToolError('invalid_input', 'startsAt and endsAt belong to a takeover: use start_takeover');
+      const aimedAt = await requireAim(org, { playlistId, target, groupId: input.groupId, screenId: input.screenId });
+      const values: Stored = {
+        playlistId,
+        ...aimedAt,
+        priority: input.priority ?? 0,
+        startDate: input.startDate ?? null,
+        endDate: input.endDate ?? null,
+        daysJson: daysJson(input.days),
+        fromTime: input.from ?? null,
+        toTime: input.to ?? null,
+        startsAt: null,
+        endsAt: null,
+      };
+      check('new', values);
+      return { entry: entryView(write(await org.scheduleEntries.stage.insert(values))) };
+    }
+    const current = await requireEntry(org, scheduleEntryId);
     const takeover = current.endsAt !== null;
     const wrong = (takeover ? SCHEDULE_ONLY : TAKEOVER_ONLY).filter((k) => input[k] !== undefined);
     if (wrong.length)
@@ -324,7 +316,9 @@ const updateEntry = defineTool({
     return { entry: entryView(write(org.scheduleEntries.stage.update(current, next, input.ifVersion))) };
   },
   refuseFailedCommit: async ({ org, input }) =>
-    (await org.scheduleEntries.get(input.scheduleEntryId)) ? missingAim(org, input) : notFound('schedule entry', input.scheduleEntryId),
+    input.scheduleEntryId === undefined || (await org.scheduleEntries.get(input.scheduleEntryId))
+      ? missingAim(org, input)
+      : notFound('schedule entry', input.scheduleEntryId),
 });
 
 const deleteEntry = defineTool({
@@ -352,4 +346,4 @@ const deleteEntry = defineTool({
   },
 });
 
-export const scheduleTools = [listEntries, createEntry, startTakeover, updateEntry, deleteEntry];
+export const scheduleTools = [listEntries, saveEntry, startTakeover, deleteEntry];

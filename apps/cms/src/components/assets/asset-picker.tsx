@@ -23,7 +23,7 @@ export function AssetPicker({
   logos = false,
 }: {
   assets: AssetView[];
-  /** For a brand kit's logo: only SVG and PNG images, which `create_brand_kit` takes. */
+  /** For a brand kit's logo: only SVG and PNG images, which `save_brand_kit` takes. */
   logos?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;

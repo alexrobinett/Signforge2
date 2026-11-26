@@ -91,8 +91,8 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await expect(groups.getByRole('rowheader', { name: 'Drive-thru' })).toBeVisible();
 
   // An entry aims at North: its delete is refused, with the entry shown, and North stays.
-  const { playlist } = (await tool(page, 'create_playlist', { name: 'Breakfast' })) as { playlist: { id: string } };
-  await tool(page, 'create_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: north.id, from: '06:00', to: '10:30' });
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast' })) as { playlist: { id: string } };
+  await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: north.id, from: '06:00', to: '10:30' });
   await page.reload();
   await hydrated(page);
   await expect(groups.getByRole('row', { name: /North/ })).toContainText('1 entry');
@@ -177,7 +177,7 @@ test('groups and screens in name order wherever they are listed, though their id
   const kits = [];
   for (const name of ['Kit A', 'Kit B'])
     kits.push(
-      ((await tool(page, 'create_brand_kit', { name, colors, idempotencyKey: `${name.replace(' ', '-')}-${Date.now()}` })) as { brandKit: { id: string } })
+      ((await tool(page, 'save_brand_kit', { name, colors, idempotencyKey: `${name.replace(' ', '-')}-${Date.now()}` })) as { brandKit: { id: string } })
         .brandKit.id,
     );
   await tool(page, 'assign_brand_kit', { brandKitId: kits[0], groupId: alpha });

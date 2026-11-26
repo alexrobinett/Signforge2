@@ -94,7 +94,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
   update_screen: { group: 'Screens', words: 'Changed' },
   screen_command: { group: 'Screens', words: 'Command sent' },
-  // Recorded before #345 merged them into update_screen, screen_command and save_group: their rows keep these names.
+  // Recorded before #345 merged them into update_screen, screen_command, save_group and the content saves: their rows keep these names.
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
   set_display_override: { group: 'Screens', words: 'Woken or put to sleep' },
@@ -109,17 +109,20 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   set_group_members: { group: 'Groups', words: 'Screens set' },
   add_group_members: { group: 'Groups', words: 'Screens added' },
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
+  save_spot: { group: 'Spots', words: 'Saved' },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
   revert_spot_draft: { group: 'Spots', words: "Agent's draft rejected, or put back" },
   keep_spot_draft: { group: 'Spots', words: "Agent's draft kept" },
   delete_spot: { group: 'Spots', words: 'Deleted' },
+  save_playlist: { group: 'Playlists', words: 'Saved' },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
   revert_playlist_draft: { group: 'Playlists', words: "Agent's draft rejected, or put back" },
   keep_playlist_draft: { group: 'Playlists', words: "Agent's draft kept" },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
+  save_schedule_entry: { group: 'Schedule', words: 'Schedule saved' },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
   publish_takeover: { group: 'Schedule', words: 'Takeover made and published' },
@@ -138,10 +141,12 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   create_video_upload: { group: 'Assets', words: 'Video upload started' },
   finalize_video_upload: { group: 'Assets', words: 'Video checked' },
   delete_asset: { group: 'Assets', words: 'Deleted' },
+  save_brand_kit: { group: 'Brand kits', words: 'Saved' },
   create_brand_kit: { group: 'Brand kits', words: 'Created' },
   update_brand_kit: { group: 'Brand kits', words: 'Changed' },
   set_default_brand_kit: { group: 'Brand kits', words: 'Made the default' },
   assign_brand_kit: { group: 'Brand kits', words: 'Brand kit changed' },
+  save_data_source: { group: 'Data sources', words: 'Saved' },
   create_data_source: { group: 'Data sources', words: 'Created' },
   update_data_source: { group: 'Data sources', words: 'Changed' },
   delete_data_source: { group: 'Data sources', words: 'Deleted' },
@@ -193,6 +198,18 @@ const SETTINGS: [string, string][] = [
   ['locale', 'language'],
 ];
 
+/**
+ * Each content save (#345 PR 4), said as the tools it replaced said it: without its id it was their create, with it
+ * their update. A brand kit made the default by it says so.
+ */
+const SAVES: Record<string, { id: string; created: string; changed: string }> = {
+  save_spot: { id: 'spotId', created: 'create_spot', changed: 'update_spot' },
+  save_playlist: { id: 'playlistId', created: 'create_playlist', changed: 'update_playlist' },
+  save_schedule_entry: { id: 'scheduleEntryId', created: 'create_schedule_entry', changed: 'update_schedule_entry' },
+  save_brand_kit: { id: 'brandKitId', created: 'create_brand_kit', changed: 'update_brand_kit' },
+  save_data_source: { id: 'dataSourceId', created: 'create_data_source', changed: 'update_data_source' },
+};
+
 /** What each of `screen_command`'s commands did, as the tools it replaced said it. */
 const SCREEN_COMMANDS: Record<string, string> = {
   identify: 'Identified',
@@ -210,6 +227,11 @@ const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 export function eventText(e: { action: string; input: Readonly<Record<string, unknown>> }): string {
   const name = text(e.input.name);
   const role = text(e.input.role);
+  const save = SAVES[e.action];
+  if (save) {
+    const words = ACTIONS[e.input[save.id] === undefined ? save.created : save.changed]!.words;
+    return e.action === 'save_brand_kit' && e.input.makeDefault === true ? `${words} · made the default` : words;
+  }
   switch (e.action) {
     case 'screen_command':
       return SCREEN_COMMANDS[text(e.input.command) ?? ''] ?? ACTIONS.screen_command!.words;

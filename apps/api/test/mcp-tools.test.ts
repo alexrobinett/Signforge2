@@ -98,7 +98,7 @@ describe('tools/list', () => {
     expect(hints('read')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     expect(hints('cancel_invitation')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
-    expect(hints('create_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+    expect(hints('save_spot')).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });
 
   it("lists a type's own read as read only where read serves it (#345): an org:manage-only grant keeps its invitations", () => {

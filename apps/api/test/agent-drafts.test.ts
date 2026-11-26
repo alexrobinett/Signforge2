@@ -10,7 +10,7 @@ describe('the cost of an agent proposal', () => {
   it('reads it, rejects it, puts it back and keeps it, each within the budget', async () => {
     const t = await team();
     const { access_token } = await agentToken(t.t, t.editor, t.org.id, ['content:read', 'content:draft']);
-    const { spot } = await t.owner.ok<{ spot: { id: string; version: number } }>('/api/tools/create_spot', {
+    const { spot } = await t.owner.ok<{ spot: { id: string; version: number } }>('/api/tools/save_spot', {
       name: 'Soup',
       kind: 'url',
       url: 'https://example.com/soup',
@@ -19,9 +19,9 @@ describe('the cost of an agent proposal', () => {
     // Its audit rows: the person's and the agent's edits, as the strip reads the newest of them.
     for (let i = 0; i < 3; i++) {
       version = (
-        await t.owner.ok<{ spot: { version: number } }>('/api/tools/update_spot', { spotId: spot.id, durationMs: 10_000 + i * 1000, ifVersion: version })
+        await t.owner.ok<{ spot: { version: number } }>('/api/tools/save_spot', { spotId: spot.id, durationMs: 10_000 + i * 1000, ifVersion: version })
       ).spot.version;
-      const edited = await mcpTool(access_token, 'update_spot', { spotId: spot.id, url: `https://example.com/soup-${i}`, ifVersion: version });
+      const edited = await mcpTool(access_token, 'save_spot', { spotId: spot.id, url: `https://example.com/soup-${i}`, ifVersion: version });
       expect(edited.isError, JSON.stringify(edited)).toBeUndefined();
       version = edited.structuredContent.spot.version;
     }

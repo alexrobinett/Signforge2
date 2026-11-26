@@ -15,7 +15,7 @@ test('a member asks the agent for a punchier headline and a QR link, sees what i
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   // The alert template: a headline and a QR code's link, and no photo to wait for.
   const alert = templates.find((t: { key: string }) => t.key === 'alert');
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Breakfast',
     kind: 'template',
     templateVersionId: alert.versions.at(-1).id,
@@ -54,7 +54,7 @@ test('a member asks the agent for a punchier headline and a QR link, sees what i
   await expect(page.locator('[data-mark="filled"]').first()).toBeVisible();
   await expect(changes.getByRole('button', { name: 'Publish now…' })).toBeVisible();
   const [entry] = (await tool(page, 'list_audit_log', { limit: 1 })).entries;
-  expect(entry).toMatchObject({ action: 'update_spot', actor: { kind: 'user', clientId: 'cms-agent' } });
+  expect(entry).toMatchObject({ action: 'save_spot', actor: { kind: 'user', clientId: 'cms-agent' } });
   await shots(page, '101-drafts-saved');
 
   // Undo these changes: the draft as it was before the turn.

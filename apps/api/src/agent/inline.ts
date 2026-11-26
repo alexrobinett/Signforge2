@@ -470,7 +470,7 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
 
     const { org } = c.var;
     const caller: Caller = { ...cmsCaller(c, connectors), actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID } };
-    const tool = registry.get(spotId ? 'update_spot' : 'create_spot');
+    const tool = registry.get('save_spot');
     if (!tool) throw new Error('the spot tools are not in the registry');
     // Before any turn, fetch or model call is spent on a spot the member may not make or change.
     if (!permits(await grantOf(caller), tool)) return refuse(c, 'forbidden', 'Only editors and owners make and change spots.');
@@ -508,7 +508,8 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     const prior = 'idempotencyKey' in request ? await org.idempotency.get(request.idempotencyKey) : undefined;
     if (prior) {
       // As the dispatcher refuses a key used for another call: another action, or another template picked (#314).
-      const made = prior.action === 'create_spot' ? outputs.create_spot.parse(JSON.parse(prior.outputJson)).spot : undefined;
+      // A key a fill used before #345 merged the spot tools names create_spot.
+      const made = prior.action === 'save_spot' || prior.action === 'create_spot' ? outputs.save_spot.parse(JSON.parse(prior.outputJson)).spot : undefined;
       if (!made) return refuse(c, 'conflict', 'That idempotency key was used for something else: use a new one.');
       if (templateVersionId !== undefined && made.templateVersionId !== templateVersionId)
         return refuse(c, 'conflict', 'That idempotency key made a spot with another template: use a new one to fill this one.');
@@ -597,15 +598,15 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     const name = fill.read.name.replace(/\s+/g, ' ').trim().slice(0, 100) || fill.read.offer.manifest.name;
     const made = await dispatch(
       registry,
-      'create_spot',
+      'save_spot',
       { name, kind: 'template', templateVersionId: fill.read.offer.versionId, data: fill.sorted.data, idempotencyKey: request.idempotencyKey },
       caller,
     );
     if (!made.ok) return c.json({ error: made.error, message: made.message }, STATUS[made.error]);
-    return c.json({ spot: outputs.create_spot.parse(made.output).spot, marks: fill.sorted.marks } satisfies InlineAnswer);
+    return c.json({ spot: outputs.save_spot.parse(made.output).spot, marks: fill.sorted.marks } satisfies InlineAnswer);
   });
 
-  // Keep (#264): the review's data, written as the agent's, through update_spot with the version it was made on.
+  // Keep (#264): the review's data, written as the agent's, through save_spot with the version it was made on.
   api.post('/agent/inline/keep', async (c) => {
     const keep = await readBody(c, keepRequest);
     if (keep instanceof Response) return keep;
@@ -615,8 +616,8 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     if ('problem' in spot) return refuse(c, spot.problem, spot.message);
     const problem = keepProblem(spot.offer, spot.data, data);
     if (problem) return refuse(c, 'invalid_input', `${problem}: it changes only text, numbers, dates and lists`);
-    const kept = await dispatch(registry, 'update_spot', { spotId, data, ifVersion }, caller);
+    const kept = await dispatch(registry, 'save_spot', { spotId, data, ifVersion }, caller);
     if (!kept.ok) return c.json({ error: kept.error, message: kept.message }, STATUS[kept.error]);
-    return c.json({ spot: outputs.update_spot.parse(kept.output).spot });
+    return c.json({ spot: outputs.save_spot.parse(kept.output).spot });
   });
 }

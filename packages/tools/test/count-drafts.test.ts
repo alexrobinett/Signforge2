@@ -18,7 +18,7 @@ describe('count_drafts', () => {
     expect(await ok(call('count_drafts', {}))).toEqual({ spots: 2, playlists: 1, scheduleEntries: 1 });
     await ok(call('publish', {}));
     expect(await ok(call('count_drafts', {}))).toEqual({ spots: 0, playlists: 0, scheduleEntries: 0 });
-    await ok(call('update_spot', { spotId: o.imageSpot, durationMs: 9_000 }));
+    await ok(call('save_spot', { spotId: o.imageSpot, durationMs: 9_000 }));
     expect(await ok(call('count_drafts', {}))).toEqual({ spots: 1, playlists: 0, scheduleEntries: 0 });
   });
 

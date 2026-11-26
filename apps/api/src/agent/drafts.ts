@@ -36,14 +36,16 @@ interface Target {
   out: string;
   /** The only fields the drawer drafts, where its tool takes more: the model is shown these alone, and refused the rest. */
   fields?: readonly string[];
+  /** Whether a call without the id is a creation the drawer drafts too; otherwise the id is required. */
+  creates?: boolean;
 }
 
-/** The writes the drawer drafts, and their targets; a creation has none. Each has its undo in the CMS (src/state/agent-drawer.ts). */
-const DRAFTS: Record<string, Target | null> = {
-  update_spot: { kind: 'spot', read: 'get_spot', id: 'spotId', out: 'spot' },
-  update_playlist: { kind: 'playlist', read: 'get_playlist', id: 'playlistId', out: 'playlist' },
-  update_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry' },
-  create_schedule_entry: null,
+/** The writes the drawer drafts, and their targets, which a creation has none of. Each has its undo in the CMS (src/state/agent-drawer.ts). */
+const DRAFTS: Record<string, Target> = {
+  // A spot's name, length and fields: its address, kind, media and bindings are not the agent's (#269).
+  save_spot: { kind: 'spot', read: 'get_spot', id: 'spotId', out: 'spot', fields: ['name', 'durationMs', 'data'] },
+  save_playlist: { kind: 'playlist', read: 'get_playlist', id: 'playlistId', out: 'playlist', fields: ['name', 'transition', 'spotIds'] },
+  save_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry', creates: true },
   // A screen's settings change what it plays when, so the drawer drafts its name alone (#345).
   update_screen: { kind: 'screen', read: 'get_screen', id: 'screenId', out: 'screen', fields: ['name'] },
 };
@@ -67,11 +69,10 @@ export const SAVE_STATEMENTS = 48;
  * test/agent-chat.test.ts, which holds `saveStatements` to them.
  */
 const STATEMENTS: Record<string, number> = {
-  update_spot: 10,
-  update_playlist: 14,
+  save_spot: 10,
+  save_playlist: 14,
   // An entry's aim is read again too: one more for a group or a screen, which an update reads whatever its input.
-  update_schedule_entry: 8,
-  create_schedule_entry: 8,
+  save_schedule_entry: 8,
   update_screen: 16,
 };
 /**
@@ -95,11 +96,16 @@ export function draftTools(grant: Grant) {
   return Object.entries(DRAFTS).flatMap(([name, target]) => {
     const tool = registry.get(name);
     if (!tool?.mutates || tool.people || !permits(asked, tool)) return [];
-    const fields = target?.fields;
+    const { fields } = target;
     if (!fields || !(tool.input instanceof z.ZodObject)) return [{ name, description: tool.description, input: tool.input }];
-    // The target and these fields, each required: the version is the drawer's to add, from its read.
+    // The target, required, and these fields: the version is the drawer's to add, from its read. Other keys are kept, not
+    // stripped, so the draft's refusal names them rather than proposing what is left (`draftRefusal`).
     const shape: Record<string, z.ZodType> = tool.input.shape;
-    return [{ name, description: tool.description, input: z.object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!]))).required() }];
+    const input = z
+      .object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!])))
+      .required({ [target.id]: true })
+      .loose();
+    return [{ name, description: tool.description, input }];
   });
 }
 
@@ -108,6 +114,7 @@ async function before(caller: Caller, name: string, input: Row): Promise<{ targe
   const t = DRAFTS[name];
   if (!t) return { target: null };
   const id = input[t.id];
+  if (id === undefined) return t.creates ? { target: null } : { problem: `the agent changes a ${t.kind}: give its ${t.id}` };
   const missing = { problem: `${t.kind} ${String(id)} not found` };
   if (typeof id !== 'string') return missing;
   // No tool reads one entry: its row, as list_schedule_entries gives it, or none once deleted.
@@ -123,17 +130,15 @@ async function before(caller: Caller, name: string, input: Row): Promise<{ targe
 
 /** Why the drawer may not make this draft, whatever the role allows; undefined when it may. */
 function draftRefusal(name: string, input: Row, target: Row | null): string | undefined {
-  if (name === 'update_spot') {
-    if (target?.kind === 'url') return "a web page spot's address is not the agent's to change: change it in the spot's editor";
-    for (const key of ['url', 'kind', 'assetId', 'fit', 'bindings', 'assets'])
-      if (input[key] !== undefined) return `the agent changes a spot's name, length and fields, not its ${key}`;
-  }
+  if (name === 'save_spot' && target?.kind === 'url') return "a web page spot's address is not the agent's to change: change it in the spot's editor";
   const t = DRAFTS[name];
+  // A change must change something: its tool refuses one that does not when it runs, not when it is drafted.
+  if (t && input[t.id] !== undefined && Object.keys(input).every((k) => k === t.id || k === 'ifVersion')) return `nothing to change in the ${t.kind}`;
   if (t?.fields)
     for (const key of Object.keys(input))
       if (![t.id, 'ifVersion', ...t.fields].includes(key))
         return `the agent drafts a ${t.kind}'s ${t.fields.join(', ')} alone, not its ${key}: change that in its settings`;
-  if (name === 'update_schedule_entry' && (target?.takeover === true || input.startsAt !== undefined || input.endsAt !== undefined))
+  if (name === 'save_schedule_entry' && (target?.takeover === true || input.startsAt !== undefined || input.endsAt !== undefined))
     return 'a takeover cuts in on screens at once: start or change it yourself, on the Schedule page';
   return undefined;
 }
@@ -213,7 +218,8 @@ export function mountApply(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefi
         results.push({ tool, ok: false, error: 'forbidden', message: `${tool} is not one the agent drafts` });
         break;
       }
-      if (DRAFTS[tool] && typeof input.ifVersion !== 'number') {
+      const named = DRAFTS[tool];
+      if (named && input[named.id] !== undefined && typeof input.ifVersion !== 'number') {
         results.push({ tool, ok: false, error: 'invalid_input', message: 'an update is saved only at the version it was drafted on: give ifVersion' });
         break;
       }

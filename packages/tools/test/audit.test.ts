@@ -56,7 +56,7 @@ beforeAll(async () => {
     actorId: 'grt_price_bot',
     clientId: 'price-bot',
     action: 'rate_limited',
-    detailJson: JSON.stringify({ tool: 'update_spot', refused: { error: 'rate_limited', message: 'over' } }),
+    detailJson: JSON.stringify({ tool: 'save_spot', refused: { error: 'rate_limited', message: 'over' } }),
   });
 });
 
@@ -75,7 +75,7 @@ describe('list_audit_log', () => {
       actor: { kind: 'agent', id: 'grt_price_bot', clientId: 'price-bot' },
       action: 'rate_limited',
       target: null,
-      detail: { tool: 'update_spot', refused: { error: 'rate_limited', message: 'over' } },
+      detail: { tool: 'save_spot', refused: { error: 'rate_limited', message: 'over' } },
     });
   });
 
@@ -108,12 +108,12 @@ describe('list_audit_log', () => {
   it('returns inputs as they were recorded, secrets redacted', async () => {
     const made = await dispatch(
       registry,
-      'create_data_source',
+      'save_data_source',
       { name: 'Menu feed', format: 'json', feedUrl: 'https://feeds.example.com/menu?key=hunter2' },
       as('editor'),
     );
     expect(made.ok, JSON.stringify(made)).toBe(true);
-    const [entry] = await all({ action: 'create_data_source' });
+    const [entry] = await all({ action: 'save_data_source' });
     expect(entry).toMatchObject({ actor: { kind: 'user', id: 'user-editor', clientId: 'cms' }, target: { kind: 'data_source' } });
     expect(entry!.detail.input).toMatchObject({ name: 'Menu feed', feedUrl: '[redacted]' });
     expect(JSON.stringify(await all({}))).not.toContain('hunter2');

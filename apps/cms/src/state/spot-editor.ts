@@ -6,7 +6,7 @@
  * in the browser (`compilePreview`) and posted to the player, so nothing on that path waits on the
  * network. A draft the compiler refuses is not posted, so the stage keeps the last valid frame.
  * Each spot's draft is a versioned draft (./versioned-draft.ts): its save to the server
- * (`update_spot`) waits a second after the last edit, sends the version the editor opened with as
+ * (`save_spot`) waits a second after the last edit, sends the version the editor opened with as
  * `ifVersion`, chains the version each save returns, and writes the saved spot into the Query
  * cache. A save asked for while one runs (Publish, an agent's review) waits for it and sends the latest
  * edit, and editing another spot sends the edit left waiting on this one.
@@ -240,7 +240,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     await queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
   }
 
-  /** Whether the server would refuse the draft (packages/tools `update_spot`), which checks it as `draftCheck` says. */
+  /** Whether the server would refuse the draft (packages/tools `save_spot`), which checks it as `draftCheck` says. */
   const unsaveable = (spot: SpotView, d: SpotDraft, orgId: string) => {
     if (!d.name.trim()) return true;
     if (spot.kind === 'url') return !safeUrl(d.url);
@@ -349,7 +349,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
           : spot.kind === 'url'
             ? { url: d.url }
             : { fit: d.fit, ...(d.assetId ? { assetId: d.assetId } : {}) };
-      const saved = (await callTool('update_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version })).spot;
+      const saved = (await callTool('save_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version })).spot;
       queryClient.setQueryData(spotKeys.one(orgId, spotId), saved);
       void dropUnbound(orgId, spot, saved);
       void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
@@ -450,7 +450,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
             ? { kind: 'url', url: d.url.trim() }
             : { kind: 'image', assetId: d.assetId };
       try {
-        const spot = (await callTool('create_spot', { name: name.trim(), ...kind, idempotencyKey: key })).spot;
+        const spot = (await callTool('save_spot', { name: name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });

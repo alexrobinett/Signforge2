@@ -88,7 +88,7 @@ async function scheduled(o: Outcome, playlistId: string, groupId: string) {
 
 /** A schedule entry playing Breakfast on the Cafe group on `days`, 07:00 to 10:00. */
 const breakfastOnCafe = (w: World, days: number[]) => ({
-  name: 'create_schedule_entry',
+  name: 'save_schedule_entry',
   input: { playlistId: w.playlists.breakfast, target: 'group', groupId: w.groups.cafe, days, from: '07:00', to: '10:00' },
 });
 
@@ -208,9 +208,9 @@ export const TASKS: Task[] = [
     check(o) {
       const entries = o.results.flatMap((r) => (r.ok ? objectsIn(parsed(r.text)) : []));
       const hit = entries.some(
-        (e) => e.action === 'update_spot' && same(e.target, { kind: 'spot', id: o.world.spots.lunch }) && isObject(e.actor) && typeof e.actor.id === 'string',
+        (e) => e.action === 'save_spot' && same(e.target, { kind: 'spot', id: o.world.spots.lunch }) && isObject(e.actor) && typeof e.actor.id === 'string',
       );
-      return hit ? undefined : "the tools never showed who made Lunch specials' update_spot";
+      return hit ? undefined : "the tools never showed who made Lunch specials' save_spot";
     },
   },
   {
@@ -241,9 +241,9 @@ export const TASKS: Task[] = [
     id: 'write-spot-duration',
     prompt: 'Make the Weather spot show for 15 seconds.',
     role: 'editor',
-    script: both((w) => [[{ name: 'read', input: { type: 'spot' } }], [{ name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } }]]),
+    script: both((w) => [[{ name: 'read', input: { type: 'spot' } }], [{ name: 'save_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } }]]),
     async check(o) {
-      if (o.arm === 'drawer') return draftOf(o, 'update_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
+      if (o.arm === 'drawer') return draftOf(o, 'save_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
       const ms = (await o.scope.spots.get(o.world.spots.weather))?.durationMs;
       return ms === 15_000 ? undefined : `Weather lasts ${ms} ms`;
     },
@@ -252,7 +252,7 @@ export const TASKS: Task[] = [
     id: 'write-create-spot',
     prompt: 'Create a web page spot called "Store hours" that shows https://example.com/hours for 10 seconds.',
     role: 'editor',
-    script: { mcp: () => [[{ name: 'create_spot', input: { name: 'Store hours', kind: 'url', url: 'https://example.com/hours', durationMs: 10_000 } }]] },
+    script: { mcp: () => [[{ name: 'save_spot', input: { name: 'Store hours', kind: 'url', url: 'https://example.com/hours', durationMs: 10_000 } }]] },
     async check(o) {
       const spot = (await o.scope.spots.list()).find((s) => s.name === 'Store hours');
       if (!spot) return 'no spot named Store hours';
@@ -267,12 +267,12 @@ export const TASKS: Task[] = [
     role: 'editor',
     script: both((w) => [
       [{ name: 'read', input: { type: 'playlist' } }],
-      [{ name: 'update_playlist', input: { playlistId: w.playlists.breakfast, spotIds: [w.spots.breakfast, w.spots.weather] } }],
+      [{ name: 'save_playlist', input: { playlistId: w.playlists.breakfast, spotIds: [w.spots.breakfast, w.spots.weather] } }],
     ]),
     async check(o) {
       const want = [o.world.spots.breakfast, o.world.spots.weather];
       if (o.arm === 'drawer')
-        return same(draftOf(o, 'update_playlist', o.world.playlists.breakfast)?.input.spotIds, want) ? undefined : 'no draft of Breakfast ending with Weather';
+        return same(draftOf(o, 'save_playlist', o.world.playlists.breakfast)?.input.spotIds, want) ? undefined : 'no draft of Breakfast ending with Weather';
       const got = await o.scope.playlists.items(o.world.playlists.breakfast);
       return same(got, want) ? undefined : `Breakfast plays ${got.join(', ')}`;
     },
@@ -284,7 +284,7 @@ export const TASKS: Task[] = [
     script: {
       mcp: (w) => [
         [{ name: 'read', input: { type: 'spot' } }],
-        [{ name: 'create_playlist', input: { name: 'Lunch', spotIds: [w.spots.lunch, w.spots.weather] } }],
+        [{ name: 'save_playlist', input: { name: 'Lunch', spotIds: [w.spots.lunch, w.spots.weather] } }],
       ],
     },
     async check(o) {
@@ -303,7 +303,7 @@ export const TASKS: Task[] = [
       ],
       [
         {
-          name: 'create_schedule_entry',
+          name: 'save_schedule_entry',
           input: { playlistId: w.playlists.breakfast, target: 'group', groupId: w.groups.cafe, days: WEEKDAYS, from: '07:00', to: '10:00' },
         },
       ],
@@ -316,7 +316,7 @@ export const TASKS: Task[] = [
         script: (w) => [
           [
             {
-              name: 'create_schedule_entry',
+              name: 'save_schedule_entry',
               input: { playlistId: w.playlists.breakfast, target: 'group', groupId: w.groups.cafe, days: [5, 4, 3, 2, 1], from: '07:00', to: '10:00' },
             },
           ],
@@ -341,7 +341,7 @@ export const TASKS: Task[] = [
         script: (w) => [
           [
             {
-              name: 'create_schedule_entry',
+              name: 'save_schedule_entry',
               input: {
                 playlistId: w.playlists.breakfast,
                 target: 'group',
@@ -359,7 +359,7 @@ export const TASKS: Task[] = [
     ],
     async check(o) {
       if (o.arm === 'drawer') {
-        const drafted = o.drafts.filter((d) => d.tool === 'create_schedule_entry').map((d) => d.input);
+        const drafted = o.drafts.filter((d) => d.tool === 'save_schedule_entry').map((d) => d.input);
         return weekdayMornings(drafted, o.world.playlists.breakfast, o.world.groups.cafe, o.today) ? undefined : `drafted ${JSON.stringify(drafted)}`;
       }
       return scheduled(o, o.world.playlists.breakfast, o.world.groups.cafe);
@@ -387,10 +387,10 @@ export const TASKS: Task[] = [
           { name: 'read', input: { type: 'spot' } },
           { name: 'read', input: { type: 'group' } },
         ],
-        [{ name: 'create_playlist', input: { name: 'Morning', spotIds: [w.spots.breakfast, w.spots.weather] } }],
+        [{ name: 'save_playlist', input: { name: 'Morning', spotIds: [w.spots.breakfast, w.spots.weather] } }],
         ([made = '']) => [
           {
-            name: 'create_schedule_entry',
+            name: 'save_schedule_entry',
             input: { playlistId: /"id":"(pls_[^"]+)"/.exec(made)?.[1], target: 'group', groupId: w.groups.cafe, days: WEEKDAYS, from: '07:00', to: '10:00' },
           },
         ],
@@ -409,7 +409,7 @@ export const TASKS: Task[] = [
     script: {
       mcp: (w) => [
         [{ name: 'read', input: { type: 'spot' } }],
-        [{ name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 20_000 } }],
+        [{ name: 'save_spot', input: { spotId: w.spots.weather, durationMs: 20_000 } }],
         [{ name: 'publish', input: {} }],
       ],
     },
@@ -430,13 +430,13 @@ export const TASKS: Task[] = [
         ],
         [
           { name: 'update_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
-          { name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } },
+          { name: 'save_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } },
         ],
       ],
     },
     check(o) {
       if (draftOf(o, 'update_screen', o.world.screens.harbor)?.input.name !== 'Harbor entrance') return 'no draft renaming Harbor lobby';
-      return draftOf(o, 'update_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
+      return draftOf(o, 'save_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
     },
   },
 

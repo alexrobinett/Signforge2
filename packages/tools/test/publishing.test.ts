@@ -187,7 +187,7 @@ describe('publishOrg', () => {
     await org.commit((await publishOrg(org, opts)).writes);
     const countdown: TemplateManifest = { ...promo, id: 'countdown', name: 'Countdown', fields: { target: { type: 'datetime', label: 'Target' } } };
     const version = await addTemplate(org, countdown, sha('e'));
-    // As create_spot saves it from the New spot dialog: the target left for the editor to pick.
+    // As save_spot saves it from the New spot dialog: the target left for the editor to pick.
     await org.spots.insert({
       id: x('launch'),
       name: 'Launch',
@@ -585,10 +585,10 @@ describe('loadCompileInput', () => {
     const call = async (name: string, input: unknown) => (await ok(tool(name, input))).playlist as { id: string; version: number };
     // The editor's path: make it empty, then add the spots and pick the transition, each an edit.
     const want = golden.playlists[golden.defaultPlaylist]!;
-    const made = await call('create_playlist', { name: want.name, transition: { type: 'cut' } });
-    const added = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot).toReversed(), ifVersion: made.version });
-    const ordered = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot), ifVersion: added.version });
-    await call('update_playlist', { playlistId: made.id, transition: want.transition, ifVersion: ordered.version });
+    const made = await call('save_playlist', { name: want.name, transition: { type: 'cut' } });
+    const added = await call('save_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot).toReversed(), ifVersion: made.version });
+    const ordered = await call('save_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot), ifVersion: added.version });
+    await call('save_playlist', { playlistId: made.id, transition: want.transition, ifVersion: ordered.version });
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: made.id })).writes);
 
     const promotion = await publishOrg(org, opts);
@@ -896,7 +896,7 @@ describe('the publish tools (M3-18)', () => {
     await ok(p.call('publish', {}));
     // Published playing Evenings; its draft then pointed at Main, and deleted.
     const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
-    const edited = await ok(call('update_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }));
+    const edited = await ok(call('save_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }));
     await ok(call('delete_schedule_entry', { scheduleEntryId: entry.id, ifVersion: (edited.entry as { version: number }).version }));
     await ok(p.call('publish', {}));
     expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toContainEqual({
@@ -916,7 +916,7 @@ describe('the publish tools (M3-18)', () => {
     // Main is published; its draft renamed, not published. The entry is pointed at Main and published alone.
     await org.playlists.update(x('main'), { name: 'Unpublished Main' });
     const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
-    const edited = (await ok(call('update_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }))).entry as {
+    const edited = (await ok(call('save_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }))).entry as {
       version: number;
     };
     await ok(p.call('publish', { drafts: [{ kind: 'schedule_entry', id: entry.id, version: edited.version }] }));

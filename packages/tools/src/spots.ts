@@ -60,7 +60,7 @@ const bindings = z
     "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live and their usual paths: live.fields for one source, or each named source's fields under live.sources, each source's fields bound to a data source of its kind",
   );
 
-/** The fields that belong to one kind of spot (KIND_FIELDS), as create_spot and update_spot both take them. */
+/** The fields that belong to one kind of spot (KIND_FIELDS), as save_spot takes them. */
 const kindInput = {
   data: data.optional(),
   assets: assets.optional(),
@@ -249,7 +249,7 @@ const listSpots = defineTool({
 const getSpot = defineTool({
   name: 'get_spot',
   description:
-    "Get one spot's draft. Returns { spot }; pass its version as ifVersion to update_spot. published: true gets the version screens have instead, shaped as the draft, its version the one published: not_found if it was never published.",
+    "Get one spot's draft. Returns { spot }; pass its version as ifVersion to save_spot. published: true gets the version screens have instead, shaped as the draft, its version the one published: not_found if it was never published.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -266,96 +266,87 @@ const getSpot = defineTool({
   },
 });
 
-const createSpot = defineTool({
-  name: 'create_spot',
+const saveSpot = defineTool({
+  name: 'save_spot',
   description:
-    "Create a spot as a draft. kind template: a templateVersionId (an approved version from list_templates), with optional data and assets (image fields to asset ids); fields left out take their defaults, and the data must pass the template's checks. kind image or video: an assetId and a fit. kind url: an https url. durationMs defaults to the template's default, or 10 s. Nothing reaches a screen until it is published. Pass an idempotencyKey so a retry cannot create it twice. Returns { spot }.",
+    "Create a spot as a draft, or change one's draft. Without spotId it creates one: a name and a kind. kind template: a templateVersionId (an approved version from read), with optional data and assets (image fields to asset ids); fields left out take their defaults, and the data must pass the template's checks. kind image or video: an assetId and a fit. kind url: an https url. durationMs defaults to the template's default, or 10 s. Pass an idempotencyKey so a retry cannot create it twice. With spotId it changes what you give: name, durationMs; for a template spot data and assets (each the whole set, replacing the draft's); for an image or video spot assetId and fit; for a URL spot url. A spot's kind and template are fixed once made. Pass the version you read as ifVersion so a change made since is not overwritten. Nothing reaches a screen until it is published. Returns { spot }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
   input: z.object({
-    name: name('spot'),
-    kind: z.enum(SPOT_KINDS),
+    spotId: id('spot').optional().describe('The spot to change; omit to create one'),
+    name: name('spot').optional(),
+    kind: z.enum(SPOT_KINDS).optional().describe("A new spot's kind; fixed once made"),
     durationMs: durationMs.optional(),
-    templateVersionId: id('template version').optional(),
+    templateVersionId: id('template version').optional().describe("A new template spot's template version; fixed once made"),
     ...kindInput,
     sample: z
       .boolean()
       .optional()
       .describe(
-        "Template spots: start the texts and lists with the template's sample copy (its defaults; live fields stay empty), in place of data, and record them as sampleFields until each is edited. publish refuses the spot while any is left, unless a person allows it",
+        "A new template spot: start the texts and lists with the template's sample copy (its defaults; live fields stay empty), in place of data, and record them as sampleFields until each is edited. publish refuses the spot while any is left, unless a person allows it",
       ),
+    ifVersion,
     idempotencyKey,
   }),
-  output: outputs.create_spot,
+  output: outputs.save_spot,
   example: { name: 'Fresh picked', kind: 'template', templateVersionId: 'tpv_example', data: { title: 'Fresh picked' } },
-  target: (_input, output) => ({ kind: 'spot', id: output.spot.id }),
-  handler: async ({ org, input, write }) => {
-    refuseOtherKinds(input.kind, input);
-    if (input.kind === 'template') {
-      if (!input.templateVersionId) throw invalid('templateVersionId', ['a template spot needs a templateVersionId']);
-      const t = await requireVersion(org, input.templateVersionId);
-      const bound = (await bindingsOf(org, input.bindings)) ?? {};
-      if (input.sample && input.data) throw invalid('data', ['a spot started with its sample copy takes no data']);
-      const startData = input.sample ? sampleData(t.manifest) : (input.data ?? {});
-      const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: startData, assets: input.assets ?? {}, bindings: bound };
-      checkTemplateDraft(t, draft);
-      // A field bound to a source shows the source, not its sample: it is not marked.
-      const sample = input.sample ? sampleFieldsOf(t.manifest, Object.fromEntries(Object.entries(startData).filter(([f]) => !(f in bound)))) : null;
-      const row = write(
-        await org.spots.stage.insert({
-          name: input.name,
-          kind: 'template',
-          durationMs: draft.durationMs,
-          templateVersionId: input.templateVersionId,
-          dataJson: JSON.stringify(draft.data),
-          assetMapJson: JSON.stringify(draft.assets),
-          bindingsJson: bindingsJson(bound),
-          sampleFieldsJson: sample && JSON.stringify(sample),
-        }),
-      );
-      return { spot: spotView(row) };
-    }
-    if (input.templateVersionId) throw invalid('templateVersionId', [`a ${input.kind} spot has no template`]);
-    const durationMs = input.durationMs ?? DEFAULT_MEDIA_MS;
-    if (input.kind === 'url') {
-      if (!input.url) throw invalid('url', ['a url spot needs a url']);
-      return { spot: spotView(write(await org.spots.stage.insert({ name: input.name, kind: 'url', durationMs, url: input.url }))) };
-    }
-    if (!input.assetId) throw invalid('assetId', [`a ${input.kind} spot needs an assetId`]);
-    await checkMedia(org, input.kind, input.assetId);
-    return {
-      spot: spotView(
-        write(await org.spots.stage.insert({ name: input.name, kind: input.kind, durationMs, assetId: input.assetId, fit: input.fit ?? DEFAULT_FIT })),
-      ),
-    };
+  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then, for a new spot.
+  target: (input, output: { spot: { id: string } } | undefined) => {
+    const spotId = input.spotId ?? output?.spot.id;
+    return spotId === undefined ? undefined : { kind: 'spot', id: spotId };
   },
-});
-
-const updateSpot = defineTool({
-  name: 'update_spot',
-  description:
-    "Change a spot's draft. Give only what changes: name, durationMs; for a template spot data and assets (each the whole set, replacing the draft's); for an image or video spot assetId and fit; for a URL spot url. Template data must pass the template's checks. Screens keep the published version until the next publish. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { spot }.",
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
-  input: z
-    .object({
-      spotId: id('spot'),
-      name: name('spot').optional(),
-      durationMs: durationMs.optional(),
-      ...kindInput,
-      ifVersion,
-    })
-    // An edit that changes nothing writes nothing to guard it, so it is refused, as update_playlist's is (review of #410).
-    .refine((v) => [v.name, v.durationMs, v.data, v.assets, v.bindings, v.assetId, v.fit, v.url].some((x) => x !== undefined), 'nothing to change'),
-  output: outputs.update_spot,
-  example: { spotId: 'spt_example', name: 'Fresh picked', durationMs: 12_000 },
-  target: (input) => ({ kind: 'spot', id: input.spotId }),
   handler: async ({ org, actor, input, write }) => {
-    const row = await requireSpot(org, input.spotId);
+    const { spotId, name, kind } = input;
+    if (spotId === undefined) {
+      if (name === undefined || kind === undefined) throw invalid(name === undefined ? 'name' : 'kind', ['a new spot needs a name and a kind; give spotId to change one']);
+      refuseOtherKinds(kind, input);
+      if (kind === 'template') {
+        if (!input.templateVersionId) throw invalid('templateVersionId', ['a template spot needs a templateVersionId']);
+        const t = await requireVersion(org, input.templateVersionId);
+        const bound = (await bindingsOf(org, input.bindings)) ?? {};
+        if (input.sample && input.data) throw invalid('data', ['a spot started with its sample copy takes no data']);
+        const startData = input.sample ? sampleData(t.manifest) : (input.data ?? {});
+        const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: startData, assets: input.assets ?? {}, bindings: bound };
+        checkTemplateDraft(t, draft);
+        // A field bound to a source shows the source, not its sample: it is not marked.
+        const sample = input.sample ? sampleFieldsOf(t.manifest, Object.fromEntries(Object.entries(startData).filter(([f]) => !(f in bound)))) : null;
+        const row = write(
+          await org.spots.stage.insert({
+            name,
+            kind: 'template',
+            durationMs: draft.durationMs,
+            templateVersionId: input.templateVersionId,
+            dataJson: JSON.stringify(draft.data),
+            assetMapJson: JSON.stringify(draft.assets),
+            bindingsJson: bindingsJson(bound),
+            sampleFieldsJson: sample && JSON.stringify(sample),
+          }),
+        );
+        return { spot: spotView(row) };
+      }
+      if (input.templateVersionId) throw invalid('templateVersionId', [`a ${kind} spot has no template`]);
+      const durationMs = input.durationMs ?? DEFAULT_MEDIA_MS;
+      if (kind === 'url') {
+        if (!input.url) throw invalid('url', ['a url spot needs a url']);
+        return { spot: spotView(write(await org.spots.stage.insert({ name, kind: 'url', durationMs, url: input.url }))) };
+      }
+      if (!input.assetId) throw invalid('assetId', [`a ${kind} spot needs an assetId`]);
+      await checkMedia(org, kind, input.assetId);
+      return {
+        spot: spotView(
+          write(await org.spots.stage.insert({ name, kind, durationMs, assetId: input.assetId, fit: input.fit ?? DEFAULT_FIT })),
+        ),
+      };
+    }
+    for (const fixed of ['kind', 'templateVersionId', 'sample'] as const)
+      if (input[fixed] !== undefined) throw invalid(fixed, [`a spot's ${fixed} is fixed once made: create another spot for another`]);
+    // An edit that changes nothing writes nothing to guard it, so it is refused, as save_playlist's is (review of #410).
+    if (![name, input.durationMs, input.data, input.assets, input.bindings, input.assetId, input.fit, input.url].some((x) => x !== undefined))
+      throw invalid('spotId', ['nothing to change']);
+    const row = await requireSpot(org, spotId);
     refuseOtherKinds(row.kind, input);
     const bound = await bindingsOf(org, input.bindings);
     const t = row.kind === 'template' && row.templateVersionId ? await requireVersion(org, row.templateVersionId) : null;
@@ -515,4 +506,4 @@ const deleteSpot = defineTool({
   refuseFailedCommit: async ({ org, input }) => inUse(org, input.spotId),
 });
 
-export const spotTools = [listSpots, getSpot, createSpot, updateSpot, revertSpotDraft, keepSpotDraft, deleteSpot, getSpotPreview];
+export const spotTools = [listSpots, getSpot, saveSpot, revertSpotDraft, keepSpotDraft, deleteSpot, getSpotPreview];
