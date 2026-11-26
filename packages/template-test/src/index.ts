@@ -460,7 +460,8 @@ export type BrandSpot = [data: Data, photo?: string, sampled?: boolean | 'broken
  * kit with poor on-colours, a light kit, a borderline accent, mid-tone accents, an accent just over
  * 3:1 and a mid-tone background. `spots(accent, orientation)` are the template's spots, given the
  * accent `$brand.accent` resolves to. `onFill` is text on a fill (text, fill, the ratio it needs);
- * `onBackdrop` is accent-coloured text, measured on whatever is behind it. With `sameWithSample`,
+ * `onBackdrop` is accent-coloured text, measured on whatever is behind it; `textColourOnBackdrop` is text in the kit's text
+ * colour, measured the same way and kept in that colour wherever it reads. With `sameWithSample`,
  * that text's colour, and whether it is on its scrim, is the same with the photo's sample as
  * without one and with one that does not decode.
  */
@@ -470,10 +471,11 @@ export function brandColourTests(
     spots: (accent: string, orientation: Orientation) => BrandSpot[] | Promise<BrandSpot[]>;
     onFill?: [text: string, fill: string, min: number][];
     onBackdrop: string[];
+    textColourOnBackdrop?: string[];
     sameWithSample?: string;
   },
 ) {
-  const { spots, onFill = [], onBackdrop, sameWithSample } = opts;
+  const { spots, onFill = [], onBackdrop, textColourOnBackdrop = [], sameWithSample } = opts;
   const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
@@ -586,10 +588,10 @@ export function brandColourTests(
           expect(found).toEqual([]);
         });
 
-      // A kit's accent is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black or white where it does not. With no kit, cstore-promo's and
-      // photo-promo's text is their own. 0.1 to spare: a template measures the ends of a gradient,
-      // this test the pixels in the box.
-      it(`accent text reads on its backdrop under ${label}, ${orientation}, in the accent where that reads`, async () => {
+      // A kit's accent, or its text colour, is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black
+      // or white where it does not. With no kit, cstore-promo's and photo-promo's text is their own. 0.1 to spare: a
+      // template measures the ends of a gradient, this test the pixels in the box.
+      it(`accent and text-coloured text reads on its backdrop under ${label}, ${orientation}, in its colour where that reads`, async () => {
         const found: string[] = [];
         /** `sameWithSample` over each photo, with the photo's sample and without. */
         const seenWith = new Map<string, string[]>();
@@ -602,14 +604,18 @@ export function brandColourTests(
             const photo = name.replace(/, (sampled|broken sample)/, '');
             seenWith.set(photo, [...(seenWith.get(photo) ?? []), seen]);
           }
-          for (const text of onBackdrop) {
+          const inks = [
+            ...onBackdrop.map((sel) => [sel, 'accent', accent] as const),
+            ...textColourOnBackdrop.map((sel) => [sel, 'text colour', theme?.colors.text] as const),
+          ];
+          for (const [text, role, ink] of inks) {
             const { color, pixels, large } = await textOnBackdrop(f, page, text);
             const min = large ? 3 : 4.5;
             const ratio = worst(color, pixels);
             if (ratio < min) found.push(`${name} ${text}: ${color} is ${ratio.toFixed(2)}:1 on its backdrop, below ${min}:1`);
-            const reads = worst(rgb(accent), pixels);
-            if (theme && color !== rgb(accent) && reads >= min + 0.1)
-              found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
+            if (!theme || !ink) continue;
+            const reads = worst(rgb(ink), pixels);
+            if (color !== rgb(ink) && reads >= min + 0.1) found.push(`${name} ${text}: ${color}, not the ${role}, which reads at ${reads.toFixed(2)}:1`);
           }
         });
         // The sample stands in for the photo, and a broken one leaves the photo: the same text every way.

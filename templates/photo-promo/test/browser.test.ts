@@ -73,21 +73,22 @@ brandColourTests(t, {
     ];
   },
   onFill: [['.tag', '.tag', 4.5]],
-  onBackdrop: ['.eyebrow'],
+  onBackdrop: [],
+  textColourOnBackdrop: ['.eyebrow'],
   sameWithSample: '.eyebrow',
 });
 
 // The SDK restores the document and inits again on new data, while the old prepare may still be
 // measuring the eyebrow's backdrop. Here the first prepare is held at its first wait until the new
 // data has played its own prepare: resuming must not set the eyebrow's colour on the new document
-// (#308). The old data's kit has a green accent and the new data's none, so the old prepare's
-// eyebrow colour (green, black or white) is never the new one's (the default accent).
+// (#308). The old data's kit has green text and the new data's none, so the old prepare's eyebrow
+// colour (green, or black on its scrim) is never the new one's (the default white).
 describe('photo-promo (#308)', () => {
   it('a prepare that new data replaced, resuming while it measures, leaves the new document as a fresh load', async () => {
     const hst = await host('landscape', true);
     const a = spotData(t().manifest, { body: 'Picked this morning' });
     const b = spotData(t().manifest, { headline: 'Two for one' });
-    const green: FrameTheme = { colors: { ...DEMO_KIT, accent: '#22c55e' }, shape: 'soft', fonts: {} };
+    const green: FrameTheme = { colors: { ...DEMO_KIT, text: '#22c55e' }, shape: 'soft', fonts: {} };
     await hst.open('fresh', t().html);
     await hst.init('fresh', b, { photo: '#000000' }, undefined, undefined, true);
     await hst.waitFor('fresh', 'ready', 1);
@@ -151,4 +152,23 @@ for (const orientation of ['landscape', 'portrait'] as const)
     const durationMs = 11_000;
     const f = await k.play({ body: 'Picked this morning' }, undefined, durationMs);
     expect(await motionContract(f, durationMs)).toEqual([]);
+  });
+
+// The board's photo promo (#news-design): the price is a flat tag, not a floating disc with a shadow.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`shows the price as a flat tag, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, { photo: '#963' });
+    const tag = await (await k.play({}, { colors: DEMO_KIT, shape: 'round', fonts: {} })).evaluate(() => {
+      const el = document.querySelector('.tag')!;
+      const style = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      return {
+        shadow: style.boxShadow,
+        radius: Number.parseFloat(style.borderTopLeftRadius) / (Math.min(innerWidth, innerHeight) / 100),
+        wider: box.width > box.height,
+      };
+    });
+    expect(tag.shadow).toBe('none');
+    expect(tag.radius).toBeLessThanOrEqual(2);
+    expect(tag.wider).toBe(true);
   });
