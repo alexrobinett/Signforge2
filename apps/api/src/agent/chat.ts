@@ -683,6 +683,13 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
        * and nothing is read for it: a card can name what their role does not show them, as an invitee's
        * address (review of #414).
        */
+      /** A card the member may not press: its title and who may, nothing read for it, no token; then the run's end. */
+      function* refusedCard(name: string, why: string): Generator<StreamChunk> {
+        const title = TOOL_CARDS[name]?.title ?? '';
+        const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt: now() + CONFIRM_MS };
+        yield { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: refused satisfies ConfirmCard, timestamp: Date.now() };
+        yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
+      }
       async function* paused(asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
         const [one] = asked;
         const name = String(one?.metadata?.toolName ?? '');
@@ -695,10 +702,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         const expiresAt = now() + CONFIRM_MS;
         const why = whyNot(grant, name, Object.fromEntries(Object.entries(called)));
         if (why) {
-          const title = TOOL_CARDS[name]?.title ?? '';
-          const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt };
-          yield { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: refused satisfies ConfirmCard, timestamp: Date.now() };
-          yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
+          yield* refusedCard(name, why);
           return;
         }
         const input = Object.fromEntries(Object.entries(called));
@@ -753,6 +757,15 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             if (chunk.finishReason === 'content_filter') refused = true;
             finished = chunk;
             continue;
+          }
+          // A card the member is not offered (#345), asked for all the same: the turn ends at the card that says who may,
+          // as before the cards were filtered, so a member learns it whatever the model would have said (review of #414).
+          const unpressable = chunk.type === 'TOOL_CALL_START' && chunk.toolCallName in CONFIRMABLE ? whyNot(grant, chunk.toolCallName, {}) : null;
+          if (chunk.type === 'TOOL_CALL_START' && unpressable !== null) {
+            stop.abort();
+            yield* shown.splice(0);
+            yield* refusedCard(chunk.toolCallName, unpressable);
+            return;
           }
           // The card as the server parsed it, every field checked; sent re-serialized from that, never as the model wrote it.
           if (chunk.type === 'CUSTOM' && chunk.name === 'structured-output.complete') answer = answerInput.safeParse(chunk.value.object).data;

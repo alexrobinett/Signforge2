@@ -94,7 +94,7 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // The token works on /mcp, on this host: the grant's tools only, and a write audited as the agent with its client.
   const accessToken = tokens.body.access_token!;
   const listed: string[] = (await stub.mcp(accessToken, 'tools/list')).result.tools.map((t: { name: string }) => t.name);
-  expect(listed).toEqual(expect.arrayContaining(['list_playlists', 'create_playlist', 'rename_screen']));
+  expect(listed).toEqual(expect.arrayContaining(['read', 'describe', 'create_playlist', 'rename_screen']));
   expect(listed).not.toContain('publish');
   const made = (await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Made by the stub agent' } })).result;
   expect(made.isError).toBeUndefined();
