@@ -466,6 +466,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * refused, as a `ToolError`. Undefined means a real failure, which is thrown. Nothing was written.
    */
   refuseFailedCommit?: (ctx: { org: D; input: z.output<S>; actor: Actor }) => Promise<ToolError | undefined>;
+  /**
+   * For a tool that `publishes`: whether a guard that failed its batch is one another attempt from a fresh read cannot
+   * pass (an approval's request decided, or expired by the database's clock, #530). Its refusal is reported at once,
+   * where a lost race would run again. Undefined: a race, run again as any.
+   */
+  refuseStale?: (ctx: { org: D; input: z.output<S>; failed: { id: string; version: number } }) => Promise<ToolError | undefined>;
 }
 
 /** Declare a tool, keeping its input and output types. */

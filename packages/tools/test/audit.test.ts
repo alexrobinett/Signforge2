@@ -4,7 +4,8 @@ import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
-import { member, seededMembers } from './member';
+import { member, memberOf, seededMembers } from './member';
+import { fakeServices } from './services';
 
 const { o, as } = seededMembers('audit-org');
 
@@ -314,5 +315,56 @@ describe('list_audit_log by a delete or a takeover (#345 PR 5)', () => {
     expect(await found('delete_schedule_entry')).toEqual(['delete schedule_entry']);
     expect(await found('delete_asset')).toEqual([]);
     expect(await found('delete')).toHaveLength(2);
+  });
+});
+
+describe('list_audit_log, every replaced tool by the rows of the one that does its job (#507)', () => {
+  it('finds the creates and changes of spots, schedule entries, brand kits and data sources, the group changes, a kit made the default, and a screen renamed or set', async () => {
+    const mine = await seedOrg(env.DB, 'audit-every-pair');
+    const owner = memberOf(scoped(env.DB, mine.orgId), 'owner', fakeServices);
+    const run = async (name: string, input: Record<string, unknown>) => {
+      const r = await dispatch(registry, name, input, owner);
+      if (!r.ok) throw new Error(`${name}: ${JSON.stringify(r)}`);
+      return r.output as Record<string, { id: string; version: number }>;
+    };
+    const { spot } = await run('save_spot', { name: 'Page', kind: 'url', url: 'https://example.com', idempotencyKey: 'every-pair-spot' });
+    await run('save_spot', { spotId: spot!.id, name: 'Page 2', ifVersion: spot!.version });
+    const { entry } = await run('save_schedule_entry', { playlistId: mine.playlist, target: 'org', idempotencyKey: 'every-pair-entry' });
+    await run('save_schedule_entry', { scheduleEntryId: entry!.id, priority: 3, ifVersion: entry!.version });
+    const colors = { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
+    const { brandKit } = await run('save_brand_kit', { name: 'Spare', colors, idempotencyKey: 'every-pair-kit' });
+    await run('save_brand_kit', { brandKitId: brandKit!.id, name: 'Spare 2', ifVersion: brandKit!.version });
+    // Asked to be the default, of the kit the seed made the default: made nothing the default.
+    const seeded = (await scoped(env.DB, mine.orgId).brandKits.assignments.list()).find((a) => a.target === 'org')!.brandKitId;
+    await run('save_brand_kit', { brandKitId: seeded, makeDefault: true });
+    await run('save_brand_kit', { brandKitId: brandKit!.id, makeDefault: true });
+    const { dataSource } = await run('save_data_source', { id: 'pairs', name: 'Pairs', format: 'json', feedUrl: 'https://api.example.com/p.json' });
+    await run('save_data_source', { dataSourceId: dataSource!.id, name: 'Pairs 2' });
+    const { group } = await run('save_group', { name: 'Hall', idempotencyKey: 'every-pair-group' });
+    await run('save_group', { groupId: group!.id, name: 'Hall 2', ifVersion: group!.version });
+    await run('save_group', { groupId: group!.id, screenIds: [mine.screen], membership: 'set', ifVersion: group!.version + 1 });
+    await run('save_group', { groupId: group!.id, screenIds: [mine.screen], membership: 'remove' });
+    await run('update_screen', { screenId: mine.screen, name: 'Lobby 2' });
+    await run('update_screen', { screenId: mine.screen, timezone: 'Europe/London' });
+    const found = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, owner);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => `${e.action} ${JSON.stringify(e.detail.input)}`);
+    };
+    expect(await found('create_spot')).toEqual([expect.stringMatching(/^save_spot \{"name":"Page",/)]);
+    expect(await found('update_spot')).toEqual([expect.stringMatching(/^save_spot \{"spotId":/)]);
+    expect(await found('create_schedule_entry')).toEqual([expect.stringMatching(/^save_schedule_entry \{"playlistId":/)]);
+    expect(await found('update_schedule_entry')).toEqual([expect.stringMatching(/^save_schedule_entry \{"scheduleEntryId":/)]);
+    expect(await found('create_brand_kit')).toEqual([expect.stringMatching(/"name":"Spare",/)]);
+    // The rename and the kit made the default: asking it of the default already changes nothing, so writes no row.
+    expect(await found('update_brand_kit')).toHaveLength(2);
+    expect(await found('set_default_brand_kit')).toEqual([expect.stringContaining(`"brandKitId":"${brandKit!.id}","makeDefault":true`)]);
+    expect(await found('create_data_source')).toEqual([expect.stringMatching(/"name":"Pairs",/)]);
+    expect(await found('update_data_source')).toEqual([expect.stringMatching(/"dataSourceId":"pairs"/)]);
+    expect(await found('rename_group')).toEqual([expect.stringContaining('"name":"Hall 2"')]);
+    expect(await found('set_group_members')).toEqual([expect.stringContaining('"membership":"set"')]);
+    expect(await found('remove_group_members')).toEqual([expect.stringContaining('"membership":"remove"')]);
+    expect(await found('rename_screen')).toEqual([expect.stringContaining('"name":"Lobby 2"')]);
+    expect(await found('update_screen_settings')).toEqual([expect.stringContaining('"timezone":"Europe/London"')]);
   });
 });

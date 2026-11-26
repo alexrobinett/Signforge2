@@ -229,6 +229,8 @@ const saveBrandKit = defineTool({
     displayFontId: 'base/oswald',
     bodyFontId: 'base/inter',
   },
+  // The audit log's Made the default follows this, the outcome, not the input's makeDefault (#507).
+  auditDetail: (output) => (output.madeDefault ? { madeDefault: true } : undefined),
   target: (input, output) => ({ kind: 'brand_kit', id: input.brandKitId ?? output.brandKit.id }),
   handler: async ({ org, input, write }) => {
     await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
@@ -260,10 +262,10 @@ const saveBrandKit = defineTool({
         }),
       );
       const isFirst = (await org.brandKits.assignments.list()).every((a) => a.target !== 'org');
-      if (!(input.makeDefault || isFirst)) return { brandKit: kitView(kit, await brandContext(org)) };
+      if (!(input.makeDefault || isFirst)) return { brandKit: kitView(kit, await brandContext(org)), madeDefault: false };
       // Staged after the kit's insert, so the kit row exists when the batch reaches this one.
       write(await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id, { newKit: true }));
-      return { brandKit: kitView(kit, await brandContext(org, { defaultKit: kit.id })) };
+      return { brandKit: kitView(kit, await brandContext(org, { defaultKit: kit.id })), madeDefault: true };
     }
     const kit = await requireKit(org, input.brandKitId);
     let colorsJson: string | undefined;
@@ -292,9 +294,11 @@ const saveBrandKit = defineTool({
         input.ifVersion,
       ),
     );
-    if (!input.makeDefault) return { brandKit: kitView(row, await brandContext(org)) };
+    // Made the default only by a save that changes it: not one of the kit that is the default already.
+    const wasDefault = (await org.brandKits.assignments.list()).some((a) => a.target === 'org' && a.brandKitId === kit.id);
+    if (!input.makeDefault || wasDefault) return { brandKit: kitView(row, await brandContext(org)), madeDefault: false };
     write(await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id));
-    return { brandKit: kitView(row, await brandContext(org, { defaultKit: kit.id })) };
+    return { brandKit: kitView(row, await brandContext(org, { defaultKit: kit.id })), madeDefault: true };
   },
 });
 
