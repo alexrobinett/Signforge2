@@ -39,24 +39,24 @@ interface TypeDef {
 const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
+ * A publish at summary detail: who made it, when, and how it rolled out. Read by id, its `rollout` names each screen it
+ * has not reached yet, with where it stands on it and its state now, so an agent asking which screens it did not reach
+ * needs no full read (#541); those playing it are only counted (`playing`), so the summary stays small however many
+ * screens took it (review of #569). full has every screen, with its manifest, files missing, wake time and last sync.
+ */
+export function publishSummary(row: Row): Row {
+  const pick = ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'] as const;
+  const picked = Object.fromEntries(pick.map((k) => [k, row[k]]));
+  // A listed publish has no rollout: none is given, as its list gives none.
+  if (!Array.isArray(row.rollout)) return picked;
+  const waiting = row.rollout.filter((s) => isRow(s) && s.outcome !== 'playing').filter(isRow);
+  return { ...picked, rollout: waiting.map((s) => ({ screenId: s.screenId, name: s.name, outcome: s.outcome, state: s.state })) };
+}
+
+/**
  * A template's summary: its key and name, and its newest approved version's id, description, orientations and field
  * names, which is what choosing one and filling a spot need. Its versions' whole manifests and check reports are `full`.
  */
-/**
- * A publish at summary detail: who made it, when, and how it rolled out, each screen with where it stands on it and its
- * state now, so an agent asking whether it reached its screens needs no full read (#541). full adds each screen's
- * manifest, files missing, wake time and last sync.
- */
-function publishSummary(row: Row): Row {
-  const pick = ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'] as const;
-  return {
-    ...Object.fromEntries(pick.map((k) => [k, row[k]])),
-    rollout: Array.isArray(row.rollout)
-      ? row.rollout.filter(isRow).map((s) => ({ screenId: s.screenId, name: s.name, outcome: s.outcome, state: s.state }))
-      : undefined,
-  };
-}
-
 function templateSummary(row: Row): Row {
   const versions = Array.isArray(row.versions) ? row.versions.filter(isRow) : [];
   const latest = versions.filter((v) => v.status === 'approved').at(-1);
