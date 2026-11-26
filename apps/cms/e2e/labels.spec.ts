@@ -126,6 +126,15 @@ test('find screens by label: a typed chip kept in the URL across a reload, "+ Fi
   await expect(chips.getByText('region: north')).toBeVisible();
   await expect(rows).toHaveCount(3);
 
+  // Typing in the middle of the search keeps the caret where it is (review of #601).
+  const box = page.getByLabel('Search screens');
+  await box.fill('drive north');
+  await box.press('Home');
+  for (let i = 0; i < 'drive'.length; i++) await box.press('ArrowRight');
+  await box.pressSequentially('XY');
+  await expect(box).toHaveValue('driveXY north');
+  await box.fill('');
+
   // "+ Filter" adds a chip from the keys and values the screens have.
   await page.getByRole('button', { name: 'Filter', exact: true }).click();
   const filter = page.getByRole('dialog', { name: 'Filter by a label' });
@@ -146,6 +155,13 @@ test('find screens by label: a typed chip kept in the URL across a reload, "+ Fi
   await expect(page).toHaveURL(/by=store/);
   await shotsBoth(page, '185-table-grouped');
   await axe(page);
+
+  // A key every object has on its prototype groups like any other (review of #601).
+  await claim('Odd one', { constructor: 'x' });
+  await page.goto('/screens?view=table&by=constructor');
+  await hydrated(page);
+  await expect(page.getByRole('rowheader', { name: 'constructor: x · 1 screen' })).toBeVisible();
+  await expect(page.getByRole('rowheader', { name: 'No constructor · 4 screens' })).toBeVisible();
 
   // Tiles, grouped the same way, with each screen's labels under its name.
   await page.goto('/screens?by=store&l=type:drive-thru');

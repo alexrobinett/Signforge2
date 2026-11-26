@@ -54,7 +54,7 @@ import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/target
 import { labelKeysQuery, screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
-import { selectedIn } from '~/state/screens';
+import { searchText, selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
 /** A state, or `retired`: the revoked screens, which no other filter shows. */
@@ -125,6 +125,9 @@ function ScreensPage() {
   const terms = termsOf(search.l);
   const keys = useQuery(labelKeysQuery(orgId)).data?.keys ?? [];
   const setTerms = (next: LabelTerm[]) => set({ l: termsParam(next) });
+  // The box's value is the store's as typed, so the caret stays where it is while the URL catches up (review of #601).
+  const searchBox = useAppStore((s) => searchText(s.screens, search.q));
+  const searchScreens = useAppStore((s) => s.searchScreens);
   const openLabelFilter = useAppStore((s) => s.openLabelFilter);
   const sort = search.sort ?? 'name';
   const matching = (retired ? screens.filter(isRetired) : active).filter((s) => {
@@ -179,15 +182,17 @@ function ScreensPage() {
             <Input
               id="screen-search"
               type="search"
-              placeholder="Search by name, spot, label or group"
-              value={search.q ?? ''}
-              onChange={(e) => set({ q: e.target.value || undefined })}
+              placeholder="Search names, labels, groups"
+              title="Search by name, spot, label or group"
+              value={searchBox}
+              onChange={(e) => void searchScreens(e.target.value)}
               onKeyDown={(e) => {
                 // A typed key=value becomes a chip: "region=north", then Enter.
                 const term = e.key === 'Enter' ? typedTerm(e.currentTarget.value) : undefined;
                 if (!term) return;
                 e.preventDefault();
-                set({ q: undefined, l: termsParam(withTerm(terms, term)) });
+                void searchScreens('');
+                set({ l: termsParam(withTerm(terms, term)) });
               }}
               aria-describedby="screen-search-help"
               className="pl-9"
@@ -477,7 +482,14 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
                         size="icon"
                         className="size-7 rounded-full"
                         aria-label={`Remove filter ${t.key}`}
-                        onClick={() => onChange(terms.filter((x) => x.key !== t.key))}
+                        data-chip-remove
+                        onClick={(e) => {
+                          // Focus goes on to the next chip, else the one before, else the search box: never lost to the page.
+                          const all = [...document.querySelectorAll<HTMLElement>('[data-chip-remove]')];
+                          const at = all.indexOf(e.currentTarget);
+                          (all[at + 1] ?? all[at - 1] ?? document.getElementById('screen-search'))?.focus();
+                          onChange(terms.filter((x) => x.key !== t.key));
+                        }}
                       >
                         <XIcon aria-hidden />
                       </Button>
@@ -485,7 +497,14 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
                   </li>
                 ))}
               </ul>
-              <Button variant="link" size="sm" onClick={() => onChange([])}>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => {
+                  document.getElementById('screen-search')?.focus();
+                  onChange([]);
+                }}
+              >
                 Clear filters
               </Button>
             </div>

@@ -73,4 +73,17 @@ describe('group by a key', () => {
       [null, ['C']],
     ]);
   });
+
+  it('names a tied value as list_label_keys does: the first spelling in code-unit order (review of #601)', () => {
+    expect(sectionsBy([screen('A', { store: 'harbor' }), screen('B', { store: 'Harbor' })], 'store')[0]!.value).toBe('Harbor');
+  });
+
+  it('reads only a screen’s own keys: grouping by constructor or __proto__ puts the screens without it under none (review of #601)', () => {
+    const screens = [screen('A', { constructor: 'x' }), screen('B', {})];
+    expect(sectionsBy(screens, 'constructor').map((s) => [s.value, s.screens.map((x) => x.name)])).toEqual([
+      ['x', ['A']],
+      [null, ['B']],
+    ]);
+    expect(sectionsBy(screens, '__proto__').map((s) => [s.value, s.screens.map((x) => x.name)])).toEqual([[null, ['A', 'B']]]);
+  });
 });

@@ -67,6 +67,12 @@ export function searchFinds(s: ScreenView, q: string, groupNames: readonly strin
   return hay.some((h) => foldValue(h).includes(needle));
 }
 
+/**
+ * The spelling a value is shown in: the one most screens have, then the first in code-unit order, as `list_label_keys`
+ * names it, so a section's heading and the "+ Filter" list say one value the same way (review of #601).
+ */
+const shownAs = (spellings: Map<string, number>) => [...spellings].toSorted(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
+
 /** One section of the page grouped by a key: the screens with one value of it, or (`value` null) without the key. */
 export interface LabelSection<S> {
   value: string | null;
@@ -82,7 +88,9 @@ export function sectionsBy<S extends Pick<ScreenView, 'labels' | 'systemLabels'>
   const none: S[] = [];
   const named: LabelSection<S>[] = [];
   for (const s of screens) {
-    const value = factsOf(s)[key];
+    const facts = factsOf(s);
+    // Its own key only, as `matches` reads one: `constructor` is on every object's prototype (review of #601).
+    const value = Object.hasOwn(facts, key) ? facts[key] : undefined;
     if (value === undefined) {
       none.push(s);
       continue;
@@ -94,6 +102,6 @@ export function sectionsBy<S extends Pick<ScreenView, 'labels' | 'systemLabels'>
     section.screens.push(s);
   }
   for (const [, section] of [...by.entries()].toSorted(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })))
-    named.push({ value: [...section.spellings].toSorted(([, n], [, m]) => m - n)[0]![0], screens: section.screens });
+    named.push({ value: shownAs(section.spellings), screens: section.screens });
   return none.length ? [...named, { value: null, screens: none }] : named;
 }

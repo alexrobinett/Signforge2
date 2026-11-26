@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ScreenView } from '../src/lib/screen-types';
 import { createLabelsSlice, labelRowsOf, type LabelsSlice } from '../src/state/labels';
-import { createScreensSlice, type ScreensSlice } from '../src/state/screens';
+import { createScreensSlice, searchText, type ScreensSlice } from '../src/state/screens';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/screens.functions', () => ({ getScreens: vi.fn(), getScreenStatus: vi.fn(), getLabelKeys: vi.fn() }));
@@ -111,5 +111,31 @@ describe("the pairing form's labels", () => {
     await s.getState().pairScreen({ timezone: 'UTC', locale: null, hours: null });
     expect(calls[0]).toMatchObject({ name: 'claim_screen', input: { labels: { region: 'north', store: '0142', type: 'kiosk' } } });
     expect(labelRowsOf(s.getState().labels, 'pairing')).toEqual([]);
+  });
+});
+
+describe('the Screens page’s search and "+ Filter" (review of #601)', () => {
+  it('shows the search as typed while its URL write is on its way, and the URL’s q once none is', async () => {
+    const s = store();
+    let arrive!: () => void;
+    router.navigate.mockImplementationOnce(() => new Promise<void>((done) => (arrive = done)));
+    const typing = s.getState().searchScreens('driveX north');
+    // The URL still says what it said: the box shows what was typed, so its caret stays.
+    expect(searchText(s.getState().screens, 'drive north')).toBe('driveX north');
+    arrive();
+    await typing;
+    expect(searchText(s.getState().screens, 'driveX north')).toBe('driveX north');
+    // Nothing on its way: a Back that changes q shows the URL's.
+    expect(searchText(s.getState().screens, 'lobby')).toBe('lobby');
+  });
+
+  it('ticks and unticks a value however it is spelled', () => {
+    const s = store();
+    s.getState().openLabelFilter('region', ['North']);
+    s.getState().tickFilterValue('north', false);
+    expect(s.getState().labels.filter?.values).toEqual([]);
+    s.getState().tickFilterValue('north', true);
+    s.getState().tickFilterValue('NORTH ', true);
+    expect(s.getState().labels.filter?.values).toEqual(['NORTH ']);
   });
 });

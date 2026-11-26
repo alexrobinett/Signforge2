@@ -3,6 +3,7 @@
  * A label edit is a merge (`update_screen_labels`), never a versioned draft: it changes only the keys it names, so two
  * people labelling one screen never refuse each other. Suggestions come from `list_label_keys` (`labelKeysQuery`).
  */
+import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
 import { labelChange, labelRows, labelsReady, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
@@ -65,12 +66,13 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
     labels: { rows: {}, editor: null, copyFrom: '', filter: null },
     openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
     chooseFilterKey: (key) => labels((l) => ({ ...l, filter: { key, values: [] } })),
+    // Values compare as selectors fold them: a chip's `North` is the list's `north`, ticked and unticked as one (review of #601).
     tickFilterValue: (value, ticked) =>
-      labels((l) =>
-        l.filter
-          ? { ...l, filter: { ...l.filter, values: ticked ? [...new Set([...l.filter.values, value])] : l.filter.values.filter((v) => v !== value) } }
-          : l,
-      ),
+      labels((l) => {
+        if (!l.filter) return l;
+        const others = l.filter.values.filter((v) => foldValue(v) !== foldValue(value));
+        return { ...l, filter: { ...l.filter, values: ticked ? [...others, value] : others } };
+      }),
     closeLabelFilter: () => labels((l) => ({ ...l, filter: null })),
     editScreenLabels: (screen) =>
       labels((l) => ({
