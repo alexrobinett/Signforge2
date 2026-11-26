@@ -132,7 +132,7 @@ defineTemplate({
     const line = {
       pop: `${words} · H\u00a0${hi}° L\u00a0${lo}°`,
       poster: [`High\u00a0${hi}°`, `low\u00a0${lo}°`, city].filter(Boolean).join(' · '),
-      night: `${words} · h${hi}\u00a0l${lo}`,
+      night: `${words} · H${hi}\u00a0L${lo}`,
       corporate: `${words} · High\u00a0${hi}° · Low\u00a0${lo}°`,
     }[look];
     document.querySelector('.wline')?.replaceChildren(line);

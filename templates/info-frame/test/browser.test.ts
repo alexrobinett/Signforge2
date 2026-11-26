@@ -438,7 +438,7 @@ describe('info frame (#201)', () => {
       days: ['WedClear75° / 60°', 'ThuRain70° / 57°', 'FriSnow73° / 58°'],
     });
     expect(await read(await r.show({ look: 'night', code: 95, ...week }))).toEqual({
-      line: 'Thunderstorm · h78 l61',
+      line: 'Thunderstorm · H78 L61',
       cond: null,
       glyph: true,
       days: ['Wed75°', 'Thu70°', 'Fri73°'],
@@ -516,7 +516,11 @@ describe('info frame (#201)', () => {
             fills: ['.rail', '.weather', '.caption'].filter((sel) => document.querySelector(sel) && style(sel).backgroundColor !== 'rgba(0, 0, 0, 0)'),
             under: box('.caption').top >= box('.photo-drift').bottom - 1,
             days: [...document.querySelectorAll('.day')].map((d) => Number.parseFloat(getComputedStyle(d).fontSize) / vmin),
-            lower: ['.wline', '.date'].filter((sel) => document.querySelector(sel) && style(sel).textTransform === 'lowercase'),
+            // As drawn: a lower-case letter before a figure, written so or lower-cased by the look.
+            lower: ['.wline', '.date'].filter((sel) => {
+              const el = document.querySelector(sel);
+              return !!el && (style(sel).textTransform === 'lowercase' ? /[A-Za-z]\d/ : /[a-z]\d/).test(el.textContent!);
+            }),
           };
         });
         if (seen.lower.length) found.push(`${look}: lower-cased ${seen.lower.join(', ')}`);
