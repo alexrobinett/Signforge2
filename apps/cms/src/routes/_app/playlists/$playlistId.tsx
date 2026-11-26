@@ -15,17 +15,7 @@ import { useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { ProposalPanel } from '~/components/proposal';
-import {
-  EditorDeleteQuestion,
-  EditorFields,
-  EditorMoreMenu,
-  EditorHeader,
-  EditorSection,
-  PublishButton,
-  SaveAlert,
-  SaveDraftButton,
-  saveWord,
-} from '~/components/editor';
+import { EditorDeleteQuestion, EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, saveWord } from '~/components/editor';
 import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { AlertDialogCancel, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '~/components/ui/alert-dialog';
 import { Alert, AlertDescription } from '~/components/ui/alert';
@@ -158,8 +148,8 @@ function PlaylistEditor() {
   const startDrag = useAppStore((s) => s.startDragSpot);
   const drop = useAppStore((s) => s.dropSpot);
   const openAdd = useAppStore((s) => s.openAddSpots);
-  const save = useAppStore((s) => s.savePlaylistDraft);
   const reload = useAppStore((s) => s.reloadPlaylist);
+  const save = useAppStore((s) => s.savePlaylistDraft);
   const askDelete = useAppStore((s) => s.askDeletePlaylist);
   const deletePlaylist = useAppStore((s) => s.deletePlaylist);
   const publishing = useAppStore((s) => s.publishing.pending);
@@ -188,7 +178,6 @@ function PlaylistEditor() {
         title={draft.name || playlist.name}
         about={`${count} · ${loop} loop · ${saveWord(status, savedAt)} · ${playlistPublishWord(playlist)}`}
       >
-        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
         {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>

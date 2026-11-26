@@ -7,9 +7,10 @@
  * A data point holds what was called and how it ended, never its input, output or message:
  *   index1  the grant id (Analytics Engine samples per index, so per grant)
  *   blob1   the org id          blob2  the grant id        blob3  the OAuth client id
- *   blob4   the tool, or `(unknown)` for a name that is no tool (the agent chose it), or tools/list
+ *   blob4   the tool, or `(unknown)` for a name that is no tool (the agent chose it), or tools/list; `read` and
+ *           `describe` as the type they read (`read:invitation`, #345), or as themselves for a type that is none
  *   blob5   `ok`, a refusal's code, or `error`
- *   blob6   the scope the tool needs, '' for none
+ *   blob6   the scope the tool needs (for read and describe, what the type's own read needs), '' for none
  *   blob7   a change's target kind, blob8 its id ('' for none)
  *   double1 the call's milliseconds, double2 1 for a tool that changes data
  *
@@ -25,7 +26,7 @@ export interface CallRecord {
   orgId: string;
   grantId: string;
   clientId: string;
-  /** A registry tool's name, `tools/list`, or `(unknown)`: never a name the agent made up. */
+  /** A registry tool's name, `read:<type>` or `describe:<type>` (#345), `tools/list`, or `(unknown)`: never a name the agent made up. */
   tool: string;
   result: 'ok' | ToolErrorCode | 'error';
   change: boolean;

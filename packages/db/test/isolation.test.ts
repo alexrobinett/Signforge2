@@ -610,11 +610,18 @@ describe('feed photos', () => {
     const urls = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://budget.example/${tag}-${i}.jpg`);
     for (const id of ['one', 'two', 'three']) await ensureSource(s.a, id);
     await ensureSource(s.b, 'one');
-    expect(await hold(s.a, 'one', { again: [], fresh: urls('one', NEW_PER_SOURCE_PER_DAY + 2) }, t)).toEqual(urls('one', NEW_PER_SOURCE_PER_DAY));
-    expect(await hold(s.a, 'two', { again: [], fresh: urls('two', NEW_PER_SOURCE_PER_DAY) }, t)).toHaveLength(NEW_PER_ORG_PER_DAY - NEW_PER_SOURCE_PER_DAY);
-    expect(await hold(s.a, 'three', { again: [], fresh: urls('three', 1) }, t)).toEqual([]);
-    // Org B's day is its own.
-    expect(await hold(s.b, 'one', { again: [], fresh: urls('one', 1) }, t)).toEqual(urls('one', 1));
+    // Each source's share of org A's day: the sources a screen shows and the one polling, in org A alone, divide it (#481).
+    const { n } = (await env.DB.prepare(
+      "SELECT count(*) AS n FROM data_sources WHERE org_id = ? AND format = 'rss' AND photos = 1 AND (photo_urls_json IS NOT NULL OR id = 'one')",
+    )
+      .bind('org-a')
+      .first<{ n: number }>())!;
+    const share = Math.min(NEW_PER_SOURCE_PER_DAY, Math.floor(NEW_PER_ORG_PER_DAY / n));
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one', share + 2) }, t)).toEqual(urls('one', share));
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one-more', 1) }, t)).toEqual([]);
+    expect(await hold(s.a, 'two', { again: [], fresh: urls('two', 1) }, t)).toEqual(urls('two', 1));
+    // Org B's day is its own: org A's photos and sources take nothing of it.
+    expect(await hold(s.b, 'one', { again: [], fresh: urls('b-one', 1) }, t)).toEqual(urls('b-one', 1));
   });
 
   it('finds the copies of the same bytes within the same org only', async () => {

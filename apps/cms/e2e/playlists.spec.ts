@@ -180,7 +180,7 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 
   await row.click();
   await hydrated(page);
-  // From the editor's ⋯ menu (#378), not between Save draft and Publish.
+  // From the editor's ⋯ menu (#378), not beside Publish.
   await page.getByRole('button', { name: 'More actions: delete' }).click();
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
@@ -308,9 +308,9 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
   // back by React, and the old value autosaved.
   const { playlist } = await tool(page, 'create_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
   const path = `/playlists/${playlist.id}`;
-  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Save draft', 'Publish', 'More actions: delete'];
+  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
-  // Rendered by the server, they are enabled once the editor has hydrated (Save draft waits for a change).
+  // Rendered by the server, they are enabled once the editor has hydrated.
   await page.goto(path);
   await hydrated(page);
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();

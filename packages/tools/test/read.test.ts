@@ -1,7 +1,7 @@
 // read and describe (#345): one read for every type, through each type's own read tool, so it reads exactly what that
 // tool reads, as the caller, in its org, for one count against an agent's limits; and a description of each type.
 import { scoped } from '@signforge/db';
-import { seedOrg } from '@signforge/db/testing';
+import { seedOrg, seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { describeTools, dispatch, READ_TYPES, type ReadType, readTypes, registry, toolsOf } from '../src';
@@ -65,10 +65,22 @@ describe('read', () => {
     const latest = await call(as('viewer'), 'get_publish', {});
     const [read] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'], detail: 'full' })).items;
     expect(read).toMatchObject({ id: latest.publish.id, rollout: latest.screens });
-    const own = await dispatch(registry, 'get_spot', { spotId: o.templateSpot, published: true }, as('viewer'));
-    const viaRead = await dispatch(registry, 'read', { type: 'spot', ids: [o.templateSpot], filter: { published: true }, detail: 'full' }, as('viewer'));
-    expect(viaRead.ok).toBe(own.ok);
-    if (own.ok && viaRead.ok) expect(viaRead.output).toMatchObject({ items: [(own.output as { spot: unknown }).spot] });
+    // Its version on screens: published, then drafted again, so the two differ.
+    const mine = await seedOrg(env.DB, 'read-tool-published');
+    const owner = member(mine.orgId, 'owner');
+    await call(owner, 'publish', {});
+    await call(owner, 'update_spot', { spotId: mine.imageSpot, durationMs: 9_000 });
+    const own = await call(owner, 'get_spot', { spotId: mine.imageSpot, published: true });
+    const [onScreens] = (await call(owner, 'read', { type: 'spot', ids: [mine.imageSpot], filter: { published: true }, detail: 'full' })).items;
+    expect(onScreens).toEqual(own.spot);
+    expect(onScreens.durationMs).not.toBe(9_000);
+  });
+
+  it("reads no newest publish for an org that has never published, as get_publish's null", async () => {
+    await seedOrganization(env.DB, 'read-tool-unpublished');
+    const viewer = member('read-tool-unpublished', 'viewer');
+    expect(await call(viewer, 'get_publish', {})).toMatchObject({ publish: null });
+    expect(await call(viewer, 'read', { type: 'publish', ids: ['latest'] })).toEqual({ type: 'publish', items: [], next: null });
   });
 
   it('refuses a filter at the top, a list filter with ids, a field only ids give, and more ids than a call takes', async () => {
@@ -80,7 +92,9 @@ describe('read', () => {
     expect(await refused({ type: 'playlist', isDefault: true })).toMatch(/read takes no isDefault: put a type's filters under filter/);
     expect(await refused({ type: 'spot', ids: [o.imageSpot], filter: { kind: 'url' } })).toMatch(/read by ids has no filter kind: it takes published/);
     expect(await refused({ type: 'screen', fields: ['credentials'] })).toMatch(/listed has no field credentials/);
-    expect(await refused({ type: 'screen', ids: Array(6).fill(o.screen) })).toMatch(/at most 5 screen ids a call/);
+    expect(await refused({ type: 'screen', ids: Array(5).fill(o.screen) })).toMatch(/at most 4 screen ids a call/);
+    expect(await refused({ type: 'spot', ids: [o.imageSpot], limit: 5 })).toMatch(/limit and cursor page a list/);
+    expect(await refused({ type: 'spot', ids: [o.imageSpot], cursor: 'x' })).toMatch(/limit and cursor page a list/);
   });
 
   it("keeps what a type's list says besides its rows: a connection's providers", async () => {

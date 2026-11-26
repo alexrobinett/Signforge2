@@ -1,6 +1,8 @@
 // The CMS's colour tokens (src/styles.css) meet WCAG 2 in both themes: text 4.5:1 on what it sits
 // on, and field edges, focus rings, status glyphs and chart marks 3:1 (WCAG 1.4.11).
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { contrastRatio } from '@signforge/compiler';
 import { describe, expect, it } from 'vitest';
 
@@ -167,4 +169,15 @@ it('a selected stage choice reads at 4.5:1, its edge and focus ring at 3:1', () 
   ]) {
     expect(contrastRatio(t['stage-ring'] ?? '', bg ?? ''), `--stage-ring on the ${name}`).toBeGreaterThanOrEqual(3);
   }
+});
+
+// Every colour and text size in a class is a token (#405): a raw hex or a px/rem text size in one does not follow the
+// themes or the type scale, and a contrast check above cannot see it.
+it('no class names a raw colour or text size', () => {
+  const root = fileURLToPath(new URL('../src', import.meta.url));
+  const raw = /-\[#[0-9a-f]{3,8}\]|\btext-\[[0-9.]+(?:px|rem|em)\]/gi;
+  const found = readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((f) => f.endsWith('.tsx'))
+    .flatMap((f) => [...readFileSync(join(root, f), 'utf8').matchAll(raw)].map((m) => `${f}: ${m[0]}`));
+  expect(found).toEqual([]);
 });

@@ -418,13 +418,17 @@ export async function createOrg(page: Page, name: string, address: string) {
  */
 export async function innerCorner(inner: Locator, outer?: Locator) {
   const box = outer ? await outer.elementHandle() : null;
-  return inner.evaluate((e, o) => {
-    const around = getComputedStyle(o ?? e.parentElement!);
-    return {
-      radius: Number.parseFloat(getComputedStyle(e).borderTopLeftRadius),
-      fits: Number.parseFloat(around.borderTopLeftRadius) - Number.parseFloat(around.paddingTop),
-    };
-  }, box);
+  try {
+    return await inner.evaluate((e, o) => {
+      const around = getComputedStyle(o ?? e.parentElement!);
+      return {
+        radius: Number.parseFloat(getComputedStyle(e).borderTopLeftRadius),
+        fits: Number.parseFloat(around.borderTopLeftRadius) - Number.parseFloat(around.paddingTop),
+      };
+    }, box);
+  } finally {
+    await box?.dispose();
+  }
 }
 
 /**

@@ -49,9 +49,12 @@ export const PASS_THROUGH_MAX_BYTES = 1_000_000;
 const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math.round(SCREEN_BOX.landscape.h * 1.25) } as const;
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
-/** Rows expired and delete candidates scanned per daily run; the org cap bounds the run to 11 D1 calls. */
-const FORGET_PER_RUN = 100;
-const DELETE_PER_RUN = 100;
+/**
+ * Rows expired and delete candidates scanned per daily run: a day's at the cap (60 rows, up to 120 blobs an org) for
+ * each of the CLEANUP_ORGS_PER_RUN orgs, so the sweep keeps up. The org cap bounds the run to 11 D1 calls, whatever these are.
+ */
+const FORGET_PER_RUN = 180;
+const DELETE_PER_RUN = 360;
 const CLEANUP_ORGS_PER_RUN = 3;
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */
 const QUALITY = 85;
@@ -115,7 +118,7 @@ export function photoDeps(env: Env, now: number): PhotoDeps {
   return { now, blobs: r2PhotoBlobs(env.BLOBS), guards: feedGuards(env, workerFetch), images: env.IMAGES };
 }
 
-/** Photo state for one RSS poll: whether photos are shown on any published spot, and the D1 read token. */
+/** Photo state for one RSS poll: whether anything shows its photos (a screen's desired manifest or a published spot), and the D1 read token. */
 export interface PhotoPoll {
   shown: boolean;
   read: PhotoRead;
@@ -128,10 +131,10 @@ export interface PhotoPlan {
 }
 
 /**
- * Start the photo half of a poll: only RSS sources take a read token and check whether any published spot shows photos,
- * by the rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose
- * rows declare an `image` property. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no
- * photo work.
+ * Start the photo half of a poll: only RSS sources take a read token and check whether anything shows photos, by the
+ * rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose rows
+ * declare an `image` property, in a screen's desired manifest (a CMS publish's or an `sf push`'s, #481) or a published
+ * spot. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no photo work.
  */
 export function startPhotoPoll(row: DataSourceRow, bound: readonly BoundField[], now: number): PhotoPoll | undefined {
   if (row.format !== 'rss') return undefined;

@@ -8,7 +8,7 @@
  * Each spot's draft is a versioned draft (./versioned-draft.ts): its save to the server
  * (`update_spot`) waits a second after the last edit, sends the version the editor opened with as
  * `ifVersion`, chains the version each save returns, and writes the saved spot into the Query
- * cache. A save asked for while one runs (Save draft, Publish) waits for it and sends the latest
+ * cache. A save asked for while one runs (Publish, an agent's review) waits for it and sends the latest
  * edit, and editing another spot sends the edit left waiting on this one.
  *
  * Which spot, orientation and kit the stage shows lives in the URL and the Query cache; the stage
@@ -116,7 +116,7 @@ export interface SpotEditorSlice {
    * moment, never a copy a caller kept across an await (a place pick), so the edit builds on what the page shows.
    */
   editSpot: (orgId: string, spotId: string, change: (d: SpotDraft) => SpotDraft) => void;
-  /** Saves the spot's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
+  /** Saves the spot's draft now (Publish, an agent's review): resolves once the save in flight and this one are done. */
   saveSpotDraft: (spotId: string) => Promise<void>;
   /** After a refused save: reads the spot again and drops its draft, to edit what is there now. */
   reloadSpot: (orgId: string, spotId: string) => Promise<void>;

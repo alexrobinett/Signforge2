@@ -51,10 +51,11 @@ async function load(bucket: R2Bucket, key: string, id: string): Promise<Manifest
   return summary;
 }
 
+/** One screen's manifest `id`, summarised, or undefined if R2 has none: for the poller, which reads what screens play (#481). */
+export const manifestSummary = (bucket: R2Bucket, orgId: string, screenId: string, id: string) => load(bucket, manifestKey(orgId, screenId, id), id);
+
 const summaries = async (bucket: R2Bucket, screen: DeviceScreen, ids: (string | null)[]): Promise<ManifestSummary[]> => {
-  const found = await Promise.all(
-    [...new Set(ids)].filter((id): id is string => !!id).map((id) => load(bucket, manifestKey(screen.orgId, screen.screenId, id), id)),
-  );
+  const found = await Promise.all([...new Set(ids)].filter((id): id is string => !!id).map((id) => manifestSummary(bucket, screen.orgId, screen.screenId, id)));
   return found.filter((m): m is ManifestSummary => !!m);
 };
 
