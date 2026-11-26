@@ -8,6 +8,7 @@ import { CheckIcon, ChevronsUpDownIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useId, useRef } from 'react';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import type { ScheduleEntryView } from '~/lib/schedule';
@@ -34,6 +35,7 @@ export function TargetPicker({
   screens,
   groups,
   kinds = EVERY_KIND,
+  sentNow = false,
   onPick,
   className,
 }: {
@@ -43,6 +45,8 @@ export function TargetPicker({
   groups: GroupView[];
   /** What may be picked: the week view shows one screen, so it offers screens alone. */
   kinds?: readonly Target[];
+  /** A takeover's: a smart group's screens are the ones it reaches when sent, said so (#186). */
+  sentNow?: boolean;
   onPick: (aim: Aim) => void;
   className?: string;
 }) {
@@ -138,6 +142,7 @@ export function TargetPicker({
                     {shownGroups.map((g) => (
                       <CommandItem key={g.id} value={`group:${g.id}`} onSelect={() => pick({ target: 'group', groupId: g.id, screenId: '' })}>
                         <span className="min-w-0 flex-1 truncate">{g.name}</span>
+                        {g.selector && <Badge title="Its screens are the ones its rule matches">Rule</Badge>}
                         <span className="text-meta text-muted-foreground">{count(g.screenIds.length)}</span>
                         {tick(`group:${g.id}`)}
                       </CommandItem>
@@ -169,7 +174,7 @@ export function TargetPicker({
       </DialogPrimitive.Root>
       {group && (
         <p id={`${id}-reach`} className="text-xs text-muted-foreground">
-          {groupReach(group, screens)}
+          {groupReach(group, screens, sentNow)}
         </p>
       )}
     </div>

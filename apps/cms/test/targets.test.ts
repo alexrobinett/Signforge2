@@ -76,6 +76,14 @@ describe('groupReach', () => {
     expect(groupReach(GROUPS[0]!, SCREENS)).toBe('1 screen: 0203 Drive-thru L');
     expect(groupReach(group('g', 'Empty', []), SCREENS)).toBe('No screens in it yet');
   });
+
+  it("says a smart group's screens are the ones its rule matches now, and the ones a takeover reaches when sent (#186)", () => {
+    const smart = { ...group('g', 'North', ['scr_b', 'scr_c']), selector: { all: [{ key: 'region', op: 'eq', values: ['north'] }] } };
+    expect(groupReach(smart, SCREENS)).toBe('Its rule matches 2 screens now: 0142 Drive-thru L, 0157 Lobby promo');
+    expect(groupReach(smart, SCREENS, true)).toBe('Reaches these 2 screens now: 0142 Drive-thru L, 0157 Lobby promo');
+    expect(groupReach({ ...smart, screenIds: ['scr_a'] }, SCREENS, true)).toBe('Reaches this screen now: 0203 Drive-thru L');
+    expect(groupReach({ ...smart, screenIds: [] }, SCREENS)).toBe('Its rule matches no screen now');
+  });
 });
 
 describe('sortScreens', () => {
