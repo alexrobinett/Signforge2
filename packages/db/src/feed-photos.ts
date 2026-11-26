@@ -12,7 +12,8 @@
  * - **A source's photos setting or URL changed** (`sourceEdited`, applied by
  *   `dataSources.stage.update`): its next poll reads the feed afresh.
  * - **A delivery produced a result** (`delivered`): stored, reused, unchanged or failed; the row
- *   updated, the hashes it displaced queued for delete, and the sources that must read afresh.
+ *   updated, the hashes it displaced queued for delete, the sources that must read afresh, and,
+ *   once a poll's new photos are all delivered, the sources whose snapshot lacks them made due (#524).
  * - **Sweep** (`expire`, `deleteBlobs`, with the cross-org finders in ./retention.ts): expire
  *   rows no poll and no snapshot names, and delete their blobs past the grace window.
  *
@@ -308,9 +309,29 @@ export function feedPhotos(db: Db, orgId: string) {
       .update(fi)
       .set(updateSet(fi, strip(found)))
       .where(mine);
+    // Once the last of a poll's new photos is delivered, stored or failed, each news source naming this URL whose
+    // snapshot lacks a copy now stored polls at the poller's next run, not at its next hourly poll (#524): one re-poll
+    // a source per batch of photos, since a photo still waiting for its first delivery holds it back. It runs after
+    // `updateRow`, so this photo no longer counts as waiting, and writes a row only when a source becomes due.
+    const stories = sql`json_each(${ds.photoUrlsJson}, '$.stories') AS story JOIN ${fi} ON ${fi.orgId} = ${orgId} AND ${fi.url} = story.value`;
+    const dueOnceDelivered = db
+      .update(ds)
+      .set({ nextPollAt: now })
+      .where(
+        and(
+          eq(ds.orgId, orgId),
+          eq(ds.format, 'rss'),
+          eq(ds.photos, true),
+          sql`${ds.nextPollAt} > ${now}`,
+          sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`,
+          sql`NOT EXISTS (SELECT 1 FROM ${stories} WHERE ${fi.fileSha256} IS NULL AND ${fi.lastError} IS NULL)`,
+          sql`EXISTS (SELECT 1 FROM ${stories} JOIN ${snap} ON ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
+            WHERE ${fi.fileSha256} IS NOT NULL AND ${fi.thumbSha256} IS NOT NULL AND ${storyCopyDiffers(sql`story.key`, fi.fileSha256, fi.thumbSha256)})`,
+        ),
+      );
     const replacesHashes = found.fileSha256 !== undefined || found.thumbSha256 !== undefined;
     if (!sourceId && !replacesHashes) {
-      await updateRow.run();
+      await commit(db, staged(undefined, updateRow, dueOnceDelivered).writes);
       return;
     }
     const file = found.fileSha256 === undefined ? fi.fileSha256 : found.fileSha256;
@@ -360,7 +381,7 @@ export function feedPhotos(db: Db, orgId: string) {
         )
       : undefined;
     // The hashes in D1 just before the update count: another delivery may have stored a copy during this fetch.
-    const statements = [readAfresh, queueDisplaced, updateRow, clearActive].filter((q) => q !== undefined);
+    const statements = [readAfresh, queueDisplaced, updateRow, clearActive, dueOnceDelivered].filter((q) => q !== undefined);
     await commit(db, staged(undefined, ...statements).writes);
   };
 
