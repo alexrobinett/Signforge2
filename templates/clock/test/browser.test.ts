@@ -29,3 +29,23 @@ for (const orientation of ['landscape', 'portrait'] as const)
     const f = await k.play({ greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, undefined, durationMs);
     expect(await motionContract(f, durationMs, { loops: '.content' })).toEqual([]);
   });
+
+// The board's clock (#news-design): the time hangs on the centre line whether or not there is a message, and the
+// greeting, date and message share one size.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`keeps the time on one line with or without a message, and one size for the words around it, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const read = async (message: string) =>
+      (await k.play({ greeting: 'Welcome', message })).evaluate(() => {
+        for (const a of document.getAnimations()) a.currentTime = 2000;
+        // Against the block it sits in, which the burn-in drift moves as a whole.
+        const time = document.querySelector('.time')!.getBoundingClientRect();
+        const block = document.querySelector('.content')!.getBoundingClientRect();
+        const size = (sel: string) => getComputedStyle(document.querySelector(sel)!).fontSize;
+        return { middle: Math.round(time.top + time.height / 2 - (block.top + block.height / 2)), sizes: [size('.greeting'), size('.date'), size('.message')] };
+      });
+    const [without, withMessage] = [await read(''), await read('Doors open at 6')];
+    expect(without.middle).toBeCloseTo(0, 0);
+    expect(withMessage.middle).toBeCloseTo(0, 0);
+    expect(new Set(withMessage.sizes).size).toBe(1);
+  });
