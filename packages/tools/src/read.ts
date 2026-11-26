@@ -83,7 +83,7 @@ export const READ_TYPES = {
   publish: {
     about: 'publishes, newest first, and how each rolled out',
     rules:
-      "A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. unreachable: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. An outcome is where the screen stands on this publish; state is the screen's state now, so a screen playing it may since be unreachable. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
+      "Nothing reaches a screen until the organization has a default playlist: when it has none, and the regular schedule entries a publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing (each listed with that problem). A publish removes the deleted schedule entries it covers (all of them, or the pinned ones) and the takeovers that have ended, listed in removed. A pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. A spot it would promote that still holds its template's sample text (its sampleFields) refuses the whole publish with sample_text before any screen is compiled, details { spots: [{ id, name, version, fields }] }: replace the text, or a person publishes again with allowSample naming those spots, versions and fields. A screen a publish cannot compile keeps what it plays and is listed with its problems. A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. unreachable: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. An outcome is where the screen stands on this publish; state is the screen's state now, so a screen playing it may since be unreachable. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
     list: { tool: 'list_publishes', items: 'publishes' },
     get: { tool: 'get_publish', id: 'publishId', item: 'publish', maxIds: 7, rename: { screens: 'rollout' }, latest: true },
     summary: ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'],
@@ -115,6 +115,8 @@ export const READ_TYPES = {
   font: { about: 'fonts a brand kit can use', list: { tool: 'list_fonts', items: 'fonts' }, summary: ['id', 'family', 'roles', 'weights', 'available'] },
   brand_kit: {
     about: 'brand kits: colors, fonts, logo, where they apply',
+    rules:
+      "Leave out onPrimary and onAccent to have them derived for 4.5:1 contrast; pairs below 4.5:1 come back as warnings. The organization's first kit becomes its default. The default kit is the kit of every screen with no choice of its own and none from its groups (assign_brand_kit chooses one). Screens get a kit's change at the next publish; a save's result says which screens it will reach.",
     list: { tool: 'list_brand_kits', items: 'brandKits' },
     get: { tool: 'get_brand_kit', id: 'brandKitId', item: 'brandKit', maxIds: 9 },
     summary: ['id', 'name', 'colors', 'displayFont', 'bodyFont', 'isDefault', 'version'],
@@ -127,6 +129,8 @@ export const READ_TYPES = {
   },
   spot: {
     about: 'spots: what plays, as drafted; full has their data',
+    rules:
+      "A template spot's field can be bound to one of the organization's data sources (bindings): it then shows the source's value at its path, and the field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live and their usual paths: live.fields for one source, or each named source's fields under live.sources, each source's fields bound to a data source of its kind. A list field can be filled from a csv or json-table source's rows (path rows, with a table mapping of item properties to columns). Nothing reaches a screen until the spot is published.",
     list: { tool: 'list_spots', items: 'spots' },
     get: { tool: 'get_spot', id: 'spotId', item: 'spot', maxIds: 30 },
     summary: ['id', 'name', 'kind', 'durationMs', 'templateVersionId', 'url', 'version', 'published', 'draftChanged'],
@@ -145,7 +149,7 @@ export const READ_TYPES = {
   schedule_entry: {
     about: 'schedule entries and takeovers: which playlist plays where and when',
     rules:
-      "What a screen plays, from the next publish: of the entries that apply to it now (in its own time zone, within their dates, days and window), the highest priority wins, and a takeover's is above every entry's. On a tie the more specific target wins (screen, then group, then org), then the later startsAt, so of two takeovers aimed alike the newer wins. Where none applies, the organization's default playlist.",
+      "What a screen plays, from the next publish: of the entries that apply to it now (in its own time zone, within their dates, days and window), the highest priority wins, and a takeover's is above every entry's. On a tie the more specific target wins (screen, then group, then org), then the later startsAt, so of two takeovers aimed alike the newer wins. Where none applies, the organization's default playlist. A published takeover cuts in at once, ending the spot on screen, and ends on time with the network down; once over it is left out of every publish and deleted at the next. A takeover's playlist changed later reaches a screen at the end of the spot on screen.",
     list: { tool: 'list_schedule_entries', items: 'entries' },
     summary: [
       'id',

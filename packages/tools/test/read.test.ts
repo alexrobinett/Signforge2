@@ -182,6 +182,29 @@ describe('describe', () => {
       for (const name of await changers('owner', type)) expect(registry.get(name)?.mutates, `${type}: ${name}`).toBe(true);
   });
 
+  it("keeps each fact a listed description no longer carries in its type's rules (#345's description pass)", async () => {
+    const rules = async (type: string) => {
+      const r = await dispatch(registry, 'describe', { type }, as('owner'));
+      return r.ok ? ((r.output as { rules: string | null }).rules ?? '') : '';
+    };
+    for (const [type, tool, fact] of [
+      ['publish', 'publish', 'set_default_playlist first'],
+      ['publish', 'publish', 'before any screen is compiled'],
+      ['spot', 'save_spot', 'fallback'],
+      ['brand_kit', 'save_brand_kit', 'none from its groups'],
+      ['schedule_entry', 'start_takeover', 'network down'],
+      ['schedule_entry', 'save_schedule_entry', 'end of the spot on screen'],
+      ['publish', 'publish', 'cannot compile keeps what it plays'],
+      ['asset', 'start_upload', 'smallest that covers its screen box'],
+    ] as const) {
+      expect(await rules(type), `${type}: ${fact}`).toContain(fact);
+      // The tool as it is listed: its description and its input's field descriptions.
+      const listed = JSON.stringify(describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === tool));
+      expect(listed, `${tool}: ${fact}`).not.toContain(fact);
+      expect(listed, tool).toContain(`describe(${type})`);
+    }
+  });
+
   it("describes a type's times as an agent reads them, ISO 8601 (#345)", async () => {
     const r = await dispatch(registry, 'describe', { type: 'spot' }, as('owner'));
     if (!r.ok) throw new Error(JSON.stringify(r));
