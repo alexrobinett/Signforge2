@@ -56,8 +56,9 @@ interface Confirmable {
   /**
    * Whether this call needs the right to publish though its tool's scope is less: the press would be refused without it,
    * so the card says who may instead (review of #419). As the tool's handler asks it of an agent, the drawer's included.
+   * Read from the org when it depends on a row (a schedule entry already published, #523).
    */
-  needsPublish?: (called: Row) => boolean;
+  needsPublish?: (called: Row, org: OrgScope) => boolean | Promise<boolean>;
   /** The card, read from the org now; a refusal (thrown `CardProblem`) when it cannot be one. */
   make: (org: OrgScope, called: Row, at: When) => Promise<Made>;
   /** What a press runs, with the input the card fixed. */
@@ -307,6 +308,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   // The drawer deletes a playlist or a schedule entry, as it did before `delete` took every type (#345): no asset or source.
   delete: {
     tools: ['delete'],
+    // A published entry's removal reaches screens at the next publish: the tool asks the right to publish (#523).
+    needsPublish: async (called, org) => {
+      if (called.type !== 'schedule_entry') return false;
+      const entry = await org.scheduleEntries.get(str(called.id));
+      return entry !== undefined && published(entry) !== undefined;
+    },
     input: () =>
       z
         .strictObject({
@@ -558,11 +565,11 @@ export const pressable = (grant: Grant, name: string) =>
   });
 
 /** Who may press the card: null when `grant` permits every tool it runs, else who to ask. */
-export function whyNot(grant: Grant, name: string, called: Row): string | null {
+export function whyNot(grant: Grant, name: string, needsPublish = false): string | null {
   const tools = (CONFIRMABLE[name]?.tools ?? []).flatMap((t) => registry.get(t) ?? []);
-  if (CONFIRMABLE[name]?.needsPublish?.(called) && !effectiveScopes(grant).includes('content:publish')) {
+  if (needsPublish && !effectiveScopes(grant).includes('content:publish')) {
     return grant.role === 'editor' && !grant.editorsPublish
-      ? 'Only owners publish in this organization: screens follow this change with no publish. Ask an owner.'
+      ? 'Only owners publish in this organization, and this change needs the right to publish: ask an owner.'
       : 'You can view only: ask an editor.';
   }
   if (pressable(grant, name)) return null;

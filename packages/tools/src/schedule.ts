@@ -218,7 +218,7 @@ const listEntries = defineTool({
 const startTakeover = defineTool({
   name: 'start_takeover',
   description:
-    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. A new one on the same screens replaces one running (describe(schedule_entry) says which wins). End one now with takeover (action end), or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
+    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two aimed alike, the later wins (describe(schedule_entry) has the rule). End one now with takeover (action end), or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,

@@ -136,6 +136,11 @@ const STALE_PINS_QUERIES = 42;
  * read of guards, as the revision's goes first. With the 99 live pins' guards before it, that read was seven, and 52 in all (#396).
  */
 const RACED_PINS_QUERIES = 46;
+/**
+ * An approval of 100 schedule entries' removals whose first batch lost to another publish, as above. Its removals' guards
+ * now follow the revision's, so the one read of guards finds it first: with them before it, this was 54 (#523).
+ */
+const RACED_REMOVALS_QUERIES = 48;
 
 describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', () => {
   it('on its costliest case, 30 approvers, Slack and a webhook, and screens to compile: asking, reading and deciding stay within it', async () => {
@@ -245,6 +250,31 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: edited } });
     expect(result().rpcs).toEqual(['acquire', 'release']);
     expect(result().queries).toBe(STALE_PINS_QUERIES);
+  });
+
+  it('approves 100 removals after losing its first batch to another publish, within the budget (#523)', async () => {
+    const t = await team();
+    const org = testScope(env.DB, t.org.id);
+    for (const name of ['Door', 'Till', 'Lobby']) await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
+    const playlist = await org.playlists.insert({ name: 'Rota', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const entries = [];
+    for (let i = 0; i < 100; i++) entries.push(await org.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: i % 100 }));
+    await t.owner.ok('/api/tools/publish', {});
+    const pins = [];
+    for (const e of entries) {
+      const out = await t.owner.ok<{ version: number }>('/api/tools/delete', { type: 'schedule_entry', id: e.id });
+      pins.push({ kind: 'schedule_entry', id: e.id, version: out.version });
+    }
+    const asked = await t.owner.ok<{ request: { id: string } }>('/api/tools/request_publish', { drafts: pins, reason: 'A hundred removals' });
+    const { result, bindings } = counted(() =>
+      env.DB.prepare('UPDATE org_settings SET publish_revision = publish_revision + 1 WHERE org_id = ?').bind(t.org.id).run(),
+    );
+    const c = new Client(t.owner.t, t.owner.ip, bindings);
+    for (const [k, v] of t.owner.jar) c.jar.set(k, v);
+    const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toMatchObject({ published: { removed: expect.any(Array) } });
+    expect(result().queries).toBe(RACED_REMOVALS_QUERIES);
   });
 
   it('approves 100 pins, 99 of them live as they are, after losing its first batch to another publish, within the budget (#396)', async () => {

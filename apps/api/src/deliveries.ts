@@ -32,7 +32,9 @@ import type { EmailSender } from './email';
  * Deliveries per run. Each POST takes one fetch, and its host's DNS two more, once per run: 12 to
  * as many hosts is 36 of the Free plan's 50 fetches an invocation. Its D1 queries do not grow with
  * it: the claim, the channels and the settles are one each (`claimDueAlertDeliveries` in
- * packages/db), and an email test reads its org's members once. The rest wait for the next run.
+ * packages/db), and an email test reads its org's members once. The rest wait for the next run. One
+ * exception: an approvers' email this run claims whole (one `deliverNow` did not send) fans out, and
+ * sends up to this many emails more, with one D1 batch to queue them and one to settle them.
  */
 const DELIVERIES_PER_RUN = 12;
 /** How long a claimed attempt is held: past one run's sends at 5 seconds each, and short of the next run. */
@@ -148,8 +150,9 @@ async function send(
     if (row.toUserId === null) {
       // Addressed to those who may approve now: one delivery each, queued in one batch, each sent and
       // retried on its own, so one mailbox that fails stops no other, and a retry sends to no one twice.
-      // A run's worth go now, claimed as they are queued and settled in one batch; the rest at the next
-      // run (#396). This one is then done.
+      // A run's worth go now, claimed as they are queued and settled in one batch; the rest at the runs
+      // after, 12 a run (#396). This one is then done. At least once, as every delivery: a settle that
+      // fails or is cut off leaves these claimed, and a run after the lease sends them again.
       const to = await approversOf(env, members, event);
       if (!to.length) throw new Undeliverable('no-member');
       const claimed = await scoped(env.DB, row.orgId).alertDeliveries.queueEmails(

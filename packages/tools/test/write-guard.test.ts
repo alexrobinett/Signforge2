@@ -183,8 +183,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     });
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, 'b'.repeat(64)), 'not the claimed bytes');
   },
-  // The member tools' rows. Role changes and removals are Better Auth's, faked here: they write nothing of their own.
-  // A cancel writes the invitation through the org's scope (#321).
+  // An invitation to cancel, which a cancel writes through the org's scope (#321).
   cancel_invitation: (o) => seedTeam(env.DB, o.orgId),
 };
 /** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
@@ -202,10 +201,10 @@ const REJECTS = new Set(['finalize_upload']);
 const STOPS_SHORT = new Set(['register_template_version']);
 
 let n = 0;
-async function runRecorded(tool: AnyTool, input: unknown) {
+async function runRecorded(tool: AnyTool, input: ((o: SeededOrg) => unknown) | undefined, prepare = PREPARE[tool.name]) {
   const o = await seedOrg(env.DB, `guard-${++n}`);
   await env.BLOBS.put(manifestKey(o.orgId, o.screen, 'a'.repeat(64)), JSON.stringify({ files: {} }));
-  await PREPARE[tool.name]?.(o);
+  await prepare?.(o);
   const { db, outside, batches, handling } = recordingD1(env.DB);
   const caller: Caller = {
     org: scoped(db, o.orgId),
@@ -215,7 +214,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     services: fakeServices,
   };
   const reg = new Map([[tool.name, { ...tool, handler: (ctx) => handling(() => tool.handler(ctx)) } satisfies AnyTool]]);
-  const result = await dispatch(reg, tool.name, input ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);
+  const result = await dispatch(reg, tool.name, input?.(o) ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);
   if (REJECTS.has(tool.name)) expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
   const audit = await scoped(env.DB, o.orgId).auditLog.list({ limit: 10 });
   return { result, outside, batches, audited: audit.some((e) => e.action === tool.name) };
@@ -233,6 +232,64 @@ describe('every tool that changes data', () => {
       expect(batches, `${tool.name} committed a batch of its own (${JSON.stringify(result)})`).toEqual([]);
       // The finalize tools refuse the seeded files, marking the asset rejected: a write too.
       if (!STOPS_SHORT.has(tool.name) && !REJECTS.has(tool.name)) expect(result, tool.name).toMatchObject({ ok: true });
+    });
+  }
+
+  // A merged tool's example runs one branch (#345); each other branch here, with what it needs seeded first.
+  const BRANCHES: { name: string; branch: string; input: (o: SeededOrg) => unknown; prepare?: (o: SeededOrg) => Promise<unknown> }[] = [
+    {
+      name: 'delete',
+      branch: 'an asset',
+      input: (o) => ({ type: 'asset', id: o.asset }),
+      prepare: async (o) => {
+        await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
+        await o.scope.spots.delete(o.imageSpot);
+        await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
+      },
+    },
+    {
+      name: 'delete',
+      branch: 'a data source',
+      input: () => ({ type: 'data_source', id: 'guard-unbound' }),
+      prepare: (o) => o.scope.dataSources.insert({ id: 'guard-unbound', name: 'Unbound', format: 'json', urlEncrypted: 'sealed', refreshS: 300 }),
+    },
+    { name: 'delete', branch: 'a schedule entry', input: (o) => ({ type: 'schedule_entry', id: o.scheduleEntry }), prepare: async () => {} },
+    {
+      name: 'takeover',
+      branch: 'end',
+      input: (o) => ({ action: 'end', scheduleEntryId: o.scheduleEntry }),
+      prepare: (o) => o.scope.scheduleEntries.update(o.scheduleEntry, { priority: 100, startsAt: Date.now(), endsAt: Date.now() + 3_600_000 }),
+    },
+    { name: 'start_upload', branch: 'a video', input: () => ({ kind: 'video', name: 'Clip', sha256: '1'.repeat(64), type: 'video/mp4', size: 48_000 }) },
+    {
+      name: 'start_upload',
+      branch: "an image's renewal",
+      input: (o) => ({ kind: 'image', assetId: o.asset }),
+      prepare: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
+    },
+    {
+      name: 'finalize_upload',
+      branch: 'a video',
+      input: (o) => ({ assetId: o.asset }),
+      // A pending video whose uploaded bytes are no MP4: finalize rejects it.
+      prepare: async (o) => {
+        const asset = await o.scope.assets.update(o.asset, { kind: 'video', status: 'pending', type: 'video/mp4', size: 11 });
+        await env.BLOBS.put(uploadKey(o.orgId, o.asset, asset!.sha256), 'not a video');
+      },
+    },
+    {
+      name: 'set_alert_channel',
+      branch: 'slack',
+      input: () => ({ kind: 'slack', webhookUrl: 'https://hooks.slack.com/services/T0A1B2C3D/B0A1B2C3D/abcDEF123' }),
+    },
+  ];
+  for (const { name, branch, input, prepare } of BRANCHES) {
+    it(`${name}, ${branch}: writes nothing outside the batch`, async () => {
+      const tool = TOOLS.find((t) => t.name === name)!;
+      const { result, outside, batches } = await runRecorded(tool, input, prepare);
+      expect(outside, `${name} ${branch} wrote straight to D1 (${JSON.stringify(result)})`).toEqual([]);
+      expect(batches, `${name} ${branch} committed a batch of its own (${JSON.stringify(result)})`).toEqual([]);
+      if (!REJECTS.has(name)) expect(result, `${name} ${branch}`).toMatchObject({ ok: true });
     });
   }
 

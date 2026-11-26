@@ -586,7 +586,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     // The cards this member is not offered (#345), each group with who may, so the model can say so instead of failing.
     const refusals = new Map<string, string[]>();
     for (const name of Object.keys(CONFIRMABLE)) {
-      const why = whyNot(grant, name, {});
+      const why = whyNot(grant, name);
       if (why !== null) refusals.set(why, [...(refusals.get(why) ?? []), (TOOL_CARDS[name]?.title ?? name).toLowerCase()]);
     }
     const cannot = [...refusals].map(([why, titles]) => `${titles.join(', ')}: ${why}`);
@@ -696,8 +696,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
        * under a one-use token for this member, then the run's end, without its pause: the press sends the
        * token, and the API resumes the call here. Only cards the member's role could press are offered (#345); the turn's
        * prompt names the rest and who may. One whose input needs more than the role (a takeover that publishes a playlist,
-       * where editors do not publish) gets its title and who may,
-       * and nothing is read for it: a card can name what their role does not show them, as an invitee's
+       * where editors do not publish, or a published schedule entry's removal) gets its title and who may, and nothing of
+       * it is shown, only whether it needs the right to publish read: a card can name what their role does not show them, as an invitee's
        * address (review of #414).
        */
       /** A card the member may not press: its title and who may, nothing read for it, no token; then the run's end. */
@@ -717,16 +717,17 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           return;
         }
         const expiresAt = now() + CONFIRM_MS;
-        const why = whyNot(grant, name, Object.fromEntries(Object.entries(called)));
+        const input = Object.fromEntries(Object.entries(called));
+        const scope = scoped(c.env.DB, org.orgId);
+        const why = whyNot(grant, name, (await confirmable.needsPublish?.(input, scope)) ?? false);
         if (why) {
           yield* refusedCard(name, why);
           return;
         }
-        const input = Object.fromEntries(Object.entries(called));
         let made: Awaited<ReturnType<typeof confirmable.make>>;
         try {
           // On the org's scoped repositories, not the turn's counted reading: a publish card's dry run reads the whole org.
-          made = await confirmable.make(scoped(c.env.DB, org.orgId), input, { now: now(), timeZone });
+          made = await confirmable.make(scope, input, { now: now(), timeZone });
         } catch (err) {
           if (!(err instanceof CardProblem)) throw err;
           yield ended('unreadable', `The agent asked for something it cannot show on a card: ${err.message}. Ask again.`);
@@ -777,7 +778,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
           }
           // A card the member is not offered (#345), asked for all the same: the turn ends at the card that says who may,
           // as before the cards were filtered, so a member learns it whatever the model would have said (review of #414).
-          const unpressable = chunk.type === 'TOOL_CALL_START' && chunk.toolCallName in CONFIRMABLE ? whyNot(grant, chunk.toolCallName, {}) : null;
+          const unpressable = chunk.type === 'TOOL_CALL_START' && chunk.toolCallName in CONFIRMABLE ? whyNot(grant, chunk.toolCallName) : null;
           if (chunk.type === 'TOOL_CALL_START' && unpressable !== null) {
             stop.abort();
             yield* shown.splice(0);

@@ -1311,6 +1311,23 @@ describe('confirmation cards (#269)', () => {
     });
   });
 
+  it("offers an editor no press for a published schedule entry's removal while only owners publish, and one for a draft entry (#523)", async () => {
+    const ask: { called?: Record<string, unknown> } = {};
+    const s = await setup({ role: 'editor', steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'delete', input: ask.called }] } : ANSWER) });
+    const playlist = await s.scope.playlists.insert({ name: 'Lunch', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const live = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
+    expect((await s.owner.tool('publish', {})).status).toBe(200);
+    const draft = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: 1 });
+    expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    const cardFor = async (id: string) => {
+      ask.called = { type: 'schedule_entry', id };
+      return pressOf(await raw(await s.ask('q')), 'q').card;
+    };
+    expect(await cardFor(live.id)).toMatchObject({ token: null, lines: [], why: expect.stringContaining('needs the right to publish') });
+    expect(await s.scope.scheduleEntries.get(live.id)).toMatchObject({ deletedAt: null });
+    expect(await cardFor(draft.id)).toMatchObject({ token: expect.any(String), why: null });
+  });
+
   it('offers an editor no press for a data source change while only owners publish: screens follow it with no publish (reviews of #419)', async () => {
     const ask: { name?: string; called?: Record<string, unknown> } = {};
     const s = await setup({

@@ -239,3 +239,35 @@ test("an editor where only owners publish asks for the takeover: the card names 
   await editor.setViewportSize({ width: 390, height: 844 });
   await shots(editor, '105-takeover-refused-card-phone');
 });
+
+test('an editor where only owners publish asks to remove a published schedule entry: the card says the removal needs the right to publish, and runs nothing (#523)', async ({
+  page,
+  browser,
+}) => {
+  const owner = '192.0.2.197';
+  await signInAs(page, `e2e-confirm-remove-owner-${Date.now()}@example.com`, owner);
+  await createOrg(page, 'Bayside Lunch Rota', owner);
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Lunch', transition: { type: 'cut' } });
+  const { entry } = await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'org' });
+  await tool(page, 'publish', {});
+  await tool(page, 'update_org_settings', { editorsPublish: false });
+  const editor = await (await browser.newContext()).newPage();
+  await joinAsEditor(page, editor, `e2e-confirm-remove-editor-${Date.now()}@example.com`, '192.0.2.198');
+
+  await editor.goto('/schedule');
+  await hydrated(editor);
+  await editor.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const drawer = editor.getByRole('dialog', { name: 'Agent' });
+  await drawer.getByLabel('Ask about your screens and content').fill(`Remove the schedule entry ${entry.id}`);
+  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  const refused = drawer.getByRole('region', { name: 'Delete playlist, or remove schedule entry' });
+  await expect(refused).toContainText('Only owners publish in this organization, and this change needs the right to publish: ask an owner.');
+  await expect(refused.getByRole('button')).toHaveCount(0);
+  expect((await tool(editor, 'list_schedule_entries', {})).entries).toMatchObject([{ id: entry.id, deleted: false }]);
+  await axe(editor);
+  await editor.setViewportSize({ width: 1440, height: 1000 });
+  await shots(editor, '106-remove-entry-refused-card');
+  await editor.setViewportSize({ width: 390, height: 844 });
+  await shots(editor, '106-remove-entry-refused-card-phone');
+});

@@ -211,13 +211,19 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
     const { t, owner, org, editorMemberId } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage']);
     const agent = new Client(t);
+    // As a bearer token, refused before Better Auth reads it; as a session cookie, Better Auth finds no session.
     const bearer = { authorization: `Bearer ${access_token}` };
+    const cookie = { cookie: `__Secure-sf.session_token=${access_token}; sf.session_token=${access_token}` };
     for (const [path, body] of [
       ['/api/auth/organization/invite-member', { email: 'agent-345@signforge.test', role: 'owner', organizationId: org.id }],
       ['/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'owner', organizationId: org.id }],
       ['/api/auth/organization/remove-member', { memberIdOrEmail: editorMemberId, organizationId: org.id }],
-    ] as const)
-      expect((await agent.post(path, body, bearer)).status, path).toBeGreaterThanOrEqual(400);
+    ] as const) {
+      const asBearer = await agent.post(path, body, bearer);
+      expect({ status: asBearer.status, body: await asBearer.json() }, path).toEqual({ status: 401, body: { error: 'device_credential_not_accepted' } });
+      const asCookie = await agent.post(path, body, cookie);
+      expect({ status: asCookie.status, body: await asCookie.json() }, path).toEqual({ status: 401, body: { code: 'UNAUTHORIZED', message: 'Unauthorized' } });
+    }
     const members = await scoped(env.DB, org.id).members.list();
     expect(members.map((m) => m.role).sort()).toEqual(['editor', 'owner']);
     expect(await scoped(env.DB, org.id).invitations.pending()).toEqual([]);
