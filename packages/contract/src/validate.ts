@@ -23,6 +23,7 @@ import {
   MAX_SNAPSHOT_BYTES,
   SNAPSHOT_STALE_MS,
   FAILED_RELEASE_REASONS,
+  PLAYER_CHANNELS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
   MAX_SYNC_RESPONSE_BLOBS,
@@ -44,6 +45,7 @@ import {
   type FailedPlayerRelease,
   type PlayerReleaseManifest,
   type PlayerReleaseOffer,
+  type PlayerChannel,
   type SupervisorAliveResponse,
   type Sha256,
   type ServerSocketMessage,
@@ -1500,6 +1502,7 @@ assertSame<Same<Infer<typeof playerReleaseManifestShape>, PlayerReleaseManifest>
 export const playerReleaseOfferShape = object(
   {
     manifestSchema: is(isReleaseVersion, 'manifestSchema must be a whole number from 1'),
+    channel: is((v): v is PlayerChannel => PLAYER_CHANNELS.some((c) => c === v), `channel must be one of ${PLAYER_CHANNELS.join(', ')}`),
     release: custom<PlayerReleaseOffer['release']>((r) => {
       if (r === null) return accepted(null);
       const manifest = own(r, 'manifest');

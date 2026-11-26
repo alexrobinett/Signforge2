@@ -1159,6 +1159,8 @@ export interface PlayerReleaseManifest {
 export interface PlayerReleaseOffer {
   /** The manifest schema this server compiles (`MANIFEST_SCHEMA`): a release that does not play it is not installed. */
   manifestSchema: number;
+  /** The screen's channel: a canary installs a release at once, a stable screen while its panel is off or an hour on. */
+  channel: PlayerChannel;
   release: { manifest: string; signature: string } | null;
 }
 

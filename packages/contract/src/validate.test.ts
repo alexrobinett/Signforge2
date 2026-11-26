@@ -1212,10 +1212,12 @@ describe('player releases (#628)', () => {
   });
 
   it("reads the release endpoint's offer: the signed text and its signature, or none", () => {
-    const offer = { manifestSchema: 9, release: { manifest: JSON.stringify(release()), signature: 'c2lnbmF0dXJl' } };
+    const offer = { manifestSchema: 9, channel: 'canary', release: { manifest: JSON.stringify(release()), signature: 'c2lnbmF0dXJl' } };
     expect(parsePlayerReleaseOffer(offer)).toEqual({ ok: true, value: offer });
-    expect(parsePlayerReleaseOffer({ manifestSchema: 9, release: null })).toEqual({ ok: true, value: { manifestSchema: 9, release: null } });
-    expect(parsePlayerReleaseOffer({ manifestSchema: 9, release: { manifest: '{}' } }).ok).toBe(false);
+    const none = { manifestSchema: 9, channel: 'stable', release: null };
+    expect(parsePlayerReleaseOffer(none)).toEqual({ ok: true, value: none });
+    expect(parsePlayerReleaseOffer({ ...none, release: { manifest: '{}' } }).ok).toBe(false);
+    expect(parsePlayerReleaseOffer({ ...none, channel: 'beta' }).ok).toBe(false);
   });
 
   it("reads the supervisor's /alive reply, and a sync carries the release it rolled back", () => {
