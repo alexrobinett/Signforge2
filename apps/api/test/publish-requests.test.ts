@@ -142,6 +142,19 @@ const RACED_PINS_QUERIES = 46;
  */
 const RACED_REMOVALS_QUERIES = 48;
 
+/** The owner's approval of `requestId`, with `race` run between its reads and its batch: its answer, and what it cost. */
+async function approveRaced(t: Awaited<ReturnType<typeof team>>, requestId: string, race: () => Promise<unknown>) {
+  const { result, bindings } = counted(race);
+  const c = new Client(t.owner.t, t.owner.ip, bindings);
+  for (const [k, v] of t.owner.jar) c.jar.set(k, v);
+  const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: requestId });
+  return { res, cost: result() };
+}
+
+/** Another publish's move of the org's revision, as `approveRaced`'s race. */
+const anotherPublish = (orgId: string) => () =>
+  env.DB.prepare('UPDATE org_settings SET publish_revision = publish_revision + 1 WHERE org_id = ?').bind(orgId).run();
+
 describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', () => {
   it('on its costliest case, 30 approvers, Slack and a webhook, and screens to compile: asking, reading and deciding stay within it', async () => {
     const t = await team();
@@ -240,16 +253,13 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       .map((x) => x.id)
       .sort()
       .at(-1)!;
-    const { result, bindings } = counted(() =>
+    const { res, cost } = await approveRaced(t, asked.request.id, () =>
       env.DB.prepare('UPDATE spots SET duration_ms = 9000, row_version = row_version + 1 WHERE id = ?').bind(edited).run(),
     );
-    const c = new Client(t.owner.t, t.owner.ip, bindings);
-    for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-    const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'conflict', details: { id: edited } });
-    expect(result().rpcs).toEqual(['acquire', 'release']);
-    expect(result().queries).toBe(STALE_PINS_QUERIES);
+    expect(cost.rpcs).toEqual(['acquire', 'release']);
+    expect(cost.queries).toBe(STALE_PINS_QUERIES);
   });
 
   it('approves 100 removals after losing its first batch to another publish, within the budget (#523)', async () => {
@@ -258,7 +268,7 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     for (const name of ['Door', 'Till', 'Lobby']) await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
     const playlist = await org.playlists.insert({ name: 'Rota', transitionJson: JSON.stringify({ type: 'cut' }) });
     const entries = [];
-    for (let i = 0; i < 100; i++) entries.push(await org.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: i % 100 }));
+    for (let i = 0; i < 100; i++) entries.push(await org.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: i }));
     await t.owner.ok('/api/tools/publish', {});
     const pins = [];
     for (const e of entries) {
@@ -266,15 +276,10 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
       pins.push({ kind: 'schedule_entry', id: e.id, version: out.version });
     }
     const asked = await t.owner.ok<{ request: { id: string } }>('/api/tools/request_publish', { drafts: pins, reason: 'A hundred removals' });
-    const { result, bindings } = counted(() =>
-      env.DB.prepare('UPDATE org_settings SET publish_revision = publish_revision + 1 WHERE org_id = ?').bind(t.org.id).run(),
-    );
-    const c = new Client(t.owner.t, t.owner.ip, bindings);
-    for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-    const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
+    const { res, cost } = await approveRaced(t, asked.request.id, anotherPublish(t.org.id));
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await res.json()).toMatchObject({ published: { removed: expect.any(Array) } });
-    expect(result().queries).toBe(RACED_REMOVALS_QUERIES);
+    expect(cost.queries).toBe(RACED_REMOVALS_QUERIES);
   });
 
   it('approves 100 pins, 99 of them live as they are, after losing its first batch to another publish, within the budget (#396)', async () => {
@@ -292,14 +297,9 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     const asked = await t.owner.ok<{ request: { id: string } }>('/api/tools/request_publish', { drafts: pins, reason: 'A hundred at once' });
     // Another publish moves the revision between the approval's reads and its batch: the batch fails on the revision's guard,
     // which goes before the 99 live pins' guards, so the diagnosis finds it in its first read; the retry commits.
-    const { result, bindings } = counted(() =>
-      env.DB.prepare('UPDATE org_settings SET publish_revision = publish_revision + 1 WHERE org_id = ?').bind(t.org.id).run(),
-    );
-    const c = new Client(t.owner.t, t.owner.ip, bindings);
-    for (const [k, v] of t.owner.jar) c.jar.set(k, v);
-    const res = await c.post('/api/tools/approve_publish_request', { publishRequestId: asked.request.id });
+    const { res, cost } = await approveRaced(t, asked.request.id, anotherPublish(t.org.id));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ request: { status: 'approved' }, published: { promoted: [{ kind: 'spot', id: edited!.id }] } });
-    expect(result().queries).toBe(RACED_PINS_QUERIES);
+    expect(cost.queries).toBe(RACED_PINS_QUERIES);
   });
 });

@@ -333,14 +333,27 @@ const saveEntry = defineTool({
  * published goes at once (version null); a published one needs the right to publish, and is marked deleted until a
  * publish applies it (its new version).
  */
+/**
+ * A schedule entry `delete` can remove, and whether that needs the right to publish: one published waits for a publish
+ * (#523). Undefined for one gone or already marked deleted, which `delete` refuses as not found. The drawer's delete card
+ * asks this too, so it offers a press exactly where the tool would run it.
+ */
+export async function entryToDelete(org: OrgScope, scheduleEntryId: string) {
+  const row = await org.scheduleEntries.get(scheduleEntryId);
+  if (!row || row.deletedAt !== null) return undefined;
+  return { row, needsPublish: published(row) !== undefined };
+}
+
 export async function deleteScheduleEntry(
   { org, write, publishRight }: Pick<ToolContext<unknown>, 'org' | 'write' | 'publishRight'>,
   scheduleEntryId: string,
   ifVersion: number | undefined,
 ): Promise<number | null> {
-  const row = await requireEntry(org, scheduleEntryId);
+  const found = await entryToDelete(org, scheduleEntryId);
+  if (!found) throw notFound('schedule entry', scheduleEntryId);
+  const { row } = found;
   if (ifVersion !== undefined && row.rowVersion !== ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
-  if (!published(row)) {
+  if (!found.needsPublish) {
     write(org.scheduleEntries.stage.remove(row));
     return null;
   }

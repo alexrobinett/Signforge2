@@ -15,10 +15,10 @@ import { type AnyTool, defineTool, ToolError, type ToolContext, type ToolService
 
 type Row = Record<string, unknown>;
 
-/** How a type is read: its list tool and the key its rows are under, its get tool by id, or one tool that answers whole. */
 /** The H.264 profiles `VIDEO_SPEC.profileIdcs` names, by profile_idc, as describe says them. */
 const PROFILE_NAMES: Readonly<Record<number, string>> = { 66: 'Baseline', 77: 'Main', 100: 'High' };
 
+/** How a type is read: its list tool and the key its rows are under, its get tool by id, or one tool that answers whole. */
 interface TypeDef {
   about: string;
   list?: { tool: string; items: string };

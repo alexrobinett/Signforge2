@@ -19,6 +19,7 @@ import {
   type DispatchResult,
   type DraftPin,
   effectiveScopes,
+  entryToDelete,
   type Grant,
   OVERRIDE_LIMIT_MS,
   permits,
@@ -309,11 +310,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
   delete: {
     tools: ['delete'],
     // A published entry's removal reaches screens at the next publish: the tool asks the right to publish (#523).
-    needsPublish: async (called, org) => {
-      if (called.type !== 'schedule_entry') return false;
-      const entry = await org.scheduleEntries.get(str(called.id));
-      return entry !== undefined && published(entry) !== undefined;
-    },
+    needsPublish: async (called, org) => called.type === 'schedule_entry' && ((await entryToDelete(org, str(called.id)))?.needsPublish ?? false),
     input: () =>
       z
         .strictObject({
@@ -339,7 +336,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           },
         };
       }
-      const entry = await org.scheduleEntries.get(str(called.id));
+      const entry = (await entryToDelete(org, str(called.id)))?.row;
       if (!entry) throw new CardProblem(`no schedule entry ${str(called.id)}`);
       const playlist = await org.playlists.get(entry.playlistId);
       return {
