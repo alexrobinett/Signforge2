@@ -20,10 +20,6 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8": {
-      "size": 90089,
-      "type": "text/html"
-    },
     "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
       "size": 81141,
       "type": "text/html"
@@ -55,6 +51,10 @@
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
       "type": "video/mp4"
+    },
+    "91fffc175750695817e7f6f96aab82ce2206ecd4c04311b5192b058f62428ff0": {
+      "size": 89809,
+      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -251,7 +251,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -264,6 +263,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -459,7 +459,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -472,6 +471,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,8 +626,6 @@
           "events": {
             "type": "list",
             "label": "Events",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -653,7 +651,9 @@
                 "label": "Location",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "rows": {
             "type": "number",
@@ -685,13 +685,13 @@
         ],
         "uses": [],
         "background": "#0d1117",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
@@ -833,8 +833,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -851,7 +849,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,18 +970,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -1007,7 +1007,6 @@
           "items": {
             "type": "list",
             "label": "Items",
-            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1038,7 +1037,8 @@
                 ],
                 "default": ""
               }
-            }
+            },
+            "maxItems": 12
           },
           "footnote": {
             "type": "text",
@@ -1072,13 +1072,13 @@
         ],
         "uses": [],
         "background": "#14110f",
+        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
     },
@@ -1104,8 +1104,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1132,7 +1130,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1190,14 +1190,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,20 +1368,20 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.6.0": {
+    "base/weather@1.7.0": {
       "manifest": {
         "id": "weather",
-        "version": "1.6.0",
+        "version": "1.7.0",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1468,6 +1468,7 @@
           "canvas"
         ],
         "background": "#0b1a33",
+        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1486,10 +1487,9 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
+      "html": "91fffc175750695817e7f6f96aab82ce2206ecd4c04311b5192b058f62428ff0"
     }
   },
   "spots": {
@@ -2023,7 +2023,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2083,7 +2083,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2105,7 +2105,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "a43f2ecfdd4c190cd833c1302e1829c0b660212e8a8dced1d12e8bfe39f9e0e4"
+  "id": "bdccab20cf2f3cf20d77fb193fe5c66d3db68326a446ffdc60faa541b7d556d2"
 }

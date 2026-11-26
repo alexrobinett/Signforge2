@@ -149,7 +149,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
 });
 
 // D's motion (docs/template-spec.md, Motion), read by seeking: a clear day with the sun, rain by day and snow by night.
-// Drifting clouds and falling rain or snow are the weather's own loops.
+// Falling rain or snow is the weather's own loop.
 for (const orientation of ['landscape', 'portrait'] as const)
   it(`moves as D does, ${orientation}`, async () => {
     const k = await screenFrame(t(), orientation, {});
@@ -161,7 +161,35 @@ for (const orientation of ['landscape', 'portrait'] as const)
       { code: 71, isDay: 0, temp: 30, sunrise: NOW / 1000 - 11 * 3600, sunset: NOW / 1000 - 3600 },
     ];
     for (const sky of skies)
-      for (const line of await motionContract(await k.play(sky, undefined, durationMs), durationMs, { loops: '.cloud, .fall' }))
-        found.push(`${sky.code}: ${line}`);
+      for (const line of await motionContract(await k.play(sky, undefined, durationMs), durationMs, { loops: '.fall' })) found.push(`${sky.code}: ${line}`);
     expect(found).toEqual([]);
+  });
+
+// The board's weather (#news-design): the glass card kept, lighter, with a hairline edge and no shadow; no clouds parked
+// on the top edge; the city in title case; the unit at the figures' cap height; two rows of tabular figures.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`keeps a lighter glass card with no edge clouds, the city in title case and the unit at cap height, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const f = await k.play({ code: 2, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 });
+    const seen = await f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 3000;
+      const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+      const top = (sel: string) => Math.round(document.querySelector(sel)!.getBoundingClientRect().top);
+      return {
+        clouds: document.querySelectorAll('.cloud:not(.hero)').length,
+        glass:
+          style('.info').backgroundColor.includes('/') ||
+          style('.info').backgroundColor.startsWith('rgba') ||
+          style('.info').backgroundColor.startsWith('color('),
+        edge: style('.info').boxShadow.includes('inset'),
+        city: style('.city').textTransform,
+        unit: top('#temp') === top('.temp .unit'),
+        rows: [
+          style('.range').gridTemplateColumns.split(' ').length,
+          style('.extra').gridTemplateColumns.split(' ').length,
+          style('.range').fontVariantNumeric,
+        ],
+      };
+    });
+    expect(seen).toEqual({ clouds: 0, glass: true, edge: true, city: 'none', unit: true, rows: [2, 2, 'tabular-nums'] });
   });
