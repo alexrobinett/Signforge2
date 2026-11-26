@@ -549,7 +549,8 @@ const rollBackPublish = defineTool({
         return { ...r, photoSources: obj ? manifestPhotoSources(await obj.json<ScreenManifest>()) : null };
       }),
     );
-    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id) };
+    // Screens go back to what that publish sent, so whom its groups reached is theirs again: the next preview compares with it (review of #620).
+    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id, undefined, target.targetsJson) };
   },
 });
 
@@ -638,11 +639,15 @@ const listPublishes = defineTool({
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens, targets }, or { publish: null } if there has been no publish; targets: whom each group reached then.",
+    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens, targets }, or { publish: null } if there has been no publish; targets (asked for): whom each group reached then.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ publishId: id('publish').optional().describe('Omit for the latest publish') }),
+  input: z.object({
+    publishId: id('publish').optional().describe('Omit for the latest publish'),
+    // Every group's screen ids can be large: a page that polls the rollout leaves them out (review of #620).
+    targets: z.boolean().default(false).describe('Also return whom each group reached'),
+  }),
   output: outputs.get_publish,
   example: {},
   handler: async ({ org, input }) => {
@@ -653,7 +658,7 @@ const getPublish = defineTool({
       // The history from this publish down: its first row is this one, with its rollout counts.
       beforeRevision = asked.revision + 1;
     }
-    const [found] = await org.publishes.history({ limit: 1, beforeRevision, targets: true });
+    const [found] = await org.publishes.history({ limit: 1, beforeRevision, targets: input.targets });
     if (!found) return { publish: null, screens: [], targets: null };
     const [rows, afterMs] = await Promise.all([org.publishes.rollout(found.id), unreachableAfterMs(org)]);
     const now = Date.now();

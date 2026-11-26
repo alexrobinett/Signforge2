@@ -160,7 +160,7 @@ describe('a publish preview and its recorded targets (#187)', () => {
   });
 
   it('records every group with the screens the publish resolved, which get_publish returns', async () => {
-    const { targets } = await call('get_publish', {});
+    const { targets } = await call('get_publish', { targets: true });
     expect(targets).toEqual(
       expect.arrayContaining([
         { groupId: zone.id, name: 'Zone N', rule: true, screenIds: [a.id, b.id].toSorted() },
@@ -195,7 +195,42 @@ describe('a publish preview and its recorded targets (#187)', () => {
       { screenId: c.id, name: 'Zone C', reasons: ['joined Zone N'] },
     ]);
     expect(switched(await call('publish', {}))).toEqual(previewed(preview));
-    const { targets } = await call('get_publish', {});
+    const { targets } = await call('get_publish', { targets: true });
     expect(targets.find((g: { groupId: string }) => g.groupId === zone.id).screenIds).toEqual([a.id, c.id].toSorted());
+  });
+
+  it('leaves out a move no screen plays differently, so it does not linger after a publish that changes nothing (review of #620)', async () => {
+    await call('save_group', { name: 'Shelf', selector: { all: [{ key: 'shelf', op: 'exists' }] }, idempotencyKey: crypto.randomUUID() });
+    await call('publish', {});
+    // Labelled into a group no entry aims at: no manifest changes, so nothing is news, now or after the publish.
+    await call('update_screen_labels', { screenIds: [a.id], set: { shelf: 'top' } });
+    expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [] });
+    expect((await call('publish', {})).publish).toBeNull();
+    expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [] });
+  });
+
+  it('says a screen paired since the last publish gets its first, not that something was compiled again (review of #620)', async () => {
+    const fresh = await scope().screens.insert({ name: 'Zone new', timezone: 'Europe/London', orientation: 'landscape' });
+    const preview = await call('preview_publish', {});
+    // It also joins the rule of a missing key an earlier test made: a new screen has no labels.
+    expect(preview.screens).toEqual([{ screenId: fresh.id, name: 'Zone new', reasons: ['first publish to this screen', 'joined No zone'] }]);
+    expect(switched(await call('publish', {}))).toEqual([fresh.id]);
+  });
+
+  it('copies the record of the publish a roll back restores, so the next preview compares with what screens have (review of #620)', async () => {
+    const { publish: restored, targets } = await call('get_publish', { targets: true });
+    await call('update_screen_labels', { screenIds: [a.id], set: { area: 'away' } });
+    await call('publish', {});
+    const rolled = await call('roll_back_publish', { publishId: restored.id });
+    expect(rolled.publish).not.toBeNull();
+    expect((await call('get_publish', { targets: true })).targets).toEqual(targets);
+    // A's manifest went back to the group's: the next publish takes it out again, said as leaving Zone N.
+    const preview = await call('preview_publish', {});
+    expect(preview.screens).toEqual([{ screenId: a.id, name: 'Zone A', reasons: ['left Zone N'] }]);
+    expect(preview.groups).toEqual([{ groupId: zone.id, name: 'Zone N', joined: [], left: [a.id] }]);
+  });
+
+  it('gives no targets unless asked: the rollout a page polls stays small (review of #620)', async () => {
+    expect((await call('get_publish', {})).targets).toBeNull();
   });
 });
