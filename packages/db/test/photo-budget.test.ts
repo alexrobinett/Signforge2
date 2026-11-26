@@ -85,7 +85,7 @@ describe('the day of new feed photos', () => {
   it("holds every story's photo under the demo's lifted caps: six feeds with ten new photos every hourly poll", async () => {
     // apps/api wrangler.jsonc `env.demo`: FEED_PHOTOS_ORG_DAILY 1800, FEED_PHOTOS_SOURCE_DAILY 300, past the 250 an hourly feed can bring in a day's window.
     const feeds = Array.from({ length: 6 }, (_, i) => `lifted-${i}`);
-    const perDay = await busy(feeds, 3, {}, {}, { perOrg: 1800, perSource: 300 });
+    const perDay = await busy(feeds, 3, {}, {}, { perOrg: 1800, perSource: 300, queuedPerDay: 2000 });
     for (const id of feeds) expect(perDay[id], id).toEqual([240, 240, 240]);
   }, 120_000);
 
@@ -167,5 +167,48 @@ describe('the day of new feed photos', () => {
     // org's 400 older ones (review of #497), with its sources and lookups.
     expect(rows).toBeGreaterThanOrEqual(400);
     expect(Math.max(...read)).toBeLessThanOrEqual(sources + 10);
+  });
+});
+
+describe("the environment's day of queue messages (#339)", () => {
+  it("stops a second org's photos once the two together reach it, rechecks too, and frees it the next UTC day", async () => {
+    const budget = { ...DEFAULT_PHOTO_BUDGET, queuedPerDay: 15 };
+    await fresh(s.a);
+    await fresh(s.b);
+    // Midday UTC, on a day no other test counted in.
+    const noon = Math.ceil(T / DAY) * DAY + 12 * HOUR;
+    await add(s.a, 'q-a');
+    await add(s.b, 'q-b');
+    // Each org under its own caps; together past the environment's 15.
+    const a = unseen('q-a', 10);
+    expect(await hold(s.a, 'q-a', a, noon, budget)).toHaveLength(10);
+    expect(await hold(s.b, 'q-b', unseen('q-b', 10), noon, budget)).toHaveLength(5);
+    expect(await hold(s.b, 'q-b', unseen('q-b', 10), noon + HOUR, budget)).toEqual([]);
+    // A recheck of what org A holds counts against it as well: none left today.
+    const row = (await s.a.scope.dataSources.get('q-a'))!;
+    const { held } = await s.a.scope.dataSources.savePoll('q-a', {
+      source: { nextPollAt: noon + 2 * DAY, failures: 0, lastError: null },
+      photos: {
+        read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now: noon + 3 * HOUR, readWhole: false, lastSeen: [] },
+        stories: { version: 'v-recheck', urls: a },
+        hold: { again: a, fresh: [], budget },
+      },
+    });
+    expect(held).toEqual([]);
+    // The next UTC day, the count starts again.
+    expect(await hold(s.b, 'q-b', unseen('q-b', 10), noon + DAY, budget)).toHaveLength(10);
+  });
+});
+
+describe("the queue messages' UTC day at its edge (#339)", () => {
+  it('counts a minute before midnight in that day, and midnight and a minute after in the next', async () => {
+    const budget = { ...DEFAULT_PHOTO_BUDGET, queuedPerDay: 10 };
+    await fresh(s.a);
+    const midnight = Math.ceil(T / DAY) * DAY + DAY;
+    await add(s.a, 'edge');
+    expect(await hold(s.a, 'edge', unseen('edge', 10), midnight - MIN, budget)).toHaveLength(10);
+    expect(await hold(s.a, 'edge', unseen('edge', 1), midnight - MIN, budget)).toEqual([]);
+    expect(await hold(s.a, 'edge', unseen('edge', 4), midnight, budget)).toHaveLength(4);
+    expect(await hold(s.a, 'edge', unseen('edge', 10), midnight + MIN, budget)).toHaveLength(6);
   });
 });

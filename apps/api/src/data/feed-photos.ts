@@ -64,23 +64,26 @@ const DELETE_PER_RUN = 600;
 const CLEANUP_ORGS_PER_RUN = 3;
 /** The most `FEED_PHOTOS_ORG_DAILY` and `FEED_PHOTOS_SOURCE_DAILY` may be: the sweep keeps up with three orgs this busy. */
 const MOST_PHOTOS_PER_DAY = 1800;
+/** The most `FEED_PHOTOS_QUEUE_DAILY` may be: a third of the Free plan's 10,000 Queues operations a day, at three a message. */
+const MOST_QUEUED_PER_DAY = 3333;
 
 /**
  * The day's photo caps the environment sets (`FEED_PHOTOS_ORG_DAILY`, `FEED_PHOTOS_SOURCE_DAILY`; the demo's real-feed
- * test lifts them), or 60 an org and 30 a source. Read once a run, before any source is claimed. A value that is not
- * written as a whole number from 1 to MOST_PHOTOS_PER_DAY (no sign, exponent, hex or spaces) fails the run, loudly,
+ * test lifts them, and `FEED_PHOTOS_QUEUE_DAILY`, its share of the account's Queues, #339), or 60 an org, 30 a source and
+ * 500 messages. Read once a run, before any source is claimed. A value that is not
+ * written as a whole number from 1 to its most (no sign, exponent, hex or spaces) fails the run, loudly,
  * rather than polling under caps nobody set.
  */
-export function photoBudget(env: Pick<Env, 'FEED_PHOTOS_ORG_DAILY' | 'FEED_PHOTOS_SOURCE_DAILY'>): PhotoBudget {
-  const read = (name: string, value: string | undefined, unset: number) => {
+export function photoBudget(env: Pick<Env, 'FEED_PHOTOS_ORG_DAILY' | 'FEED_PHOTOS_SOURCE_DAILY' | 'FEED_PHOTOS_QUEUE_DAILY'>): PhotoBudget {
+  const read = (name: string, value: string | undefined, unset: number, most: number) => {
     if (value === undefined) return unset;
-    if (!/^[1-9]\d*$/.test(value) || Number(value) > MOST_PHOTOS_PER_DAY)
-      throw new Error(`${name} must be a whole number from 1 to ${MOST_PHOTOS_PER_DAY}, not ${JSON.stringify(value)}`);
+    if (!/^[1-9]\d*$/.test(value) || Number(value) > most) throw new Error(`${name} must be a whole number from 1 to ${most}, not ${JSON.stringify(value)}`);
     return Number(value);
   };
   return {
-    perOrg: read('FEED_PHOTOS_ORG_DAILY', env.FEED_PHOTOS_ORG_DAILY, DEFAULT_PHOTO_BUDGET.perOrg),
-    perSource: read('FEED_PHOTOS_SOURCE_DAILY', env.FEED_PHOTOS_SOURCE_DAILY, DEFAULT_PHOTO_BUDGET.perSource),
+    perOrg: read('FEED_PHOTOS_ORG_DAILY', env.FEED_PHOTOS_ORG_DAILY, DEFAULT_PHOTO_BUDGET.perOrg, MOST_PHOTOS_PER_DAY),
+    perSource: read('FEED_PHOTOS_SOURCE_DAILY', env.FEED_PHOTOS_SOURCE_DAILY, DEFAULT_PHOTO_BUDGET.perSource, MOST_PHOTOS_PER_DAY),
+    queuedPerDay: read('FEED_PHOTOS_QUEUE_DAILY', env.FEED_PHOTOS_QUEUE_DAILY, DEFAULT_PHOTO_BUDGET.queuedPerDay, MOST_QUEUED_PER_DAY),
   };
 }
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */

@@ -1579,3 +1579,13 @@ export const imagesUsage = sqliteTable('images_usage', {
   month: text('month').primaryKey(),
   transforms: integer('transforms').notNull(),
 });
+
+/**
+ * The feed photos' queue messages a UTC day, counted for the environment, not an org (#339): every hold counts what it
+ * queues, rechecks and retries too, and stops at `PhotoBudget.queuedPerDay`, so the account's Queues operations are
+ * left for publish notices. Holds no org's data, as `images_usage` does not.
+ */
+export const feedPhotoQueueUsage = sqliteTable('feed_photo_queue_usage', {
+  day: text('day').primaryKey(),
+  messages: integer('messages').notNull(),
+});

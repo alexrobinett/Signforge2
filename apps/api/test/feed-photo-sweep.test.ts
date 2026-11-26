@@ -20,7 +20,7 @@ const DAYS = 19;
 const CAPS: [string, PhotoBudget, number][] = [
   ['default', DEFAULT_PHOTO_BUDGET, 0],
   // Its own days, after the default case's: the sweep reads across orgs, and the cases share the file's database.
-  ['demo', { perOrg: 1800, perSource: 300 }, 60],
+  ['demo', { perOrg: 1800, perSource: 300, queuedPerDay: 2000 }, 60],
 ];
 
 it.for(CAPS)(
