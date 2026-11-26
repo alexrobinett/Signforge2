@@ -52,7 +52,13 @@ function Toggle<T extends string>({
     // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the canvas draws it; a fieldset would need a legend shown.
     <div role="group" aria-label={label} className="flex rounded-xl bg-stage-control p-1">
       {options.map((o) => (
-        <Choice key={o.value} tone="stage" selected={value === o.value} onClick={() => onChange(o.value)} className="h-9 rounded-lg px-3 font-medium">
+        <Choice
+          key={o.value}
+          tone="stage"
+          selected={value === o.value}
+          onClick={() => onChange(o.value)}
+          className="h-9 rounded-[calc(var(--radius-xl)-(--spacing(1)))] px-3 font-medium"
+        >
           {o.label}
         </Choice>
       ))}
