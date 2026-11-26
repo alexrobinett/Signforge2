@@ -23,7 +23,7 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   await createOrg(page, 'Juniper Row', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Opening',
     kind: 'template',
     templateVersionId: clock,
@@ -32,7 +32,7 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   });
   const {
     playlist: { id: opening },
-  } = await tool(page, 'create_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spot.id] });
+  } = await tool(page, 'save_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spot.id] });
 
   // A test screen, paired by its code, as the Screens page pairs one. No default playlist is chosen.
   const screen = await (await browser.newContext()).newPage();
@@ -62,7 +62,7 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
 
   // A name with no break in it wraps inside the notice at a phone's width, not past the dialog (review of #453).
   const unbroken = 'Q'.repeat(100);
-  await tool(page, 'create_playlist', { name: unbroken, transition: { type: 'cut' }, spotIds: [spot.id] });
+  await tool(page, 'save_playlist', { name: unbroken, transition: { type: 'cut' }, spotIds: [spot.id] });
   await page.reload();
   await hydrated(page);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -118,8 +118,8 @@ test('a default never published goes live only when the person ticks it: not wit
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   const made = async (name: string) => {
-    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { greeting: name } });
-    return (await tool(page, 'create_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] })).playlist.id as string;
+    const { spot } = await tool(page, 'save_spot', { name, kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { greeting: name } });
+    return (await tool(page, 'save_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] })).playlist.id as string;
   };
   const allDay = await made('All day');
   await made('Lunch');

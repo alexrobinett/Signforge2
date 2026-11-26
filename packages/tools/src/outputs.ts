@@ -666,7 +666,7 @@ const spotOutput = z.object({
   bindings: z
     .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string(), table: tableMapping.optional() }))
     .nullable()
-    .describe('Template spots: fields bound to a data source, as update_spot takes them'),
+    .describe('Template spots: fields bound to a data source, as save_spot takes them'),
   assetId: z.string().nullable().describe('Image and video spots'),
   fit: z.enum(SPOT_FITS).nullable().describe('Image and video spots'),
   url: z.string().nullable().describe('URL spots'),
@@ -674,7 +674,7 @@ const spotOutput = z.object({
     .object({ texts: z.array(z.string()), lists: z.record(z.string(), z.array(z.array(z.string()))) })
     .nullable()
     .describe(
-      "Template spots: the draft's fields still holding the template's sample copy that create_spot's sample started it with: texts by name, and each list's rows, the cells not edited yet. A saved edit of a field, or binding it, takes it out. publish refuses a spot with any (sample_text) unless a person allows it. null for none",
+      "Template spots: the draft's fields still holding the template's sample copy that save_spot's sample started it with: texts by name, and each list's rows, the cells not edited yet. A saved edit of a field, or binding it, takes it out. publish refuses a spot with any (sample_text) unless a person allows it. null for none",
     ),
   version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
   ...draftOutput,
@@ -978,14 +978,11 @@ export const outputs = {
   list_fonts: z.object({ fonts: z.array(fontOutput), next: nextOutput }),
   list_brand_kits: z.object({ brandKits: z.array(brandKitOutput), next: nextOutput }),
   get_brand_kit: kitResult,
-  create_brand_kit: kitResult,
-  update_brand_kit: kitResult,
-  set_default_brand_kit: kitResult,
+  save_brand_kit: kitResult,
   assign_brand_kit: z.object({ brandKit: brandKitOutput.nullable() }),
   list_data_sources: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   get_data_source: z.object({ dataSource: dataSourceOutput, snapshot: snapshotOutput.nullable() }),
-  create_data_source: dataSourceResult,
-  update_data_source: dataSourceResult,
+  save_data_source: dataSourceResult,
   delete_data_source: z.object({ deleted: z.string().describe("The deleted data source's id") }),
   find_places: z.object({ places: z.array(placeOutput) }),
   read_table: z.object({
@@ -1036,9 +1033,8 @@ export const outputs = {
   retry_alert_delivery: z.object({ delivery: deliveryView }),
   list_spots: z.object({ spots: z.array(spotOutput), next: nextOutput, total: z.number().describe('How many match the filters, over every page') }),
   get_spot: spotResult,
-  create_spot: spotResult,
+  save_spot: spotResult,
   delete_spot: z.object({ deleted: z.string().describe("The deleted spot's id") }),
-  update_spot: spotResult,
   revert_spot_draft: spotResult.extend({ rejected }),
   keep_spot_draft: spotResult,
   get_spot_preview: z.object({
@@ -1057,8 +1053,7 @@ export const outputs = {
   }),
   list_playlists: z.object({ playlists: z.array(playlistOutput), next: nextOutput, total: z.number().describe('How many match the filters, over every page') }),
   get_playlist: playlistResult,
-  create_playlist: playlistResult,
-  update_playlist: playlistResult,
+  save_playlist: playlistResult,
   revert_playlist_draft: playlistResult.extend({ rejected }),
   keep_playlist_draft: playlistResult,
   get_agent_draft: agentDraftOutput,
@@ -1069,9 +1064,8 @@ export const outputs = {
     next: nextOutput,
     total: z.number().describe('How many match the filters, over every page'),
   }),
-  create_schedule_entry: entryResult,
+  save_schedule_entry: entryResult,
   start_takeover: entryResult,
-  update_schedule_entry: entryResult,
   delete_schedule_entry: z.object({
     deleted: z.string().describe("The deleted entry's id"),
     version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),

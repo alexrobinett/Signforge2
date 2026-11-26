@@ -138,7 +138,7 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   calendar = dataSources.find((d: { name: string }) => d.name === 'Break room').id;
   blog = dataSources.find((d: { name: string }) => d.name === 'Northside blog').id;
   // A spot reads the calendar (no tool binds one yet: the spot editor's sources are #79).
-  const { spot } = await tool(owner, 'create_spot', { name: 'Break room agenda', kind: 'url', url: 'https://example.com/agenda' });
+  const { spot } = await tool(owner, 'save_spot', { name: 'Break room agenda', kind: 'url', url: 'https://example.com/agenda' });
   await d1(`UPDATE spots SET bindings_json = '{"events":{"source":"${calendar}","path":"events"}}' WHERE org_id = '${orgId}' AND id = '${spot.id}'`);
 
   // The feed is fine; the calendar was good two hours ago and its last 2 polls failed.
@@ -266,7 +266,7 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
 
   // A weather source is named and reused by its place and units (the spot editor's): no address is typed for it here,
   // and a failing one is the forecast service's.
-  const { dataSource: weather } = await tool(owner, 'create_data_source', {
+  const { dataSource: weather } = await tool(owner, 'save_data_source', {
     id: 'weather-5746545-f-mph-e2e001',
     name: 'Weather, Portland',
     format: 'json',

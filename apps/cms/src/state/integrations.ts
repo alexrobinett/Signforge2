@@ -10,7 +10,7 @@ import { connectionKeys } from '~/queries/integrations';
 import { dataSourceKeys } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
-/** A new calendar's look-ahead, as `create_data_source` defaults it. */
+/** A new calendar's look-ahead, as `save_data_source` defaults it. */
 const DEFAULT_HORIZON_DAYS = 30;
 
 /** What the add form makes: feeds by address. Weather is made from a place, in the spot editor (#79). */
@@ -152,7 +152,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       attempt(async () => {
         const { name, feedUrl, horizonDays } = get().integrations.newSource;
         const url = feedUrl.trim();
-        await callTool('create_data_source', {
+        await callTool('save_data_source', {
           // Never the address itself: a private calendar's is a secret, and the name is shown.
           name: name.trim() || (URL.canParse(url) ? new URL(url).hostname : 'Feed'),
           format,
@@ -171,7 +171,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     changeSourceUrl: (orgId, source) =>
       attempt(
         async () => {
-          await callTool('update_data_source', { dataSourceId: source.id, feedUrl: get().integrations.feedUrl.trim(), ifVersion: source.version });
+          await callTool('save_data_source', { dataSourceId: source.id, feedUrl: get().integrations.feedUrl.trim(), ifVersion: source.version });
           await refresh(orgId);
           integrations((s) => ({ ...s, editing: null, feedUrl: '', pending: false }));
         },
@@ -182,7 +182,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       integrations((s) => ({ ...s, settingPhotos: { id: source.id, photos } }));
       await attempt(
         async () => {
-          await callTool('update_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
+          await callTool('save_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
           await refresh(orgId);
           integrations((s) => ({ ...s, pending: false }));
         },

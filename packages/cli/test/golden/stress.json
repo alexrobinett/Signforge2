@@ -16,6 +16,10 @@
       "size": 320263,
       "type": "image/jpeg"
     },
+    "26afc77d8e9ce5b122ce8e517d2b8f2b15c62cd71881e31ac7da9ea83394095d": {
+      "size": 385598,
+      "type": "text/html"
+    },
     "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357": {
       "size": 81112,
       "type": "text/html"
@@ -109,10 +113,6 @@
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
-    },
-    "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0": {
-      "size": 388707,
-      "type": "text/html"
     }
   },
   "templates": {
@@ -1066,12 +1066,12 @@
       },
       "html": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215"
     },
-    "base/news@2.0.2": {
+    "base/news@2.1.0": {
       "manifest": {
         "id": "news",
-        "version": "2.0.2",
+        "version": "2.1.0",
         "name": "News",
-        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
           "title": {
             "type": "text",
@@ -1154,17 +1154,12 @@
           },
           "showList": {
             "type": "boolean",
-            "label": "Show the story list",
+            "label": "Show the story strip",
             "default": true
           },
           "showMeta": {
             "type": "boolean",
             "label": "Show the source and age",
-            "default": true
-          },
-          "showCrawl": {
-            "type": "boolean",
-            "label": "Show the crawl",
             "default": true
           }
         },
@@ -1188,7 +1183,7 @@
         },
         "protocol": 2
       },
-      "html": "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0"
+      "html": "26afc77d8e9ce5b122ce8e517d2b8f2b15c62cd71881e31ac7da9ea83394095d"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -1861,7 +1856,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.0.2",
+      "template": "base/news@2.1.0",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -1872,8 +1867,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 15000,
@@ -2205,5 +2199,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "60ef2cb87e10f372e2ae3e805986ce8bab906ebf48d378d52a111e60a3343145"
+  "id": "21fd32db73090d66c98fbd24883300239d63d5f1be73d1660fb4bfe3f4246f78"
 }

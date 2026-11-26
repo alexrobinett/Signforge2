@@ -10,7 +10,7 @@ import { SparklesIcon } from 'lucide-react';
 import { useId } from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
-import { ACTIONS, agentWho, auditTime, whoText } from '~/lib/audit';
+import { agentWho, auditTime, whatText, whoText } from '~/lib/audit';
 import { useNow } from '~/lib/live';
 import { ago } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
@@ -210,7 +210,8 @@ export function ProposalPanel({
                   {/* An agent by its client's plain name, never its id (as the approvals queue names an asker). */}
                   {e.actor.kind === 'agent' ? agentWho(draft.agents.find((a) => a.id === e.actor.id)) : whoText(e, names, me)}
                 </bdi>
-                <span>{ACTIONS[e.action]?.words ?? e.action.replaceAll('_', ' ')}</span>
+                {/* In the log's words: a save says whether it made the draft or changed it (#345). */}
+                <span>{whatText(e)}</span>
               </li>
             ))}
           </ol>

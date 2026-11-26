@@ -24,9 +24,9 @@ const WRITERS: Record<string, string> = {
   'POST /api/agent/chat':
     "a turn of the agent's drawer (#267): a question reads only, POST because the body is a conversation (it writes nothing of ours, checked below); a press of its confirmation card (#269) runs that one tool through the dispatcher as the member via cms-agent, once, its audit row carrying the card (agent-chat.test.ts)",
   'POST /api/agent/inline/keep':
-    "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
+    "Keep of the agent's update of a spot (#264): one save_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
   'POST /api/agent/inline':
-    "the agent's fill from a flyer, photo or link (#263): one create_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
+    "the agent's fill from a flyer, photo or link (#263): one save_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /admin/screens/:screen/missing': 'reads only: POST because the body is a manifest',
   'PUT /admin/screens/:screen/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
   'PUT /admin/base/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
@@ -264,7 +264,7 @@ describe('requests', () => {
     expect(ours()).toEqual([]);
 
     // Its drafts, saved (#268): the change and its audit row, and nothing else.
-    const made = await owner.tool('create_spot', {
+    const made = await owner.tool('save_spot', {
       name: 'Clock',
       kind: 'template',
       templateVersionId: baseVersion,
@@ -274,7 +274,7 @@ describe('requests', () => {
     const { spot } = (await made.json()) as { spot: { id: string; version: number } };
     writes.length = 0;
     const saved = await member.post('/api/agent/apply', {
-      calls: [{ tool: 'update_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
+      calls: [{ tool: 'save_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
     });
     expect(saved.status, await saved.clone().text()).toBe(200);
     // A draft saved from the drawer is the agent's proposal (#116): the draft it replaced is kept beside it.

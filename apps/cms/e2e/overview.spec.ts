@@ -64,7 +64,7 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await expect(page.getByRole('region', { name: 'Unpublished drafts' }).getByRole('link')).toHaveText([/Opening.*Spot · never published/]);
 
   // Step 2 ticks once a playlist with the spot is the default and published: a draft default plays nowhere.
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spotId] });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spotId] });
   await tool(page, 'set_default_playlist', { playlistId: playlist.id });
   await page.reload();
   await expect(setup).toContainText('1 of 3 done');
@@ -112,7 +112,7 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   // The screen goes quiet and misses the next publish (its last sync moved back in the run's local
   // D1, as screens.spec.ts does): it needs someone, and the page says why.
   await screen.context().close();
-  await tool(page, 'update_spot', { spotId, name: 'Opening hours' });
+  await tool(page, 'save_spot', { spotId, name: 'Opening hours' });
   await page.reload();
   await expect(page.getByRole('region', { name: 'Unpublished drafts' }).getByRole('link')).toHaveText([/Opening hours.*Spot · changes not published/]);
   await tool(page, 'publish', {});
@@ -163,7 +163,7 @@ test('a long playlist name wraps on a phone, hiding the checklist keeps it hidde
 
   // The default's name is on its step's button: 100 letters, with no space to break at.
   const long = 'W'.repeat(100);
-  const { playlist } = await tool(page, 'create_playlist', { name: long, transition: { type: 'cut' } });
+  const { playlist } = await tool(page, 'save_playlist', { name: long, transition: { type: 'cut' } });
   await tool(page, 'set_default_playlist', { playlistId: playlist.id });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
@@ -216,7 +216,7 @@ test('at 390 px the sidebar Publish asks in one dialog a screen reader finds, sa
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   // A spot New spot would make, its sample text recorded by the server: an Alert, which needs nothing else to publish.
   const alert = templates.find((t: { key: string }) => t.key === 'alert' || t.key.endsWith('/alert'));
-  await tool(page, 'create_spot', { name: 'Fire drill', kind: 'template', templateVersionId: alert.versions.at(-1).id, sample: true });
+  await tool(page, 'save_spot', { name: 'Fire drill', kind: 'template', templateVersionId: alert.versions.at(-1).id, sample: true });
   await page.reload();
   await hydrated(page);
 

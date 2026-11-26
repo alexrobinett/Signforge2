@@ -93,12 +93,12 @@ async function seed(owner: Client): Promise<World> {
     weather: await template(TEMPLATES.weather),
   };
   const spot = async (name: string, path: string, durationMs: number) =>
-    (await tool('create_spot', { name, kind: 'url', url: `https://example.com/${path}`, durationMs })).spot!.id;
+    (await tool('save_spot', { name, kind: 'url', url: `https://example.com/${path}`, durationMs })).spot!.id;
   const spots = {
     breakfast: await spot('Breakfast menu', 'breakfast', 10_000),
     // A template spot, as most are: the drawer drafts changes to these, never to a web page spot's (its address is the person's).
     weather: (
-      await tool('create_spot', {
+      await tool('save_spot', {
         name: 'Weather',
         kind: 'template',
         templateVersionId: templates.announcement.versionId,
@@ -115,7 +115,7 @@ async function seed(owner: Client): Promise<World> {
     ).spot!.id,
     lunch: await spot('Lunch specials', 'lunch', 12_000),
   };
-  const playlist = async (name: string, spotIds: string[]) => (await tool('create_playlist', { name, spotIds })).playlist!.id;
+  const playlist = async (name: string, spotIds: string[]) => (await tool('save_playlist', { name, spotIds })).playlist!.id;
   const playlists = {
     lobby: await playlist('Lobby loop', [spots.breakfast, spots.weather]),
     breakfast: await playlist('Breakfast', [spots.breakfast]),
@@ -123,7 +123,7 @@ async function seed(owner: Client): Promise<World> {
   };
   await tool('set_default_playlist', { playlistId: playlists.lobby });
   const entry = (
-    await tool('create_schedule_entry', {
+    await tool('save_schedule_entry', {
       playlistId: playlists.breakfast,
       target: 'group',
       groupId: groups.bayside,
@@ -133,7 +133,7 @@ async function seed(owner: Client): Promise<World> {
     })
   ).entry!.id;
   await tool('publish', {});
-  const lunch = (await tool('update_spot', { spotId: spots.lunch, durationMs: 15_000 })).spot!;
+  const lunch = (await tool('save_spot', { spotId: spots.lunch, durationMs: 15_000 })).spot!;
   return {
     orgId: org.id,
     screens,

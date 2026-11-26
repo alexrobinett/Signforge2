@@ -167,7 +167,7 @@ describe('POST /api/agent/inline', () => {
     expect(body.marks.accent).toBeUndefined();
     const [entry] = await s.scope.auditLog.list({ limit: 1 });
     const { user } = (await s.member.session()).body;
-    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'create_spot', targetId: body.spot.id });
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'save_spot', targetId: body.spot.id });
   });
 
   it("sends the page's text fenced as data, without its scripts, and the material cannot close the fence", async () => {
@@ -207,7 +207,7 @@ describe('POST /api/agent/inline', () => {
     const res = await s.fill({ kind: 'link', url: LINK });
     expect(res.status).toBe(200);
     const after = await s.scope.auditLog.list({ limit: 50 });
-    expect(after.slice(0, after.length - before.length).map((e) => e.action)).toEqual(['create_spot']);
+    expect(after.slice(0, after.length - before.length).map((e) => e.action)).toEqual(['save_spot']);
     expect(await s.scope.publishes.list()).toEqual([]);
     expect(await s.spots()).toHaveLength(1);
   });
@@ -322,7 +322,7 @@ describe('POST /api/agent/inline', () => {
     expect(s.model.asked).toHaveLength(1);
     expect(await s.spots()).toHaveLength(1);
     // A key used for another call is refused, before anything is spent.
-    expect((await s.owner.tool('create_playlist', { name: 'Morning', idempotencyKey: 'used-for-a-playlist' })).status).toBe(200);
+    expect((await s.owner.tool('save_playlist', { name: 'Morning', idempotencyKey: 'used-for-a-playlist' })).status).toBe(200);
     const other = await s.fill({ kind: 'link', url: LINK }, { idempotencyKey: 'used-for-a-playlist' });
     expect(other.status).toBe(409);
     expect(await other.json()).toMatchObject({ error: 'conflict' });
@@ -771,7 +771,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     expect(listing).not.toMatch(/<templates>[\s\S]*"items"[\s\S]*<\/templates>/);
   });
 
-  it('keeps the review as the agent, through update_spot with the version it was made on', async () => {
+  it('keeps the review as the agent, through save_spot with the version it was made on', async () => {
     const m = await menu();
     m.answer({ items: [{ name: 'Latte', price: '$4.75' }] });
     const { review } = await (await m.update()).json<any>();
@@ -782,7 +782,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     expect((await m.stored()).data).toEqual(review.data);
     const [entry] = await m.scope.auditLog.list({ limit: 1 });
     const { user } = (await m.member.session()).body;
-    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'update_spot', targetId: m.spot.id });
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'save_spot', targetId: m.spot.id });
   });
 
   it('refuses a Keep made on a version someone has saved over since, keeping their change', async () => {
@@ -790,9 +790,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     m.answer({ items: [{ name: 'Latte', price: '$4.75' }] });
     const { review } = await (await m.update()).json<any>();
     // Someone saves the spot meanwhile.
-    expect((await m.owner.tool('update_spot', { spotId: m.spot.id, data: { ...MENU_DATA, title: 'Their title' }, ifVersion: review.version })).status).toBe(
-      200,
-    );
+    expect((await m.owner.tool('save_spot', { spotId: m.spot.id, data: { ...MENU_DATA, title: 'Their title' }, ifVersion: review.version })).status).toBe(200);
     const res = await m.keep({ spotId: m.spot.id, ifVersion: review.version, data: review.data });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'conflict' });
@@ -849,14 +847,14 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     expect(made.marks.theme).toMatchObject({ state: 'missing', note: expect.stringContaining('leaves to you') });
   });
 
-  it('refuses a row key that is no column, from Keep and from update_spot for every caller (#264 review)', async () => {
+  it('refuses a row key that is no column, from Keep and from save_spot for every caller (#264 review)', async () => {
     const m = await menu();
     const v = (await m.stored()).version;
     const rows = [{ ...ROWS[0], payUrl: 'https://evil.example/pay' }, ...ROWS.slice(1)];
     const kept = await m.keep({ spotId: m.spot.id, ifVersion: v, data: { ...MENU_DATA, items: rows } });
     expect(kept.status).toBe(400);
     expect(await kept.json()).toMatchObject({ message: expect.stringContaining('has no column "payUrl"') });
-    const tool = await m.owner.tool('update_spot', { spotId: m.spot.id, data: { ...MENU_DATA, items: rows }, ifVersion: v });
+    const tool = await m.owner.tool('save_spot', { spotId: m.spot.id, data: { ...MENU_DATA, items: rows }, ifVersion: v });
     expect(tool.status).toBe(400);
     expect((await m.stored()).data).toEqual(MENU_DATA);
   });

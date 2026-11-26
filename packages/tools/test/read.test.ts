@@ -69,7 +69,7 @@ describe('read', () => {
     const mine = await seedOrg(env.DB, 'read-tool-published');
     const owner = member(mine.orgId, 'owner');
     await call(owner, 'publish', {});
-    await call(owner, 'update_spot', { spotId: mine.imageSpot, durationMs: 9_000 });
+    await call(owner, 'save_spot', { spotId: mine.imageSpot, durationMs: 9_000 });
     const own = await call(owner, 'get_spot', { spotId: mine.imageSpot, published: true });
     const [onScreens] = (await call(owner, 'read', { type: 'spot', ids: [mine.imageSpot], filter: { published: true }, detail: 'full' })).items;
     expect(onScreens).toEqual(own.spot);
@@ -167,7 +167,7 @@ describe('describe', () => {
     expect(spot).toMatchObject({ type: 'spot', ids: true, query: false, summary: READ_TYPES.spot.summary });
     expect(Object.keys(spot.filters)).toEqual(['kind', 'unpublished']);
     expect(spot.fields).toHaveProperty('data');
-    expect(spot.changedBy).toEqual(expect.arrayContaining(['create_spot', 'update_spot']));
+    expect(spot.changedBy).toEqual(expect.arrayContaining(['save_spot', 'save_spot']));
     expect(await call(as('viewer'), 'describe', { type: 'asset' })).toMatchObject({ query: true });
   });
 

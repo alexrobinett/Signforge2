@@ -469,37 +469,30 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     run: run('read_table'),
   },
-  create_data_source: {
-    tools: ['create_data_source'],
-    input: ofRegistry('create_data_source'),
-    description: describedAs('create_data_source'),
-    needsPublish: (called) => called.format === 'provider',
-    async make(_org, called) {
-      const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
-      return {
-        input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
-        withheld: resourceLines(called),
-        card: {
-          title: 'Add a data source',
-          lines: [
-            `Adds ${str(called.name) || 'a data source'}, read from ${called.resource === undefined ? 'the address below' : 'its connection'}.`,
-            ...resourceLines(called),
-          ],
-          address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, `The poller, every ${minutes === 1 ? 'minute' : `${minutes} minutes`}`),
-          when: 'Now: the poller starts reading it',
-          undo: 'Delete the data source on the Integrations page.',
-          press: 'Add it',
-        },
-      };
-    },
-    run: run('create_data_source'),
-  },
-  update_data_source: {
-    tools: ['update_data_source'],
-    input: ofRegistry('update_data_source'),
-    description: describedAs('update_data_source'),
-    needsPublish: reachesScreens,
+  save_data_source: {
+    tools: ['save_data_source'],
+    input: ofRegistry('save_data_source'),
+    description: describedAs('save_data_source'),
+    needsPublish: (called) => (called.dataSourceId === undefined ? called.format === 'provider' : reachesScreens(called)),
     async make(org, called) {
+      if (called.dataSourceId === undefined) {
+        const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
+        return {
+          input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
+          withheld: resourceLines(called),
+          card: {
+            title: 'Add a data source',
+            lines: [
+              `Adds ${str(called.name) || 'a data source'}, read from ${called.resource === undefined ? 'the address below' : 'its connection'}.`,
+              ...resourceLines(called),
+            ],
+            address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, `The poller, every ${minutes === 1 ? 'minute' : `${minutes} minutes`}`),
+            when: 'Now: the poller starts reading it',
+            undo: 'Delete the data source on the Integrations page.',
+            press: 'Add it',
+          },
+        };
+      }
       const source = await org.dataSources.get(str(called.dataSourceId));
       if (!source) throw new CardProblem(`no data source ${str(called.dataSourceId)}`);
       return {
@@ -510,7 +503,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           lines: [
             `Changes ${source.name}: ${
               Object.keys(called)
-                .filter((k) => k !== 'dataSourceId' && k !== 'ifVersion')
+                .filter((k) => !['dataSourceId', 'ifVersion', 'idempotencyKey'].includes(k))
                 .join(', ') || 'nothing'
             }.`,
             ...resourceLines(called),
@@ -522,10 +515,10 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('update_data_source'),
+    run: run('save_data_source'),
   },
   set_spot_url: {
-    tools: ['update_spot'],
+    tools: ['save_spot'],
     input: () => z.object({ spotId: z.string().describe('The web page spot'), url: z.string().describe('The https address it shows') }).strict(),
     description: () =>
       "Set a web page spot's address: the page its stage and screens open. From the drawer the person sees the address in full and presses to save it as the spot's draft.",
@@ -545,7 +538,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('update_spot'),
+    run: run('save_spot'),
   },
 };
 

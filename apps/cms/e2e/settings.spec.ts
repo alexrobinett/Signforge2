@@ -271,7 +271,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   expect(refused.status()).toBe(403);
   expect(await refused.json()).toMatchObject({ error: 'forbidden', message: 'Only owners publish in this organization' });
   // Choosing what every screen plays goes with publishing (M3-18): no Publish and no Play on every screen.
-  const made = await toolResponse(invitee, 'create_playlist', { name: 'Editor loop' });
+  const made = await toolResponse(invitee, 'save_playlist', { name: 'Editor loop' });
   const { playlist } = await made.json();
   expect((await toolResponse(invitee, 'set_default_playlist', { playlistId: playlist.id })).status()).toBe(403);
   await invitee.goto(`/playlists/${playlist.id}`);

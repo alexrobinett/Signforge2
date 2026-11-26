@@ -166,26 +166,26 @@ const REFUSED_BY_ANOTHER = new Set([
  * each, naming org A's row there and org B's own rows elsewhere.
  */
 const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
-  'create_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
-  'create_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
-  'update_spot.assetId': (s) => ({ spotId: s.b.imageSpot, assetId: s.a.asset }),
-  'create_spot.bindings.*.dataSourceId': (s) => ({
+  // A change names the row, and takes none of a new one's fields.
+  'save_spot.spotId': (s) => ({ spotId: s.a.templateSpot, name: 'Theirs' }),
+  'save_data_source.dataSourceId': (s) => ({ dataSourceId: s.a.dataSource, name: 'Theirs' }),
+  'save_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
+  'save_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
+  'save_spot.bindings.*.dataSourceId': (s) => ({
     name: 'Menu',
     kind: 'template',
     templateVersionId: s.b.templateVersion,
     bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } },
   }),
-  'update_spot.bindings.*.dataSourceId': (s) => ({ spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } }),
   // A schedule entry is aimed at a group or a screen, never both: one input for each.
-  'create_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
+  'save_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
   'start_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
   'start_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
   'publish_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
   'publish_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
-  'update_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
-  'update_schedule_entry.screenId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'screen', screenId: s.a.screen, ifVersion: 1 }),
+  'save_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
   // A provider source takes a resource with its connection, and no feed URL.
-  'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
+  'save_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
 
 let s: Seeded;
@@ -252,9 +252,9 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     const paths = (name: string) =>
       unique(idFields(z.toJSONSchema(registry.get(name)!.input, { io: 'input', unrepresentable: 'any' }))).map((f) => f.path.join('.'));
     expect(paths('assign_brand_kit')).toEqual(['brandKitId', 'screenId', 'groupId']);
-    expect(paths('create_brand_kit')).toEqual(['logoOnDarkAssetId', 'logoOnLightAssetId']);
+    expect(paths('save_brand_kit')).toEqual(['brandKitId', 'logoOnDarkAssetId', 'logoOnLightAssetId']);
     expect(paths('save_group')).toEqual(['groupId', 'screenIds']);
-    expect(paths('update_spot')).toContain('bindings.*.dataSourceId');
+    expect(paths('save_spot')).toContain('bindings.*.dataSourceId');
   });
 
   it("refuses a draft pin naming org A's draft as not there (version 0), for publish and request_publish", async () => {
@@ -316,6 +316,20 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     const removed = await dispatch(registry, 'save_group', { groupId: s.b.group, screenIds: [theirs], membership: 'remove' }, callerB);
     expect(removed.ok, JSON.stringify(removed)).toBe(true);
     expect(JSON.stringify(removed)).not.toContain(theirs);
+  });
+
+  it("finds nothing of org A in a change to org B's spot either: an asset, or a binding's source (#345 PR 4)", async () => {
+    for (const input of [
+      { spotId: s.b.imageSpot, assetId: s.a.asset },
+      { spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } },
+    ]) {
+      const named = 'assetId' in input ? s.a.asset : s.a.dataSource;
+      expect(await dispatch(registry, 'save_spot', input, callerB), JSON.stringify(input)).toMatchObject({
+        ok: false,
+        error: 'not_found',
+        message: expect.stringContaining(named),
+      });
+    }
   });
 
   it("leaves org A's data and audit log as they were", async () => {

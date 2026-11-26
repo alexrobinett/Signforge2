@@ -70,14 +70,14 @@ describe('ifVersion', () => {
     const stale = [
       ['save_group', { groupId: o.group, name: 'Late', ifVersion: 9 }],
       ['save_group', { membership: 'set', groupId: o.group, screenIds: [], ifVersion: 9 }],
-      ['update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 9 }],
-      ['update_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 9 }],
+      ['save_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 9 }],
+      ['save_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 9 }],
     ] as const;
     for (const [name, input] of stale) expect(await dispatch(registry, name, input, person), name).toMatchObject({ ok: false, error: 'conflict' });
     expect((await call(person, 'list_groups', {})).groups[0]).toMatchObject({ screenIds: [o.screen], version: 1 });
     expect((await call(person, 'save_group', { groupId: o.group, name: 'Now', ifVersion: 1 })).group.version).toBe(2);
-    expect((await call(person, 'update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 1 })).brandKit.version).toBe(2);
-    expect((await call(person, 'update_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 1 })).dataSource.version).toBe(2);
+    expect((await call(person, 'save_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 1 })).brandKit.version).toBe(2);
+    expect((await call(person, 'save_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 1 })).dataSource.version).toBe(2);
   });
 });
 

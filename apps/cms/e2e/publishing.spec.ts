@@ -27,10 +27,10 @@ test.beforeAll(async ({ browser }) => {
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   ({
     spot: { id: spotId },
-  } = await tool(page, 'create_spot', { name: 'Deal', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { message: 'Two for $4' } }));
+  } = await tool(page, 'save_spot', { name: 'Deal', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { message: 'Two for $4' } }));
   ({
     playlist: { id: playlistId },
-  } = await tool(page, 'create_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
+  } = await tool(page, 'save_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
 
   // A test screen, paired by its code as the Screens page pairs one.
   screen = await (await browser.newContext()).newPage();
@@ -197,14 +197,14 @@ test('Publish pressed while an autosave is on its way waits for it, and publishe
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
   let first = true;
-  await page.route('**/api/tools/update_spot', async (route) => {
+  await page.route('**/api/tools/save_spot', async (route) => {
     if (!first) return route.continue();
     first = false;
     const response = await route.fetch();
     await held;
     await route.fulfill({ response });
   });
-  const saving = page.waitForRequest('**/api/tools/update_spot');
+  const saving = page.waitForRequest('**/api/tools/save_spot');
   await page.getByLabel('Message').fill('Four for $6');
   // The autosave, a second after the edit.
   await saving;
@@ -215,13 +215,13 @@ test('Publish pressed while an autosave is on its way waits for it, and publishe
   await expect(toastSays('Not published')).toHaveCount(0);
   await expect.poll(() => stageShows(screen, 'Five for $7'), { timeout: 20_000 }).toBe(true);
   expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { message: 'Five for $7' }, draftChanged: false });
-  await page.unroute('**/api/tools/update_spot');
+  await page.unroute('**/api/tools/save_spot');
 });
 
 test("a name with no break wraps in the history's line at a phone's width (review of #455)", async () => {
   const { spot } = await tool(page, 'get_spot', { spotId });
   const unbroken = 'Q'.repeat(100);
-  await tool(page, 'update_spot', { spotId, name: unbroken, ifVersion: spot.version });
+  await tool(page, 'save_spot', { spotId, name: unbroken, ifVersion: spot.version });
   await tool(page, 'publish', {});
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/publishes');

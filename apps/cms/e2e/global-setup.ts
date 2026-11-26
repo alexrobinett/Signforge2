@@ -103,7 +103,7 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
         .replace(/\n<\/data>$/, '')
         .replaceAll('&lt;', '<'),
     );
-    return { name: 'update_spot', input: { spotId, data: { ...read.items[0].data, ...STUB_DRAFT } } };
+    return { name: 'save_spot', input: { spotId, data: { ...read.items[0].data, ...STUB_DRAFT } } };
   }
   return { card: { groups: [], steps: [], ...STUB_DRAFTED } };
 }

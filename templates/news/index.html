@@ -7,40 +7,29 @@
 </head>
 <body>
 <div class="stage">
-  <header class="top lk-fade">
-    <p class="badge lk-badge lk-d1" data-sf="title">Latest news</p>
-    <p class="credit lk-fade lk-d2" id="credit"></p>
-    <p class="clock lk-fade lk-d2" id="clock"></p>
+  <header class="top">
+    <p class="title" data-sf="title">Latest news</p>
+    <p class="clock" id="clock"></p>
   </header>
-  <div class="body">
-    <section class="leads" id="leads"></section>
-    <aside class="list lk-fade lk-d3" data-show="list">
-      <div class="marker" aria-hidden="true"></div>
-      <ol class="rows" id="rows"></ol>
-    </aside>
-  </div>
-  <footer class="ticker lk-fade lk-d4" data-show="crawl">
-    <div class="window"><p class="lk-crawl" id="crawl"></p></div>
+  <section class="leads" id="leads"></section>
+  <footer class="strip" data-show="list">
+    <ol class="rows" id="rows"></ol>
+    <div class="bar" aria-hidden="true"></div>
   </footer>
+  <div class="progress" aria-hidden="true"></div>
 </div>
 <template id="story">
   <article class="story">
-    <div class="media lk-photo" data-show="images">
-      <img class="photo" data-sf-src="image" alt="">
-      <div class="lk-cover"></div>
-    </div>
-    <div class="card lk-fade lk-d1">
+    <div class="text">
       <p class="meta" data-show="meta"><span class="src"></span><span class="age"></span></p>
-      <div class="lk-mask"><h1 class="headline lk-text lk-d2" data-sf="title">Headline</h1></div>
-      <p class="summary lk-fade lk-d3" data-show="summary" data-sf="summary"></p>
+      <h1 class="headline" data-sf="title">Headline</h1>
+      <p class="summary" data-show="summary" data-sf="summary"></p>
     </div>
+    <div class="area" data-show="images"><img class="photo" data-sf-src="image" alt=""></div>
   </article>
 </template>
 <template id="row">
-  <li class="row">
-    <span class="thumb" data-show="images"><img data-sf-src="image:thumb" alt=""><span class="number" aria-hidden="true"></span></span>
-    <span class="rtitle" data-sf="title"></span>
-  </li>
+  <li class="row"><span class="number"></span><span class="rtitle" data-sf="title"></span></li>
 </template>
 <script type="module" src="main.ts"></script>
 </body>

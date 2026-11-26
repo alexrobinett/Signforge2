@@ -25,14 +25,14 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Closed',
     kind: 'template',
     templateVersionId: clock,
     durationMs: 10_000,
     data: { greeting: 'Closed' },
   });
-  await tool(page, 'create_playlist', { name: 'Storm closure', transition: { type: 'cut' }, spotIds: [spot.id] });
+  await tool(page, 'save_playlist', { name: 'Storm closure', transition: { type: 'cut' }, spotIds: [spot.id] });
 
   await page.goto('/schedule');
   await hydrated(page);
