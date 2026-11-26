@@ -1,0 +1,1 @@
+ALTER TABLE `screen_groups` ADD `selector_json` text;

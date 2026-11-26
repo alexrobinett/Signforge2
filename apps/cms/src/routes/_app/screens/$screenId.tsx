@@ -39,7 +39,7 @@ import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock, reachable } from '~/lib/screen-status';
 import type { PlaylistView } from '~/lib/playlists';
 import { describeWhen, howItReaches, runsAfter, stateWord, timeWord, type ScheduleEntryView } from '~/lib/schedule';
-import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
+import { isOrientation, listedGroups, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
 import { cn } from '~/lib/utils';
 import { playlistsQuery } from '~/queries/playlists';
@@ -596,8 +596,9 @@ function CacheState({ screen }: { screen: ScreenView }) {
   );
 }
 
-function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupView[] }) {
+function SettingsDialog({ screen, groups: all }: { screen: ScreenView; groups: GroupView[] }) {
   const id = useId();
+  const groups = listedGroups(all);
   const draft = useAppStore((s) => settingsDraftOf(s.screens, screen.id));
   const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const renameDraft = useAppStore((s) => s.renameDraft);

@@ -37,10 +37,12 @@ describe('update_screen_labels', () => {
     const b = await newScreen('Merge B');
     expect(await call('update_screen_labels', { screenIds: [b.id, a.id, a.id], set: { type: 'kiosk', store: '0142' } })).toEqual({
       screens: [a.id, b.id].toSorted().map((id) => ({ id, labels: { type: 'kiosk', store: '0142' } })),
+      groupsUsingRemoved: [],
     });
     // Stored as typed, trimmed; a key a screen lacks is ignored on removal.
     expect(await call('update_screen_labels', { screenIds: [a.id], set: { type: '  Drive-Thru ' }, remove: ['store', 'legacy'] })).toEqual({
       screens: [{ id: a.id, labels: { type: 'Drive-Thru' } }],
+      groupsUsingRemoved: [],
     });
     expect(await labelsOf(a.id)).toEqual({ type: 'Drive-Thru' });
     expect(await labelsOf(b.id)).toEqual({ type: 'kiosk', store: '0142' });
