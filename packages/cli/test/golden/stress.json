@@ -64,10 +64,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
-      "size": 399570,
-      "type": "text/html"
-    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
@@ -80,6 +76,10 @@
       "size": 182996,
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
+    },
+    "d4baea9c7886823cc2a124bd4cf112f1f1c8f29dd11eec1f6e38a281c35a8a14": {
+      "size": 398807,
+      "type": "text/html"
     },
     "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b": {
       "size": 81204,
@@ -251,7 +251,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -264,6 +263,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -459,7 +459,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -472,6 +471,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,8 +626,6 @@
           "events": {
             "type": "list",
             "label": "Events",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -653,7 +651,9 @@
                 "label": "Location",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "rows": {
             "type": "number",
@@ -685,13 +685,13 @@
         ],
         "uses": [],
         "background": "#0d1117",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
@@ -833,8 +833,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -851,7 +849,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,18 +970,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -1007,7 +1007,6 @@
           "items": {
             "type": "list",
             "label": "Items",
-            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1038,7 +1037,8 @@
                 ],
                 "default": ""
               }
-            }
+            },
+            "maxItems": 12
           },
           "footnote": {
             "type": "text",
@@ -1072,13 +1072,13 @@
         ],
         "uses": [],
         "background": "#14110f",
+        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
     },
@@ -1104,8 +1104,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1132,7 +1130,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1190,14 +1190,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1252,10 +1252,10 @@
       },
       "html": "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46"
     },
-    "base/room-status@1.1.1": {
+    "base/room-status@1.2.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,15 +1368,15 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
+      "html": "d4baea9c7886823cc2a124bd4cf112f1f1c8f29dd11eec1f6e38a281c35a8a14"
     },
     "base/weather@1.6.0": {
       "manifest": {
@@ -1468,6 +1468,7 @@
           "canvas"
         ],
         "background": "#0b1a33",
+        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1486,8 +1487,7 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
     }
@@ -1950,7 +1950,7 @@
       "id": "room-status",
       "name": "Room status (live calendar)",
       "kind": "template",
-      "template": "base/room-status@1.1.1",
+      "template": "base/room-status@1.2.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "a43f2ecfdd4c190cd833c1302e1829c0b660212e8a8dced1d12e8bfe39f9e0e4"
+  "id": "5e2a05b1e519218e59affaf1061c1a249efb0b1bd101e2d1531184b41060702f"
 }

@@ -339,10 +339,41 @@ describe('room status (#199)', () => {
         unended: [],
         unknown: [],
       });
-      // D's motion, read by seeking; the clock's colon and Night's glow are the room's own loops.
-      expect(await motionContract(f, durationMs, { loops: '.lk-crawl, .lk-ping, .colon, .glow' }), look).toEqual([]);
+      // D's motion, read by seeking: nothing loops, not even the clock's colon.
+      expect(await motionContract(f, durationMs, { loops: '' }), look).toEqual([]);
     }
   });
+
+  // The board's room status (#news-design): the room's name at title size, no text under 2.6vmin in any look, nothing
+  // blinking or pinging, and Night's day as solid bars on a hairline track rather than chips cut to three letters.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`leads with the room's name, keeps every text at 2.6vmin or more and nothing looping, ${orientation}`, async () => {
+      const r = await room(orientation);
+      const found: string[] = [];
+      const day = { events: [booking('Design review', -0.25, 0.75), booking('Quarterly planning', 2, 3), booking('Vendor demo', 4.5, 5)] };
+      for (const look of looks) {
+        const seen = await (await r.show({ look, ...day })).evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 3000;
+          const vmin = Math.min(innerWidth, innerHeight) / 100;
+          const shown = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+          const texts = [...document.querySelectorAll('.stage *')].filter(
+            (el) => shown(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim()),
+          );
+          const small = texts.filter((el) => Number.parseFloat(getComputedStyle(el).fontSize) < 2.6 * vmin - 0.5).map((el) => el.className || el.tagName);
+          return {
+            room: Number.parseFloat(getComputedStyle(document.querySelector('.room')!).fontSize) / vmin,
+            small: [...new Set(small)],
+            loops: document.getAnimations().filter((a) => a.effect!.getComputedTiming().iterations === Number.POSITIVE_INFINITY).length,
+            chips: [...document.querySelectorAll('.block .what')].filter(shown).length,
+          };
+        });
+        if (seen.room < 6.5) found.push(`${look}: the room's name is ${seen.room.toFixed(1)}vmin`);
+        if (seen.small.length) found.push(`${look}: under 2.6vmin: ${seen.small.join(', ')}`);
+        if (seen.loops) found.push(`${look}: ${seen.loops} loops`);
+        if (look === 'night' && seen.chips) found.push(`night: ${seen.chips} chips on the track`);
+      }
+      expect(found).toEqual([]);
+    });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const r = await room();
