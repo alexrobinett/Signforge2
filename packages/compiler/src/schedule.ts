@@ -23,6 +23,17 @@ export interface ScheduleScreen {
   groups: readonly string[];
 }
 
+/** The group or screen an entry stored as `groupId` and `screenId` (a row, a tool's output) is aimed at. */
+export const targetIdOf = (e: { target: TargetedEntry['target']; groupId?: string | null; screenId?: string | null }): string | undefined =>
+  (e.target === 'group' ? e.groupId : e.target === 'screen' ? e.screenId : undefined) ?? undefined;
+
+/** Why an entry cannot be placed on any screen: one the compiler reports rather than leaves out. */
+export function entryProblems(e: Pick<TargetedEntry, 'target' | 'targetId'>): string[] {
+  if (!['org', 'group', 'screen'].includes(e.target)) return ['target must be org, group or screen'];
+  if (e.target !== 'org' && !e.targetId) return [`a ${e.target} entry needs a targetId`];
+  return [];
+}
+
 /** Whether `e` reaches `screen`: aimed at every screen, one of its groups, or it. */
 export const reaches = (e: Pick<TargetedEntry, 'target' | 'targetId'>, screen: ScheduleScreen): boolean =>
   e.target === 'org' || (e.target === 'group' && screen.groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId === screen.id);

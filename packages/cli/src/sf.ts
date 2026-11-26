@@ -56,7 +56,17 @@ import {
   type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
-import { compileScreen, fontById, fontFilePath, onColor, reaches, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import {
+  compileScreen,
+  entryProblems,
+  fontById,
+  fontFilePath,
+  onColor,
+  reaches,
+  spotProblems,
+  type CompileInput,
+  type TargetedEntry,
+} from '@signforge/compiler';
 import { imageSample } from '@signforge/media/sample';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
@@ -257,7 +267,8 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
     order,
   }));
   for (const e of schedule) {
-    if (!reaches(e, { id: screen.id, groups }))
+    // One the compiler reports as unplaceable is not noted as left out too (review of #591).
+    if (!entryProblems(e).length && !reaches(e, { id: screen.id, groups }))
       console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
   }
 

@@ -26,12 +26,12 @@ import {
   type TemplateManifest,
 } from '@signforge/contract';
 import { chooseBrandKit, DEFAULT_BRAND_COLORS, isBrandColor, tokenName, type BrandChoice } from './brand';
-import { screenSchedule, type TargetedEntry } from './schedule';
+import { entryProblems, screenSchedule, type TargetedEntry } from './schedule';
 
 export * from './brand';
 export { brandFont, FONTS, fontById, fontFilePath, isCatalogueFontFile, MAX_FONT_FAMILY_BYTES, type CatalogueFont } from './fonts';
 
-export { reaches, screenSchedule, type ScheduleScreen, type TargetedEntry } from './schedule';
+export { entryProblems, reaches, screenSchedule, targetIdOf, type ScheduleScreen, type TargetedEntry } from './schedule';
 
 export interface CompileInput {
   screen: ScreenManifest['screen'];
@@ -130,13 +130,6 @@ export function spotProblems(spot: Spot, templates: CompileInput['templates']): 
   const { minMs, maxMs } = t.duration;
   if (spot.durationMs < minMs || spot.durationMs > maxMs) out.unshift(`duration ${spot.durationMs} ms is outside the template's range ${minMs} to ${maxMs}`);
   return out;
-}
-
-/** Why an entry cannot be placed on any screen. */
-function entryProblems(e: TargetedEntry): string[] {
-  if (!['org', 'group', 'screen'].includes(e.target)) return ['target must be org, group or screen'];
-  if (e.target !== 'org' && !e.targetId) return [`a ${e.target} entry needs a targetId`];
-  return [];
 }
 
 export async function compileScreen(input: CompileInput, opts: CompileOptions): Promise<CompileResult> {

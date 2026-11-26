@@ -14,7 +14,7 @@
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import { reaches } from '@signforge/compiler/schedule';
+import { reaches, targetIdOf } from '@signforge/compiler/schedule';
 import type { ScreenManifest } from '@signforge/contract';
 import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow, type StoredManifest } from '@signforge/db';
 import { manifestPhotoSources } from '@signforge/player-core';
@@ -451,12 +451,7 @@ const takeover = defineTool({
     }
     if (read && input.ifReach) {
       const reach = read.screens
-        .filter((s) =>
-          reaches(
-            { target: fields.target, targetId: fields.target === 'group' ? fields.groupId : fields.screenId },
-            { id: s.id, groups: read.groupsOf.get(s.id) ?? [] },
-          ),
-        )
+        .filter((s) => reaches({ target: fields.target, targetId: targetIdOf(fields) }, { id: s.id, groups: read.groupsOf.get(s.id) ?? [] }))
         .map((s) => s.id)
         .sort();
       if (reach.join(',') !== [...input.ifReach].sort().join(','))

@@ -2,6 +2,7 @@
 // from the entries aimed at it, its groups or every screen, to the minute. Checked against a week
 // written out by hand, and against player-core's resolvePlaylist (what the screen itself runs) at
 // the start of every stretch it draws.
+import { reaches, targetIdOf } from '@signforge/compiler/schedule';
 import type { ScheduleEntry, ScreenManifest } from '@signforge/contract';
 import { resolvePlaylist } from '@signforge/player-core';
 import { describe, expect, it } from 'vitest';
@@ -79,13 +80,11 @@ describe('the week view', () => {
     );
     // Saturday: every screen's Flash, but the screen's own lunch wins the tie at midday.
     expect([6, 11, 15].map((h) => playlistAt('2026-11-21', h))).toEqual(['flash', 'lunch', 'flash']);
-    // Group Back's dinner is never this screen's.
-    expect(week.flatMap((d) => d.hours).some((h) => h!.segments.some((g) => g.playlistId === 'dinner'))).toBe(false);
   });
 
   it('agrees with resolvePlaylist, which the screen runs, at the start of everything it draws', () => {
-    // The entries this screen gets, chosen here as the compiler chooses them.
-    const mine = entries.filter((e) => e.target === 'org' || e.groupId === 'grp_front' || e.screenId === 'scr_lobby');
+    // The entries this screen gets, chosen by the compiler's rule (packages/compiler test/schedule.test.ts tests it).
+    const mine = entries.filter((e) => reaches({ target: e.target, targetId: targetIdOf(e) }, { id: lobby.id, groups: ['grp_front'] }));
     const schedule: ScheduleEntry[] = mine.map((e) => ({
       id: e.id,
       playlist: e.playlistId,

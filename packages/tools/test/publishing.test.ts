@@ -317,6 +317,30 @@ describe('publishOrg', () => {
     expect(result.screens.every((s) => s.manifest && s.manifest.schedule.length === 1)).toBe(true);
   });
 
+  it('gives screens their entries in publish order, oldest first, whatever their ids or when they were made (review of #591)', async () => {
+    const { org, version, photo } = await seedSmallOrg('pub-order');
+    const at = (minutes: number) => ({ ...opts, now: new Date(NOW.getTime() + minutes * 60_000) });
+    await org.commit((await publishOrg(org, at(0))).writes);
+    // Made first, with the first id, but held: its playlist plays a spot that does not pass its checks.
+    await org.spots.insert({
+      id: x('broken'),
+      name: 'Broken',
+      kind: 'template',
+      durationMs: 1000,
+      templateVersionId: version.id,
+      dataJson: '{}',
+      assetMapJson: '{}',
+    });
+    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
+    await org.playlists.setItems(side.id, [x('broken')]);
+    await org.scheduleEntries.insert({ id: x('a-held'), playlistId: side.id, target: 'org', priority: 1 });
+    await org.scheduleEntries.insert({ id: x('b-now'), playlistId: x('main'), target: 'org', priority: 1 });
+    await org.commit((await publishOrg(org, at(1))).writes);
+    await org.spots.update(x('broken'), { durationMs: 8000, assetMapJson: JSON.stringify({ photo: photo.id }) });
+    const last = await publishOrg(org, at(2));
+    expect(last.screens.map((s) => s.manifest?.schedule.map((e) => e.id))).toEqual(last.screens.map(() => [x('evening-takeover'), x('b-now'), x('a-held')]));
+  });
+
   it('reports a screen it cannot publish without stopping the others', async () => {
     const { org, lobby, hall } = await seedSmallOrg('pub-one-bad');
     const other = await addImage(org, sha('e'), sha('f'));
