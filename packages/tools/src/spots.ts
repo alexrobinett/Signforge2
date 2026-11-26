@@ -28,7 +28,7 @@ import { DECIDING, decidedMeanwhile, keptFor, shownVersion, spotContent } from '
 import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
 import { page, pageInput } from './paging';
 import { loadOrg, previewInput, spotDraft } from './publishing';
-import { defineTool, isAgent, notFound, ToolError } from './tool';
+import { defineTool, invalidFields, isAgent, notFound, ToolError } from './tool';
 import { outputs, SPOT_FITS, SPOT_KINDS, tableMapping, type SpotView } from './outputs';
 
 /** A new image, video or URL spot's length when none is given. */
@@ -302,7 +302,7 @@ const saveSpot = defineTool({
   handler: async ({ org, actor, input, write }) => {
     const { spotId, name, kind } = input;
     if (spotId === undefined) {
-      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new spot has no version yet: ifVersion is for a change');
+      if (input.ifVersion !== undefined) throw invalidFields('a new spot has no version yet: ifVersion is for a change', 'ifVersion');
       if (name === undefined || kind === undefined)
         throw invalid(name === undefined ? 'name' : 'kind', ['a new spot needs a name and a kind; give spotId to change one']);
       refuseOtherKinds(kind, input);

@@ -174,7 +174,28 @@ describe('table sources', () => {
       error: 'invalid_input',
       details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
     });
-    expect(await refusal('save_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({ error: 'invalid_input' });
+    expect(await refusal('save_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({
+      error: 'invalid_input',
+      details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
+    });
+  });
+
+  it("points each refusal of a save at the fields it gave or left out, as the schema's own refusals do (#507)", async () => {
+    const fields = async (input: Record<string, unknown>) => {
+      const r = await refusal('save_data_source', input);
+      if (r.ok) throw new Error('saved');
+      return { error: r.error, paths: (r.details as { path: string }[]).map((d) => d.path) };
+    };
+    expect(await fields({ name: 'Menu', feedUrl: 'https://menu.example.com/a.csv' })).toEqual({ error: 'invalid_input', paths: ['format'] });
+    expect(await fields({ format: 'csv', feedUrl: 'https://menu.example.com/a.csv', ifVersion: 1 })).toEqual({ error: 'invalid_input', paths: ['ifVersion'] });
+    expect(await fields({ name: 'Menu', format: 'csv', connectionId: 'con_x', resource: 'A1' })).toEqual({
+      error: 'invalid_input',
+      paths: ['connectionId', 'resource'],
+    });
+    await call('save_data_source', { id: 'paths', name: 'Paths', format: 'csv', feedUrl: 'https://menu.example.com/p.csv' });
+    expect(await fields({ dataSourceId: 'paths', format: 'json' })).toEqual({ error: 'invalid_input', paths: ['format'] });
+    expect(await fields({ dataSourceId: 'paths', horizonDays: 9 })).toEqual({ error: 'invalid_input', paths: ['horizonDays'] });
+    expect(await fields({ dataSourceId: 'paths', resource: 'A1' })).toEqual({ error: 'invalid_input', paths: ['resource'] });
   });
 
   it('polls a json-table source afresh when the path to its rows changes', async () => {

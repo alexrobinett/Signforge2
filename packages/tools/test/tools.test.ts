@@ -108,6 +108,29 @@ describe('content saves (#345 PR 4): one tool creates or changes each kind', () 
       expect(await refused(name, input), name).toMatch(/has no version yet: ifVersion is for a change/);
   });
 
+  it('points each refusal at the fields it names in details, as a schema refusal does (#507)', async () => {
+    const paths = async (name: string, input: Record<string, unknown>) => {
+      const r = await refusal(name, input);
+      if (r.ok) throw new Error(`${name} saved`);
+      return (r.details as { path: string }[] | undefined)?.map((d) => d.path);
+    };
+    expect(await paths('save_spot', { kind: 'url', url: 'https://example.com' })).toEqual(['name']);
+    expect(await paths('save_spot', { name: 'New', kind: 'url', url: 'https://example.com', ifVersion: 1 })).toEqual(['ifVersion']);
+    expect(await paths('save_playlist', { spotIds: [] })).toEqual(['name']);
+    expect(await paths('save_schedule_entry', { target: 'org' })).toEqual(['playlistId']);
+    expect(await paths('save_schedule_entry', { playlistId: o.playlist, target: 'org', endsAt: '2026-11-17T20:00:00Z' })).toEqual(['endsAt']);
+    expect(await paths('save_brand_kit', { colors: { primary: '#000000' } })).toEqual([
+      'name',
+      'colors.accent',
+      'colors.background',
+      'colors.surface',
+      'colors.text',
+      'colors.muted',
+    ]);
+    expect(await paths('save_data_source', { name: 'No format', feedUrl: 'https://example.com/feed' })).toEqual(['format']);
+    expect(await paths('save_data_source', { dataSourceId: o.dataSource, format: 'rss' })).toEqual(['format']);
+  });
+
   it('refuses a change that changes nothing, which would write nothing to guard', async () => {
     expect(await refused('save_spot', { spotId: o.imageSpot })).toMatch(/nothing to change/);
     expect(await refused('save_playlist', { playlistId: o.playlist })).toMatch(/nothing to change/);

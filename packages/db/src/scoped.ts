@@ -85,8 +85,12 @@ interface AuditPage {
   actorKind?: (typeof s.auditLog.$inferSelect)['actorKind'];
   actorId?: string;
   action?: string;
-  /** With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the default, for `set_default_playlist`). */
-  alsoAction?: { actions: readonly string[]; detailHas: string };
+  /**
+   * With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the
+   * default, for `set_default_playlist`) and whose recorded input has, or lacks, each key of `inputHas` (a save with or
+   * without its id, for the create or update it replaced).
+   */
+  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -2388,11 +2392,15 @@ export function scoped(d1: D1Database, orgId: string) {
         if (p.actorId) where.push(eq(a.actorId, p.actorId));
         if (p.action) {
           const also = p.alsoAction;
-          where.push(
-            also
-              ? or(eq(a.action, p.action), and(inArray(a.action, [...also.actions]), sql`instr(${a.detailJson}, ${also.detailHas}) > 0`))!
-              : eq(a.action, p.action),
-          );
+          const alsoWhere = also && [
+            inArray(a.action, [...also.actions]),
+            ...(also.detailHas === undefined ? [] : [sql`instr(${a.detailJson}, ${also.detailHas}) > 0`]),
+            ...Object.entries(also.inputHas ?? {}).map(([key, has]) => {
+              const value = sql`json_extract(${a.detailJson}, ${`$.input.${key}`})`;
+              return has ? sql`${value} is not null` : sql`${value} is null`;
+            }),
+          ];
+          where.push(alsoWhere ? or(eq(a.action, p.action), and(...alsoWhere))! : eq(a.action, p.action));
         }
         if (p.targetKind) where.push(eq(a.targetKind, p.targetKind));
         if (p.targetId) where.push(eq(a.targetId, p.targetId));

@@ -23,7 +23,7 @@ import { draftChanged, published, StaleVersionError, type OrgScope, type Schedul
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, invalidFields, notFound, ToolError } from './tool';
 import { type entryOutput, type fieldsOutput, outputs, scheduleTarget } from './outputs';
 
 /** The longest takeover: past a day it is a schedule, and a screen that misses its end would run it too long. */
@@ -266,12 +266,18 @@ const saveEntry = defineTool({
   handler: async ({ org, input, write }) => {
     const { scheduleEntryId } = input;
     if (scheduleEntryId === undefined) {
-      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new schedule entry has no version yet: ifVersion is for a change');
+      if (input.ifVersion !== undefined) throw invalidFields('a new schedule entry has no version yet: ifVersion is for a change', 'ifVersion');
       const { playlistId, target } = input;
       if (playlistId === undefined || target === undefined)
-        throw new ToolError('invalid_input', 'a new entry needs a playlistId and a target; give scheduleEntryId to change one');
+        throw invalidFields(
+          'a new entry needs a playlistId and a target; give scheduleEntryId to change one',
+          ...(['playlistId', 'target'] as const).filter((k) => input[k] === undefined),
+        );
       if (input.startsAt !== undefined || input.endsAt !== undefined)
-        throw new ToolError('invalid_input', 'startsAt and endsAt belong to a takeover: use start_takeover');
+        throw invalidFields(
+          'startsAt and endsAt belong to a takeover: use start_takeover',
+          ...(['startsAt', 'endsAt'] as const).filter((k) => input[k] !== undefined),
+        );
       const aimedAt = await requireAim(org, { playlistId, target, groupId: input.groupId, screenId: input.screenId });
       const values: Stored = {
         playlistId,
@@ -292,9 +298,9 @@ const saveEntry = defineTool({
     const takeover = current.endsAt !== null;
     const wrong = (takeover ? SCHEDULE_ONLY : TAKEOVER_ONLY).filter((k) => input[k] !== undefined);
     if (wrong.length)
-      throw new ToolError(
-        'invalid_input',
+      throw invalidFields(
         `${wrong.join(', ')} ${takeover ? 'belong to a schedule entry, not a takeover' : 'belong to a takeover: use start_takeover'}`,
+        ...wrong,
       );
     const playlistId = input.playlistId ?? current.playlistId;
     const aimedAt = input.target
