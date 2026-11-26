@@ -30,7 +30,7 @@ import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import { changingOrg } from './orgs';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
+import { createVersionedDrafts, noteSaved, noteUnsaved, realClock, shown, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
 type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'ai' | 'agents' | 'account' | 'invitation';
@@ -289,8 +289,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   /** Whether `scope` is still the tab's to act in: shown, and its org not being left (`changingOrg`, as the drawer's). */
   const here = (scope: SettingsScope) => onScreen(router, scope) && (scope.orgId === null || !changingOrg(get().orgs));
 
-  /** The name this tab last gave each org, until the page reads it back. */
-  const renamedTo = new Map<string, string>();
+  /** The name this tab last gave each org, and the name it was given over, until the page reads another (#479). */
+  const renamedTo = new Map<string, { to: string; from: string }>();
   /** The settings each form's last save was asked with, which `invalid` judges the edits against. */
   const savingWith = new Map<string, OrgSettings>();
   /** The action running on each page, by scope key: a form's save waits for it. */
@@ -304,13 +304,14 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       const change = changeOf(fields, settings);
       // The versioned write first: a stale save changes nothing, the name included.
       if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version }, draft.orgId)).settings.version);
-      // Against the name this tab last gave it, until the page reads it back: a name put back while its rename was on its
-      // way is a rename too (review of #466).
-      if (renamed && renamedTo.get(renamed.id) === renamed.name) renamedTo.delete(renamed.id);
-      const now = renamed && (renamedTo.get(renamed.id) ?? renamed.name);
+      // Against the name this tab last gave it, until the page reads another than the one it renamed over: a name put back
+      // while its rename is on its way is a rename (#466), and so is one put back after someone else's (#479).
+      const sent = renamed && renamedTo.get(renamed.id);
+      if (renamed && sent && renamed.name !== sent.from) renamedTo.delete(renamed.id);
+      const now = renamed && (renamedTo.get(renamed.id)?.to ?? renamed.name);
       if (name !== undefined && renamed && name.trim() !== now) {
         await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
-        renamedTo.set(renamed.id, name.trim());
+        renamedTo.set(renamed.id, { to: name.trim(), from: renamed.name });
       }
       // Saved quietly (#366): the form says Saved where it is, as an editor does.
       if (orgOnScreen(router) === draft.orgId) await router.invalidate({ sync: true });
@@ -510,13 +511,11 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       )),
 
     saveAiKey(orgId, { provider, apiKey, baseUrl, acceptsImages, jsonSchemaOutput }, ifVersion) {
-      // A new key starts the provider over: a version this tab made before is no longer one to build on.
-      aiSaved.delete(orgId);
       return run(
         ai(orgId),
         'key',
-        () =>
-          callTool(
+        async () => {
+          await callTool(
             'save_ai_provider',
             {
               provider,
@@ -525,7 +524,11 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
               ifVersion,
             },
             orgId,
-          ),
+          );
+          // A new key starts the provider over: a version this tab made before is no longer one to build on. Only once
+          // saved: a refused press changed nothing, and the next choice still builds on that version (#479).
+          aiSaved.delete(orgId);
+        },
         apiKey.trim() ? 'Key saved. Test it to choose the models.' : 'Saved',
       );
     },
@@ -580,6 +583,10 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
           }
           return { ...s, aiEdit: Object.keys(left).length ? { orgId, choices: left } : null };
         });
+      // A choice that got no answer, or was refused, is unsaved: closing the tab asks, while it is still this org's (#479).
+      const id = `ai-choices:${orgId}`;
+      if (saved || get().settings.aiEdit?.orgId !== orgId) noteSaved(id);
+      else noteUnsaved(id, () => get().settings.aiEdit?.orgId === orgId && orgOnScreen(router) === orgId);
     },
     askToRemoveAiKey: (orgId, open) => {
       const was = get().settings.removingAiKey;
@@ -592,15 +599,16 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     },
     async removeAiKey(orgId) {
       if (runningIn(get().settings, ai(orgId)) !== undefined) return;
-      aiSaved.delete(orgId);
       // The form is read afresh without a key, as the removal reads the page again: its key field takes focus. Named as
       // the removal channel's is (review of #421).
       const removed = await run(
         ai(orgId),
         'remove',
-        () => {
+        async () => {
           aim(orgId, 'form:key');
-          return callTool('remove_ai_provider', {}, orgId);
+          await callTool('remove_ai_provider', {}, orgId);
+          // As a new key's save: only once removed (#479).
+          aiSaved.delete(orgId);
         },
         'Key removed. The agent uses the demo model.',
       );
@@ -675,6 +683,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         aiEdit: null,
         removingAiKey: null,
         disconnecting: null,
+        // When an org's quiet saves last saved is that org's (#479): only the account's own, its name, stays.
+        savedAt: Object.fromEntries(Object.entries(s.savedAt).filter(([at]) => at === 'profile')),
       }));
     },
 

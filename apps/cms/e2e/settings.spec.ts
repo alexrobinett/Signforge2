@@ -806,6 +806,17 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
   await page.getByLabel('Daily ceiling for the whole organization').blur();
   expect((await (await ceiling).response())?.status()).toBe(200);
   await expect(page.getByText(/^Saved \d/)).toBeVisible();
+  // A choice that gets no answer is said with Try again, which saves it (#479).
+  await page.route('**/api/tools/save_ai_provider', (route) => route.abort('internetdisconnected'));
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[0]!);
+  const failed = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(failed.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await page.unroute('**/api/tools/save_ai_provider');
+  await failed.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+  await expect(failed).toHaveCount(0);
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[1]!);
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   // Kept, and the key is in no page, read or audit row.
   await page.reload();

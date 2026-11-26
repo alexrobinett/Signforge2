@@ -138,6 +138,25 @@ describe("the drawer's drafts, in the store", () => {
     return made;
   }
 
+  it('reloads no spot when the drawer is forgotten while the pages read again after its save, as on an org switch (#494, #495)', async () => {
+    const { store, reloaded } = draftsStore(true);
+    answers.push(turn());
+    await store.getState().askAgent('Make the headline punchier');
+    answers.push(savedBoth());
+    // The org changes while the pages read again what the save changed: the editor open next is the next org's.
+    const invalidate = QueryClient.prototype.invalidateQueries;
+    const switched = vi.spyOn(QueryClient.prototype, 'invalidateQueries').mockImplementation(function (this: QueryClient, ...args) {
+      store.getState().forgetAgentDrawer();
+      return invalidate.apply(this, args);
+    });
+    try {
+      await store.getState().saveDrafts(1);
+    } finally {
+      switched.mockRestore();
+    }
+    expect(reloaded).toEqual([]);
+  });
+
   it('says nothing went live when the publish was let go, such as Edit first on sample text (#360)', async () => {
     const { at } = await publishedNow(false);
     expect(at().drafts).toMatchObject({ status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' });

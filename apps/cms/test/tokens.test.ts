@@ -173,15 +173,25 @@ it('a selected stage choice reads at 4.5:1, its edge and focus ring at 3:1', () 
 
 // Every colour and text size in a class is a token (#405, review of #491): one written out in a class does not follow
 // the themes or the type scale, and no contrast check above can see it. Classes in `.tsx` and `.ts` alike.
+/** A hex colour, not an id that starts like one (`has-[#add-screen]`, review of #493): no letter, digit or dash after it. */
+const HEX = '#[0-9a-f]{3,8}(?![0-9a-z-])';
+const COLOR_FN = String.raw`\b(?:oklch|oklab|rgba?|hsla?|lab|lch|hwb)\(`;
+const PALETTE =
+  'slate|gray|zinc|neutral|stone|mauve|olive|mist|taupe|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose';
+/** The utilities a colour goes in, sides and offsets included (`border-t-`, `ring-offset-`). */
+const COLOR_UTILITY = String.raw`(?:text|bg|border(?:-[xytrblse])?|fill|stroke|ring(?:-offset)?|outline|decoration|divide|placeholder|caret|accent|shadow|inset-shadow|inset-ring|drop-shadow|text-shadow|from|via|to)`;
 const RAW = [
-  // An arbitrary colour in any utility: hex, a colour function, a typed colour, a shadow's.
-  /-\[(?:color:)?(?:#[0-9a-f]{3,8}|(?:oklch|oklab|rgba?|hsla?|lab|lch|hwb)\()/gi,
-  /\bshadow-\[[^\]]*(?:#[0-9a-f]{3,8}|rgba?\(|hsla?\(|oklch\()/gi,
-  // An arbitrary text size: a length, a typed length, a calc, the property itself.
-  /\btext-\[(?:length:|calc\(|[0-9.]+(?:px|rem|em)\])/gi,
+  // A colour anywhere in an arbitrary value or property, not only first (a gradient's, a border's, a color-mix's):
+  // a hex, or a colour function.
+  new RegExp(String.raw`\[[^\]\s'"]*?(?:${HEX}|${COLOR_FN})`, 'gi'),
+  // A named colour as an arbitrary value (`bg-[red]`), and an arbitrary colour property that is not a variable.
+  new RegExp(String.raw`\b${COLOR_UTILITY}-\[(?:color:)?(?!transparent\]|currentcolor\]|inherit\])[a-z]+\]`, 'gi'),
+  /\[(?:color|background(?:-color)?|border(?:-[a-z]+)?-color|fill|stroke|outline-color|text-decoration-color|caret-color|accent-color):(?!var\()/gi,
+  // Any arbitrary text size, in whatever unit or function (vw, cqw, %, clamp, min): text-[…] takes a colour variable alone.
+  /\btext-\[(?!color:var\()/gi,
   /\[font-size:/gi,
-  // Tailwind's own palette, white and black included: the themes do not set it.
-  /\b(?:text|bg|border|fill|stroke|ring|outline|decoration|divide|placeholder|caret|accent|shadow|from|via|to)-(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3})\b/g,
+  // Tailwind's own palette, white and black included, its newer palettes too: the themes do not set it.
+  new RegExp(String.raw`\b${COLOR_UTILITY}-(?:white|black|(?:${PALETTE})-[0-9]{2,3})\b`, 'g'),
 ];
 it('no class names a colour or a text size that is not a token', () => {
   const root = fileURLToPath(new URL('../src', import.meta.url));
@@ -206,13 +216,38 @@ it.each([
   'text-white',
   'bg-black/50',
   'ring-slate-200',
+  // Review of #493: an arbitrary property, a colour not first in its value, a named colour, sides and offsets, newer
+  // palettes, and text sizes in any unit or function.
+  '[color:#fff]',
+  '[background-color:red]',
+  'bg-[linear-gradient(to_right,#000,#fff)]',
+  'border-[1px_solid_#000]',
+  'bg-[color-mix(in_srgb,#fff_50%,transparent)]',
+  'bg-[red]',
+  'border-t-black',
+  'ring-offset-white',
+  'bg-mauve-500',
+  'text-[2vw]',
+  'text-[5cqw]',
+  'text-[120%]',
+  'text-[clamp(1rem,2vw,2rem)]',
+  'text-[min(4vw,2rem)]',
 ])('takes %s for what it is: not a token', (cls) => {
   expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(true);
 });
 
-it.each(['bg-stage', 'text-meta', 'rounded-[calc(var(--radius-lg)-(--spacing(1)))]', 'w-[calc(100%-2rem)]', 'text-muted-foreground', 'bg-scrim'])(
-  'leaves %s be',
-  (cls) => {
-    expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(false);
-  },
-);
+it.each([
+  'bg-stage',
+  'text-meta',
+  'rounded-[calc(var(--radius-lg)-(--spacing(1)))]',
+  'w-[calc(100%-2rem)]',
+  'text-muted-foreground',
+  'bg-scrim',
+  // An id, not a colour (review of #493); a mix of tokens; a colour variable; no colour at all.
+  'has-[#add-screen]:flex',
+  'bg-[color-mix(in_oklab,var(--chart-1)_20%,transparent)]',
+  'text-[color:var(--status-online)]',
+  'bg-[transparent]',
+])('leaves %s be', (cls) => {
+  expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(false);
+});

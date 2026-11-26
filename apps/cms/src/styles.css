@@ -112,9 +112,6 @@
   --letterbox: #000000;
   /* The page behind a dialog, a sheet or the command menu, dimmed. */
   --scrim: rgb(0 0 0 / 0.5);
-  /* The mark on a dark picture in either theme (the sign-in page): a white square, its screen drawn in deep indigo. */
-  --logo-inverse: #ffffff;
-  --logo-inverse-ink: oklch(0.3 0.12 272);
   color-scheme: light;
 }
 
@@ -259,8 +256,6 @@
   --color-toast-action-foreground: var(--toast-action-foreground);
   --color-letterbox: var(--letterbox);
   --color-scrim: var(--scrim);
-  --color-logo-inverse: var(--logo-inverse);
-  --color-logo-inverse-ink: var(--logo-inverse-ink);
   /* Type steps between Tailwind's (#372): row and meta lines, large controls and lead text, and the
      smallest labels on a thumbnail. Every size in the CMS is one of these or Tailwind's own. */
   --text-2xs: 0.6875rem;
@@ -301,15 +296,15 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
-  /* A field focused by Tab or Shift+Tab scrolls clear of an editor's save alert stuck at the top (#479): room for an
-     alert of three lines, and under 64rem for the phone's top bar above it too, 3.5rem (WCAG 2.4.11, review of #485).
-     The alert sticks while the editor is narrow, which a wide window can be too, beside the agent drawer. */
+  /* A field focused by Tab or Shift+Tab scrolls clear of an editor's save alert stuck at the top (#479): room for the
+     alert as it is measured (--save-alert-height, SaveAlert; none while it scrolls with the form, #495), and under 64rem
+     for the phone's top bar above it too, 3.5rem (WCAG 2.4.11, review of #485). */
   html:has([data-save-alert]) {
-    scroll-padding-top: 8.5rem;
+    scroll-padding-top: calc(var(--save-alert-height, 0px) + 0.5rem);
   }
   @media (width < 64rem) {
     html:has([data-save-alert]) {
-      scroll-padding-top: 12rem;
+      scroll-padding-top: calc(3.5rem + var(--save-alert-height, 0px) + 0.5rem);
     }
   }
   /* A fieldset shrinks like any box (browsers default it to its content's width), so a row of chips can wrap. */

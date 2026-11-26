@@ -84,6 +84,25 @@ test('a save that fails says so under the top bar at phone width, in both editor
   await expect(above).toBeFocused();
   const [field, cover] = await Promise.all([above.boundingBox(), alert.boundingBox()]);
   expect(field!.y).toBeGreaterThanOrEqual(cover!.y + cover!.height - 1);
+  // A refusal long enough to wrap to many lines: the room kept is the alert's own height, measured, not a fixed three
+  // lines' (#495), so the field reached by Shift+Tab is still clear of it.
+  await page.unroute('**/api/tools/save_spot');
+  const long = `That duration cannot be saved: ${'the spot plays for longer than its template allows, '.repeat(6)}so choose a shorter one.`;
+  await page.route('**/api/tools/save_spot', (route) => route.fulfill({ status: 400, json: { error: 'invalid_input', message: long } }));
+  await duration.fill('13');
+  const refused = page.locator('[data-save-alert]').filter({ hasText: 'so choose a shorter one.' });
+  await expect(refused).toBeVisible();
+  expect((await refused.boundingBox())!.height).toBeGreaterThan(200);
+  await duration.focus();
+  await page.evaluate(async () => {
+    const field = document.activeElement as HTMLElement;
+    const alertBox = document.querySelector('[data-save-alert]')!.getBoundingClientRect();
+    window.scrollBy(0, field.getBoundingClientRect().top - alertBox.bottom);
+  });
+  await page.keyboard.press('Shift+Tab');
+  await expect(above).toBeFocused();
+  const [field2, cover2] = await Promise.all([above.boundingBox(), refused.boundingBox()]);
+  expect(field2!.y).toBeGreaterThanOrEqual(cover2!.y + cover2!.height - 1);
   await page.unroute('**/api/tools/save_spot');
 
   // The playlist editor: its alert under the bar too, the page scrolled to its foot.

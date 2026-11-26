@@ -5,8 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./sha256": "./src/sha256.ts",
-    "./frame": "./src/frame.ts"
+    "./sha256": "./src/sha256.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

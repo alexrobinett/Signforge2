@@ -171,7 +171,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     const d = options.state.read()[key];
     if (!d) return;
     unsavedHere.add(d.id);
-    unsaved.add(d.id);
+    unsaved.set(d.id, () => options.currentOrg() === d.orgId);
   };
   const state = {
     read: options.state.read,
@@ -256,8 +256,12 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         return settle((x) => ({ ...x, status: 'unsaved' }));
       }
       if (answer.version !== undefined) moved(answer.version);
-      unsavedHere.delete(id);
-      unsaved.delete(id);
+      // Saved, unless a field was typed meanwhile and not sent: that one is still unsaved (#479).
+      const now = state.read()[key];
+      if (!now || now.id !== id || now.edit === sent) {
+        unsavedHere.delete(id);
+        unsaved.delete(id);
+      }
       settle((x) => ({
         ...x,
         record: answer.record ?? x.record,
@@ -278,7 +282,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         unsaved.delete(id);
       } else {
         unsavedHere.add(id);
-        unsaved.add(id);
+        unsaved.set(id, () => options.currentOrg() === orgId);
       }
       settle((x) => ({ ...x, status: 'unsaved', stale: isStale(err), gone, error: isStale(err) ? STALE : toolMessage(err) }));
     }
@@ -361,9 +365,15 @@ let sending = 0;
 
 /**
  * Drafts edited and not saved, by draft id, in every store: a settings field typed and not left, a save that failed
- * (review of #461, #466). Kept until saved or dropped.
+ * (review of #461, #466). Kept until saved or dropped. Each with whether it can still be saved: one of an org the tab
+ * has left cannot, so it does not make the tab ask before closing (#479).
  */
-const unsaved = new Set<string>();
+const unsaved = new Map<string, () => boolean>();
+
+/** An edit outside these drafts that is not saved (an AI choice that got no answer, #479): counted as theirs are. */
+export const noteUnsaved = (id: string, saveable: () => boolean) => void unsaved.set(id, saveable);
+/** That edit saved, or let go. */
+export const noteSaved = (id: string) => void unsaved.delete(id);
 
 /**
  * Every save still waiting out its autosave delay, in every store. Leaving the org would strand
@@ -401,4 +411,4 @@ export function autosave(clock: Clock, ms: number, save: (key: string) => Promis
 export const saveWaiting = () => Promise.all([...waiting].map((now) => now()));
 
 /** Whether an edit is not saved yet: waiting, on its way, failed, or typed and not sent. Closing the tab now could lose it. */
-export const savesWaiting = () => waiting.size > 0 || sending > 0 || unsaved.size > 0;
+export const savesWaiting = () => waiting.size > 0 || sending > 0 || [...unsaved.values()].some((saveable) => saveable());

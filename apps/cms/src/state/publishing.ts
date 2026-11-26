@@ -471,8 +471,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     acks: SampleSpot[] = [],
   ): Promise<boolean> {
     const { made, ifDefault } = byDefault;
-    // Asked in an org the tab has left, or is leaving (a drawer's Publish answered late): it is not sent (#479).
-    if (!showing(orgId)) return false;
+    // Asked in an org the tab has left, or is leaving (a drawer's Publish answered late): it is not sent (#479), and
+    // said, as the sidebar's Publish says it (#495).
+    if (!showing(orgId)) {
+      toast.error(refused, { description: 'The organization is changing. Publish once it shows.' });
+      return false;
+    }
     pending(true);
     try {
       // Once each: a chosen default may be the entry's own playlist.
