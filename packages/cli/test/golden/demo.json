@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
-      "onPrimary": "#ffffff",
       "accent": "#f97316",
-      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb"
+      "muted": "#a5b4cb",
+      "onPrimary": "#ffffff",
+      "onAccent": "#000000"
     },
     "shape": "soft",
     "fonts": {
@@ -109,10 +109,6 @@
       "size": 582,
       "type": "image/svg+xml"
     },
-    "3a83deb54995c724e62b81dc325c0369417298971f81df8f7d1d283241e48644": {
-      "size": 393717,
-      "type": "text/html"
-    },
     "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3": {
       "size": 1042,
       "type": "image/svg+xml"
@@ -159,6 +155,10 @@
     },
     "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
       "size": 395766,
+      "type": "text/html"
+    },
+    "528cedb9acf5da986fcc062f4cf48e7ce4f0bf5e6d65964ec292d7c0806e2200": {
+      "size": 393904,
       "type": "text/html"
     },
     "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f": {
@@ -224,6 +224,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -236,7 +237,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -382,6 +382,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -394,7 +395,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -436,7 +436,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "3a83deb54995c724e62b81dc325c0369417298971f81df8f7d1d283241e48644"
+      "html": "528cedb9acf5da986fcc062f4cf48e7ce4f0bf5e6d65964ec292d7c0806e2200"
     },
     "base/cstore-promo@1.3.1": {
       "manifest": {
@@ -755,6 +755,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -771,9 +773,7 @@
                 "label": "Source",
                 "default": ""
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "crawlLabel": {
             "type": "text",
@@ -864,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
+              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -892,18 +892,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              },
-              "label": "Weather"
+              }
             },
             "headlines": {
+              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              },
-              "label": "Headlines"
+              }
             }
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -929,6 +929,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -955,9 +957,7 @@
                 "type": "image",
                 "label": "Photo"
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "language": {
             "type": "text",
@@ -1015,14 +1015,14 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1072,6 +1072,8 @@
           "events": {
             "type": "list",
             "label": "Bookings",
+            "maxItems": 25,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1096,9 +1098,7 @@
                 "label": "Organiser",
                 "default": ""
               }
-            },
-            "maxItems": 25,
-            "default": []
+            }
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,13 +1142,13 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     }
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "e4c27fa6c2f545d0d87c43fa75618cee2587b5d4a71693c418c00cdc6c7e7c0b"
+  "id": "3f12a1557b16e575b9266bc236a1af16c12759ee9088a1d7ae958dc21a4064f2"
 }
