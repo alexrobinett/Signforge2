@@ -131,11 +131,11 @@ interface RenderArgs {
 /**
  * Runs in the host page: the screen's Frame host (`window.SFFrameHost`, #331) on one template spot, as
  * a slot drives it. Resolves with the time from `init` to `ready`, or the template's error, or neither
- * when the player would have given up on it: it navigated away (its frame loaded again), the ready
- * timeout passed, or it said ready before it had `init` (the host gives that no time). Leaves `__sfPlay`
- * on the window to send `play`.
+ * when the player would have given up on it: it navigated away (its frame loaded again), or the ready
+ * timeout passed. `beforeInit`: it said ready before it had `init`, which the host gives no time.
+ * Leaves `__sfPlay` on the window to send `play`.
  */
-async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; error: string | null }> {
+async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; error: string | null; beforeInit: boolean }> {
   const open: unknown = Reflect.get(Reflect.get(window, 'SFFrameHost') ?? {}, 'openFrameHost');
   if (typeof open !== 'function') throw new Error('the host page has no Frame host');
   // One small PNG for every image field: the template gets a real image to decode.
@@ -159,13 +159,13 @@ async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; er
   return new Promise((resolve) => {
     // Counted from when the template's frame is added. The player counts from the start of the
     // spot's prepare, a few ms earlier, so this is no stricter than a screen.
-    setTimeout(() => resolve({ readyMs: null, error: null }), a.readyTimeoutMs);
+    setTimeout(() => resolve({ readyMs: null, error: null, beforeInit: false }), a.readyTimeoutMs);
     host.start().then(
-      (readyMs) => resolve({ readyMs, error: null }),
+      (readyMs) => resolve({ readyMs, error: null, beforeInit: readyMs === null }),
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         const prefix = 'template error: ';
-        resolve({ readyMs: null, error: message.startsWith(prefix) ? message.slice(prefix.length) : null });
+        resolve({ readyMs: null, error: message.startsWith(prefix) ? message.slice(prefix.length) : null, beforeInit: false });
       },
     );
   });
@@ -241,9 +241,10 @@ async function render(
       images,
       readyTimeoutMs: READY_TIMEOUT_MS,
     };
-    const { readyMs, error } = await page.evaluate(renderInHost, args);
+    const { readyMs, error, beforeInit } = await page.evaluate(renderInHost, args);
     // The SDK forwards an uncaught error as `Uncaught <name>: <message>`; Chromium's own report of it is the problem.
     if (error !== null && !error.startsWith('Uncaught ')) problems.add(`failed to prepare: ${error}`);
+    if (beforeInit) problems.add('reported ready before init');
 
     let frames: TemplateRender['frames'] = null;
     if (readyMs !== null) {

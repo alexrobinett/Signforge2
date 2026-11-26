@@ -7,6 +7,7 @@ src/runner/check.ts    the render, what it refuses, and the start-up canary (Pla
 src/runner/server.ts   the runner's HTTP API in the container: GET /health, POST /check; probes and queue
 src/worker/index.ts    the Worker, the per-org Durable Object that starts its container, and CheckSlots
 build.ts               `pnpm build`: dist/runner.mjs and dist/package.json (the Playwright the tests ran)
+frame-host-script.ts   player-core's Frame host bundled as a script for the host page; build.ts and the tests inline it
 Dockerfile             Node, Playwright's Chromium shell, the two files above
 ```
 
