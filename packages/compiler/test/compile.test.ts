@@ -87,7 +87,7 @@ describe('compileScreen', () => {
 
   it('keeps only the schedule entries that target this screen, its groups or the whole org', async () => {
     const input = org();
-    const e = (id: string, target: 'org' | 'group' | 'screen', targetId?: string) => ({ id, playlist: 'all-day', priority: 1, target, targetId });
+    const e = (id: string, target: 'org' | 'group' | 'screen', targetId?: string) => ({ id, playlist: 'all-day', priority: 1, target, targetId, order: 0 });
     input.schedule = [
       e('everyone', 'org'),
       e('front-desk', 'group', 'front'),
@@ -122,7 +122,7 @@ describe('compileScreen', () => {
     expect(Object.keys(lean.dataSources)).toEqual(['weather']);
 
     // A group takeover makes the back room playlist reachable, and with it the still photo.
-    input.schedule = [{ id: 'evenings', playlist: 'back-room', priority: 5, target: 'group', targetId: 'front', from: '18:00', to: '22:00' }];
+    input.schedule = [{ id: 'evenings', playlist: 'back-room', priority: 5, target: 'group', targetId: 'front', from: '18:00', to: '22:00', order: 0 }];
     const full = (await compileScreen(input, opts())).manifest!;
     expect(Object.keys(full.playlists).sort()).toEqual(['all-day', 'back-room']);
     expect(Object.keys(full.spots).sort()).toEqual(['deal', 'still']);
@@ -159,7 +159,7 @@ describe('compileScreen', () => {
     input.files['e'.repeat(64)] = { size: 30, type: 'image/png' };
     input.files['f'.repeat(64)] = { size: 30, type: 'image/png' };
     // The back room's image spot plays the still photo (c), the deal's template the other (b).
-    input.schedule = [{ id: 'evenings', playlist: 'back-room', priority: 5, target: 'group', targetId: 'front', from: '18:00', to: '22:00' }];
+    input.schedule = [{ id: 'evenings', playlist: 'back-room', priority: 5, target: 'group', targetId: 'front', from: '18:00', to: '22:00', order: 0 }];
     const { manifest } = await compileScreen(input, opts());
     expect(Object.keys(manifest!.files).sort()).toEqual(['a', 'b', 'c', 'e'].map((c) => c.repeat(64)));
     expect(manifest!.files['b'.repeat(64)]).toMatchObject({ sample: 'e'.repeat(64) });
@@ -178,13 +178,13 @@ describe('compileScreen', () => {
       durationMs: 1000,
     });
     input.playlists.push({ id: 'elsewhere', name: 'Elsewhere', transition: { type: 'cut' }, items: [{ spot: 'draft' }] });
-    input.schedule = [{ id: 'kitchen-only', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'kitchen' }];
+    input.schedule = [{ id: 'kitchen-only', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'kitchen', order: 0 }];
     const result = await compileScreen(input, opts());
     expect(result.problems).toEqual([]);
     expect(Object.keys(result.manifest!.spots)).not.toContain('draft');
 
     // Once this screen reaches it, it is reported, alongside any manifest problem.
-    input.schedule = [{ id: 'front', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'front' }];
+    input.schedule = [{ id: 'front', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'front', order: 0 }];
     input.defaultPlaylist = 'missing';
     expect((await compileScreen(input, opts())).problems).toEqual([
       "spot draft: duration 1000 ms is outside the template's range 4000 to 60000",
@@ -195,8 +195,8 @@ describe('compileScreen', () => {
   it('reports schedule entries it cannot place instead of dropping them', async () => {
     const input = org();
     input.schedule = [
-      { id: 'typo', playlist: 'all-day', priority: 1, target: 'screens' as never, targetId: 'counter' },
-      { id: 'nobody', playlist: 'all-day', priority: 1, target: 'group' },
+      { id: 'typo', playlist: 'all-day', priority: 1, target: 'screens' as never, targetId: 'counter', order: 0 },
+      { id: 'nobody', playlist: 'all-day', priority: 1, target: 'group', order: 1 },
     ];
     expect((await compileScreen(input, opts())).problems).toEqual([
       'schedule entry typo: target must be org, group or screen',

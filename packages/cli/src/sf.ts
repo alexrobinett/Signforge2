@@ -56,7 +56,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
-import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import { compileScreen, fontById, fontFilePath, onColor, reaches, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { imageSample } from '@signforge/media/sample';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
@@ -249,14 +249,16 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   const sourceDefs = existsSync(sourcesPath) ? readJson<Record<string, { url: string; refreshS: number; format?: 'json' | 'ical' | 'rss' }>>(sourcesPath) : {};
   const dataSources: DataSource[] = Object.entries(sourceDefs).map(([id, d]) => ({ id, refreshS: d.refreshS }));
 
-  const sched = readJson<{ defaultPlaylist: string; entries?: TargetedEntry[] }>(join(projectDir, 'schedule.json'));
-  const schedule = (sched.entries ?? []).map((e) => ({
+  const sched = readJson<{ defaultPlaylist: string; entries?: Omit<TargetedEntry, 'order'>[] }>(join(projectDir, 'schedule.json'));
+  // In the file's order: of two otherwise tied entries a screen plays the later.
+  const schedule: TargetedEntry[] = (sched.entries ?? []).map((e, order) => ({
     ...e,
     targetId: e.targetId ?? (e.target === 'screen' ? screen.id : e.target === 'group' ? groups[0] : undefined),
+    order,
   }));
   for (const e of schedule) {
-    const elsewhere = (e.target === 'group' && !groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId !== screen.id);
-    if (elsewhere) console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
+    if (!reaches(e, { id: screen.id, groups }))
+      console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
   }
 
   const brand = await readBrand(projectDir, problems, addBlob, addMedia);

@@ -231,10 +231,12 @@ const toPlaylist = (p: PublishedPlaylist): Playlist => ({
   items: p.items.map((spot) => ({ spot })),
 });
 
+/** A row as the Screen schedule takes it: sorted by when it was published. */
 function toEntry(e: ScheduleEntryRow): TargetedEntry {
   const days = json<number[] | null>(e.daysJson, null);
   return {
     id: e.id,
+    order: e.publishedAt ?? 0,
     playlist: e.playlistId,
     priority: e.priority,
     target: e.target,
@@ -267,14 +269,11 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
     const pub = published(row);
     return pub ? [toPlaylist(pub)] : [];
   });
-  // In publish order, oldest first: of two otherwise tied entries a screen plays the later (the contract's ScheduleEntry).
-  const schedule = graph.entries
-    .flatMap((row) => {
-      const pub = published(row);
-      return pub ? [pub] : [];
-    })
-    .sort((a, b) => (a.publishedAt ?? 0) - (b.publishedAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map(toEntry);
+  // Ordered, and kept to what reaches the screen, by the compiler's Screen schedule.
+  const schedule = graph.entries.flatMap((row) => {
+    const pub = published(row);
+    return pub ? [toEntry(pub)] : [];
+  });
   const displayHours = screen.displayHoursJson ? JSON.parse(screen.displayHoursJson) : undefined;
   const { brand, unavailable: unavailableKits } = brandInput(graph, screen, files);
   return {
