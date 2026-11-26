@@ -78,10 +78,7 @@ const renditionInput = z.object({
   size: bytes,
   width: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
   height: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
-  sample: z
-    .object({ sha256, size: bytes })
-    .optional()
-    .describe("The rendition's sample, a PNG (@signforge/media makes it); none for SVG or an image with transparent pixels"),
+  sample: z.object({ sha256, size: bytes }).optional().describe('Its sample PNG from @signforge/media; none for SVG or transparency'),
 });
 
 const listAssets = defineTool({

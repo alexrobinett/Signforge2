@@ -16,7 +16,7 @@ const VIDEO_ONLY = ['sha256', 'type', 'size'] as const;
 const startUpload = defineTool({
   name: 'start_upload',
   description:
-    "Start an upload; PUT its files, then call finalize_upload. kind image: a landscape and a portrait rendition made with @signforge/media (describe(asset) has the rules), JPEG, PNG or WebP (an SVG as it is, for both), each with its SHA-256, type, bytes, pixel size and, if raster without transparency, its sample. Returns { asset, uploads }: a PUT URL and headers per file the server lacks, until expiresAt. kind image with a pending image's assetId alone: new URLs for its files not yet PUT. kind video: an MP4 screens play as it is (describe(asset) has the spec), by SHA-256, type and size. Returns { asset, upload }: a multipart upload, part n being bytes from (n-1)*partBytes; keep each part's ETag. upload is null when the file is held already. Pass an idempotencyKey so a retry makes one asset.",
+    "Start an upload; PUT its files, then call finalize_upload. kind image: its landscape and portrait renditions made with @signforge/media; with a pending image's assetId alone, new URLs for its files not yet PUT. kind video: one MP4, by SHA-256, type and size. Pass an idempotencyKey so a retry makes one asset. describe(asset) has the rules, the video spec and how the uploads work. Returns { asset, uploads } for an image, { asset, upload } for a video (null when the file is held already).",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
