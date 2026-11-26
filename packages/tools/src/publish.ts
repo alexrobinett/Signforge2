@@ -10,7 +10,7 @@
  * commit, through the notifier's `manifests` (the API: a queue, 50 screens a message). The same
  * batch deletes the weather sources the spot editor made that no spot binds any more.
  *
- * `end_takeover` deletes a takeover and publishes that alone, the same way, in one batch.
+ * `takeover` ends a takeover, deleting it and publishing that alone, the same way, in one batch.
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
@@ -43,6 +43,8 @@ const publishManifestToScreen = defineTool({
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
+  // A developer's path (`sf push`, /admin), which act as the system: no agent pushes a raw manifest (#345).
+  people: true,
   input: z.object({
     screenId: id('screen'),
     manifestId: z.string().regex(SHA256, 'not a manifest id (64 lowercase hex characters)').describe("The manifest's id, the SHA-256 in its `id` field"),
@@ -139,9 +141,9 @@ interface HeldTo {
 
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
- * compile every screen, store and switch the changed ones. `publish`, `end_takeover`, and an
+ * compile every screen, store and switch the changed ones. `publish`, `takeover`, and an
  * approved request. `held`: what it may publish only while it is still so (`HeldTo`), each held to
- * the commit. `added`: entries staged before this in the call's batch (`publish_takeover`).
+ * the commit. `added`: entries staged before this in the call's batch (`takeover`'s publish).
  */
 export async function runPublish(
   ctx: ToolContext<unknown>,
@@ -325,51 +327,64 @@ const publish = defineTool({
   },
 });
 
-const endTakeover = defineTool({
-  name: 'end_takeover',
-  description:
-    'End a takeover now: delete it and publish that alone, in one step, so its screens drop it at once (a screen ends the spot on screen when the winning takeover changes) and nothing is left half done. No draft is published with it. Returns what publish returns; publish is null if the takeover was never published.',
-  scope: 'content:publish',
-  minRole: 'editor',
-  mutates: true,
-  publishes: true,
-  input: z.object({ scheduleEntryId: id('schedule entry').describe('The takeover') }),
-  output: outputs.end_takeover,
-  example: { scheduleEntryId: 'sch_example' },
-  target: (input) => ({ kind: 'schedule_entry', id: input.scheduleEntryId }),
-  handler: async (ctx) => {
-    const row = await ctx.org.scheduleEntries.get(ctx.input.scheduleEntryId);
-    if (!row || row.endsAt === null) throw notFound('takeover', ctx.input.scheduleEntryId);
-    return runPublish(ctx, [], [row.id]);
-  },
-});
+/** What `takeover` takes to publish a new one, refused with `end`. */
+const PUBLISH_ONLY = ['playlistId', 'target', 'groupId', 'screenId', 'startsAt', 'endsAt', 'with'] as const;
 
-const publishTakeover = defineTool({
-  name: 'publish_takeover',
+const takeover = defineTool({
+  name: 'takeover',
   description:
-    'Take over screens now: make a takeover and publish it, with the drafts it needs pinned at their versions (its playlist and spots, if never published), in one step, so it is sent whole or not at all: one that cannot be published leaves no draft behind. Nothing else is published with it. Takes what start_takeover takes, and with, the drafts to publish beside it. Returns what publish returns, and the takeover as entry.',
+    'Take over screens now, or end a takeover now, in one step sent whole or not at all; nothing else is published with it. action publish takes what start_takeover takes, makes the takeover and publishes it, with the drafts it needs in with, each at its version (its playlist and spots, if never published); one that cannot be published leaves no draft. action end, with scheduleEntryId, deletes a takeover and publishes that, so its screens drop it at once. Returns what publish returns, and for publish the takeover as entry.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   publishes: true,
   input: z
-    .object({
-      ...takeoverFields,
+    .strictObject({
+      action: z.enum(['publish', 'end']).describe('publish: make one and publish it; end: end one'),
+      scheduleEntryId: id('schedule entry').optional().describe('end: the takeover'),
+      playlistId: takeoverFields.playlistId.optional(),
+      target: takeoverFields.target.optional(),
+      groupId: takeoverFields.groupId,
+      screenId: takeoverFields.screenId,
+      startsAt: takeoverFields.startsAt,
+      endsAt: takeoverFields.endsAt.optional(),
       with: z
         .array(draftRef.extend({ version: z.number().int().positive() }))
         .max(500)
         .optional()
-        .describe('Drafts published with it, each at the version chosen: its playlist and spots, if never published'),
+        .describe('publish: drafts published with it, each at the version chosen: its playlist and spots, if never published'),
     })
-    .refine(aimed, AIMED),
-  output: outputs.publish_takeover,
-  example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
-  // A refused press has no output (`refusedPress`): no target then.
-  target: (_input, output: { entry: { id: string } } | undefined) => (output ? { kind: 'schedule_entry', id: output.entry.id } : undefined),
+    .superRefine((v, ctx) => {
+      const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+      if (v.action === 'end') {
+        if (v.scheduleEntryId === undefined) issue('scheduleEntryId', 'end needs the takeover: scheduleEntryId');
+        for (const k of PUBLISH_ONLY) if (v[k] !== undefined) issue(k, `${k} is for publish: end takes scheduleEntryId alone`);
+        return;
+      }
+      if (v.scheduleEntryId !== undefined) issue('scheduleEntryId', 'publish makes a new takeover: scheduleEntryId is for end');
+      for (const k of ['playlistId', 'target', 'endsAt'] as const) if (v[k] === undefined) issue(k, `publish needs ${k}`);
+      if (!aimed(v)) issue('target', AIMED);
+    }),
+  output: outputs.takeover,
+  example: { action: 'publish', playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
+  // A refused press has no output (`refusedPress`): no target then, for a new one.
+  target: (input, output: { entry?: { id: string } } | undefined) => {
+    const entryId = input.scheduleEntryId ?? output?.entry?.id;
+    return entryId === undefined ? undefined : { kind: 'schedule_entry', id: entryId };
+  },
   handler: async (ctx) => {
     const { org, input, write } = ctx;
+    if (input.action === 'end') {
+      // Given with end: the input refuses it otherwise.
+      const entryId = input.scheduleEntryId!;
+      const row = await org.scheduleEntries.get(entryId);
+      if (!row || row.endsAt === null) throw notFound('takeover', entryId);
+      return runPublish(ctx, [], [row.id]);
+    }
+    // Given with publish: the input refuses it otherwise.
+    const fields = { ...input, playlistId: input.playlistId!, target: input.target!, endsAt: input.endsAt! };
     // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
-    const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())));
+    const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, fields, Date.now())));
     const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], {}, [], [made]);
     // Held (its playlist not published, a check it fails): nothing is written, not even the draft.
     const held = out.held.find((h) => h.kind === 'schedule_entry' && h.id === made.id);
@@ -573,4 +588,4 @@ const countDrafts = defineTool({
   },
 });
 
-export const publishTools = [publishManifestToScreen, publish, endTakeover, publishTakeover, rollBackPublish, listPublishes, getPublish, countDrafts];
+export const publishTools = [publishManifestToScreen, publish, takeover, rollBackPublish, listPublishes, getPublish, countDrafts];

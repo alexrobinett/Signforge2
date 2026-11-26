@@ -2,7 +2,7 @@
  * `@signforge/media-check`: is this video one a screen plays well? See README.md.
  *
  * `checkVideo` reads an MP4's header through a range reader and checks it against the contract's
- * `VIDEO_SPEC`. The CMS runs it on the file before upload, `finalize_video_upload` over R2 range
+ * `VIDEO_SPEC`. The CMS runs it on the file before upload, `finalize_upload` over R2 range
  * reads after. `videoProblems` is the rule alone: `sf build` feeds it what ffprobe reports.
  */
 import { VIDEO_SPEC } from '@signforge/contract';

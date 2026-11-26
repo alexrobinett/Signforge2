@@ -87,7 +87,10 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
     if (!result) return { name: 'read', input: { type: 'playlist' } };
     if (lastCall === 'read') {
       const read = JSON.parse(result.replace(/^<data>\n/, '').replace(/\n<\/data>$/, ''));
-      return { name: 'start_takeover', input: { playlistId: read.items[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() } };
+      return {
+        name: 'takeover',
+        input: { action: 'publish', playlistId: read.items[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() },
+      };
     }
     return { card: { groups: [], steps: [], ...STUB_TAKEN } };
   }

@@ -218,7 +218,7 @@ describe("the drawer's drafts, in the store", () => {
 
     await store.getState().undoDrafts(1);
     expect(tools.calls).toEqual([
-      { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new', ifVersion: 1 }, org: 'org_1' },
+      { name: 'delete', input: { type: 'schedule_entry', id: 'sch_new', ifVersion: 1 }, org: 'org_1' },
       { name: 'save_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 }, org: 'org_1' },
     ]);
     expect(at().drafts.status).toBe('undone');
@@ -256,14 +256,14 @@ describe("the drawer's drafts, in the store", () => {
     // The first call Undo makes, held on its way.
     let release: () => void = () => {};
     const held = new Promise<void>((r) => (release = r));
-    tools.answer = (name) => (name === 'delete_schedule_entry' ? held.then(() => ({})) : {});
+    tools.answer = (name) => (name === 'delete' ? held.then(() => ({})) : {});
     const undoing = store.getState().undoDrafts(1);
     await vi.waitFor(() => expect(tools.calls).toHaveLength(1));
     active.org = 'org_2';
     store.getState().forgetAgentDrawer();
     release();
     await undoing;
-    expect(tools.calls.map((c) => [c.name, c.org])).toEqual([['delete_schedule_entry', 'org_1']]);
+    expect(tools.calls.map((c) => [c.name, c.org])).toEqual([['delete', 'org_1']]);
   });
 
   it('shows a refused save as the refused call, overwriting nothing: someone saved the spot since', async () => {
@@ -429,7 +429,7 @@ describe("the drawer's drafts, in the store", () => {
     await store.getState().undoDrafts(1);
     expect(at().drafts).toMatchObject({ status: 'saved', error: 'save_playlist failed', undone: [2] });
     expect(tools.calls.map((c) => c.input)).toEqual([
-      { scheduleEntryId: 'sch_new', ifVersion: 1 },
+      { type: 'schedule_entry', id: 'sch_new', ifVersion: 1 },
       { playlistId: 'pls_a', spotIds: ['spt_1'], ifVersion: 7 },
     ]);
 

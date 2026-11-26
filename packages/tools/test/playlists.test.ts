@@ -100,17 +100,17 @@ describe('playlist drafts', () => {
 
   it('deletes a playlist, but not the default playlist or one a schedule entry plays', async () => {
     const { o, org, call } = await setup('pl-delete');
-    expect(await call('delete_playlist', { playlistId: o.playlist })).toMatchObject({
+    expect(await call('delete', { type: 'playlist', id: o.playlist })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { scheduleEntryIds: [o.scheduleEntry] },
     });
     await org.scheduleEntries.delete(o.scheduleEntry);
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
-    expect(await call('delete_playlist', { playlistId: o.playlist })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('delete', { type: 'playlist', id: o.playlist })).toMatchObject({ ok: false, error: 'conflict' });
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
 
-    expect(await ok(call('delete_playlist', { playlistId: o.playlist }))).toEqual({ deleted: o.playlist });
+    expect(await ok(call('delete', { type: 'playlist', id: o.playlist }))).toEqual({ deleted: o.playlist, version: null });
     expect(await call('get_playlist', { playlistId: o.playlist })).toMatchObject({ ok: false, error: 'not_found' });
     expect(await org.playlists.allItems()).toEqual(new Map());
   });
@@ -121,7 +121,7 @@ describe('playlist drafts', () => {
     const id = idOf(made);
     const read = (await ok(call('save_playlist', { playlistId: id, name: 'Lunch, edited', ifVersion: 1 }))).playlist as { version: number };
     expect(read.version).toBe(2);
-    expect(await ok(call('delete_playlist', { playlistId: id }))).toEqual({ deleted: id });
+    expect(await ok(call('delete', { type: 'playlist', id: id }))).toEqual({ deleted: id, version: null });
 
     // Made again with the same id, as a content import or `sf push` may: it continues the versions.
     await org.commit((await org.playlists.stage.insert({ id, name: 'Again', transitionJson: JSON.stringify({ type: 'cut' }) })).writes);
@@ -143,7 +143,7 @@ describe('playlist drafts', () => {
     for (const [name, input] of [
       ['save_playlist', { name: 'x' }],
       ['save_playlist', { playlistId: o.playlist, name: 'x' }],
-      ['delete_playlist', { playlistId: o.playlist }],
+      ['delete', { type: 'playlist', id: o.playlist }],
     ] as const)
       expect(await dispatch(registry, name, input, viewer)).toMatchObject({ ok: false, error: 'forbidden' });
   });
@@ -204,7 +204,7 @@ describe('playlist tools racing another commit (review of #97)', () => {
           },
         },
       };
-      expect(await editorCalls(racing)('delete_playlist', { playlistId: o.playlist }), what).toMatchObject({ ok: false, error: 'conflict' });
+      expect(await editorCalls(racing)('delete', { type: 'playlist', id: o.playlist }), what).toMatchObject({ ok: false, error: 'conflict' });
       expect(await org.playlists.get(o.playlist), what).toBeDefined();
     }
   });

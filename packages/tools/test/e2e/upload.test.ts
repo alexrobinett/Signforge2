@@ -1,6 +1,6 @@
 // The upload, end to end, in a real Chromium (Node test: vitest.e2e.config.ts): @signforge/media scales a 4K phone photo with an
 // EXIF rotation, the tools hand out presigned PUTs, the browser PUTs to the local bucket's S3 API
-// (Miniflare checks the signatures as R2 does), and finalize_asset checks what landed.
+// (Miniflare checks the signatures as R2 does), and finalize_upload checks what landed.
 //
 // The browser is Playwright's Chromium, or the one at SF_CHROMIUM.
 import { build } from 'esbuild';
@@ -176,7 +176,7 @@ describe('the presigned PUT and the server check', () => {
       const file = new File([await c.convertToBlob({ type: 'image/png' })], `${name}.png`, { type: 'image/png' });
       const media = (globalThis as any).SFMedia;
       const r = await media.makeRenditions(file);
-      const created = await (globalThis as any).callTool('create_asset_upload', media.assetUploadInput(name, r));
+      const created = await (globalThis as any).callTool('start_upload', media.assetUploadInput(name, r));
       return { created, landscape: { size: r.landscape.size, sha256: r.landscape.sha256, type: r.landscape.type } };
     }, name);
 
@@ -188,7 +188,7 @@ describe('the presigned PUT and the server check', () => {
         // Same length and type, other bytes: the signature binds those, not the content.
         const status = (await fetch(target.url, { method: 'PUT', headers: target.headers, body: new Uint8Array(size).fill(7) })).status;
         try {
-          await (globalThis as any).callTool('finalize_asset', { assetId });
+          await (globalThis as any).callTool('finalize_upload', { assetId });
           return { statuses: [status], refused: null };
         } catch (err: any) {
           return { statuses: [status], refused: err.result };
@@ -241,7 +241,7 @@ describe('a video', () => {
       const { asset } = await (globalThis as any).SFMedia.uploadVideo(file, { callTool });
       return { asset, calls, size: file.size };
     }, clip('high.mp4'));
-    expect(result.calls).toEqual(['create_video_upload', 'finalize_video_upload']);
+    expect(result.calls).toEqual(['start_upload', 'finalize_upload']);
     expect(result.asset).toMatchObject({ kind: 'video', status: 'verified', width: 320, height: 180, durationMs: 1000, size: result.size });
     const obj = await (await mf.getR2Bucket('BLOBS')).head(blobKey(result.asset.sha256));
     expect(obj?.size).toBe(result.size);
@@ -268,11 +268,11 @@ describe('a video', () => {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const sha256 = await (globalThis as any).SFMedia.sha256Hex(bytes);
       const call = (globalThis as any).callTool;
-      const { asset, upload } = await call('create_video_upload', { name: 'Sneaky', sha256, type: 'video/mp4', size: bytes.length });
+      const { asset, upload } = await call('start_upload', { kind: 'video', name: 'Sneaky', sha256, type: 'video/mp4', size: bytes.length });
       const part = upload.parts[0];
       const res = await fetch(part.url, { method: 'PUT', headers: part.headers, body: bytes });
       try {
-        await call('finalize_video_upload', { assetId: asset.id, uploadId: upload.uploadId, parts: [{ partNumber: 1, etag: res.headers.get('etag') }] });
+        await call('finalize_upload', { assetId: asset.id, uploadId: upload.uploadId, parts: [{ partNumber: 1, etag: res.headers.get('etag') }] });
         return null;
       } catch (err: any) {
         return { status: res.status, refused: err.result, assetId: asset.id };
@@ -283,7 +283,7 @@ describe('a video', () => {
   }, 30_000);
 });
 
-describe('delete_asset', () => {
+describe('delete, an asset', () => {
   it('refuses while a spot uses the asset', async () => {
     const outcome = await page.evaluate(async () => {
       const c = new OffscreenCanvas(640, 360);
@@ -295,7 +295,7 @@ describe('delete_asset', () => {
       const listed = (await call('list_assets', { query: 'used' })).assets.find((a: any) => a.id === asset.id);
       let refused = null;
       try {
-        await call('delete_asset', { assetId: asset.id });
+        await call('delete', { type: 'asset', id: asset.id });
       } catch (err: any) {
         refused = err.result;
       }
@@ -322,7 +322,7 @@ describe('an upload tried again', () => {
       let lost = false;
       const flaky = async (name: string, input: unknown) => {
         const out = await call(name, input);
-        if (name === 'create_asset_upload' && !lost) {
+        if (name === 'start_upload' && !lost) {
           lost = true;
           throw new Error('the connection dropped');
         }
@@ -358,7 +358,7 @@ describe('an upload whose URLs expired', () => {
       const late = async (name: string, input: any) => {
         calls.push([name, input.assetId]);
         const out = await call(name, input);
-        if (name === 'create_asset_upload') for (const u of out.uploads) u.expiresAt = Date.now() - 1000;
+        if (name === 'start_upload' && input.assetId === undefined) for (const u of out.uploads) u.expiresAt = Date.now() - 1000;
         return out;
       };
       const { asset } = await (globalThis as any).SFMedia.uploadImage(file, { callTool: late });
@@ -367,9 +367,9 @@ describe('an upload whose URLs expired', () => {
     });
     expect(outcome.asset.status).toBe('verified');
     expect(outcome.calls).toEqual([
-      ['create_asset_upload', undefined],
-      ['renew_asset_upload', outcome.asset.id],
-      ['finalize_asset', outcome.asset.id],
+      ['start_upload', undefined],
+      ['start_upload', outcome.asset.id],
+      ['finalize_upload', outcome.asset.id],
     ]);
     expect(outcome.listed).toEqual([outcome.asset.id]);
   }, 30_000);

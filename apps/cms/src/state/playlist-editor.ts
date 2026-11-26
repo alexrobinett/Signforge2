@@ -284,7 +284,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     async deletePlaylist(orgId, playlistId) {
       editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null } }));
       try {
-        await callTool('delete_playlist', { playlistId });
+        await callTool('delete', { type: 'playlist', id: playlistId });
         // Only once it is gone: a refused delete leaves the waiting save to run.
         drafts.drop(playlistId);
         await router.navigate({ to: '/playlists' });

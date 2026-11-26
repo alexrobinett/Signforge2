@@ -67,20 +67,13 @@ describe('the registry', () => {
       'check_publish_request',
       'claim_screen',
       'count_drafts',
-      'create_asset_upload',
-      'create_video_upload',
       'decline_publish_request',
-      'delete_asset',
-      'delete_data_source',
+      'delete',
       'delete_group',
-      'delete_playlist',
-      'delete_schedule_entry',
       'delete_spot',
       'describe',
       'disconnect',
-      'end_takeover',
-      'finalize_asset',
-      'finalize_video_upload',
+      'finalize_upload',
       'find_places',
       'finish_connection',
       'get_agent_draft',
@@ -124,14 +117,12 @@ describe('the registry', () => {
       'list_templates',
       'publish',
       'publish_manifest_to_screen',
-      'publish_takeover',
       'read',
       'read_table',
       'register_template_version',
       'remove_ai_provider',
       'remove_alert_channel',
       'remove_member',
-      'renew_asset_upload',
       'reopen_publish_request',
       'request_publish',
       'retry_alert_delivery',
@@ -154,6 +145,8 @@ describe('the registry', () => {
       'set_webhook_alert_channel',
       'start_connection',
       'start_takeover',
+      'start_upload',
+      'takeover',
       'test_ai_provider',
       'test_alert_channel',
       'update_agent_grant_scopes',
@@ -170,8 +163,6 @@ describe('the registry', () => {
       .sort();
     expect(keyed).toEqual([
       'claim_screen',
-      'create_asset_upload',
-      'create_video_upload',
       'request_publish',
       'save_brand_kit',
       'save_data_source',
@@ -180,6 +171,7 @@ describe('the registry', () => {
       'save_schedule_entry',
       'save_spot',
       'start_takeover',
+      'start_upload',
     ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
@@ -305,8 +297,8 @@ describe('whether editors publish (Q7, an org setting)', () => {
     agentLimiter: unlimited,
   });
   const editorsAgent = () => as('editor', ['content:read', 'content:draft', 'content:publish'], { kind: 'agent', id: 'grant-q7', clientId: 'agent-app' });
-  // Past the role and scope check, the manifest was never uploaded: not_found means the call was allowed.
-  const publish = (c: Caller) => dispatch(registry, 'publish_manifest_to_screen', { screenId: q.screen, manifestId: 'f'.repeat(64) }, c);
+  // Past the role and scope check, there is no such takeover: not_found means the call was allowed.
+  const publish = (c: Caller) => dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: 'sch_none' }, c);
   const setEditorsPublish = async (on: boolean) =>
     expect(await dispatch(registry, 'update_org_settings', { editorsPublish: on }, as('owner'))).toMatchObject({ ok: true });
 
@@ -334,9 +326,9 @@ describe('whether editors publish (Q7, an org setting)', () => {
 
   it('decides what an editor is offered', async () => {
     const offered = async () => describeTools(registry, await grantOf(as('editor'))).map((t) => t.name);
-    expect(await offered()).toContain('publish_manifest_to_screen');
+    expect(await offered()).toContain('takeover');
     await setEditorsPublish(false);
-    expect(await offered()).not.toContain('publish_manifest_to_screen');
+    expect(await offered()).not.toContain('takeover');
     expect(await offered()).toContain('update_screen');
     await setEditorsPublish(true);
   });

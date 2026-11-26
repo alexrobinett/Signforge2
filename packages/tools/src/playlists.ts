@@ -15,7 +15,7 @@ import { DECIDING, decidedMeanwhile, keptFor, playlistContent, shownVersion } fr
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
-import { defineTool, isAgent, notFound, ToolError } from './tool';
+import { defineTool, isAgent, notFound, ToolError, type ToolContext } from './tool';
 import { outputs, transition, type PlaylistView } from './outputs';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
@@ -223,7 +223,7 @@ const endedWith = async (org: OrgScope, playlistId: string, now: number) =>
   (await org.scheduleEntries.list()).filter((e) => ended(e, now) && (e.playlistId === playlistId || published(e)?.playlistId === playlistId));
 
 /** Why a playlist cannot be deleted now (it is the default, or a schedule entry plays it), or undefined. An ended takeover does not count. */
-async function inUse(org: OrgScope, playlistId: string): Promise<ToolError | undefined> {
+export async function playlistInUse(org: OrgScope, playlistId: string): Promise<ToolError | undefined> {
   if ((await org.settings.get())?.defaultPlaylistId === playlistId)
     return new ToolError('conflict', `playlist ${playlistId} is the default playlist; choose another default first`);
   const now = Date.now();
@@ -234,28 +234,17 @@ async function inUse(org: OrgScope, playlistId: string): Promise<ToolError | und
   return undefined;
 }
 
-const deletePlaylist = defineTool({
-  name: 'delete_playlist',
-  description:
-    'Delete a playlist, its draft and its published version. Its spots are not deleted. Refused with a conflict while it is the default playlist or a schedule entry plays it, in its draft or its published version: change those first, since screens play them. Takeovers of it that have ended are deleted with it. Returns { deleted: playlistId }.',
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ playlistId: id('playlist') }),
-  output: outputs.delete_playlist,
-  example: { playlistId: 'pls_example' },
-  target,
-  handler: async ({ org, input, write }) => {
-    await requirePlaylist(org, input.playlistId);
-    const used = await inUse(org, input.playlistId);
-    if (used) throw used;
-    for (const e of await endedWith(org, input.playlistId, Date.now())) write(org.scheduleEntries.stage.remove(e));
-    write(org.playlists.stage.delete(input.playlistId));
-    return { deleted: input.playlistId };
-  },
-  // Made the default or scheduled since the check, the foreign keys fail the batch: the same refusal.
-  refuseFailedCommit: async ({ org, input }) => inUse(org, input.playlistId),
-});
+/**
+ * Delete a playlist, its draft and its published version, not its spots (the `delete` tool, ./delete.ts): refused with a
+ * conflict while it is the default or a schedule entry plays it. Takeovers of it that have ended go with it.
+ */
+export async function deletePlaylist({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, playlistId: string) {
+  await requirePlaylist(org, playlistId);
+  const used = await playlistInUse(org, playlistId);
+  if (used) throw used;
+  for (const e of await endedWith(org, playlistId, Date.now())) write(org.scheduleEntries.stage.remove(e));
+  write(org.playlists.stage.delete(playlistId));
+}
 
 const setDefaultPlaylist = defineTool({
   name: 'set_default_playlist',
@@ -289,4 +278,4 @@ const setDefaultPlaylist = defineTool({
   },
 });
 
-export const playlistTools = [listPlaylists, getPlaylist, savePlaylist, revertPlaylistDraft, keepPlaylistDraft, deletePlaylist, setDefaultPlaylist];
+export const playlistTools = [listPlaylists, getPlaylist, savePlaylist, revertPlaylistDraft, keepPlaylistDraft, setDefaultPlaylist];

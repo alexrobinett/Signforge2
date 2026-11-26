@@ -220,7 +220,7 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   // A save sends its cleanup's deletes before it says Saved (`dropUnbound`, src/state/spot-editor.ts).
   const deletes: string[] = [];
-  const sent = (r: Request) => void (r.url().endsWith('/api/tools/delete_data_source') && deletes.push(r.url()));
+  const sent = (r: Request) => void (r.url().endsWith('/api/tools/delete') && deletes.push(r.url()));
   page.on('request', sent);
   await form.getByRole('button', { name: 'Change source' }).click();
   await form.getByLabel('News feed').selectOption({ label: 'World desk' });

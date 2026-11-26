@@ -201,7 +201,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       if (!source) return;
       await attempt(
         async () => {
-          await callTool('delete_data_source', { dataSourceId: source.id });
+          await callTool('delete', { type: 'data_source', id: source.id });
           await refresh(orgId);
           integrations((s) => ({ ...s, deleting: null, pending: false }));
         },

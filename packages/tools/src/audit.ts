@@ -20,14 +20,24 @@ const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
 
 /**
  * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
- * changed it too (#243). A screen command (#345) does what the tool it replaced did: its rows are found under that one's
- * name, by the command its input recorded.
+ * changed it too (#243). A screen command, a delete, a takeover and an upload (#345) do what the tools they replaced did:
+ * their rows are found under those tools' names, by the command, type, action or kind they recorded.
  */
 const ALSO: Record<string, { actions: readonly string[]; detailHas: string }> = {
   set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
   identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
   restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
   set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
+  delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
+  delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
+  delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
+  delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
+  publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
+  end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
+  create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
+  create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
+  finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
+  finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
 };
 
 const listAuditLog = defineTool({
@@ -48,7 +58,9 @@ const listAuditLog = defineTool({
       .min(1)
       .max(64)
       .optional()
-      .describe('Only this action, such as update_screen; identify_screen, restart_screen and set_display_override find those screen_command sent too'),
+      .describe(
+        'Only this action, such as update_screen. A replaced tool also finds the rows of the tool that does its job now: delete_playlist finds delete of a playlist, identify_screen finds screen_command identify, and so on',
+      ),
     target: z
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()

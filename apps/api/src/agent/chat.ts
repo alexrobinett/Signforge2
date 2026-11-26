@@ -102,7 +102,6 @@ export const NEVER_OFFERED: ReadonlySet<string> = new Set([
   'disconnect',
   // Code that runs on screens.
   'register_template_version',
-  'publish_manifest_to_screen',
 ]);
 
 /**
@@ -150,11 +149,10 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   update_screen: { title: 'Screen name', did: 'Drafted a new name for a screen' },
   // Behind a card the person presses (#269): what a press did.
   publish: { title: 'Publish', did: 'Published' },
-  start_takeover: { title: 'Takeover', did: 'Took over the screens' },
-  end_takeover: { title: 'End takeover', did: 'Ended the takeover' },
-  delete_playlist: { title: 'Delete playlist', did: 'Deleted a playlist' },
+  // Each names what both its actions or types do, as a role that may not press it is told (#345); `didOf` says what each did.
+  takeover: { title: 'Take over screens, or end a takeover', did: 'Took over the screens' },
+  delete: { title: 'Delete playlist, or remove schedule entry', did: 'Deleted a playlist' },
   cancel_invitation: { title: 'Cancel an invitation', did: 'Cancelled an invitation' },
-  delete_schedule_entry: { title: 'Remove schedule entry', did: 'Removed a schedule entry' },
   revoke_screen_credential: { title: 'Revoke credential', did: "Revoked a screen's credential" },
   // Its title names the three it stands for, as a role that may not press it is told (#345); `didOf` says what each command did.
   screen_command: { title: 'Display on or off, restart screen, identify screen', did: 'Sent the command to the screen' },
@@ -174,8 +172,17 @@ const COMMANDS_DID: Readonly<Record<string, string>> = {
   display_off: "Turned a screen's display off",
   display_auto: 'Set a screen to follow its display hours again',
 };
+/** What a press of a takeover's or a delete's card did, by its action or type, as the tools they replaced said it. */
+const ACTIONS_DID: Readonly<Record<string, string>> = {
+  'takeover:end': 'Ended the takeover',
+  'delete:schedule_entry': 'Removed a schedule entry',
+};
+
 const didOf = (name: string, input: Record<string, unknown>) =>
-  (name === 'screen_command' && typeof input.command === 'string' ? COMMANDS_DID[input.command] : undefined) ?? TOOL_CARDS[name]?.did ?? 'Done';
+  (name === 'screen_command' && typeof input.command === 'string' ? COMMANDS_DID[input.command] : undefined) ??
+  ACTIONS_DID[`${name}:${String(input.action ?? input.type)}`] ??
+  TOOL_CARDS[name]?.did ??
+  'Done';
 
 /**
  * The `org:manage` reads the drawer offers all the same, each only to whom its own scope and role allow (`describeTools`):
