@@ -5,6 +5,7 @@
  */
 import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
+import { importPlan, readLabelCsv, type ImportMode } from '~/lib/label-csv';
 import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
@@ -28,6 +29,20 @@ interface LabelsState {
   filter: { key: string; values: string[] } | null;
   /** The bulk "Labels…" dialog on the table's selection, while open: one key set to one value, or removed, on every screen. */
   bulk: BulkLabels | null;
+  /** "Import labels…", while open: the file as parsed, how an empty cell is read, and the send's progress (#188). */
+  import: LabelImport | null;
+}
+
+interface LabelImport {
+  /** Which opening this is, as `BulkLabels.opened`. */
+  opened: number;
+  orgId: string;
+  fileName: string | null;
+  /** The file's columns and rows, parsed once when it was chosen; null until one reads. */
+  file: { columns: string[]; rows: string[][] } | null;
+  mode: ImportMode;
+  pending: boolean;
+  error: string | null;
 }
 
 interface BulkLabels {
@@ -70,6 +85,14 @@ export interface LabelsSlice {
   closeBulkLabels: () => void;
   /** Sets the key to the value on every screen of the selection, or removes it from each, in one `update_screen_labels`. */
   applyBulkLabels: () => Promise<void>;
+  /** Opens "Import labels…" on the Screens page. */
+  openLabelImport: (orgId: string) => void;
+  closeLabelImport: () => void;
+  chooseImportMode: (mode: ImportMode) => void;
+  /** Reads a chosen file and parses it once: its rows, or why it cannot be read. */
+  readLabelFile: (file: File) => Promise<void>;
+  /** Sends the import, as the preview shows it for `screens`, in one `import_screen_labels`: all of it, or none. */
+  applyLabelImport: (screens: readonly ScreenView[]) => Promise<void>;
   /** Saves the editor's rows as one merge into the screen's labels, and closes it. */
   saveScreenLabels: (orgId: string, screen: ScreenView) => Promise<void>;
 }
@@ -95,12 +118,30 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const labels = (change: (l: LabelsState) => LabelsState) => set((s) => ({ labels: change(s.labels) }));
   const rows = (target: LabelTarget, change: (r: LabelRow[]) => LabelRow[]) =>
     labels((l) => ({ ...l, rows: { ...l.rows, [keyOf(target)]: change(labelRowsOf(l, target)) } }));
+  /**
+   * The one way labels are sent from the Screens page, a bulk edit or an import (#188): the call, then the screens and
+   * the keys read again, and the toast; the refusal's words, or null when it went.
+   */
+  async function sendLabels(orgId: string, send: () => Promise<unknown>, done: string): Promise<string | null> {
+    try {
+      await send();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: screensQuery(orgId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: labelKeysQuery(orgId).queryKey }),
+      ]);
+      if (orgOnScreen(router) === orgId) toast.success(done, { description: NEXT_PUBLISH });
+      return null;
+    } catch (err) {
+      return toolMessage(err);
+    }
+  }
+  const labelImport = (change: (i: LabelImport) => LabelImport) => labels((l) => ({ ...l, import: l.import && change(l.import) }));
   const bulk = (change: (b: BulkLabels) => BulkLabels) => labels((l) => ({ ...l, bulk: l.bulk && change(l.bulk) }));
   let openings = 0;
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
-    labels: { rows: {}, editor: null, copyFrom: '', filter: null, bulk: null },
+    labels: { rows: {}, editor: null, copyFrom: '', filter: null, bulk: null, import: null },
     openBulkLabels: (orgId, screenIds) =>
       labels((l) => ({ ...l, bulk: { opened: ++openings, orgId, screenIds, key: '', mode: 'set', value: '', pending: false, error: null } })),
     chooseBulkKey: (key) => bulk((b) => ({ ...b, key, error: null })),
@@ -119,18 +160,46 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
       // Cancel does not stop the call; what it answers belongs to this dialog only, which may have closed, or another opened.
       const mine = (change: (x: BulkLabels) => BulkLabels | null) => labels((l) => ({ ...l, bulk: l.bulk?.opened === b.opened ? change(l.bulk) : l.bulk }));
       const n = `${b.screenIds.length} ${b.screenIds.length === 1 ? 'screen' : 'screens'}`;
-      try {
-        await callTool('update_screen_labels', { screenIds: b.screenIds, ...(b.mode === 'set' ? { set: { [key]: value } } : { remove: [key] }) });
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: screensQuery(b.orgId).queryKey }),
-          queryClient.invalidateQueries({ queryKey: labelKeysQuery(b.orgId).queryKey }),
-        ]);
-        mine(() => null);
-        if (orgOnScreen(router) === b.orgId)
-          toast.success(b.mode === 'set' ? `Set ${key}: ${value} on ${n}` : `Removed ${key} from ${n}`, { description: NEXT_PUBLISH });
-      } catch (err) {
-        mine((x) => ({ ...x, pending: false, error: toolMessage(err) }));
-      }
+      const error = await sendLabels(
+        b.orgId,
+        () => callTool('update_screen_labels', { screenIds: b.screenIds, ...(b.mode === 'set' ? { set: { [key]: value } } : { remove: [key] }) }),
+        b.mode === 'set' ? `Set ${key}: ${value} on ${n}` : `Removed ${key} from ${n}`,
+      );
+      mine((x) => (error === null ? null : { ...x, pending: false, error }));
+    },
+
+    openLabelImport: (orgId) =>
+      labels((l) => ({ ...l, import: { opened: ++openings, orgId, fileName: null, file: null, mode: 'merge', pending: false, error: null } })),
+    closeLabelImport: () => labels((l) => ({ ...l, import: null })),
+    chooseImportMode: (mode) => labelImport((i) => ({ ...i, mode, error: null })),
+    async readLabelFile(file) {
+      const text = await file.text();
+      // Parsed once, here, where the file comes in: the preview and the send both read what this kept.
+      const read = readLabelCsv(text);
+      labelImport((i) => ({
+        ...i,
+        fileName: file.name,
+        file: read.ok ? { columns: read.columns, rows: read.rows } : null,
+        error: read.ok ? null : read.error,
+      }));
+    },
+    async applyLabelImport(screens) {
+      const i = get().labels.import;
+      if (!i?.file || i.pending) return;
+      const { changes, problems } = importPlan(i.file.columns, i.file.rows, screens, i.mode);
+      if (problems.length) return labelImport((x) => ({ ...x, error: 'Fix the file and choose it again: nothing is written while it has a problem.' }));
+      if (!changes.length) return labelImport((x) => ({ ...x, error: 'The file changes no screen’s labels.' }));
+      if (changes.length > MAX_BULK_SCREENS)
+        return labelImport((x) => ({ ...x, error: `An import changes at most ${MAX_BULK_SCREENS} screens; this file changes ${changes.length}. Split it.` }));
+      labelImport((x) => ({ ...x, pending: true, error: null }));
+      const n = `${changes.length} ${changes.length === 1 ? 'screen' : 'screens'}`;
+      const error = await sendLabels(
+        i.orgId,
+        () => callTool('import_screen_labels', { screens: changes.map(({ screenId, set, remove }) => ({ screenId, set, remove })) }),
+        `Labels imported on ${n}`,
+      );
+      // As the bulk dialog's: the reply belongs to this import only (#605).
+      labels((l) => ({ ...l, import: l.import?.opened === i.opened ? (error === null ? null : { ...l.import, pending: false, error }) : l.import }));
     },
     openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
     chooseFilterKey: (key) => labels((l) => ({ ...l, filter: { key, values: [] } })),
