@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./sha256": "./src/sha256.ts",
-    "./frame": "./src/frame.ts"
+    "./frame": "./src/frame.ts",
+    "./frame-host": "./src/frame-host.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

@@ -11,20 +11,17 @@ import {
   type FrameClock,
   type FrameFont,
   type FrameTheme,
-  type HostMessage,
   type Orientation,
   type ScreenManifest,
   type Spot,
   type TemplateManifest,
-  type TemplateMessage,
 } from '@signforge/contract';
-import { READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { READY_TIMEOUT_MS, resolveSpotData, screenLocale } from '@signforge/player-core';
+import { openFrameHost, type FrameHost } from '@signforge/player-core/frame-host';
 import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
-
-type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
@@ -55,10 +52,8 @@ type TemplateSpot = Extract<Spot, { kind: 'template' }>;
 
 /** A slot's template frame, and what its next `init` sends. */
 interface LiveFrame {
-  frame: HTMLIFrameElement;
-  wrapperFrame: HTMLIFrameElement;
-  /** The wrapper frame's window: the template's `parent`. */
-  wrapper: WrapperWindow;
+  /** The template's frames and the protocol with it (player-core's Frame host). */
+  host: FrameHost;
   protocol: number;
   /** The bundle's hash: an update to another bundle is a fresh load. */
   html: string;
@@ -72,8 +67,6 @@ interface LiveFrame {
   theme?: FrameTheme;
   orientation: Orientation;
   viewport: { width: number; height: number };
-  /** Settles on the frame's next `ready` or `error`. */
-  waiter?: { resolve: () => void; reject: (err: Error) => void };
 }
 
 /**
@@ -405,11 +398,11 @@ export class Slot {
       if (live.protocol < 2) {
         await this.prepare(spot, live.manifest, false);
       } else {
-        const signal = this.abort.signal;
-        this.size(live.wrapperFrame, fit);
+        live.host.resize(fit.viewport);
+        this.background(fit);
         live.orientation = fit.orientation;
         live.viewport = fit.viewport;
-        await this.resetToReady(live, signal);
+        await live.host.reset();
       }
     } catch (err) {
       // Cleared, or given another spot or a new draft meanwhile: nothing of this refit is on screen.
@@ -427,27 +420,10 @@ export class Slot {
     }
   }
 
-  private size(wrapperFrame: HTMLIFrameElement, fit: ReturnType<typeof fitTo>): void {
-    wrapperFrame.style.width = `${fit.viewport.width}px`;
-    wrapperFrame.style.height = `${fit.viewport.height}px`;
+  /** Behind a letterboxed template, the background it declares. */
+  private background(fit: ReturnType<typeof fitTo>): void {
     if (fit.background) this.el.style.setProperty('--slot-bg', fit.background);
     else this.el.style.removeProperty('--slot-bg');
-  }
-
-  /** `reset` the frame, which answers `loaded` and gets `init` from `live`; resolve on its `ready`. */
-  private async resetToReady(live: LiveFrame, signal: AbortSignal): Promise<void> {
-    let timer = 0;
-    try {
-      await Promise.race([
-        this.nextReady(() => this.post({ sf: live.protocol, type: 'reset' }), signal),
-        new Promise<never>((_, reject) => {
-          timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-    alive(signal);
   }
 
   clear(): void {
@@ -480,33 +456,6 @@ export class Slot {
   /** Set while a template spot is loaded. */
   private live?: LiveFrame;
 
-  private post(m: HostMessage): void {
-    const live = this.live;
-    if (live?.frame.contentWindow) live.wrapper.relay(live.frame.contentWindow, m);
-  }
-
-  /** Wait for the frame's next `ready`; `send` starts what leads to it. */
-  private nextReady(send: () => void, signal: AbortSignal): Promise<void> {
-    const live = this.live!;
-    live.waiter?.reject(new Error('superseded'));
-    return new Promise<void>((resolve, reject) => {
-      // Cleared once settled, so `waiter` is set only while a load, a refit or an update waits.
-      const waiter = {
-        resolve: () => {
-          if (live.waiter === waiter) live.waiter = undefined;
-          resolve();
-        },
-        reject: (err: Error) => {
-          if (live.waiter === waiter) live.waiter = undefined;
-          reject(err);
-        },
-      };
-      live.waiter = waiter;
-      signal.addEventListener('abort', () => waiter.reject(new Error('cancelled')), { once: true });
-      send();
-    });
-  }
-
   private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal, report: boolean): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
@@ -528,39 +477,39 @@ export class Slot {
     alive(signal);
 
     const fit = fitTo(t.manifest);
-
-    // The template runs in a wrapper frame the player writes and the template cannot touch. The
-    // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
-    // markup of its own runs, and no document can drop a policy it was given. The wrapper's
-    // policy, not the template's, also decides where the template's frame may navigate: nowhere
-    // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
-    // error page, without a request. It runs only the bundle's own scripts, each of which first
-    // takes WebRTC away from its realm (`containedFrames` in packages/player-core). See "Template containment" in docs/architecture.md.
-    const wrapperFrame = document.createElement('iframe');
-    // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
-    wrapperFrame.title = spot.name;
-    this.size(wrapperFrame, fit);
-    wrapperFrame.srcdoc = wrapperHtml;
-    // Rejects on abort, so a load cleared here settles: `play` waits for it (`fitted`).
-    const wrapped = new Promise<void>((resolve, reject) => {
-      wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal });
-      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    this.background(fit);
+    // The frames, their containment and the handshake are the Frame host's (player-core). Set once
+    // the wrapper has loaded, before the template's frame is added: what each `init` sends.
+    let live: LiveFrame | undefined;
+    const host = await openFrameHost({
+      container: this.el,
+      frames: { wrapper: wrapperHtml, template: templateHtml },
+      protocol,
+      title: spot.name,
+      size: fit.viewport,
+      // Read at each `loaded`: after an update (`reset`), the new spot's.
+      init: () => ({
+        data: live!.data,
+        assets: live!.assets,
+        durationMs: live!.spot.durationMs,
+        orientation: live!.orientation,
+        viewport: live!.viewport,
+        timezone: live!.manifest.screen.timezone,
+        locale: live!.locale,
+        clock: frameClock(),
+        ...(live!.theme ? { theme: live!.theme } : {}),
+      }),
+      label: spot.template,
+      signal,
+      // Once loaded: blank the slot and report it (`died`), so playback moves on. Aborted, so a resize
+      // before the slot is cleared cannot refit it and report a second death.
+      onNavigatedAway: () => {
+        this.abort?.abort();
+        this.died(`${live!.spot.id}: template navigated away`);
+      },
     });
-    this.el.appendChild(wrapperFrame);
-    await wrapped;
-    alive(signal);
-    const wrapper = wrapperFrame.contentWindow as WrapperWindow;
-    const frame = wrapper.document.createElement('iframe');
-    // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
-    // no popups, forms, or navigating any frame but its own.
-    frame.setAttribute('sandbox', TEMPLATE_SANDBOX);
-    frame.title = spot.name;
-    frame.srcdoc = templateHtml;
-
-    const live: LiveFrame = (this.live = {
-      frame,
-      wrapperFrame,
-      wrapper,
+    live = this.live = {
+      host,
       protocol,
       html: t.html,
       template: t.manifest,
@@ -572,58 +521,12 @@ export class Slot {
       theme,
       orientation: fit.orientation,
       viewport: fit.viewport,
-    });
-    // A second load is a navigation, which the policy turned into an error page. Fail the load or
-    // refit waiting; once loaded, blank the slot and report it (`died`), so playback moves on.
-    let loads = 0;
-    frame.addEventListener(
-      'load',
-      () => {
-        if (++loads < 2) return;
-        console.warn(`[sf] template ${spot.template} navigated away; removed`);
-        wrapperFrame.remove();
-        if (live.waiter) live.waiter.reject(new Error('template navigated away'));
-        else {
-          // Aborted, so a resize before the slot is cleared cannot refit it and report a second death.
-          this.abort?.abort();
-          this.died(`${live.spot.id}: template navigated away`);
-        }
-      },
-      { signal },
-    );
-    // One listener for the frame's life. It reads `live`, so after an update (`reset`) the frame's
-    // next `loaded` gets the new spot's init. The template's `parent` is the wrapper, so its
-    // messages arrive there.
-    wrapper.addEventListener(
-      'message',
-      (e: MessageEvent<TemplateMessage>) => {
-        if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
-        if (e.data.type === 'loaded') {
-          this.post({
-            sf: protocol,
-            type: 'init',
-            data: live.data,
-            assets: live.assets,
-            durationMs: live.spot.durationMs,
-            orientation: live.orientation,
-            viewport: live.viewport,
-            timezone: live.manifest.screen.timezone,
-            locale: live.locale,
-            clock: frameClock(),
-            ...(live.theme ? { theme: live.theme } : {}),
-          });
-        } else if (e.data.type === 'ready') live.waiter?.resolve();
-        else if (e.data.type === 'error') live.waiter?.reject(new Error(`template error: ${e.data.message}`));
-      },
-      { signal },
-    );
+    };
     this.startPlayback = () => {
-      this.post({ sf: protocol, type: 'play' });
+      host.play();
       return Promise.resolve();
     };
-    const ready = this.nextReady(() => wrapper.document.body.appendChild(frame), signal);
-    await ready;
-    alive(signal);
+    await host.start();
   }
 
   /**
@@ -653,9 +556,9 @@ export class Slot {
       alive(signal);
       Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
       // The frames are reused, so a rename in the editor must reach their titles too.
-      live.frame.title = live.wrapperFrame.title = spot.name;
+      live.host.setTitle(spot.name);
       this.spot = spot;
-      await this.resetToReady(live, signal);
+      await live.host.reset();
     })();
     // Queued as a load: a refit waits for it, and one it supersedes gives way quietly (see `fitAgain`).
     this.loading = work.catch(() => undefined);

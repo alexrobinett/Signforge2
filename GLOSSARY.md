@@ -20,6 +20,9 @@ _Avoid_: rollout status, applied.
 
 **Selector**: which screens to pick by their labels and system labels: every term holds (`{ all: [{ key, op, values }] }`, at most 10 terms; `eq`, `neq`, `in`, `notin`, `exists`, `missing`), written for people as `region=north, type in (drive-thru, kiosk), !legacy`. A key a screen lacks equals nothing, so `region!=north` skips a screen with no region. One pure module (`@signforge/compiler/selector`: `matches`, `format`) decides it for `list_screens`, and will decide it for the CMS's preview and the publish, so they never disagree. A selector cannot name a screen's name, id or status.
 
+**Frame host**: the screen's side of the template frame protocol: given a bundle's contained frames (`containedFrames`), it builds the wrapper frame and the sandboxed template frame, answers the template's `loaded` with `init`, waits for `ready` or `error` (the time from `init` to `ready`), sends `play` and `reset`, and removes a template that navigates its own frame. One module (`packages/player-core/src/frame-host.ts`, #331); the player's `Slot` decides what `init` carries and when a spot shows.
+_Avoid_: template host, iframe wrapper.
+
 **Bound fields**: the fields a data source feeds (each spot's bindings to it, with its template's field definitions, in a locale a screen plays in), and whether a snapshot of it may replace the last good one. One module (`packages/player-core/src/bound.ts`) answers it for the player, the sync and the poller; the screen's locale, or for the poller every locale the org's screens play in.
 _Avoid_: fit, fitting fields.
 
