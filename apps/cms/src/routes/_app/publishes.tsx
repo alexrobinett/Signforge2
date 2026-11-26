@@ -213,7 +213,11 @@ function GroupsReached({ orgId, targets }: { orgId: string; targets: NonNullable
           const removed = g.screenIds.length - reached.length;
           const shown = reached.toSorted(byName).slice(0, NAMED);
           const more = reached.length - shown.length;
-          const words = [...shown.map((r) => r.name), ...(more ? [`${more} more`] : []), ...(removed ? [`${removed} removed ${removed === 1 ? 'screen' : 'screens'}`] : [])];
+          const words = [
+            ...shown.map((r) => r.name),
+            ...(more ? [`${more} more`] : []),
+            ...(removed ? [`${removed} removed ${removed === 1 ? 'screen' : 'screens'}`] : []),
+          ];
           return (
             <li key={g.groupId} className="flex flex-col gap-1 px-4 py-3 text-sm">
               <span className="flex flex-wrap items-center gap-2">
@@ -224,9 +228,7 @@ function GroupsReached({ orgId, targets }: { orgId: string; targets: NonNullable
                 </span>
               </span>
               {g.screenIds.length > 0 && (
-                <span className="text-muted-foreground">
-                  {words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]}
-                </span>
+                <span className="text-muted-foreground">{words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]}</span>
               )}
             </li>
           );

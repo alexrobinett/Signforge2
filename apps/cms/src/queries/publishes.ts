@@ -22,4 +22,8 @@ export const publishQuery = (orgId: string, publishId: string | null) =>
 
 /** Whom each group reached at a publish (#187): read once, not polled, as it is large and never changes. */
 export const publishTargetsQuery = (orgId: string, publishId: string | null) =>
-  queryOptions({ queryKey: [...publishKeys.one(orgId, publishId), 'targets'], queryFn: () => getPublishTargets({ data: publishId }), staleTime: Number.POSITIVE_INFINITY });
+  queryOptions({
+    queryKey: [...publishKeys.one(orgId, publishId), 'targets'],
+    queryFn: () => getPublishTargets({ data: publishId }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
