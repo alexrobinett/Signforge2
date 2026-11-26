@@ -178,12 +178,15 @@ interface Hosted {
   spot?: { now: number } & Record<string, unknown>;
 }
 
-/** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size. */
-export async function host(orientation: Orientation = 'landscape', full = false): Promise<Host> {
+/**
+ * A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size.
+ * `full` may instead be a size of its own, for a screen of another shape: its long side is the one `orientation` says.
+ */
+export async function host(orientation: Orientation = 'landscape', full: boolean | { long: number; short: number } = false): Promise<Host> {
   const context = await browser.newContext({ viewport: { width: 960, height: 540 } });
   contexts.push(context);
   const page = await context.newPage();
-  const [long, short] = full ? [1920, 1080] : [960, 540];
+  const { long, short } = typeof full === 'object' ? full : full ? { long: 1920, short: 1080 } : { long: 960, short: 540 };
   const size = orientation === 'landscape' ? { width: long, height: short } : { width: short, height: long };
   await page.setViewportSize(size);
   await page.addScriptTag({ content: sampler });

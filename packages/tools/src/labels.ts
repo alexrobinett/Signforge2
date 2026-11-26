@@ -14,22 +14,21 @@ import { defineTool, ToolError } from './tool';
 
 type LabelRow = { screenId: string; key: string; value: string };
 
-/** A merge into screens' labels. */
-type Change = { set: Readonly<Record<string, string>>; remove: readonly string[] };
+/** A merge into one screen's labels. */
+type Change = { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] };
 
 /**
- * Why a change would give a screen more labels, or the org more keys, than `LABEL_LIMITS`, from
- * the org's labels as read (`rows`); undefined if it would not. The batch checks again as it
- * commits (`labels.stage.update`), in case another change lands in between.
+ * Why changes would give a screen more labels, or the org more keys, than `LABEL_LIMITS`, from the org's labels as
+ * read (`rows`); undefined if they would not. The batch checks again as it commits (`labels.stage.update` and
+ * `each`), in case another change lands in between.
  */
-export function overLimit(rows: readonly LabelRow[], screenIds: readonly string[], change: Change): ToolError | undefined {
-  const targets = new Set(screenIds);
-  const removed = new Set(change.remove);
+export function overLimit(rows: readonly LabelRow[], changes: readonly Change[]): ToolError | undefined {
+  const by = new Map(changes.map((c) => [c.screenId, c]));
   const keysOf = new Map<string, Set<string>>();
   const add = (screenId: string, key: string) => keysOf.set(screenId, (keysOf.get(screenId) ?? new Set()).add(key));
-  for (const r of rows) if (!(targets.has(r.screenId) && removed.has(r.key))) add(r.screenId, r.key);
-  for (const screenId of targets) for (const key of Object.keys(change.set)) add(screenId, key);
-  const crowded = [...targets].filter((s) => (keysOf.get(s)?.size ?? 0) > LABEL_LIMITS.perScreen);
+  for (const r of rows) if (!by.get(r.screenId)?.remove.includes(r.key)) add(r.screenId, r.key);
+  for (const c of changes) for (const key of Object.keys(c.set)) add(c.screenId, key);
+  const crowded = [...by.keys()].filter((s) => (keysOf.get(s)?.size ?? 0) > LABEL_LIMITS.perScreen);
   if (crowded.length)
     return new ToolError('conflict', `a screen has at most ${LABEL_LIMITS.perScreen} labels; ${crowded.length} of these would have more`, {
       screenIds: crowded,
@@ -42,6 +41,10 @@ export function overLimit(rows: readonly LabelRow[], screenIds: readonly string[
     );
   return undefined;
 }
+
+/** One change for each of `screenIds`, as `update_screen_labels` makes it. */
+const forEach = (screenIds: readonly string[], change: { set: Readonly<Record<string, string>>; remove: readonly string[] }) =>
+  screenIds.map((screenId) => ({ screenId, ...change }));
 
 const change = z
   .object({
@@ -65,7 +68,7 @@ const updateScreenLabels = defineTool({
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds)].toSorted();
     const rows = await org.screens.labels.list();
-    const over = overLimit(rows, screenIds, input);
+    const over = overLimit(rows, forEach(screenIds, input));
     if (over) throw over;
     write(await org.screens.labels.stage.update(screenIds, input));
     const before = labelsByScreen(rows);
@@ -79,7 +82,50 @@ const updateScreenLabels = defineTool({
       }),
     };
   },
-  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), input.screenIds, input),
+  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), forEach([...new Set(input.screenIds)], input)),
+});
+
+const importScreenLabels = defineTool({
+  name: 'import_screen_labels',
+  description: `A label import (a CSV file in the CMS, #188): each screen its own merge, set and removed as update_screen_labels does, all written or none. Up to 1000 screens. For people only. Returns { screens: [{ id, labels }] }, ordered by id.`,
+  scope: 'screens:manage',
+  minRole: 'editor',
+  mutates: true,
+  // A file of a fleet's labels is a person's to send: an agent labels with update_screen_labels.
+  people: true,
+  input: z.object({
+    screens: z
+      .array(
+        z
+          .object({ screenId: id('screen'), set: labels.default({}), remove: z.array(labelKey).default([]) })
+          .refine((c) => !c.remove.some((k) => Object.hasOwn(c.set, k)), 'a key cannot be both set and removed'),
+      )
+      .min(1)
+      .max(1000)
+      .refine((all) => new Set(all.map((c) => c.screenId)).size === all.length, 'each screen once'),
+  }),
+  output: outputs.import_screen_labels,
+  example: { screens: [{ screenId: 'scr_example', set: { region: 'north' }, remove: ['legacy'] }] },
+  // As update_screen_labels: one screen's import is in its events (review of #612).
+  target: (input) => (input.screens.length === 1 ? { kind: 'screen', id: input.screens[0]!.screenId } : undefined),
+  // The row's input lists the first 100 screens, as every audit row cuts a list; the count says how many it changed.
+  auditDetail: (output) => ({ screenCount: output.screens.length }),
+  handler: async ({ org, input, write }) => {
+    const rows = await org.screens.labels.list();
+    const over = overLimit(rows, input.screens);
+    if (over) throw over;
+    write(await org.screens.labels.stage.each(input.screens));
+    const before = labelsByScreen(rows);
+    return {
+      screens: input.screens
+        .map((c) => {
+          const kept = Object.entries(before.get(c.screenId) ?? {}).filter(([k]) => !c.remove.includes(k));
+          return { id: c.screenId, labels: { ...Object.fromEntries(kept), ...c.set } };
+        })
+        .toSorted((a, b) => (a.id < b.id ? -1 : 1)),
+    };
+  },
+  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), input.screens),
 });
 
 /** The spelling a value is shown in: the one most screens have, then the first in code-unit order. */
@@ -118,4 +164,4 @@ const listLabelKeys = defineTool({
   },
 });
 
-export const labelTools = [updateScreenLabels, listLabelKeys];
+export const labelTools = [updateScreenLabels, listLabelKeys, importScreenLabels];

@@ -4,6 +4,7 @@ import { seedOrg, testScope, type SeededOrg, type TestScope } from '@signforge/d
 import { env } from 'cloudflare:workers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
+import { unlimited } from './calls';
 import { member } from './member';
 
 const NOW = Date.parse('2026-11-21T12:00:00Z');
@@ -313,5 +314,92 @@ describe('claim_screen', () => {
     const { screen } = await call('claim_screen', { ...claim, labels: { region: ' North ', store: '0142' } });
     expect(screen).toMatchObject({ labels: { region: 'North', store: '0142' }, systemLabels: { orientation: 'portrait' } });
     expect(await labelsOf(screen.id)).toEqual({ region: 'North', store: '0142' });
+  });
+});
+
+describe('import_screen_labels (#188)', () => {
+  it("is audited as update_screen_labels is: one screen's in its events, and a large one's count beside the first 100 (review of #612)", async () => {
+    const one = await newScreen('Import audit');
+    await call('import_screen_labels', { screens: [{ screenId: one.id, set: { store: '0142' } }] });
+    const [mine] = await org.auditLog.list({ limit: 1, target: { kind: 'screen', id: one.id } });
+    expect(mine).toMatchObject({ action: 'import_screen_labels' });
+    const many = [];
+    for (let i = 0; i < 101; i++) many.push(await newScreen(`Import audit ${i}`));
+    await call('import_screen_labels', { screens: many.map((s) => ({ screenId: s.id, set: { store: 'bulk' } })) });
+    const [row] = await org.auditLog.list({ limit: 1 });
+    const detail = JSON.parse(row!.detailJson ?? '{}');
+    expect(row).toMatchObject({ action: 'import_screen_labels', targetId: null });
+    expect(detail.input.screens).toHaveLength(100);
+    expect(detail.detail).toEqual({ screenCount: 101 });
+  });
+
+  it('gives each screen its own merge, in one batch', async () => {
+    const a = await newScreen('Import A');
+    const b = await newScreen('Import B');
+    await call('update_screen_labels', { screenIds: [a.id, b.id], set: { region: 'north', legacy: 'yes' } });
+    const out = await call('import_screen_labels', {
+      screens: [
+        { screenId: a.id, set: { store: '0142' }, remove: ['legacy'] },
+        { screenId: b.id, set: { region: 'South', store: '0009' } },
+      ],
+    });
+    expect(out.screens).toEqual(
+      [
+        { id: a.id, labels: { region: 'north', store: '0142' } },
+        { id: b.id, labels: { region: 'South', legacy: 'yes', store: '0009' } },
+      ].toSorted((x, y) => (x.id < y.id ? -1 : 1)),
+    );
+    expect(await labelsOf(a.id)).toEqual({ region: 'north', store: '0142' });
+    expect(await labelsOf(b.id)).toEqual({ region: 'South', legacy: 'yes', store: '0009' });
+  });
+
+  it('writes none of it when one screen is not the organization’s, or one would pass a limit', async () => {
+    const a = await newScreen('Import C');
+    const before = await labelsOf(a.id);
+    expect(
+      await run('import_screen_labels', {
+        screens: [
+          { screenId: a.id, set: { store: '1' } },
+          { screenId: 'scr_not_here', set: { store: '2' } },
+        ],
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
+    const tooMany = Object.fromEntries(Array.from({ length: LABEL_LIMITS.perScreen + 1 }, (_, i) => [`k${i}`, 'v']));
+    const b = await newScreen('Import D');
+    expect(
+      await run('import_screen_labels', {
+        screens: [
+          { screenId: a.id, set: { store: '1' } },
+          { screenId: b.id, set: tooMany },
+        ],
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    expect(await labelsOf(a.id)).toEqual(before);
+  });
+
+  it('checks keys and values as update_screen_labels does, each screen once, and refuses an agent', async () => {
+    const a = await newScreen('Import E');
+    for (const screens of [
+      [{ screenId: a.id, set: { orientation: 'portrait' } }],
+      [{ screenId: a.id, set: { Region: 'north' } }],
+      [{ screenId: a.id, set: { region: '' } }],
+      [{ screenId: a.id, set: { region: 'north' }, remove: ['region'] }],
+      [
+        { screenId: a.id, set: { region: 'north' } },
+        { screenId: a.id, set: { store: '1' } },
+      ],
+    ])
+      expect(await run('import_screen_labels', { screens }), JSON.stringify(screens)).toMatchObject({ ok: false, error: 'invalid_input' });
+    const agent = { ...editor, actor: { kind: 'agent' as const, id: 'agt_x', clientId: 'agent-app' }, agentLimiter: unlimited };
+    expect(await run('import_screen_labels', { screens: [{ screenId: a.id, set: { region: 'north' } }] }, agent)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
   });
 });
