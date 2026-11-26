@@ -37,7 +37,7 @@ const drawer = (): Caller => person('editor', CMS_AGENT_CLIENT_ID);
 
 const spot = async () => (await scope().spots.get(o.templateSpot))!;
 const edit = async (caller: Caller, durationMs: number, ifVersion?: number) =>
-  (await call(caller, 'update_spot', { spotId: o.templateSpot, durationMs, ...(ifVersion ? { ifVersion } : {}) })).spot.version as number;
+  (await call(caller, 'save_spot', { spotId: o.templateSpot, durationMs, ...(ifVersion ? { ifVersion } : {}) })).spot.version as number;
 const draftOf = (kind: 'spot' | 'playlist' = 'spot', id = o.templateSpot) =>
   call(person('viewer'), 'get_agent_draft', kind === 'spot' ? { spotId: id } : { playlistId: id });
 
@@ -116,7 +116,7 @@ describe("an agent's draft of a spot", () => {
 
     // Deleted: what was kept goes with it, so a spot made again with its id starts with none.
     const other = await scope().spots.insert({ name: 'Doomed', kind: 'url', durationMs: 5_000, url: 'https://example.com/a' });
-    await call(agent(), 'update_spot', { spotId: other.id, url: 'https://example.com/b', ifVersion: other.rowVersion });
+    await call(agent(), 'save_spot', { spotId: other.id, url: 'https://example.com/b', ifVersion: other.rowVersion });
     expect(await scope().draftSnapshots.get('spot', other.id)).toBeDefined();
     await scope().commit(scope().spots.stage.delete(other.id).writes);
     expect(await scope().draftSnapshots.get('spot', other.id)).toBeUndefined();
@@ -140,7 +140,7 @@ describe("an agent's draft of a spot", () => {
   it("never loses a person's edit to an agent's write without ifVersion: one landing under it refuses the agent", async () => {
     const start = (await spot()).rowVersion;
     const raced = racing(agent(), () => edit(person(), 11_000, start));
-    expect(await dispatch(registry, 'update_spot', { spotId: o.templateSpot, durationMs: 12_000 }, raced)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await dispatch(registry, 'save_spot', { spotId: o.templateSpot, durationMs: 12_000 }, raced)).toMatchObject({ ok: false, error: 'conflict' });
     expect((await spot()).durationMs).toBe(11_000);
     expect(await scope().draftSnapshots.get('spot', o.templateSpot)).toBeUndefined();
   });
@@ -157,9 +157,9 @@ describe("an agent's draft of a playlist", () => {
   it("puts the person's order back on Reject, and the agent's on its Undo; it changes the items, by spot id", async () => {
     await call(person('owner'), 'publish', {});
     const start = (await scope().playlists.get(o.playlist))!;
-    const mine = (await call(person(), 'update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot, o.templateSpot], ifVersion: start.rowVersion }))
+    const mine = (await call(person(), 'save_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot, o.templateSpot], ifVersion: start.rowVersion }))
       .playlist.version as number;
-    const theirs = (await call(agent(), 'update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot], name: 'Agent order', ifVersion: mine })).playlist
+    const theirs = (await call(agent(), 'save_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot], name: 'Agent order', ifVersion: mine })).playlist
       .version as number;
     const proposal = await draftOf('playlist', o.playlist);
     expect(proposal).toMatchObject({ proposed: true, by: { name: 'Seeded agent' } });
@@ -184,7 +184,7 @@ describe('the races and paths of review round 1 (#410)', () => {
 
   it('refuses an edit that changes nothing, and never keeps a draft without the draft still at the version read', async () => {
     const theirs = await edit(agent(), 12_000, (await spot()).rowVersion);
-    expect(await dispatch(registry, 'update_spot', { spotId: o.templateSpot }, person())).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await dispatch(registry, 'save_spot', { spotId: o.templateSpot }, person())).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await kept()).toBe('person');
     // A kept draft written from a read the draft has since moved on from: the batch writes nothing.
     const read = await spot();

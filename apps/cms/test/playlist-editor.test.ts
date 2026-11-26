@@ -99,7 +99,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: [] }));
     void store.getState().savePlaylistDraft('pls_a');
     await settle();
-    expect(calls).toMatchObject([{ name: 'update_playlist', input: { playlistId: 'pls_a', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_playlist', input: { playlistId: 'pls_a', ifVersion: 4 } }]);
 
     store.getState().editPlaylist(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     calls[0]!.answer({ playlist: playlist('pls_a', 5, []) });
@@ -108,7 +108,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     expect(editor().drafts.pls_b).toMatchObject({ version: 1, status: 'unsaved', error: null, stale: false });
 
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_b', name: 'B, renamed', ifVersion: 1 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_b', name: 'B, renamed', ifVersion: 1 } });
   });
 
   it("saves A's waiting edit when B is opened, at the version A's save in flight returns", async () => {
@@ -126,7 +126,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     calls[0]!.answer({ playlist: playlist('pls_a', 5, ['s2', 's1']) });
     await settle();
 
-    expect(calls[1]).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_a', spotIds: ['s2'], ifVersion: 5 } });
+    expect(calls[1]).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_a', spotIds: ['s2'], ifVersion: 5 } });
     calls[1]!.answer({ playlist: playlist('pls_a', 6, ['s2']) });
     await settle();
     expect(queryClient.getQueryData(playlistKeys.one(ORG, 'pls_a'))).toMatchObject({ version: 6, spotIds: ['s2'] });
@@ -159,7 +159,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     await settle();
     expect(editor().deleting.error).toBe('playlist pls_a is the default playlist');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_a', name: 'Renamed' } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_a', name: 'Renamed' } });
   });
 
   it('says so, and stops saving, when someone else deleted the playlist', async () => {
@@ -232,7 +232,7 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     open(a);
     store.getState().removeSpotFromPlaylist(ORG, a.id, 1, 'Lunch');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'closing'], ifVersion: 1 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { spotIds: ['opening', 'closing'], ifVersion: 1 } });
     calls.at(-1)!.answer({ playlist: playlist('pls_a', 2, ['opening', 'closing']) });
     await settle();
     expect(queryClient.getQueryData(playlistKeys.one(ORG, 'pls_a'))).toMatchObject({ version: 2 });
@@ -240,7 +240,7 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     toasts[0]!.undo();
     expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'closing']);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
   });
 });
 

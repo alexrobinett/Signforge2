@@ -11,28 +11,28 @@ const NOON = Date.UTC(2026, 10, 25, 12);
 const hello = (role: Role): Task => ({ id: 'catalogue', prompt: 'Hello', role, script: { mcp: () => [], drawer: () => [] }, check: () => undefined });
 
 /**
- * Measured with #345 PR 3's update_screen, screen_command and save_group, PR 2's read and describe, which stand for each type's own read, and PR 1's trims: no `$schema`, id pattern or safe-integer bound in any input, short ifVersion and
+ * Measured with #345 PR 4's save_spot, save_playlist, save_schedule_entry, save_brand_kit and save_data_source, PR 3's update_screen, screen_command and save_group, PR 2's read and describe, which stand for each type's own read, and PR 1's trims: no `$schema`, id pattern or safe-integer bound in any input, short ifVersion and
  * idempotencyKey texts, and only the cards a role can press in the drawer. /mcp's is tools/list as the eval's client hands it to Anthropic: name, description and
  * input schema, without the annotations. The drawer's carries TanStack AI's own fields (`type`, `cache_control`) and no
  * `$schema`, so it differs from the audit's count, which was built from chat.ts's lists.
  */
 const MODEL_FACING: Record<Arm, Record<Role, Size>> = {
   mcp: {
-    owner: { tools: 45, bytes: 70_929, tokens: 16_886 },
-    editor: { tools: 42, bytes: 64_935, tokens: 15_450 },
+    owner: { tools: 39, bytes: 62_214, tokens: 14_656 },
+    editor: { tools: 36, bytes: 56_220, tokens: 13_220 },
     viewer: { tools: 6, bytes: 7556, tokens: 1726 },
   },
   drawer: {
-    owner: { tools: 22, bytes: 34_593, tokens: 7992 },
-    editor: { tools: 20, bytes: 33_174, tokens: 7690 },
-    viewer: { tools: 11, bytes: 18_455, tokens: 4334 },
+    owner: { tools: 20, bytes: 29_794, tokens: 6839 },
+    editor: { tools: 18, bytes: 28_375, tokens: 6537 },
+    viewer: { tools: 10, bytes: 15_096, tokens: 3533 },
   },
 };
 
-/** /mcp's tools/list, with PR 1's trims, each tool's title, each type's own read listed as `read` (#345 PR 2), and PR 3's screen writes. */
+/** /mcp's tools/list, with PR 1's trims, each tool's title, each type's own read listed as `read` (#345 PR 2), PR 3's screen writes and PR 4's content saves. */
 const DISCOVERY: Record<Role, Size> = {
-  owner: { tools: 45, bytes: 75_850, tokens: 18_079 },
-  editor: { tools: 42, bytes: 69_516, tokens: 16_562 },
+  owner: { tools: 39, bytes: 66_459, tokens: 15_688 },
+  editor: { tools: 36, bytes: 60_125, tokens: 14_171 },
   viewer: { tools: 6, bytes: 8184, tokens: 1882 },
 };
 

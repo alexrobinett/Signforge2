@@ -212,26 +212,26 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
 
   it("refuses a draft-only agent a feed's address, which screens follow with no publish, and keeps the sealed one", async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+    expect((await owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
       200,
     );
     const before = (await scoped(env.DB, org.id).dataSources.get('menu'))?.urlEncrypted;
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
-    expect(await mcpTool(access_token, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://evil.example.com/menu.json' })).toMatchObject({
+    expect(await mcpTool(access_token, 'save_data_source', { dataSourceId: 'menu', feedUrl: 'https://evil.example.com/menu.json' })).toMatchObject({
       isError: true,
       structuredContent: { error: 'forbidden', message: expect.stringContaining('needs the right to publish') },
     });
     expect((await scoped(env.DB, org.id).dataSources.get('menu'))?.urlEncrypted).toBe(before);
     // With the right to publish, it may.
     const publisher = (await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish'])).access_token;
-    expect(await mcpTool(publisher, 'update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' })).toMatchObject({
+    expect(await mcpTool(publisher, 'save_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' })).toMatchObject({
       structuredContent: { dataSource: { id: 'menu' } },
     });
   });
 
   it('changes a feed within the budget (the Free plan: 50 D1 queries an invocation)', async () => {
     const { t, owner, org } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+    expect((await owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
       200,
     );
     const publisher = (await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish'])).access_token;
@@ -240,7 +240,7 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
     for (const token of [publisher, drafter]) expect((await listed(token)).status).toBe(200);
     const measured = (token: string, input: Record<string, unknown>) =>
       measure(async (b) => {
-        expect(await mcpTool(token, 'update_data_source', { dataSourceId: 'menu', ...input }, b)).toMatchObject({
+        expect(await mcpTool(token, 'save_data_source', { dataSourceId: 'menu', ...input }, b)).toMatchObject({
           structuredContent: { dataSource: { id: 'menu' } },
         });
       });
@@ -260,12 +260,12 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
 
   it("changes a feed as a person within the budget, the right to publish held to the batch as an agent's is (#424)", async () => {
     const { owner } = await team();
-    expect((await owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+    expect((await owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
       200,
     );
     const measured = (input: Record<string, unknown>) =>
       measure(async (b) => {
-        expect((await as(owner, b).tool('update_data_source', { dataSourceId: 'menu', ...input })).status).toBe(200);
+        expect((await as(owner, b).tool('save_data_source', { dataSourceId: 'menu', ...input })).status).toBe(200);
       });
     const refresh = await measured({ refreshS: 600 });
     const name = await measured({ name: 'Menu board' });

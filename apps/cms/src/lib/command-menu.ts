@@ -103,9 +103,9 @@ export function parseToolList(body: unknown): ToolListing[] {
 /** Each action's words, and the tools a member's role must have for it. */
 const ACTIONS: Record<PeopleAction, { label: string; needs: readonly string[]; keywords: string[] }> = {
   pair: { label: 'Pair a screen…', needs: ['claim_screen'], keywords: ['add screen', 'new screen', 'code'] },
-  'new-spot': { label: 'New spot…', needs: ['create_spot'], keywords: ['create', 'template', 'image', 'web page'] },
-  'new-playlist': { label: 'New playlist…', needs: ['create_playlist'], keywords: ['create', 'loop'] },
-  'new-entry': { label: 'Add to the schedule…', needs: ['create_schedule_entry'], keywords: ['schedule', 'play', 'plan'] },
+  'new-spot': { label: 'New spot…', needs: ['save_spot'], keywords: ['create', 'template', 'image', 'web page'] },
+  'new-playlist': { label: 'New playlist…', needs: ['save_playlist'], keywords: ['create', 'loop'] },
+  'new-entry': { label: 'Add to the schedule…', needs: ['save_schedule_entry'], keywords: ['schedule', 'play', 'plan'] },
   // A takeover is sent at once wherever the CMS offers it: one who may only draft it is not offered it (#253).
   'take-over': { label: 'Take over screens now…', needs: ['start_takeover', 'publish'], keywords: ['takeover', 'urgent', 'override'] },
   'publish-all': { label: 'Publish all changes…', needs: ['publish'], keywords: ['publish', 'unpublished', 'drafts'] },
@@ -190,7 +190,7 @@ export function targetActions(
   const may = (tool: string) => checked && listed(tool);
   const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
   // These open a dialog, sending nothing: they need no read of this opening, though not on a revoked screen.
-  if (listed('create_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
+  if (listed('save_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
   // A takeover is started, then published at once: an editor where only owners publish keeps start_takeover, not publish.
   if (listed('start_takeover') && listed('publish')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
   if (may('screen_command'))

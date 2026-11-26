@@ -56,7 +56,7 @@ export async function plant(t: App, owner: Client, ownerId: string, orgId: strin
   const clientId = await register(t, { client_name: CLIENT_SAYS });
   const { back, verifier } = await authorize(owner, clientId, { organizationId: orgId, scopes: ['content:read', 'content:draft', 'org:manage'] });
   const { access_token } = await exchange(t, clientId, back!.searchParams.get('code')!, verifier);
-  const edited = await mcpTool(access_token, 'update_spot', { spotId: spot.id, durationMs: 12_000, ifVersion: spot.rowVersion });
+  const edited = await mcpTool(access_token, 'save_spot', { spotId: spot.id, durationMs: 12_000, ifVersion: spot.rowVersion });
   expect(edited.isError, JSON.stringify(edited)).toBeUndefined();
   const asked = await mcpTool(access_token, 'request_publish', {
     drafts: [{ kind: 'spot', id: spot.id, version: edited.structuredContent.spot.version }],

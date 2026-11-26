@@ -17,7 +17,7 @@ test("an agent's edit over /mcp shows as its proposal; Reject puts the person's 
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock'));
   const version = clock.versions.at(-1);
   const label: string = version.manifest.fields.greeting.label;
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Soup board',
     kind: 'template',
     templateVersionId: version.id,
@@ -26,12 +26,12 @@ test("an agent's edit over /mcp shows as its proposal; Reject puts the person's 
   });
   await tool(page, 'publish', {});
   // The person edits it after the publish: their draft, not on screens yet.
-  const mine = (await tool(page, 'update_spot', { spotId: spot.id, data: { greeting: 'Opening soon' }, ifVersion: spot.version })).spot.version as number;
+  const mine = (await tool(page, 'save_spot', { spotId: spot.id, data: { greeting: 'Opening soon' }, ifVersion: spot.version })).spot.version as number;
 
   // An agent with drafting only edits it on top, over /mcp.
   const { stub, token } = await connectStub(page, 'Deli bot', ADDRESS.stub);
   const edited = await stub.mcp(token, 'tools/call', {
-    name: 'update_spot',
+    name: 'save_spot',
     arguments: { spotId: spot.id, data: { greeting: 'Tomato basil soup' }, ifVersion: mine },
   });
   expect(edited.result.isError).toBeUndefined();

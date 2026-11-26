@@ -75,6 +75,64 @@ describe('screens', () => {
   });
 });
 
+describe('content saves (#345 PR 4): one tool creates or changes each kind', () => {
+  const refused = async (name: string, input: Record<string, unknown>) => {
+    const r = await refusal(name, input);
+    expect(r, `${name} ${JSON.stringify(input)}`).toMatchObject({ ok: false, error: 'invalid_input' });
+    return r.ok ? '' : r.message;
+  };
+
+  it('refuses a new one missing what it needs, and a change to what is fixed once made, saying what to send', async () => {
+    expect(await refused('save_spot', { kind: 'url', url: 'https://example.com' })).toMatch(/a new spot needs a name and a kind; give spotId/);
+    expect(await refused('save_spot', { spotId: o.imageSpot, kind: 'url' })).toMatch(/a spot's kind is fixed once made/);
+    expect(await refused('save_playlist', { spotIds: [] })).toMatch(/a new playlist needs a name; give playlistId/);
+    expect(await refused('save_schedule_entry', { target: 'org' })).toMatch(/a new entry needs a playlistId and a target/);
+    expect(await refused('save_schedule_entry', { playlistId: o.playlist, target: 'org', endsAt: '2026-11-17T20:00:00Z' })).toMatch(/use start_takeover/);
+    expect(await refused('save_brand_kit', { name: 'Half', colors: { primary: '#000000' } })).toMatch(/\(missing accent, background, surface, text, muted\)/);
+    expect(await refused('save_data_source', { name: 'No format', feedUrl: 'https://example.com/feed' })).toMatch(
+      /a new data source needs a name and a format/,
+    );
+    expect(await refused('save_data_source', { dataSourceId: o.dataSource, format: 'rss' })).toMatch(/a data source's format is fixed once made/);
+  });
+
+  it('refuses a field it does not take by name, and ifVersion on a new one, as save_group does (review of #499)', async () => {
+    expect(await refused('save_spot', { spotId: o.imageSpot, name: 'X', colour: 'red' })).toMatch(/colour/);
+    expect(await refused('save_playlist', { playlistId: o.playlist, name: 'X', isDefault: true })).toMatch(/isDefault/);
+    expect(await refused('save_brand_kit', { brandKitId: o.brandKit, isDefault: true })).toMatch(/isDefault/);
+    for (const [name, input] of [
+      ['save_spot', { name: 'New', kind: 'url', url: 'https://example.com', ifVersion: 1 }],
+      ['save_playlist', { name: 'New', ifVersion: 1 }],
+      ['save_schedule_entry', { playlistId: o.playlist, target: 'org', ifVersion: 1 }],
+      ['save_data_source', { name: 'New', format: 'json', feedUrl: 'https://example.com/data.json', ifVersion: 1 }],
+    ] as const)
+      expect(await refused(name, input), name).toMatch(/has no version yet: ifVersion is for a change/);
+  });
+
+  it('refuses a change that changes nothing, which would write nothing to guard', async () => {
+    expect(await refused('save_spot', { spotId: o.imageSpot })).toMatch(/nothing to change/);
+    expect(await refused('save_playlist', { playlistId: o.playlist })).toMatch(/nothing to change/);
+  });
+
+  it('creates without an id and changes with one, the version moving on', async () => {
+    const { playlist } = await call('save_playlist', { name: 'Lunch', spotIds: [o.imageSpot] });
+    const renamed = (await call('save_playlist', { playlistId: playlist.id, name: 'Lunch specials', ifVersion: playlist.version })).playlist;
+    expect(renamed).toMatchObject({ id: playlist.id, name: 'Lunch specials', version: playlist.version + 1 });
+    expect(await refusal('save_playlist', { playlistId: playlist.id, name: 'Late', ifVersion: playlist.version })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+  });
+
+  it('makes a kit the default with a change, as set_default_brand_kit did, and with a new kit', async () => {
+    const colors = { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
+    const made = (await call('save_brand_kit', { name: 'Second', colors })).brandKit;
+    expect(made.isDefault).toBe(false);
+    expect((await call('save_brand_kit', { brandKitId: made.id, makeDefault: true })).brandKit.isDefault).toBe(true);
+    expect((await call('save_brand_kit', { name: 'Third', colors, makeDefault: true })).brandKit.isDefault).toBe(true);
+    expect((await call('get_brand_kit', { brandKitId: made.id })).brandKit.isDefault).toBe(false);
+  });
+});
+
 describe('groups', () => {
   it('creates, renames, sets members and deletes', async () => {
     const extra = await testScope(env.DB, o.orgId).screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });

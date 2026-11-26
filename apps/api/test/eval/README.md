@@ -55,11 +55,11 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 45 tools · 16,886 tokens | 42 · 15,450 | 6 · 1,726 |
-| Drawer request | 22 · 7,992 | 20 · 7,690 | 11 · 4,334 |
-| /mcp `tools/list` (discovery) | 45 · 18,079 | 42 · 16,562 | 6 · 1,882 |
+| /mcp request | 39 tools · 14,656 tokens | 36 · 13,220 | 6 · 1,726 |
+| Drawer request | 20 · 6,839 | 18 · 6,537 | 10 · 3,533 |
+| /mcp `tools/list` (discovery) | 39 · 15,688 | 36 · 14,171 | 6 · 1,882 |
 
-The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882.
+The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Since PR 4, one `save_*` tool per content type creates or changes it (spot, playlist, schedule entry, brand kit, data source), and the drawer drafts a spot's name, length and fields alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882; after PR 3, /mcp 16,886 / 15,450 / 1,726, drawer 7,992 / 7,690 / 4,334, and discovery 18,079 / 16,562 / 1,882.
 
 ## Adding a task
 

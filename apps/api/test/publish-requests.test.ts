@@ -17,7 +17,7 @@ type Team = Awaited<ReturnType<typeof team>>;
 
 /** A URL spot made in the CMS by `by`: a draft, never published. */
 async function urlSpot(by: Client, name: string) {
-  const { spot } = await by.ok<{ spot: { id: string; version: number } }>('/api/tools/create_spot', { name, kind: 'url', url: `https://example.com/${name}` });
+  const { spot } = await by.ok<{ spot: { id: string; version: number } }>('/api/tools/save_spot', { name, kind: 'url', url: `https://example.com/${name}` });
   return spot;
 }
 
@@ -25,7 +25,7 @@ async function urlSpot(by: Client, name: string) {
 async function agentEdited(t: Team) {
   const { access_token } = await agentToken(t.t, t.editor, t.org.id, ['content:read', 'content:draft']);
   const spot = await urlSpot(t.owner, 'menu');
-  const edited = await mcpTool(access_token, 'update_spot', { spotId: spot.id, durationMs: 12_000, ifVersion: spot.version });
+  const edited = await mcpTool(access_token, 'save_spot', { spotId: spot.id, durationMs: 12_000, ifVersion: spot.version });
   expect(edited.isError, JSON.stringify(edited)).toBeUndefined();
   return { token: access_token, spotId: spot.id, version: edited.structuredContent.spot.version as number };
 }
@@ -74,7 +74,7 @@ describe('an agent asks over /mcp, a person approves', () => {
     const t = await team();
     const { token, spotId, version } = await agentEdited(t);
     const requestId: string = (await ask(token, spotId, version)).structuredContent.request.id;
-    const edited = await mcpTool(token, 'update_spot', { spotId, durationMs: 20_000, ifVersion: version });
+    const edited = await mcpTool(token, 'save_spot', { spotId, durationMs: 20_000, ifVersion: version });
     expect(edited.isError).toBeUndefined();
     const res = await t.owner.post('/api/tools/approve_publish_request', { publishRequestId: requestId });
     expect(res.status).toBe(409);

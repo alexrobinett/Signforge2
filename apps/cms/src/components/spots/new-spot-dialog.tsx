@@ -4,7 +4,7 @@
  * a web page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
  * A template spot is named after the template version picked, as its tile is labelled, until the person types a name, and starts with its
- * sample copy (`create_spot`'s `sample`, #360), which the server records and the editor marks until it is replaced. While Create is
+ * sample copy (`save_spot`'s `sample`, #360), which the server records and the editor marks until it is replaced. While Create is
  * off, the dialog says why.
  */
 import { choiceVariants } from '~/components/ui/choice';

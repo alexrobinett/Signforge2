@@ -469,13 +469,15 @@ export async function newSpot(page: Page, template: string, name: string) {
 }
 
 /** Holds the first request to `path` until the test continues it; later ones go through, counted. */
-export async function holdFirst(page: Page, path: string) {
+export async function holdFirst(page: Page, path: string, which?: (body: Record<string, unknown>) => boolean) {
   let calls = 0;
   let hold: (route: Route) => void = () => {};
   const arrived = new Promise<Route>((resolve) => {
     hold = resolve;
   });
   await page.route(`**${path}`, (route) => {
+    // A tool that creates and changes (#345's saves): only the calls `which` picks, the rest to the next route.
+    if (which && !which(route.request().postDataJSON())) return void route.fallback();
     calls += 1;
     if (calls === 1) hold(route);
     else void route.continue();

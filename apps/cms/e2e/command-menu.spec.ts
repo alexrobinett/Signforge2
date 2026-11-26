@@ -85,7 +85,7 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   // With a change unpublished, every page offers Publish all, which asks with the sidebar's own question (#361).
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
+  await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
   await page.reload();
   await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
@@ -455,7 +455,7 @@ test("New playlist opens its dialog wherever the page's own button does: an empt
   await hydrated(page);
   await signInAs(page, `e2e-command-new-playlist-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Quayside Prints', ADDRESS);
-  await tool(page, 'create_playlist', { name: 'Window loop', spotIds: [] });
+  await tool(page, 'save_playlist', { name: 'Window loop', spotIds: [] });
   await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.type('new playlist');

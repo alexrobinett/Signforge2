@@ -80,12 +80,12 @@ const CARD: AnswerCard = {
   trace: [],
   drafts: [
     {
-      tool: 'update_spot',
+      tool: 'save_spot',
       input: { spotId: 'spt_1', data: { headline: 'Hot breakfast, fast' }, ifVersion: 3 },
       target: { kind: 'spot', id: 'spt_1' },
       before: BEFORE,
     },
-    { tool: 'create_schedule_entry', input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' }, target: null, before: null },
+    { tool: 'save_schedule_entry', input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' }, target: null, before: null },
   ],
 };
 /** A turn answered with `card`, as the API streams it (#350): the run, the card, its end. */
@@ -123,8 +123,8 @@ describe("the drawer's drafts, in the store", () => {
   const savedBoth = () =>
     Response.json({
       results: [
-        { tool: 'update_spot', ok: true, output: { spot: { ...BEFORE, data: { headline: 'Hot breakfast, fast' }, version: 4 } } },
-        { tool: 'create_schedule_entry', ok: true, output: { entry: { id: 'sch_new', version: 1 } } },
+        { tool: 'save_spot', ok: true, output: { spot: { ...BEFORE, data: { headline: 'Hot breakfast, fast' }, version: 4 } } },
+        { tool: 'save_schedule_entry', ok: true, output: { entry: { id: 'sch_new', version: 1 } } },
       ],
     });
   /** The drafts proposed, saved and Publish now pressed, each publish answering `published`. */
@@ -219,7 +219,7 @@ describe("the drawer's drafts, in the store", () => {
     await store.getState().undoDrafts(1);
     expect(tools.calls).toEqual([
       { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new', ifVersion: 1 }, org: 'org_1' },
-      { name: 'update_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 }, org: 'org_1' },
+      { name: 'save_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 }, org: 'org_1' },
     ]);
     expect(at().drafts.status).toBe('undone');
     expect(store.getState().agent.filled.spt_1).toBeUndefined();
@@ -271,7 +271,7 @@ describe("the drawer's drafts, in the store", () => {
     answers.push(turn());
     await store.getState().askAgent('Punchier');
     answers.push(
-      Response.json({ results: [{ tool: 'update_spot', ok: false, error: 'conflict', message: 'spot spt_1 changed since version 3' }] }, { status: 409 }),
+      Response.json({ results: [{ tool: 'save_spot', ok: false, error: 'conflict', message: 'spot spt_1 changed since version 3' }] }, { status: 409 }),
     );
     await store.getState().saveDrafts(1);
     expect(at().drafts).toMatchObject({ status: 'refused', error: 'spot spt_1 changed since version 3' });
@@ -344,18 +344,18 @@ describe("the drawer's drafts, in the store", () => {
     const toGroup = await saved(
       [
         {
-          tool: 'update_schedule_entry',
+          tool: 'save_schedule_entry',
           input: { scheduleEntryId: 'sch_1', target: 'group', groupId: 'grp_dt', ifVersion: 4 },
           target: { kind: 'schedule_entry', id: 'sch_1' },
           before: ENTRY,
         },
       ],
-      [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, target: 'group', groupId: 'grp_dt', version: 5 } } }],
+      [{ tool: 'save_schedule_entry', ok: true, output: { entry: { ...ENTRY, target: 'group', groupId: 'grp_dt', version: 5 } } }],
     );
     await toGroup.store.getState().undoDrafts(1);
     expect(tools.calls).toMatchObject([
       {
-        name: 'update_schedule_entry',
+        name: 'save_schedule_entry',
         input: {
           scheduleEntryId: 'sch_1',
           playlistId: 'pls_a',
@@ -376,18 +376,18 @@ describe("the drawer's drafts, in the store", () => {
     const toOrg = await saved(
       [
         {
-          tool: 'update_schedule_entry',
+          tool: 'save_schedule_entry',
           input: { scheduleEntryId: 'sch_1', target: 'org', ifVersion: 4 },
           target: { kind: 'schedule_entry', id: 'sch_1' },
           before: grouped,
         },
       ],
-      [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, version: 5 } } }],
+      [{ tool: 'save_schedule_entry', ok: true, output: { entry: { ...ENTRY, version: 5 } } }],
     );
     await toOrg.store.getState().undoDrafts(1);
     expect(tools.calls).toMatchObject([
       {
-        name: 'update_schedule_entry',
+        name: 'save_schedule_entry',
         input: {
           scheduleEntryId: 'sch_1',
           playlistId: 'pls_a',
@@ -408,26 +408,26 @@ describe("the drawer's drafts, in the store", () => {
   it('carries on an Undo that stopped from where it did, each draft at the version its target is at now: two playlist changes and an entry made', async () => {
     const PLAYLIST = { id: 'pls_a', name: 'Breakfast', transition: { type: 'cut' }, spotIds: ['spt_1'], version: 5 };
     const drafts: AnswerCard['drafts'] = [
-      { tool: 'update_playlist', input: { playlistId: 'pls_a', name: 'Morning', ifVersion: 5 }, target: { kind: 'playlist', id: 'pls_a' }, before: PLAYLIST },
+      { tool: 'save_playlist', input: { playlistId: 'pls_a', name: 'Morning', ifVersion: 5 }, target: { kind: 'playlist', id: 'pls_a' }, before: PLAYLIST },
       {
-        tool: 'update_playlist',
+        tool: 'save_playlist',
         input: { playlistId: 'pls_a', spotIds: [], ifVersion: 6 },
         target: { kind: 'playlist', id: 'pls_a' },
         before: { ...PLAYLIST, name: 'Morning', version: 6 },
       },
-      { tool: 'create_schedule_entry', input: { playlistId: 'pls_a', target: 'org', idempotencyKey: 'k' }, target: null, before: null },
+      { tool: 'save_schedule_entry', input: { playlistId: 'pls_a', target: 'org', idempotencyKey: 'k' }, target: null, before: null },
     ];
     const { store, at } = await saved(drafts, [
-      { tool: 'update_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', version: 6 } } },
-      { tool: 'update_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', spotIds: [], version: 7 } } },
-      { tool: 'create_schedule_entry', ok: true, output: { entry: { ...ENTRY, id: 'sch_new', version: 1 } } },
+      { tool: 'save_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', version: 6 } } },
+      { tool: 'save_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', spotIds: [], version: 7 } } },
+      { tool: 'save_schedule_entry', ok: true, output: { entry: { ...ENTRY, id: 'sch_new', version: 1 } } },
     ]);
     // Each undo answers with the version it left.
     let version = 7;
-    tools.answer = (name) => (name === 'update_playlist' ? { playlist: { ...PLAYLIST, version: ++version } } : { deleted: 'sch_new', version: null });
-    tools.failing.add('update_playlist');
+    tools.answer = (name) => (name === 'save_playlist' ? { playlist: { ...PLAYLIST, version: ++version } } : { deleted: 'sch_new', version: null });
+    tools.failing.add('save_playlist');
     await store.getState().undoDrafts(1);
-    expect(at().drafts).toMatchObject({ status: 'saved', error: 'update_playlist failed', undone: [2] });
+    expect(at().drafts).toMatchObject({ status: 'saved', error: 'save_playlist failed', undone: [2] });
     expect(tools.calls.map((c) => c.input)).toEqual([
       { scheduleEntryId: 'sch_new', ifVersion: 1 },
       { playlistId: 'pls_a', spotIds: ['spt_1'], ifVersion: 7 },

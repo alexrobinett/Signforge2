@@ -94,11 +94,11 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // The token works on /mcp, on this host: the grant's tools only, and a write audited as the agent with its client.
   const accessToken = tokens.body.access_token!;
   const listed: string[] = (await stub.mcp(accessToken, 'tools/list')).result.tools.map((t: { name: string }) => t.name);
-  expect(listed).toEqual(expect.arrayContaining(['read', 'describe', 'create_playlist', 'update_screen']));
+  expect(listed).toEqual(expect.arrayContaining(['read', 'describe', 'save_playlist', 'update_screen']));
   expect(listed).not.toContain('publish');
-  const made = (await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Made by the stub agent' } })).result;
+  const made = (await stub.mcp(accessToken, 'tools/call', { name: 'save_playlist', arguments: { name: 'Made by the stub agent' } })).result;
   expect(made.isError).toBeUndefined();
-  const audit = await stub.mcp(accessToken, 'tools/call', { name: 'list_audit_log', arguments: { action: 'create_playlist', actor: { kind: 'agent' } } });
+  const audit = await stub.mcp(accessToken, 'tools/call', { name: 'list_audit_log', arguments: { action: 'save_playlist', actor: { kind: 'agent' } } });
   const { entries } = audit.result.structuredContent;
   expect(entries).toEqual([
     expect.objectContaining({

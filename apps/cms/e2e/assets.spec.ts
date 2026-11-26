@@ -58,7 +58,7 @@ test('upload images, search them by name, see which are in use, and delete one n
   // A spot uses the photo: it says so and cannot be deleted; the logo can.
   const listed = await toolResponse(page, 'list_assets', { query: 'raspberries' });
   const { assets } = (await listed.json()) as { assets: { id: string }[] };
-  const made = await toolResponse(page, 'create_spot', { name: 'Summer menu', kind: 'image', assetId: assets[0]!.id });
+  const made = await toolResponse(page, 'save_spot', { name: 'Summer menu', kind: 'image', assetId: assets[0]!.id });
   expect(made.status(), await made.text()).toBe(200);
   await page.reload();
   await hydrated(page);

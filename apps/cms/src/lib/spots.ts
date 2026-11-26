@@ -203,7 +203,7 @@ const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
 export const spotWhat = (s: Pick<SpotView, 'kind' | 'templateVersionId'>, versions: Map<string, TemplateVersionView>) =>
   s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
-/** A spot's name, as `create_spot` takes it: at most this many characters. */
+/** A spot's name, as `save_spot` takes it: at most this many characters. */
 const NAME_MAX = 100;
 
 /**

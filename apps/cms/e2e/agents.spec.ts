@@ -31,7 +31,7 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   const rename = () => stub.mcp(accessToken, 'tools/call', { name: 'update_screen', arguments: { screenId: 'scr_nowhere', name: 'Lobby' } });
   expect((await rename()).result.structuredContent.error).toBe('not_found');
   // With content:draft it makes a playlist: a change, in the audit log and in its calls.
-  const made = await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Kestrel specials' } });
+  const made = await stub.mcp(accessToken, 'tools/call', { name: 'save_playlist', arguments: { name: 'Kestrel specials' } });
   expect(made.result.isError).toBeUndefined();
 
   // It is listed, by its quoted name, with its scopes and who granted it.
@@ -85,7 +85,7 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // Its change links to its row in the audit log: the agent's, on that playlist.
-  await page.getByRole('link', { name: 'See the change by create_playlist' }).click();
+  await page.getByRole('link', { name: 'See the change by save_playlist' }).click();
   await expect(page).toHaveURL(/\/audit\?.*target=playlist/);
   await hydrated(page);
   await expect(page.getByRole('row', { name: /Created/ })).toBeVisible();

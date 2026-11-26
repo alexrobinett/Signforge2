@@ -35,7 +35,7 @@ const agent = (scopes: Scope[]): Caller => ({
 /** A spot New spot would make: started with its template's sample copy. The seeded template's one text has no default: its label stands in. */
 async function sampleSpot() {
   const templateVersionId = (await testScope(env.DB, o.orgId).spots.get(o.templateSpot))?.templateVersionId;
-  return (await call(person(), 'create_spot', { name: 'Fresh', kind: 'template', templateVersionId, sample: true })).spot;
+  return (await call(person(), 'save_spot', { name: 'Fresh', kind: 'template', templateVersionId, sample: true })).spot;
 }
 const pin = (spot: { id: string; version: number }) => ({ drafts: [{ kind: 'spot', id: spot.id, version: spot.version }] });
 const ack = (spot: { id: string; version: number }, fields = ['title']) => [{ spotId: spot.id, version: spot.version, fields }];
@@ -46,7 +46,7 @@ describe('sample text on the server', () => {
     expect(spot).toMatchObject({ data: { title: 'Title' }, sampleFields: { texts: ['title'], lists: {} } });
     expect((await call(person(), 'get_spot', { spotId: o.templateSpot })).spot.sampleFields).toBeNull();
     expect(
-      await dispatch(registry, 'create_spot', { name: 'x', kind: 'template', templateVersionId: spot.templateVersionId, sample: true, data: {} }, person()),
+      await dispatch(registry, 'save_spot', { name: 'x', kind: 'template', templateVersionId: spot.templateVersionId, sample: true, data: {} }, person()),
     ).toMatchObject({
       ok: false,
       error: 'invalid_input',
@@ -55,7 +55,7 @@ describe('sample text on the server', () => {
 
   it('does not mark a field bound to a source at create: screens show the source', async () => {
     const templateVersionId = (await testScope(env.DB, o.orgId).spots.get(o.templateSpot))?.templateVersionId;
-    const { spot } = await call(person(), 'create_spot', {
+    const { spot } = await call(person(), 'save_spot', {
       name: 'Bound',
       kind: 'template',
       templateVersionId,
@@ -113,9 +113,9 @@ describe('sample text on the server', () => {
 
   it('lets a field go once a saved edit changes it, and then publishes without asking', async () => {
     const spot = await sampleSpot();
-    const same = (await call(person(), 'update_spot', { spotId: spot.id, data: { title: 'Title' }, ifVersion: spot.version })).spot;
+    const same = (await call(person(), 'save_spot', { spotId: spot.id, data: { title: 'Title' }, ifVersion: spot.version })).spot;
     expect(same.sampleFields).toEqual({ texts: ['title'], lists: {} });
-    const edited = (await call(person(), 'update_spot', { spotId: spot.id, data: { title: 'Fresh picked' }, ifVersion: same.version })).spot;
+    const edited = (await call(person(), 'save_spot', { spotId: spot.id, data: { title: 'Fresh picked' }, ifVersion: same.version })).spot;
     expect(edited.sampleFields).toBeNull();
     expect((await call(person(), 'publish', pin(edited))).promoted).toContainEqual({ kind: 'spot', id: spot.id });
   });
