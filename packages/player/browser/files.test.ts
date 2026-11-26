@@ -269,6 +269,16 @@ describe('content files', () => {
     expect(await readsOf(p, bundleOf(two))).toBe(1);
   });
 
+  it('keeps its bundles as contained, so the next page load plays them without reading a bundle (#232)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a', 'b']);
+    const p = await openCountingReads(content);
+    // Kept by the read-ahead while a spot plays.
+    await expect.poll(() => p.page.evaluate(async () => (await (await caches.open('sf-frames-v1')).keys()).length)).toBe(2);
+    await p.page.reload();
+    await p.until((s) => s.log.some((l) => l.spot === 'a') && s.log.some((l) => l.spot === 'b'));
+    expect([await readsOf(p, bundle.a!), await readsOf(p, bundle.b!)]).toEqual([0, 0]);
+  });
+
   it('never shows a template from the bundle it had for another hash (#213)', async () => {
     const one = h.content([{ id: 'a', durationMs: 600 }], { variant: 'bundle-one' });
     const p = await h.openPlayer((s) => s.publish(one));

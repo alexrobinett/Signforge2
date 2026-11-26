@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
 import { FEED_IMAGE_MAX_BYTES } from './download';
-import { PinSet, UnauthorisedError, heldBlobs, loadActiveManifest, sync, syncFeedImages } from './store';
+import { PinSet, UnauthorisedError, heldBlobs, loadActiveManifest, storeFrames, storedFrames, sync, syncFeedImages } from './store';
 
 // ---------------------------------------------------------------- fakes
 /** Cache Storage in memory: enough of it for the store. */
@@ -200,6 +200,21 @@ describe('file cleanup and pins', () => {
     pins.release('preparing');
     await sync(BASE, { currentId: 'm2', headers: auth, pinned: pins });
     expect(await held()).toEqual([A]);
+  });
+
+  it('keeps contained frames for the next page load, and drops them with their bundle or when another player made them (#232)', async () => {
+    await sync(BASE, { headers: auth });
+    await storeFrames(A, { wrapper: 'wrapper a', template: 'template a' });
+    await storeFrames(B, { wrapper: 'wrapper b', template: 'template b' });
+    // What an earlier player version kept for the same bundle.
+    await open('sf-frames-v1').put(`/_sf/frames/0.0.0%2Bolder/${A}`, Response.json({ wrapper: 'old', template: 'old' }));
+    expect(await storedFrames(A)).toEqual({ wrapper: 'wrapper a', template: 'template a' });
+
+    api.manifest = withoutB('m2');
+    await sync(BASE, { currentId: 'm1', headers: auth });
+    expect(await storedFrames(A)).toEqual({ wrapper: 'wrapper a', template: 'template a' });
+    expect(await storedFrames(B)).toBeUndefined();
+    expect((await open('sf-frames-v1').keys()).map((k) => new URL(k.url).pathname)).toEqual([`/_sf/frames/0.0.0%2Btest/${A}`]);
   });
 
   it('pins from several holders add up, and a holder replaces its own pins', () => {

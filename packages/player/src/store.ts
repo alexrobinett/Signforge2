@@ -5,7 +5,10 @@
  */
 import { manifestShape, parseManifest, safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { planSync } from '@signforge/player-core';
+import type { Frames } from './bundles';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
+
+declare const __SF_PLAYER_VERSION__: string;
 
 export { UnauthorisedError };
 
@@ -15,6 +18,31 @@ const ACTIVE = '/_sf/manifest/active';
 const BLOB_PREFIX = '/_sf/blob/';
 const PARTIAL_PREFIX = '/_sf/partial/';
 const blobKey = (sha: string) => `${BLOB_PREFIX}${sha}`;
+
+/**
+ * Each template bundle as this player contains it (`containedFrames`), kept beside the file cache so the first prepare
+ * after a page load or a kiosk restart does not contain it again: on a Pi 4 that was about 240 ms of a 400 kB bundle's
+ * first prepare (#232). Kept under the player's version, which names its commit: a player that contains bundles
+ * differently never reads what another made, and a sync's cleanup deletes what other versions left.
+ */
+const FRAMES = 'sf-frames-v1';
+const FRAMES_PREFIX = '/_sf/frames/';
+const framesKey = (sha: string) => `${FRAMES_PREFIX}${encodeURIComponent(__SF_PLAYER_VERSION__)}/${sha}`;
+
+/** The frames this player made of bundle `sha` and kept, if it has. */
+export async function storedFrames(sha: string): Promise<Frames | undefined> {
+  const res = await (await caches.open(FRAMES)).match(framesKey(sha));
+  if (!res) return undefined;
+  const kept: unknown = await res.json();
+  return typeof kept === 'object' && kept && 'wrapper' in kept && 'template' in kept && typeof kept.wrapper === 'string' && typeof kept.template === 'string'
+    ? { wrapper: kept.wrapper, template: kept.template }
+    : undefined;
+}
+
+/** Keep the frames of bundle `sha`, for the next page load. */
+export async function storeFrames(sha: string, frames: Frames): Promise<void> {
+  await (await caches.open(FRAMES)).put(framesKey(sha), jsonResponse(JSON.stringify(frames)));
+}
 
 /**
  * Download one file into the file cache (see `download`). In the browser it runs in a worker, so
@@ -290,6 +318,12 @@ async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<st
   const keep = new Set(pinned);
   const evict = stale.filter((sha) => !keep.has(sha));
   await Promise.all([...evict.map(blobKey), ...partials].map((k) => blobs.delete(k)));
+  // Frames go with their bundle, and those another version made go.
+  const gone = new Set(evict);
+  const held = new Set(hashes.filter((sha) => !gone.has(sha)).map(framesKey));
+  const frames = await caches.open(FRAMES);
+  const kept = (await frames.keys()).map((r) => new URL(r.url).pathname);
+  await Promise.all(kept.filter((k) => !held.has(k)).map((k) => frames.delete(k)));
   return evict.length < stale.length;
 }
 
@@ -351,6 +385,6 @@ export async function requestPersistence(): Promise<boolean> {
  * org that revoked it. The player shell, cached by the service worker, stays.
  */
 export async function wipeContent(): Promise<void> {
-  await Promise.all([caches.delete(BLOBS), caches.delete(STATE)]);
+  await Promise.all([caches.delete(BLOBS), caches.delete(STATE), caches.delete(FRAMES)]);
   missingNow = 0;
 }
