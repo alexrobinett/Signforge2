@@ -1178,7 +1178,10 @@ export const dataSources = sqliteTable(
     rowsPath: text('rows_path'),
     /** `rss`: whether the poller fetches and stores its stories' photos (./feed-photos.ts, apps/api src/data/feed-photos.ts). On unless a person turns it off. */
     photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
-    /** `rss`: { stories: (URL | null)[] } in snapshot order. Older rows held a flat list of URLs. Null until polled with photos active. */
+    /**
+     * `rss`: { version, stories: (URL | null)[] }, the stories in snapshot order and the snapshot version they were read
+     * from (#481). Older rows held { stories } or a flat list of URLs. Null until polled with photos active.
+     */
     photoUrlsJson: text('photo_urls_json'),
     /** Moves on when a photo delivery invalidates RSS validators, even if they were already clear. */
     photoGeneration: integer('photo_generation').notNull().default(0),
