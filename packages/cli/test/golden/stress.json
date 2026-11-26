@@ -89,8 +89,8 @@
       "size": 43425,
       "type": "image/png"
     },
-    "6d750f51044028eadb733e45cad798827ae90730c368a3394abd619dafcc480b": {
-      "size": 393945,
+    "2991bdec140b5f8187bcad78707d4a4c8c51568329319c8c6f9130eb0fdf0a5f": {
+      "size": 393933,
       "type": "text/html"
     },
     "de29f63a8d1386d966af4f67750a68a3498ec14b44d005facc2144f63162c937": {
@@ -387,10 +387,10 @@
       },
       "html": "e88ea0b68c6ac4825ad980171fd47dc5c1d4c65a220b4e41782b0254fa65f6ad"
     },
-    "base/countdown@1.1.2": {
+    "base/countdown@1.2.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.1.2",
+        "version": "1.2.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -513,7 +513,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "6d750f51044028eadb733e45cad798827ae90730c368a3394abd619dafcc480b"
+      "html": "2991bdec140b5f8187bcad78707d4a4c8c51568329319c8c6f9130eb0fdf0a5f"
     },
     "base/cstore-promo@1.4.1": {
       "manifest": {
@@ -1559,7 +1559,7 @@
       "id": "countdown",
       "name": "Countdown (minutes ticking)",
       "kind": "template",
-      "template": "base/countdown@1.1.2",
+      "template": "base/countdown@1.2.1",
       "data": {
         "look": "night",
         "mode": "up",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "4608376b523ba4e68278e8bfa3cd738da897c74968ab773dcfb381359ce89d0b"
+  "id": "da82eb1e3a03acc8997bb35a15bf158a1f226e5dd5a14ce8839a05b45d80c832"
 }
