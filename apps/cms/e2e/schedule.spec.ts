@@ -38,10 +38,10 @@ test.beforeAll(async ({ browser }) => {
   // short, and the others a minute long: a takeover that waited for the spot's end would miss the waits.
   const lengths: Record<string, number> = { 'All day': 10_000, Breakfast: 60_000, 'Flash sale': 60_000 };
   for (const name of Object.keys(lengths)) {
-    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: clock, durationMs: lengths[name], data: { greeting: name } });
+    const { spot } = await tool(page, 'save_spot', { name, kind: 'template', templateVersionId: clock, durationMs: lengths[name], data: { greeting: name } });
     ({
       playlist: { id: playlist[name] },
-    } = await tool(page, 'create_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] }));
+    } = await tool(page, 'save_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] }));
   }
   await tool(page, 'set_default_playlist', { playlistId: playlist['All day'] });
 
@@ -203,7 +203,7 @@ test('a create whose answer was lost, saved again, makes one entry, and a takeov
     ).length;
   const entriesBefore = await count('entries');
 
-  await loseFirstAnswer('create_schedule_entry');
+  await loseFirstAnswer('save_schedule_entry');
   await page.getByRole('button', { name: 'Schedule a playlist' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
   await dialog.getByLabel('Playlist').selectOption({ label: 'Breakfast' });
@@ -300,7 +300,7 @@ test('play a new playlist on this screen from its page, see what it will play, r
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   // A playlist and spot never published: Save and publish takes them along with the entry.
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Holiday',
     kind: 'template',
     templateVersionId: clock,
@@ -309,11 +309,11 @@ test('play a new playlist on this screen from its page, see what it will play, r
   });
   const {
     playlist: { id: holiday },
-  } = await tool(page, 'create_playlist', { name: 'Holiday promo', transition: { type: 'cut' }, spotIds: [spot.id] });
+  } = await tool(page, 'save_playlist', { name: 'Holiday promo', transition: { type: 'cut' }, spotIds: [spot.id] });
   // On screens: the screen's group plays Breakfast every morning at priority 10, which outranks a new entry.
   const { groups } = await tool(page, 'list_groups', {});
   const front = groups.find((g: { name: string }) => g.name === 'Front').id;
-  const { entry: breakfast } = await tool(page, 'create_schedule_entry', {
+  const { entry: breakfast } = await tool(page, 'save_schedule_entry', {
     playlistId: playlist.Breakfast,
     target: 'group',
     groupId: front,
@@ -324,7 +324,7 @@ test('play a new playlist on this screen from its page, see what it will play, r
   await tool(page, 'publish', { drafts: [{ kind: 'schedule_entry', id: breakfast.id, version: breakfast.version }] });
   // Someone else's draft, never published, for the screen at noon at priority 20: as drafted it outranks the new entry too,
   // though Save and publish leaves it off screens, a draft.
-  const { entry: flash } = await tool(page, 'create_schedule_entry', {
+  const { entry: flash } = await tool(page, 'save_schedule_entry', {
     playlistId: playlist['Flash sale'],
     target: 'screen',
     screenId,

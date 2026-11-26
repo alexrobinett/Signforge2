@@ -326,7 +326,7 @@ h1 {
   padding-inline-start: 8.9vmin;
 }
 
-/* Night: the ring, two half-discs turned inside their halves, and the copy in lime and lilac. */
+/* Night: the ring, two half-discs turned inside their halves, and the copy in amber. */
 [data-look='night'] .stage {
   display: flex;
   align-items: center;

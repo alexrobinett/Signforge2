@@ -1,6 +1,6 @@
 {
   "id": "info-frame",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "name": "Info frame",
   "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
   "fields": {

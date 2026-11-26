@@ -95,8 +95,10 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
   const before = call.before ?? {};
   const input = call.input;
   const line = (label: string, a: unknown, b: unknown, check = false): DraftLine[] => (same(a, b) ? [] : [{ label, before: shown(a), after: shown(b), check }]);
-  switch (call.tool) {
-    case 'update_spot': {
+  // A schedule entry's one save tool makes a new entry without its id, and changes one with it (#345).
+  const drafted = call.tool === 'save_schedule_entry' && input.scheduleEntryId === undefined ? 'new_schedule_entry' : call.tool;
+  switch (drafted) {
+    case 'save_spot': {
       const data = isRow(input.data) ? input.data : undefined;
       const fields = d.fieldsOf(str(before.templateVersionId));
       if (data && !fields) return { problem: `The fields of spot ${str(before.name)}'s template could not be read, so its change cannot be shown.` };
@@ -127,7 +129,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
       const reach = d.playlists.filter((p) => p.spotIds.includes(call.target?.id ?? '')).reduce((n, p) => Math.max(n, playing(p.id, d)), 0);
       return { title: `Spot ${str(before.name)}`, lines, reach: `Reaches ${screensWord(reach)} at the next publish` };
     }
-    case 'update_playlist': {
+    case 'save_playlist': {
       const spotNames = (v: unknown) => (Array.isArray(v) ? v.map((id) => d.spots.find((s) => s.id === id)?.name ?? 'a spot').join(', ') : undefined);
       const lines = [
         ...line('Name', before.name, input.name ?? before.name),
@@ -136,7 +138,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
       ];
       return { title: `Playlist ${str(before.name)}`, lines, reach: `Reaches ${screensWord(playing(str(before.id), d))} at the next publish` };
     }
-    case 'create_schedule_entry': {
+    case 'new_schedule_entry': {
       const name = d.playlists.find((p) => p.id === input.playlistId)?.name ?? 'a playlist';
       const when = describeWhen({
         days: Array.isArray(input.days) ? input.days.filter((x): x is number => typeof x === 'number') : null,
@@ -153,7 +155,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
       ];
       return { title: 'New schedule entry', lines, reach: wins(input, null, d) };
     }
-    case 'update_schedule_entry': {
+    case 'save_schedule_entry': {
       const merged: Row = { ...before, ...input };
       const whenOf = (e: Row) =>
         describeWhen({
@@ -172,7 +174,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
       ];
       return { title: `Schedule entry ${name(before.playlistId)}`, lines, reach: wins(merged, str(before.id), d) };
     }
-    case 'rename_screen':
+    case 'update_screen':
       return { title: `Screen ${str(before.name)}`, lines: line('Name', before.name, input.name), reach: 'This screen' };
     default:
       return { title: call.tool.replaceAll('_', ' '), lines: [], reach: '' };

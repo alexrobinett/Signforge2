@@ -112,7 +112,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByRole('button', { name: 'New playlist' }).first()).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'New playlist' })).toHaveCount(0);
   // With one, it is to play it here.
-  await tool(page, 'create_playlist', { name: 'Arcade loop', spotIds: [] });
+  await tool(page, 'save_playlist', { name: 'Arcade loop', spotIds: [] });
   await page.goto(screenPage);
   await hydrated(page);
   await expect(fix).toHaveAccessibleName('Play on this screen…');
@@ -320,7 +320,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await hydrated(page);
   await expect(page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Kiosk' }) })).toContainText('9:16');
   await expect(page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Hall' }) })).not.toContainText('16:9');
-  const group = (await tool('create_group', { name: 'Windows' })).group!;
+  const group = (await tool('save_group', { name: 'Windows' })).group!;
 
   await page.goto(`/screens/${lobby}`);
   await hydrated(page);
@@ -330,7 +330,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await settings.getByLabel('Windows').check();
 
   // An agent puts Hall in the group while the form is open; saving the form keeps it there.
-  await tool('add_group_members', { groupId: group.id, screenIds: [hall] });
+  await tool('save_group', { membership: 'add', groupId: group.id, screenIds: [hall] });
   await settings.getByRole('button', { name: 'Save' }).click();
   await expect(settings).toBeHidden();
   const { groups } = (await (await toolResponse(page, 'list_groups', {})).json()) as { groups: { id: string; screenIds: string[] }[] };
@@ -339,7 +339,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   // An agent renames the screen while the form is open; the person's rename is refused, not written over it.
   await page.getByRole('button', { name: /More actions/ }).click();
   await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
-  await tool('rename_screen', { screenId: lobby, name: 'Front lobby' });
+  await tool('update_screen', { screenId: lobby, name: 'Front lobby' });
   await settings.getByLabel('Name').fill('Main lobby');
   await settings.getByRole('button', { name: 'Save' }).click();
   await expect(settings.getByText('This changed since you opened it.')).toBeVisible();
@@ -350,7 +350,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   // A long one-word name wraps at phone width instead of widening the page (#372).
   // Wide letters, so the breadcrumb's copy of the name is wider than the screen too.
   const long = `Frontlobby${'W'.repeat(30)}`;
-  await tool('rename_screen', { screenId: lobby, name: long });
+  await tool('update_screen', { screenId: lobby, name: long });
   await page.reload();
   await hydrated(page);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -504,7 +504,7 @@ test("Take over's notice keeps a name with no break inside the dialog at a phone
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   const unbroken = 'Q'.repeat(100);
-  await tool(page, 'create_playlist', { name: unbroken, spotIds: [] });
+  await tool(page, 'save_playlist', { name: unbroken, spotIds: [] });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/screens/${screen.id}`);
   await hydrated(page);
@@ -537,7 +537,7 @@ test("the Screens page's pairing form, and its search and filters, are disabled 
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   // In a group, so the Group filter has it.
-  await tool(page, 'create_group', { name: 'Windows', screenIds: [screen.id] });
+  await tool(page, 'save_group', { name: 'Windows', screenIds: [screen.id] });
   const filters = ['Search screens', 'Group', 'Status', 'Tiles', 'Table'];
   expect(await disabledOnServer(page, '/screens', filters)).toEqual(Object.fromEntries(filters.map((n) => [n, [true]])));
   await page.goto('/screens');

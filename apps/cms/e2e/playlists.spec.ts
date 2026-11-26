@@ -24,10 +24,10 @@ test.beforeAll(async ({ browser }) => {
     ['Closing', 'See you tomorrow'],
   ];
   for (const [name, greeting] of clocks) {
-    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: version('clock'), durationMs: 4000, data: { greeting } });
+    const { spot } = await tool(page, 'save_spot', { name, kind: 'template', templateVersionId: version('clock'), durationMs: 4000, data: { greeting } });
     spots[name] = spot.id;
   }
-  const { spot } = await tool(page, 'create_spot', { name: 'Berries', kind: 'template', templateVersionId: version('photo-promo') });
+  const { spot } = await tool(page, 'save_spot', { name: 'Berries', kind: 'template', templateVersionId: version('photo-promo') });
   spots.Berries = spot.id;
 });
 
@@ -100,14 +100,14 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   // Undo pressed after the removal has autosaved (re-check of #153): the spot comes back once, on the
   // version that save made. With the pointer held down on the toast its timer stays paused, even if
   // sonner's toast list changes meanwhile, so it waits for the save.
-  const removalSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist') && r.ok());
+  const removalSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_playlist') && r.ok());
   await page.getByRole('button', { name: 'Remove Lunch' }).click();
   const removed = page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Lunch' });
   await removed.hover();
   await page.mouse.down();
   await removalSaved;
   await page.mouse.up();
-  const undoSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist'));
+  const undoSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_playlist'));
   await removed.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
   expect((await undoSaved).status()).toBe(200);
@@ -156,7 +156,7 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
 test('a change someone else made while the editor was open is not overwritten', async () => {
   const { playlist } = await tool(page, 'get_playlist', { playlistId });
   // Stands in for an agent: a reorder lands after the page read the playlist.
-  await tool(page, 'update_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
+  await tool(page, 'save_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
   await page.getByRole('radio', { name: /^Cut/ }).check();
   await expect(page.getByText('This changed since you opened it.')).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
@@ -191,7 +191,7 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 
 test('the delete question, opened from ⋯ by keyboard, gives focus back to ⋯ on Escape and on Cancel (#378)', async () => {
   // Radix gave it back once the question's closing had played, the page's body focused until then.
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Keyboard loop', spotIds: [spots.Opening], idempotencyKey: `keyboard-loop-${Date.now()}` });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Keyboard loop', spotIds: [spots.Opening], idempotencyKey: `keyboard-loop-${Date.now()}` });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
   const more = page.getByRole('button', { name: 'More actions: delete' });
@@ -226,8 +226,8 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     ['Doors close', 60_000],
   ];
   for (const [greeting, durationMs] of loop)
-    spotIds.push((await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
-  const { playlist } = await tool(page, 'create_playlist', {
+    spotIds.push((await tool(page, 'save_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
+  const { playlist } = await tool(page, 'save_playlist', {
     name: 'Fade check',
     transition: { type: 'fade', ms: 4000 },
     spotIds,
@@ -306,7 +306,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
 test("the editor's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
   // The editor hydrates after the page (body[data-hydrated]): a field changed in between was set
   // back by React, and the old value autosaved.
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
   const path = `/playlists/${playlist.id}`;
   const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
@@ -319,7 +319,7 @@ test("the editor's fields and actions are disabled in the server's HTML, until t
 
 /** A playlist made for one test, open in its editor (#385): its list, and the names in it in order. */
 async function openPlaylist(name: string, spotIds: (string | undefined)[]) {
-  const { playlist } = await tool(page, 'create_playlist', { name, spotIds, idempotencyKey: `${name.replaceAll(' ', '-')}-${Date.now()}` });
+  const { playlist } = await tool(page, 'save_playlist', { name, spotIds, idempotencyKey: `${name.replaceAll(' ', '-')}-${Date.now()}` });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
   const list = page.getByRole('list', { name: 'Spots in play order' });

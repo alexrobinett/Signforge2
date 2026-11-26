@@ -7,6 +7,7 @@
 import type * as s from './schema';
 
 export { brandStateOf, scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
+export { imagesMonth, imagesTransformsUsed, takeImagesTransforms } from './images-usage';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';
@@ -28,6 +29,7 @@ export {
   pendingFeedImageDeletes,
 } from './retention';
 export {
+  DEFAULT_PHOTO_BUDGET,
   DELETE_LEASE_MS,
   DeleteInFlightError,
   type Delivery,
@@ -38,6 +40,7 @@ export {
   NEW_PER_ORG_PER_DAY,
   NEW_PER_SOURCE_PER_DAY,
   PHOTOS_PER_SOURCE,
+  type PhotoBudget,
   type PhotoRead,
   photoRead,
   type PollPhotos,

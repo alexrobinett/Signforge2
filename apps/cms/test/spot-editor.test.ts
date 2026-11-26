@@ -20,6 +20,7 @@ import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../s
 import { draftOf, fieldProblems } from '../src/lib/spots';
 import { type AgentSlice, createAgentSlice } from '../src/state/agent';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
+import { initialOrgs } from '../src/state/orgs';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -124,6 +125,7 @@ describe('a save on its way (#150)', () => {
     const store = createStore<SpotEditorSlice & PublishingSlice>()((set, get) => ({
       ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
       ...createPublishingSlice(set as never, get as never, { router, queryClient } as never),
+      orgs: initialOrgs,
     }));
     return { store, queryClient };
   }
@@ -134,14 +136,14 @@ describe('a save on its way (#150)', () => {
     queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'One' }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { name: 'One', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { name: 'One', ifVersion: 4 } }]);
 
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'Two' }));
     void store.getState().publishSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
     answers[0]!({ spot: { ...a, name: 'One', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.map((c) => c.name)).toEqual(['update_spot', 'update_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'save_spot']);
     expect(calls[1]!.input).toMatchObject({ name: 'Two', ifVersion: 5 });
 
     answers[1]!({ spot: { ...a, name: 'Two', version: 6 } });
@@ -157,7 +159,7 @@ describe('a save on its way (#150)', () => {
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'A, renamed' }));
     store.getState().editSpot(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: 'spt_a', name: 'A, renamed', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { spotId: 'spt_a', name: 'A, renamed', ifVersion: 4 } }]);
     expect(store.getState().spotEditor.drafts.spt_a?.edit.name).toBe('A, renamed');
   });
 });
@@ -334,7 +336,7 @@ describe('a date not picked yet (review of #192)', () => {
     const { store, launch } = editing({ target: '' });
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
     expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {}, bindings: {} })).toEqual(
       new Map([['target', ['field "target" has no date and time yet']]]),
     );
@@ -354,14 +356,14 @@ describe('a date not picked yet (review of #192)', () => {
     expect(calls).toEqual([]);
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, target: '2026-12-24T18:00' } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '2026-12-24T18:00', title: 'Doors open' } } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { data: { target: '2026-12-24T18:00', title: 'Doors open' } } }]);
   });
 
   it('saves a new list row whose datetime is not picked yet, and still holds back a row the server would refuse for another reason', async () => {
     const { store, launch } = editing({ target: '', events: [] });
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: '', at: '' }] } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '', events: [{ name: '', at: '' }] } } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { data: { target: '', events: [{ name: '', at: '' }] } } }]);
     answers[0]!({ spot: { ...launch, data: { target: '', events: [{ name: '', at: '' }] }, version: 2 } });
     await vi.advanceTimersByTimeAsync(0);
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: 7, at: '' }] } }));
@@ -398,7 +400,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
     type('!');
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Theirs!', ifVersion: 6 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_spot', input: { name: 'Theirs!', ifVersion: 6 } });
   });
 
   it('with nobody else saving, the next edit builds on the saved draft, at the version it saved', async () => {
@@ -417,7 +419,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
     store.getState().editSpot(ORG, v5.id, (d) => ({ ...d, name: `${d.name}two` }));
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Mine two', ifVersion: 5 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_spot', input: { name: 'Mine two', ifVersion: 5 } });
   });
 });
 
@@ -561,7 +563,7 @@ describe('deleting a spot (#242)', () => {
     d.store.getState().askDeleteSpot(true);
     void d.store.getState().deleteSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls).toEqual([{ name: 'update_spot', input: expect.objectContaining({ spotId: 'spt_a', name: 'Renamed', ifVersion: 4 }) }]);
+    expect(calls).toEqual([{ name: 'save_spot', input: expect.objectContaining({ spotId: 'spt_a', name: 'Renamed', ifVersion: 4 }) }]);
     reply({ spot: { ...a, name: 'Renamed', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
     return { ...d, reply, a };
@@ -577,7 +579,7 @@ describe('deleting a spot (#242)', () => {
     expect(queryClient.getQueryData(spotKeys.one(ORG, a.id))).toBeUndefined();
     expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [], savedSince: false });
     await vi.advanceTimersByTimeAsync(5000);
-    expect(calls.map((c) => c.name)).toEqual(['update_spot', 'delete_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
   });
 
   it('waits for an autosave already on its way, and deletes at the version it made (#355)', async () => {
@@ -588,10 +590,10 @@ describe('deleting a spot (#242)', () => {
     d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
     // The autosave's second passes: its save is sent, not yet answered, when Delete is pressed.
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.map((c) => c.name)).toEqual(['update_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot']);
     void d.store.getState().deleteSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.map((c) => c.name)).toEqual(['update_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot']);
     reply({ spot: { ...a, name: 'Renamed', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });

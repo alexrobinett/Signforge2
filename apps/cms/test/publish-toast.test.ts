@@ -689,6 +689,19 @@ describe('sample text the server refuses (#360)', () => {
     expect(store.getState().publishing.pending).toBe(false);
   });
 
+  it('sends nothing for an org the tab has left, as a drawer Publish answered after a switch (#479)', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockImplementation(async () => published(++revision));
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    shown.org = 'org_2';
+    expect(await store.getState().publishTogether(ORG, [{ kind: 'schedule_entry', id: 'sch_breakfast' }])).toBe(false);
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
   it('says not published when the publish was held back: no publish was made', async () => {
     vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
     vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);

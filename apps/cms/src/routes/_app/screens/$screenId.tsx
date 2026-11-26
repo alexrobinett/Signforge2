@@ -233,7 +233,9 @@ function ScreenPage() {
                   <Button
                     variant="outline"
                     disabled={!!busy}
-                    onClick={() => run('identify', 'identify_screen', {}, 'Sent. The screen shows its name for 10 seconds, if it is connected.')}
+                    onClick={() =>
+                      run('identify', 'screen_command', { command: 'identify' }, 'Sent. The screen shows its name for 10 seconds, if it is connected.')
+                    }
                   >
                     {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
                   </Button>
@@ -242,7 +244,7 @@ function ScreenPage() {
                     variant="outline"
                     disabled={!!busy || !inTouch}
                     aria-describedby={inTouch ? undefined : 'restart-off'}
-                    onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
+                    onClick={() => run('restart', 'screen_command', { command: 'restart' }, 'Sent. The player restarts and plays from its cache at once.')}
                   >
                     {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
                   </Button>
@@ -251,7 +253,7 @@ function ScreenPage() {
                     <Button
                       variant="outline"
                       disabled={!!busy}
-                      onClick={() => run('display', 'set_display_override', { state: null }, 'Back to its display hours.')}
+                      onClick={() => run('display', 'screen_command', { command: 'display_auto' }, 'Back to its display hours.')}
                     >
                       {spinner('display', <UndoIcon aria-hidden />)} Back to display hours
                     </Button>
@@ -259,7 +261,7 @@ function ScreenPage() {
                     <Button
                       variant="outline"
                       disabled={!!busy}
-                      onClick={() => run('display', 'set_display_override', { state: 'on' }, 'Waking it until its next scheduled change.')}
+                      onClick={() => run('display', 'screen_command', { command: 'display_on' }, 'Waking it until its next scheduled change.')}
                     >
                       {spinner('display', <SunIcon aria-hidden />)} Wake now
                     </Button>
@@ -267,7 +269,7 @@ function ScreenPage() {
                     <Button
                       variant="outline"
                       disabled={!!busy}
-                      onClick={() => run('display', 'set_display_override', { state: 'off' }, 'Sleeping it until its next scheduled change.')}
+                      onClick={() => run('display', 'screen_command', { command: 'display_off' }, 'Sleeping it until its next scheduled change.')}
                     >
                       {spinner('display', <MoonIcon aria-hidden />)} Sleep now
                     </Button>

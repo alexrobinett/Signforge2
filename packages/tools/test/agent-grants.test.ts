@@ -268,7 +268,7 @@ describe('usage (M4-08)', () => {
   /** A call log that answers from fixed calls and notes which grants it was asked about. */
   function log() {
     const asked: string[][] = [];
-    const call = { at: 1, tool: 'rename_screen', result: 'forbidden', change: true, needs: 'screens:manage', target: null };
+    const call = { at: 1, tool: 'update_screen', result: 'forbidden', change: true, needs: 'screens:manage', target: null };
     const agentCalls: AgentCallLog = {
       usage: async (ids) => {
         asked.push([...ids]);
@@ -304,8 +304,8 @@ describe('usage (M4-08)', () => {
       ok: true,
       output: {
         grants: [{ grantId: mine, calls: 12, changes: 3, drafts: 2, refusals: 1 }],
-        recent: [{ tool: 'rename_screen', result: 'forbidden' }],
-        lastRefusal: { tool: 'rename_screen', needs: 'screens:manage' },
+        recent: [{ tool: 'update_screen', result: 'forbidden' }],
+        lastRefusal: { tool: 'update_screen', needs: 'screens:manage' },
       },
     });
     expect(await call(withLog(person('editor'), agentCalls), 'get_agent_grant_usage', { grantId: owners })).toMatchObject({ ok: false, error: 'not_found' });

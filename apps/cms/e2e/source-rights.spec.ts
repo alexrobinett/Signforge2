@@ -13,7 +13,7 @@ test("an editor where only owners publish sees a feed's address and photos unava
 }) => {
   await signInAs(page, `e2e-source-rights-${Date.now()}@example.com`, ADDRESS.owner);
   await createOrg(page, 'Quayside Bakery', ADDRESS.owner);
-  const { dataSource } = await tool(page, 'create_data_source', {
+  const { dataSource } = await tool(page, 'save_data_source', {
     name: 'Bakery news',
     format: 'rss',
     feedUrl: 'https://news.example.com/bakery.xml',
@@ -52,9 +52,9 @@ test("an editor where only owners publish sees a feed's address and photos unava
   await shots(editor, '107-source-rights-phone');
 
   // The API refuses it as well, and a name alone it allows.
-  const refused = await toolResponse(editor, 'update_data_source', { dataSourceId: dataSource.id, photos: false });
+  const refused = await toolResponse(editor, 'save_data_source', { dataSourceId: dataSource.id, photos: false });
   expect(refused.status()).toBe(403);
   expect(await refused.text()).toContain('needs the right to publish');
-  await tool(editor, 'update_data_source', { dataSourceId: dataSource.id, name: 'Bakery blog' });
+  await tool(editor, 'save_data_source', { dataSourceId: dataSource.id, name: 'Bakery blog' });
   await editor.context().close();
 });

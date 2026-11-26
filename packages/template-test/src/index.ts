@@ -643,21 +643,29 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
 }
 
 /**
+ * An entrance starts and ends inside this many ms of its play's start: the last stagger step's delay plus the longest
+ * intro is under it, and an exit, a push-in over the play or a loop is not.
+ */
+export const INTRO_WINDOW_MS = 2000;
+
+/**
  * What is wrong with a template's layout at rest: text past the screen, past its clamp or cut by a
  * box around it, painted over (except by what `crosses` selects, drawn across text by design), and
  * texts that overlap, with the elements `also` selects (such as a now line) counted as text. Each
  * text is its lines' boxes, cut to every box that clips it. With `inside`, each text must also stay
- * within its nearest ancestor that matches it (a card).
+ * within its nearest ancestor that matches it (a card). `at`: the time at rest, for a template whose outros are not its
+ * intros reversed (news 2.1's lift away); otherwise, where the longest intro ends.
  */
-export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
+export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '', at?: number) =>
   f.evaluate(
-    ({ also, crosses, inside }) => {
-      // At rest: where the longest intro ends. An outro runs in reverse, and ambient motion never ends.
+    ({ also, crosses, inside, at, window }) => {
+      // At rest: where the longest entrance ends. An entrance starts and ends within the first seconds; an exit starts
+      // near the play's end (or, before D's motion, ran in reverse), a push-in lasts the play, and a loop never ends.
       const intros = document
         .getAnimations()
         .map((a) => a.effect!.getComputedTiming())
-        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)));
-      const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < window && Number(t.duration) < window);
+      const rest = at ?? Math.max(0, ...intros.map((t) => Number(t.endTime)));
       for (const a of document.getAnimations()) a.currentTime = rest;
       type Box = { l: number; t: number; r: number; b: number };
       const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
@@ -740,7 +748,7 @@ export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
         }
       return [...new Set(found)];
     },
-    { also, crosses, inside },
+    { also, crosses, inside, at, window: INTRO_WINDOW_MS },
   );
 
 /**
@@ -765,7 +773,142 @@ export const motion = (f: Frame, durationMs: number, every = false) =>
         const ends = el.getAnimations().map((a) => Math.round(a.effect!.getComputedTiming().endTime as number));
         if ((every || ends.length) && !ends.includes(durationMs)) unended.push(el.className);
       }
-      return { props: [...props].sort(), withinCap: moving.size <= 50, unended };
+      // A name with no @keyframes runs nothing and fails silently: the element shows from the first frame.
+      const defined = new Set<string>();
+      const read = (rules: CSSRuleList) => {
+        for (const r of rules)
+          if (r instanceof CSSKeyframesRule) defined.add(r.name);
+          else if (r instanceof CSSGroupingRule) read(r.cssRules);
+      };
+      for (const sheet of document.styleSheets) read(sheet.cssRules);
+      const unknown = [...document.querySelectorAll('*')].flatMap((el) =>
+        getComputedStyle(el)
+          .animationName.split(', ')
+          .filter((n) => n !== 'none' && !defined.has(n))
+          .map((n) => `${el.className} ${n}`),
+      );
+      return { props: [...props].sort(), withinCap: moving.size <= 50, unended, unknown: [...new Set(unknown)] };
     },
     { durationMs, every },
+  );
+
+/** D's motion (#news-design, docs/template-spec.md, Motion): the curves and limits `motionContract` holds a spot to. */
+export const MOTION = {
+  easeIn: 'cubic-bezier(0.05, 0.7, 0.1, 1)',
+  easeOut: 'cubic-bezier(0.3, 0, 0.8, 0.15)',
+  easeMove: 'cubic-bezier(0.2, 0, 0, 1)',
+  introMs: [400, 650],
+  outroMs: 300,
+  inVmin: 1.5,
+  outVmin: 0.6,
+  scale: [0.94, 1.04],
+} as const;
+
+/**
+ * Where a play of `durationMs` breaks D's motion, one line each: none when it keeps it. Every animation (CSS, a
+ * transition or a script's) is played alone, seeked through 25 points and read against its element at rest, so it
+ * takes no wall clock. What it does there sorts it:
+ * - an entrance, from unseen to rest: the decelerating curve, 400 to 650 ms, at most 1.5vmin from rest;
+ * - an exit, from rest to unseen: the accelerating curve, 300 ms, ending as the spot does, at most 0.6vmin, and not
+ *   an entrance played backwards;
+ * - ambient motion, over half the play or more, or looping where `loops` allows: any curve, at most 1.5vmin;
+ * - anything else is a move mid-play, from on screen to on screen: the standard curve, staying on screen.
+ * Each moves only transform and opacity, goes one way from where it starts to where it ends (no overshoot, though
+ * it may pass through several keyframes), never rotates, and scales within 0.94 to 1.04 (a reveal along one axis
+ * may start from nothing).
+ */
+export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl, .lk-ping') =>
+  f.evaluate(
+    ({ durationMs, loops, m }) => {
+      const found: string[] = [];
+      const name = (el: Element) =>
+        `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
+      const vmin = Math.min(innerWidth, innerHeight) / 100;
+      const matrix = (transform: string) => new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
+      for (const a of document.getAnimations()) {
+        const effect = a.effect as KeyframeEffect;
+        const el = effect.target!;
+        const kind = a instanceof CSSAnimation ? a.animationName : a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : 'script animation';
+        const who = `${name(el)} ${kind}`;
+        const frames = effect.getKeyframes();
+        for (const k of frames)
+          for (const p of Object.keys(k))
+            if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform'].includes(p)) found.push(`${who} moves ${p}`);
+        const timing = effect.getComputedTiming();
+        if (timing.iterations === Number.POSITIVE_INFINITY) {
+          if (!el.matches(loops)) found.push(`${who} loops`);
+          continue;
+        }
+        const start = Number(timing.delay ?? 0);
+        const dur = Number(timing.duration);
+        const end = Math.round(Number(timing.endTime));
+        const curve = [...new Set([String(timing.easing), ...frames.map((k) => String(k.easing))].filter((e) => e !== 'linear'))].join(' then ') || 'linear';
+
+        // Alone: every other animation of the element taken off, and this one too for its rest.
+        const others = el.getAnimations().map((x) => ({ x, effect: x.effect, time: x.currentTime }));
+        for (const { x } of others) x.effect = null;
+        const still = getComputedStyle(el);
+        const rest = { m: matrix(still.transform), o: Number(still.opacity) };
+        const undo = rest.m.inverse();
+        a.effect = effect;
+        const samples = Array.from({ length: 25 }, (_, i) => {
+          a.currentTime = start + ((dur - 0.01) * i) / 24;
+          const now = getComputedStyle(el);
+          const x = matrix(now.transform);
+          // Against its rest: a resting translate(-50%, -50%) is where it stands, not how far it moves.
+          const r = Number.isNaN(undo.m11) ? x : undo.multiply(x);
+          const box = el.getBoundingClientRect();
+          return {
+            x: x.m41 - rest.m.m41,
+            y: x.m42 - rest.m.m42,
+            sx: Math.hypot(r.m11, r.m12),
+            sy: Math.hypot(r.m21, r.m22),
+            turn: (Math.atan2(r.m12, r.m11) * 180) / Math.PI,
+            o: Number(now.opacity),
+            onScreen: box.left > -1 && box.top > -1 && box.right < innerWidth + 1 && box.bottom < innerHeight + 1,
+          };
+        });
+        for (const { x, effect, time } of others) {
+          x.effect = effect;
+          x.currentTime = time;
+        }
+
+        const first = samples[0]!;
+        const last = samples.at(-1)!;
+        const unseen = (s: typeof first) => s.o < 0.01 || s.sx < 0.01 || s.sy < 0.01;
+        const atRest = (s: typeof first) =>
+          Math.hypot(s.x, s.y) < 0.05 && Math.abs(s.sx - 1) < 0.001 && Math.abs(s.sy - 1) < 0.001 && Math.abs(s.turn) < 0.01 && Math.abs(s.o - rest.o) < 0.001;
+        const travel = Math.max(...samples.map((s) => Math.hypot(s.x, s.y))) / vmin;
+        const ambient = dur >= durationMs / 2;
+        if (!ambient && unseen(first) && atRest(last)) {
+          if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
+          if (curve !== m.easeIn) found.push(`${who} arrives on ${curve}`);
+          if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+        } else if (!ambient && atRest(first) && unseen(last)) {
+          if (Math.round(dur) !== m.outroMs) found.push(`${who} leaves in ${Math.round(dur)} ms`);
+          if (curve !== m.easeOut) found.push(`${who} leaves on ${curve}`);
+          if (end !== durationMs) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
+          if (travel > m.outVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+          if (String(timing.direction).includes('reverse')) found.push(`${who} leaves by reversing its entrance`);
+        } else if (ambient) {
+          if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+        } else {
+          if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
+          if (samples.some((s) => !s.onScreen)) found.push(`${who} moves off the screen`);
+        }
+        for (const k of ['x', 'y', 'sx', 'sy', 'o'] as const) {
+          const steps = samples.slice(1).map((s, i) => s[k] - samples[i]![k]);
+          const eps = k === 'x' || k === 'y' ? 0.05 : 0.0005;
+          if (steps.some((d) => d > eps) && steps.some((d) => d < -eps)) found.push(`${who} overshoots in ${k}`);
+        }
+        if (samples.some((s) => Math.abs(s.turn) > 0.01)) found.push(`${who} rotates`);
+        for (const s of samples) {
+          const uniform = Math.abs(s.sx - s.sy) < 0.001;
+          if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > m.scale[1] + 0.001)
+            found.push(`${who} scales to ${(uniform && s.sx < 1 ? s.sx : Math.max(s.sx, s.sy)).toFixed(2)}`);
+        }
+      }
+      return [...new Set(found)];
+    },
+    { durationMs, loops, m: MOTION },
   );

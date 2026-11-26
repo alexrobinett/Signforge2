@@ -165,8 +165,8 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const fields = { playlistId: edit.playlistId, ...aim(edit), ...entryWhen(edit) };
       const out =
         record === null
-          ? await callTool('create_schedule_entry', { ...fields, idempotencyKey })
-          : await callTool('update_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version });
+          ? await callTool('save_schedule_entry', { ...fields, idempotencyKey })
+          : await callTool('save_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version });
       await refresh(orgId);
       return { record: out.entry.id };
     },

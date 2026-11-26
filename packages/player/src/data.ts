@@ -11,7 +11,7 @@
  * so a value that does not fit leaves the spot's fallback on screen. Every refusal is counted
  * against its source in `dataRejections`.
  */
-import { MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
+import { isNewsImage, MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
 import { manifestBoundFields, snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
@@ -122,9 +122,12 @@ export async function offerSnapshots(list: readonly DataSnapshot[], playing: () 
 
 /** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */
 export async function offerPending(manifest: ScreenManifest): Promise<void> {
-  const waiting = [...pending];
-  pending.clear();
-  for (const [id, p] of waiting) await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  // Each stays waiting until its own offer is done: a sync between offers prunes photos by `namedImages`, which reads
+  // the waiting ones too.
+  for (const [id, p] of [...pending]) {
+    await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+    if (pending.get(id) === p) pending.delete(id);
+  }
 }
 
 /**
@@ -140,6 +143,24 @@ export async function offerChecked(checked: NonNullable<SyncResponse['checked']>
     snapshots.set(id, next);
     await store(id, next).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   }
+}
+
+/**
+ * Every feed photo a snapshot the screen holds or keeps waiting names (any `{ file, thumb }` in its data): what a
+ * manifest still on its way can need. A photo only a superseded snapshot named is in none of them.
+ */
+export function namedImages(): Set<string> {
+  const out = new Set<string>();
+  const visit = (v: unknown): void => {
+    if (isNewsImage(v)) {
+      out.add(v.file);
+      out.add(v.thumb);
+    } else if (Array.isArray(v)) v.forEach(visit);
+    else if (typeof v === 'object' && v !== null) Object.values(v).forEach(visit);
+  };
+  for (const snap of snapshots.values()) visit(snap.data);
+  for (const { snapshot } of pending.values()) visit(snapshot.data);
+  return out;
 }
 
 /** Load the stored snapshots of `manifest`'s sources, for a screen whose data comes on sync. */

@@ -36,6 +36,7 @@ import { playlistsQuery } from '~/queries/playlists';
 import { screensQuery } from '~/queries/screens';
 import { spotsQuery } from '~/queries/spots';
 import type { Shell } from '~/server/shell.functions';
+import { changingOrg } from '~/state/orgs';
 import { useAppStore } from '~/state/provider';
 
 /** The org list's first button takes focus when the list replaces the commands. Stable, so it runs once. */
@@ -94,7 +95,7 @@ function TargetView({
   const actions = screen ? targetActions({ kind: 'screen', screen }, tools, checked) : group ? targetActions({ kind: 'group', group }, tools, checked) : [];
   const name = screen?.name ?? group?.name ?? (checking ? 'Checking…' : 'Not found');
   // Said only where the role has commands and the screen is not known to be revoked: only the check is missing.
-  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'identify_screen' || t.name === 'restart_screen');
+  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'screen_command');
 
   return (
     <>
@@ -130,7 +131,7 @@ function TargetView({
               ? `Checking ${name} before Identify and Restart…`
               : waiting && failed
                 ? `Couldn’t check ${name}, so Identify and Restart are off. Close ⌘K and open it again to retry.`
-                : screen && checked && screen.status !== 'revoked' && !reachable(screen) && tools.some((t) => t.name === 'restart_screen')
+                : screen && checked && screen.status !== 'revoked' && !reachable(screen) && tools.some((t) => t.name === 'screen_command')
                   ? `Restart is off: ${name} cannot be reached now, and a restart only reaches a screen in touch.`
                   : ''}
         </p>
@@ -224,6 +225,8 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const move = useAppStore((s) => s.moveCommandSelection);
   const chooseTarget = useAppStore((s) => s.chooseTarget);
   const askFromMenu = useAppStore((s) => s.askFromMenu);
+  // The agent asks nothing while the org changes (#479): its entries say so by being off.
+  const switching = useAppStore((s) => changingOrg(s.orgs));
   const path = useRouterState({ select: (s) => s.location.pathname });
   const canPublish = useCanPublish();
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
@@ -279,7 +282,13 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const item = (e: CommandEntry) => {
     const Icon = e.kind === 'go' ? icon(e.to) : undefined;
     return (
-      <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
+      <CommandItem
+        key={e.id}
+        value={e.id}
+        keywords={[e.label, ...e.keywords]}
+        disabled={running || (switching && (e.kind === 'agent' || e.kind === 'ask'))}
+        onSelect={() => void choose(e)}
+      >
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'action' && <ZapIcon className="size-4 text-muted-foreground" aria-hidden />}

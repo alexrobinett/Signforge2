@@ -6,8 +6,9 @@
 // - each pin on its own: a held snapshot's, and the spot on screen's
 // - cleanup while falling back keeps the synced manifest's files
 // - images still arrive while the manifest cannot be fetched
+// - falling back, only the photos of the manifest playing are fetched, and an adoption keeps every waiting snapshot's
 // - editor preview shows snapshot images and tolerates missing blobs
-// - the shipped news (2.0) plays the feed's photos, a story without one with its initial
+// - the shipped news (2.1) plays the feed's photos, and its strip numbers the stories
 import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { buildTemplate } from '@signforge/template-build';
@@ -209,20 +210,27 @@ describe('feed images on screens (#196)', () => {
     expect(await onScreenRows(p)).toEqual([rowView('One', [12, 8], [4, 3])]);
   }, 30_000);
 
-  it('keeps the files of the manifest it falls back from when feed images come', async () => {
-    const { images, shas } = twoPhotos();
-    const [f1, t1] = shas;
-    const asset = randomBytes(4096);
+  /** A player that played a manifest whose one spot binds `news`, then fell back to it from `broken`. */
+  async function fallenBack(broken: Content, first?: (p: Player) => Promise<void>) {
     const good = h.content([{ id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: bound }], { variant: 'good' });
-    // Bound to the same source, so the server sends its images while the screen falls back from it.
-    const broken = h.content([{ id: 'x', mode: 'throw', asset, durationMs: 600, bindings: bound }], { variant: 'broken' });
     const p = await h.openPlayer((s) => {
       s.nextSyncS = 1;
       s.publish(good);
     }, api);
     await p.until((s) => s.lastGood === good.manifest.id);
+    await first?.(p);
     p.server.publish(broken);
     await p.until((s) => s.fallback === broken.manifest.id && s.manifestId === good.manifest.id);
+    return p;
+  }
+
+  it('keeps the files of the manifest it falls back from when feed images come', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1] = shas;
+    const asset = randomBytes(4096);
+    // Bound to the same source, so the server sends its images while the screen falls back from it.
+    const broken = h.content([{ id: 'x', mode: 'throw', asset, durationMs: 600, bindings: bound }], { variant: 'broken' });
+    const p = await fallenBack(broken);
 
     feed(p.server, 1000, [photo('One', f1, t1)], images.slice(0, 2));
     await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
@@ -231,6 +239,109 @@ describe('feed images on screens (#196)', () => {
     expect(requestsFor(p, sha256(asset))).toHaveLength(1);
     expect((await p.state()).fallback).toBe(broken.manifest.id);
   }, 30_000);
+
+  // While it falls back, the screen plays the last good manifest until a newer publish (#460).
+  it('fetches only the photos of the manifest it falls back to, none of the one it fell back from', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1, f2, t2] = shas;
+    // The broken one binds `news2` too, which the good one does not: its photos would be fetched and evicted at every sync.
+    const broken = h.content(
+      [
+        { id: 'x', mode: 'throw', durationMs: 600, bindings: bound },
+        { id: 'y', mode: 'throw', durationMs: 600, bindings: { items: { source: 'news2', path: 'items' } } },
+      ],
+      { variant: 'broken' },
+    );
+    const p = await fallenBack(broken);
+
+    feed(p.server, 1000, [photo('One', f1, t1)], images);
+    p.server.setData('news2', { ...makeSnap(1000, [photo('Two', f2, t2)]), id: 'news2' });
+    await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
+    // Two more syncs the player has finished with, each naming news2's photos.
+    const { syncs } = await p.state();
+    await p.until((s) => s.syncs > syncs + 1);
+    expect(requestsFor(p, f2)).toEqual([]);
+    expect(requestsFor(p, t2)).toEqual([]);
+  }, 30_000);
+
+  // Two snapshots refused for the manifest playing wait for the next; adopting it stores them one by one, and the
+  // cleanup after the adoption waits for both, or the second one's photos would be evicted and fetched again (#460).
+  it('keeps the photos of every snapshot waiting for the manifest it adopts', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1, f2, t2] = shas;
+    const stories = (source: string) => ({ items: { source, path: 'stories' } });
+    const snap = (id: string, title: string, file: string, thumb: string) => ({
+      id,
+      version: 1000,
+      fetchedAt: new Date(1000).toISOString(),
+      checkedAt: new Date().toISOString(),
+      data: { stories: [photo(title, file, thumb)] },
+    });
+    // The first manifest binds `items`, which the snapshots do not have: both are refused for it and wait.
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(
+        h.content([
+          { id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: bound },
+          { id: 'news2', durationMs: 600, items: [{ title: 'Fallback' }], bindings: { items: { source: 'news2', path: 'items' } } },
+        ]),
+      );
+    }, api);
+    await p.until((s) => s.played >= 1);
+    const failing = p.server.intercept(/^\/content\/manifest\.json$/, { status: 503 });
+    const next = h.content(
+      [
+        { id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: stories('news') },
+        { id: 'news2', durationMs: 600, items: [{ title: 'Fallback' }], bindings: stories('news2') },
+      ],
+      { variant: 'stories' },
+    );
+    p.server.publish(next);
+    for (const b of images) p.server.setFeedBlob(sha256(b), b);
+    p.server.setData('news', snap('news', 'One', f1, t1));
+    p.server.setData('news2', snap('news2', 'Two', f2, t2));
+    await expect.poll(() => cached(p), { timeout: 10_000 }).toEqual(expect.arrayContaining(shas.map((sha) => `/_sf/blob/${sha}`)));
+    // Storing the first waiting snapshot is held until the test lets it go, so the second is not stored meanwhile.
+    await p.page.evaluate(() => {
+      const put = Cache.prototype.put;
+      let release = () => {};
+      const held = new Promise<void>((r) => (release = r));
+      Reflect.set(window, 'sfReleaseStore', release);
+      Cache.prototype.put = function (request, response) {
+        const url = request instanceof Request ? request.url : String(request);
+        return url.endsWith('/_sf/data/news') ? held.then(() => put.call(this, request, response)) : put.call(this, request, response);
+      };
+    });
+    failing();
+    await p.until((s) => s.manifestId === next.manifest.id);
+    // A sync the player has finished with after the adoption, then the store goes on.
+    const { syncs } = await p.state();
+    await p.until((s) => s.syncs > syncs);
+    await p.page.evaluate(() => {
+      const release: unknown = Reflect.get(window, 'sfReleaseStore');
+      if (typeof release === 'function') release();
+    });
+    await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([...shas].sort());
+    // Never evicted and fetched again.
+    for (const sha of shas) expect(requestsFor(p, sha), sha).toHaveLength(1);
+  }, 40_000);
+
+  // Restarted while falling back, its last good manifest's photos are kept, not deleted and fetched again (#464).
+  it('keeps the photos of the manifest it falls back to across a restart', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1] = shas;
+    // A spot that never gets ready: after the restart, the first sync's cleanup runs before the player falls back again.
+    const broken = h.content([{ id: 'y', mode: 'hang', durationMs: 600, bindings: { items: { source: 'news2', path: 'items' } } }], { variant: 'broken' });
+    // Its photos come while the good one is the one synced: the broken one binds another feed.
+    const p = await fallenBack(broken, async (p) => {
+      feed(p.server, 1000, [photo('One', f1, t1)], images.slice(0, 2));
+      await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
+    });
+    await p.page.reload();
+    await p.until((s) => s.fallback === broken.manifest.id && s.syncs > 1, 20_000);
+    await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
+    for (const sha of [f1, t1]) expect(requestsFor(p, sha), sha).toHaveLength(1);
+  }, 40_000);
 
   // A broken image would show where the photo was: the row goes without one instead (review of #240).
   it('plays a story whose photo cannot be decoded as one with no image', async () => {
@@ -294,6 +405,15 @@ describe('feed images on screens (#196)', () => {
     }
     const gone = (p: Player, ...shas: string[]) =>
       expect.poll(async () => (await cached(p)).filter((k) => shas.some((sha) => k.endsWith(sha))), { timeout: 15_000 }).toEqual([]);
+
+    it('lets go of those a newer snapshot dropped while the manifest is still on its way (#464)', async () => {
+      const { p, f1, t1 } = await sentWhileFailing();
+      const { images, shas } = twoPhotos();
+      const [, , f2, t2] = shas;
+      feed(p.server, 2000, [photo('Two', f2, t2)], images.slice(2));
+      await expect.poll(() => cached(p), { timeout: 10_000 }).toEqual(expect.arrayContaining([`/_sf/blob/${f2}`, `/_sf/blob/${t2}`]));
+      await gone(p, f1, t1);
+    }, 40_000);
 
     it('evicts them when it recovers onto a manifest that does not name them', async () => {
       const { p, f1, t1, failing } = await sentWhileFailing();
@@ -400,7 +520,7 @@ describe('feed images on screens (#196)', () => {
     expect(msgs.some((m) => m.type === 'error')).toBe(false);
   }, 30_000);
 
-  it("plays the shipped news template with the feed's photos, a story without one with its initial", async () => {
+  it("plays the shipped news template with the feed's photos, and numbers the stories in its strip", async () => {
     const built = await buildTemplate(resolve(import.meta.dirname, '../../../templates/news'));
     const htmlBuf = Buffer.from(built.html);
     const htmlSha = sha256(htmlBuf);
@@ -430,7 +550,6 @@ describe('feed images on screens (#196)', () => {
             showSummary: true,
             showList: true,
             showMeta: true,
-            showCrawl: true,
           },
           assets: {},
           bindings: { items: { source: 'feed', path: 'items' }, language: { source: 'feed', path: 'language' } },
@@ -472,12 +591,10 @@ describe('feed images on screens (#196)', () => {
       return frame?.evaluate(() => ({
         lead: document.querySelector('.headline')!.textContent,
         photo: document.querySelector<HTMLImageElement>('.story .photo')?.naturalWidth ?? 0,
-        thumbs: [...document.querySelectorAll('.row')].map(
-          (r) => r.querySelector<HTMLImageElement>('img')?.naturalWidth ?? r.querySelector('.initial')!.textContent,
-        ),
+        strip: [...document.querySelectorAll('.row')].map((r) => r.querySelector('.number')!.textContent),
       }));
     };
-    await expect.poll(shown, { timeout: 10_000 }).toEqual({ lead: 'Lead story with photo', photo: 32, thumbs: [16, 'N'] });
+    await expect.poll(shown, { timeout: 10_000 }).toEqual({ lead: 'Lead story with photo', photo: 32, strip: ['1', '2'] });
     // Each photo fetched once.
     for (const sha of [sha256(lead), sha256(thumb)]) expect(requestsFor(p, sha), sha).toHaveLength(1);
   }, 30_000);

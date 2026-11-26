@@ -19,7 +19,7 @@ const BREAKFAST = [
 async function menuSpot(page: Page, name: string, items: Record<string, unknown>[]) {
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const menu = templates.find((t: { key: string }) => t.key === 'menu-board');
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name,
     kind: 'template',
     templateVersionId: menu.versions.at(-1).id,
@@ -121,12 +121,12 @@ test("a member updates a menu from today's, sees each row it changes before anyt
   // A save made since the review was read is kept: Keep is refused, and Reload shows it.
   // The breakfast menu is already as the link has it: its items back first, so the link changes it again.
   const was = (await tool(page, 'get_spot', { spotId: breakfast })).spot;
-  await tool(page, 'update_spot', { spotId: breakfast, data: { ...was.data, items: BREAKFAST }, ifVersion: was.version });
+  await tool(page, 'save_spot', { spotId: breakfast, data: { ...was.data, items: BREAKFAST }, ifVersion: was.version });
   await page.goto(`/spots/${breakfast}`);
   await hydrated(page);
   await fillFromLink(page);
   const now = (await tool(page, 'get_spot', { spotId: breakfast })).spot;
-  await tool(page, 'update_spot', { spotId: breakfast, data: { ...now.data, title: 'Their title' }, ifVersion: now.version });
+  await tool(page, 'save_spot', { spotId: breakfast, data: { ...now.data, title: 'Their title' }, ifVersion: now.version });
   await page.getByRole('button', { name: 'Keep in the draft' }).click();
   await expect(page.getByRole('region', { name: /What the agent would change/ }).getByRole('alert')).toContainText('Their change is kept');
   await page.getByRole('button', { name: 'Reload' }).click();

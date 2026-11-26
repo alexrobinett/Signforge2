@@ -85,7 +85,7 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   // With a change unpublished, every page offers Publish all, which asks with the sidebar's own question (#361).
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
+  await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
   await page.reload();
   await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
@@ -186,7 +186,7 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   // for the option it means to be selected: cmdk moves the selection in a step of its own after each keystroke.
   const { screens } = await tool(page, 'list_screens', {});
   const deli = screens.find((s: { name: string }) => s.name === 'Deli counter').id;
-  const { group } = await tool(page, 'create_group', { name: 'Front of house', screenIds: [deli] });
+  const { group } = await tool(page, 'save_group', { name: 'Front of house', screenIds: [deli] });
   const actions = menu.getByRole('option');
   const selected = menu.getByRole('option', { selected: true });
   const actionsSearch = menu.getByRole('combobox', { name: 'Actions for Deli counter' });
@@ -307,9 +307,9 @@ test("the command menu, keyboard only: the page's own actions, each its page's d
   await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/poll`, { data: { pollToken }, headers: { 'cf-connecting-ip': '192.0.2.14' } });
   const { credentials } = await tool(page, 'get_screen', { screenId: deli });
   await tool(page, 'revoke_screen_credential', { screenId: deli, credentialId: credentials[0].id });
-  await tool(page, 'create_group', { name: 'Kiosk 9' });
+  await tool(page, 'save_group', { name: 'Kiosk 9' });
   // The server refuses a command to a revoked screen too.
-  expect((await toolResponse(page, 'identify_screen', { screenId: deli })).status()).toBe(409);
+  expect((await toolResponse(page, 'screen_command', { screenId: deli, command: 'identify' })).status()).toBe(409);
   /** Holds the list's reads until `release`. */
   const holdListRead = async () => {
     let release = () => {};
@@ -455,7 +455,7 @@ test("New playlist opens its dialog wherever the page's own button does: an empt
   await hydrated(page);
   await signInAs(page, `e2e-command-new-playlist-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Quayside Prints', ADDRESS);
-  await tool(page, 'create_playlist', { name: 'Window loop', spotIds: [] });
+  await tool(page, 'save_playlist', { name: 'Window loop', spotIds: [] });
   await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.type('new playlist');

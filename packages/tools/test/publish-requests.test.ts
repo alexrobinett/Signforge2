@@ -66,7 +66,7 @@ const agent = (scopes: Scope[] = ['content:read', 'content:draft'], role: Role =
 
 const spotVersion = async (id: string) => (await testScope(env.DB, o.orgId).spots.get(id))!.rowVersion;
 const editSpot = async (caller: Caller, id: string, durationMs: number) =>
-  (await call(caller, 'update_spot', { spotId: id, durationMs, ifVersion: await spotVersion(id) })).spot.version as number;
+  (await call(caller, 'save_spot', { spotId: id, durationMs, ifVersion: await spotVersion(id) })).spot.version as number;
 const ask = (caller: Caller, drafts: unknown[], reason = 'Weekend opening hours on the lobby screens') => call(caller, 'request_publish', { drafts, reason });
 
 describe('an agent asks, a person approves', () => {
@@ -390,14 +390,14 @@ describe('brand kits, which have no draft (review of #386)', () => {
   it('refuses after a kit is edited', async () => {
     const id = await asked();
     const kit = (await scope().brandKits.get(o.brandKit))!;
-    await call(agent(), 'update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: kit.rowVersion });
+    await call(agent(), 'save_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: kit.rowVersion });
     await refusedForBrand(id);
   });
 
   it('refuses after the default kit changes', async () => {
     const id = await asked();
     const night = await scope().brandKits.insert({ name: 'Night', colorsJson: (await scope().brandKits.get(o.brandKit))!.colorsJson, shape: 'soft' });
-    await call(agent(), 'set_default_brand_kit', { brandKitId: night.id });
+    await call(agent(), 'save_brand_kit', { brandKitId: night.id, makeDefault: true });
     await refusedForBrand(id);
   });
 

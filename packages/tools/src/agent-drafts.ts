@@ -37,8 +37,11 @@ export async function keptFor(
   });
 }
 
-/** The tools that write a draft's content: the audit rows that say who wrote it. */
-const WRITES: Record<KeptKind, readonly string[]> = { spot: ['create_spot', 'update_spot'], playlist: ['create_playlist', 'update_playlist'] };
+/** The tools that write a draft's content: the audit rows that say who wrote it, those from before #345 merged them included. */
+const WRITES: Record<KeptKind, readonly string[]> = {
+  spot: ['save_spot', 'create_spot', 'update_spot'],
+  playlist: ['save_playlist', 'create_playlist', 'update_playlist'],
+};
 
 /** The audit rows read for the author: an agent's proposal is the newest writes of it, after a person's Reject at most. */
 const AUTHOR_ROWS = 20;

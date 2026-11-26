@@ -35,14 +35,14 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
   // The soup board, on a default playlist, published: the screen plays it.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Soup board',
     kind: 'template',
     templateVersionId: clock,
     durationMs: 10_000,
     data: { greeting: 'Soup of the day' },
   });
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Deli', transition: { type: 'cut' }, spotIds: [spot.id] });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Deli', transition: { type: 'cut' }, spotIds: [spot.id] });
   await tool(page, 'set_default_playlist', { playlistId: playlist.id });
   await tool(page, 'publish', {});
 
@@ -55,7 +55,7 @@ test('an agent asks, the owner approves what it pinned and the rollout starts; a
   };
   const edit = async (greeting: string) => {
     const { spot: now } = await call('get_spot', { spotId: spot.id });
-    return (await call('update_spot', { spotId: spot.id, data: { greeting }, ifVersion: now.version })).spot.version as number;
+    return (await call('save_spot', { spotId: spot.id, data: { greeting }, ifVersion: now.version })).spot.version as number;
   };
   const asked = async (greeting: string, reason: string) => {
     const version = await edit(greeting);

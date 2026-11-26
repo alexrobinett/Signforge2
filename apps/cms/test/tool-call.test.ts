@@ -29,7 +29,7 @@ describe('a tool called from a server function', () => {
 
   it('throws a stale refusal with its code and details, so a loader can tell it is stale', async () => {
     refused(409, { error: 'conflict', message: 'spot spt_1 has changed', details: { id: 'spt_1', version: 4 } });
-    const err = await caught(tool('update_spot', { spotId: 'spt_1', ifVersion: 3 }));
+    const err = await caught(tool('save_spot', { spotId: 'spt_1', ifVersion: 3 }));
     expect(err).toBeInstanceOf(Refusal);
     expect(err).toMatchObject({ code: 'conflict', message: 'spot spt_1 has changed', details: { id: 'spt_1', version: 4 } });
     expect(isStale(err)).toBe(true);
@@ -67,9 +67,9 @@ describe('a server function’s refusal, on its way to the browser', () => {
 
 describe('a tool’s output', () => {
   it('is typed by the tool’s own output schema, so reading what it does not return fails the typecheck', () => {
-    expectTypeOf<ToolOutput<'update_spot'>>().toHaveProperty('spot');
-    expectTypeOf<ToolOutput<'update_spot'>>().not.toHaveProperty('playlist');
-    expectTypeOf<ToolOutput<'update_spot'>['spot']['kind']>().toEqualTypeOf<'template' | 'image' | 'video' | 'url'>();
+    expectTypeOf<ToolOutput<'save_spot'>>().toHaveProperty('spot');
+    expectTypeOf<ToolOutput<'save_spot'>>().not.toHaveProperty('playlist');
+    expectTypeOf<ToolOutput<'save_spot'>['spot']['kind']>().toEqualTypeOf<'template' | 'image' | 'video' | 'url'>();
     expectTypeOf<ToolOutput<'list_audit_log'>['next']>().toEqualTypeOf<string | null>();
   });
 });

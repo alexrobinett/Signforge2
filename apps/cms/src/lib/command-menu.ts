@@ -103,9 +103,9 @@ export function parseToolList(body: unknown): ToolListing[] {
 /** Each action's words, and the tools a member's role must have for it. */
 const ACTIONS: Record<PeopleAction, { label: string; needs: readonly string[]; keywords: string[] }> = {
   pair: { label: 'Pair a screen…', needs: ['claim_screen'], keywords: ['add screen', 'new screen', 'code'] },
-  'new-spot': { label: 'New spot…', needs: ['create_spot'], keywords: ['create', 'template', 'image', 'web page'] },
-  'new-playlist': { label: 'New playlist…', needs: ['create_playlist'], keywords: ['create', 'loop'] },
-  'new-entry': { label: 'Add to the schedule…', needs: ['create_schedule_entry'], keywords: ['schedule', 'play', 'plan'] },
+  'new-spot': { label: 'New spot…', needs: ['save_spot'], keywords: ['create', 'template', 'image', 'web page'] },
+  'new-playlist': { label: 'New playlist…', needs: ['save_playlist'], keywords: ['create', 'loop'] },
+  'new-entry': { label: 'Add to the schedule…', needs: ['save_schedule_entry'], keywords: ['schedule', 'play', 'plan'] },
   // A takeover is sent at once wherever the CMS offers it: one who may only draft it is not offered it (#253).
   'take-over': { label: 'Take over screens now…', needs: ['start_takeover', 'publish'], keywords: ['takeover', 'urgent', 'override'] },
   'publish-all': { label: 'Publish all changes…', needs: ['publish'], keywords: ['publish', 'unpublished', 'drafts'] },
@@ -171,7 +171,7 @@ export type TargetAction =
   | { kind: 'play-here'; label: string; screenId: string }
   /** The takeover dialog, aimed at the screen (#181). */
   | { kind: 'take-over'; label: string; screenId: string }
-  | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
+  | { kind: 'command'; label: string; command: 'identify' | 'restart'; screenId: string; screenName: string; done: string };
 
 /**
  * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
@@ -190,23 +190,23 @@ export function targetActions(
   const may = (tool: string) => checked && listed(tool);
   const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
   // These open a dialog, sending nothing: they need no read of this opening, though not on a revoked screen.
-  if (listed('create_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
+  if (listed('save_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
   // A takeover is started, then published at once: an editor where only owners publish keeps start_takeover, not publish.
   if (listed('start_takeover') && listed('publish')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
-  if (may('identify_screen'))
+  if (may('screen_command'))
     actions.push({
-      kind: 'tool',
+      kind: 'command',
       label: 'Identify (10 s)',
-      tool: 'identify_screen',
+      command: 'identify',
       screenId,
       screenName,
       done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
     });
-  if (may('restart_screen') && reachable(target.screen))
+  if (may('screen_command') && reachable(target.screen))
     actions.push({
-      kind: 'tool',
+      kind: 'command',
       label: 'Restart player',
-      tool: 'restart_screen',
+      command: 'restart',
       screenId,
       screenName,
       done: 'Sent. The player restarts and plays from its cache at once.',

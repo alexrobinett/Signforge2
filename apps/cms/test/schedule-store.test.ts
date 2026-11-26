@@ -66,7 +66,7 @@ describe('a retried create (#149)', () => {
 
     replies.push(made);
     await store.getState().saveEntry(ORG);
-    expect(calls.map((c) => c.name)).toEqual(['create_schedule_entry', 'create_schedule_entry']);
+    expect(calls.map((c) => c.name)).toEqual(['save_schedule_entry', 'save_schedule_entry']);
     expect(calls[1]!.input.idempotencyKey).toBe(calls[0]!.input.idempotencyKey);
     expect(store.getState().schedule.entries).toEqual({});
   });
@@ -128,7 +128,7 @@ describe('a change to an entry', () => {
     store.getState().editEntry({ priority: 5 });
     replies.push({ status: 409, body: { error: 'conflict', message: 'stale', details: { version: 3 } } });
     await store.getState().saveEntry(ORG);
-    expect(calls[0]).toMatchObject({ name: 'update_schedule_entry', input: { scheduleEntryId: 'sch_1', priority: 5, ifVersion: 2 } });
+    expect(calls[0]).toMatchObject({ name: 'save_schedule_entry', input: { scheduleEntryId: 'sch_1', priority: 5, ifVersion: 2 } });
     expect(store.getState().schedule.entries[DIALOG]).toMatchObject({ stale: true, edit: { priority: 5 }, error: 'This changed since you opened it.' });
 
     queryClient.setQueryData(scheduleKey(ORG), { entries: [{ ...entry, priority: 9, version: 3 }] });
@@ -207,7 +207,7 @@ describe('save and publish (#181)', () => {
     store.getState().openNewEntry(ORG, { playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
     replies.push(made);
     await store.getState().saveAndPublishEntry(ORG);
-    expect(calls.map((c) => c.name)).toEqual(['create_schedule_entry']);
+    expect(calls.map((c) => c.name)).toEqual(['save_schedule_entry']);
     expect(calls[0]!.input).toMatchObject({ playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
     expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1', { choice: 'pls_holiday', publishDefault: false }, []);
     expect(store.getState().schedule.entries).toEqual({});

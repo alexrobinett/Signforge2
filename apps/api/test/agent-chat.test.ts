@@ -8,6 +8,7 @@ import { describeTools, grantOf, READ_TOOLS, registry, toolsOf } from '@signforg
 import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { drawerReadTypes, drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
 import { CLIENT_SAYS, plant, reads, SAYS } from './planted';
 import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
@@ -71,7 +72,7 @@ function model(steps: Step[] | ((asked: any) => Step)) {
 }
 
 /** The writes the drawer drafts (#268), for a member who may make them. */
-const DRAFTING = ['create_schedule_entry', 'rename_screen', 'update_playlist', 'update_schedule_entry', 'update_spot'];
+const DRAFTING = ['save_playlist', 'save_schedule_entry', 'save_spot', 'update_screen'];
 
 const CARD = {
   text: 'Both Bayside screens went quiet at 09:14: the store, not the players.',
@@ -198,7 +199,7 @@ describe('the tools the drawer offers', () => {
         'get_alert_channels',
         'list_connections',
         'claim_screen',
-        'rename_screen',
+        'update_screen',
         'publish',
         'list_agent_grants',
         'get_agent_grant',
@@ -983,6 +984,17 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
+  it('says which screen command a press did, as the tool it replaced said it (review of #499)', async () => {
+    const steps: Step[] = [];
+    const s = await setup({ steps });
+    const [screen] = await s.scope.screens.list();
+    steps.push({ calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'restart' } }] }, ANSWER);
+    const shown = pressOf(await raw(await s.ask('q')), 'q');
+    steps.push(ANSWER);
+    const pressed = await raw(await s.member.post('/api/agent/chat', shown.body));
+    expect(pressed.find((e) => e.name === CHAT_EVENTS.done)?.value).toMatchObject({ tool: 'screen_command', ok: true, message: 'Restarted a screen' });
+  });
+
   it('stops at an address card showing the address in full, audits a confirmed read, and a live screen command at a card naming the screen', async () => {
     const steps: Step[] = [];
     const s = await setup({ steps });
@@ -999,7 +1011,7 @@ describe('confirmation cards (#269)', () => {
       callId: expect.any(String),
     });
     const [screen] = await s.scope.screens.list();
-    steps.splice(0, steps.length, { calls: [{ name: 'restart_screen', input: { screenId: screen?.id } }] });
+    steps.splice(0, steps.length, { calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'restart' } }] });
     s.model.asked.length = 0;
     const restart = pressOf(await raw(await s.ask('q')), 'q').card;
     expect(restart).toMatchObject({
@@ -1007,7 +1019,7 @@ describe('confirmation cards (#269)', () => {
       lines: [`${screen?.name} restarts now: it goes blank for a moment, then plays again.`],
       when: 'Now, on the live screen',
     });
-    steps.splice(0, steps.length, { calls: [{ name: 'set_display_override', input: { screenId: screen?.id, state: 'off' } }] });
+    steps.splice(0, steps.length, { calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'display_off' } }] });
     const off = pressOf(await raw(await s.ask('q')), 'q').card;
     expect(off).toMatchObject({
       title: 'Turn the display off',
@@ -1053,15 +1065,15 @@ describe('confirmation cards (#269)', () => {
     const called = { name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' };
     const s = await setup({
       steps: [
-        { calls: [{ name: 'create_data_source', input: { id: 'bad id!', ...called } }] },
-        { calls: [{ name: 'create_data_source', input: { id: 'menu', ...called } }] },
+        { calls: [{ name: 'save_data_source', input: { id: 'bad id!', ...called } }] },
+        { calls: [{ name: 'save_data_source', input: { id: 'menu', ...called } }] },
       ],
     });
     const all = await raw(await s.ask('q'));
     const told = s.model.asked[1].messages.at(-1).content[0];
     expect(told).toMatchObject({ type: 'tool_result', is_error: true });
     expect(JSON.stringify(told.content)).toContain('not a valid');
-    expect(pressOf(all, 'q').card).toMatchObject({ tool: 'create_data_source', token: expect.any(String) });
+    expect(pressOf(all, 'q').card).toMatchObject({ tool: 'save_data_source', token: expect.any(String) });
     expect(await s.scope.dataSources.list()).toEqual([]);
   });
 
@@ -1084,6 +1096,8 @@ describe('confirmation cards (#269)', () => {
     expect(await promptOf(owner)).not.toContain('What they may not do here');
     const viewer = await setup({ role: 'viewer', steps: [ANSWER] });
     expect(await promptOf(viewer)).toMatch(/What they may not do here, and who may: publish[^:]*: You can view only: ask an editor\./);
+    // A screen command names the three it stands for (review of #499).
+    expect(await promptOf(viewer)).toContain('display on or off, restart screen, identify screen');
     const editor = await setup({ role: 'editor', steps: [ANSWER] });
     const publishing = await promptOf(editor);
     expect(publishing).toContain('cancel an invitation');
@@ -1160,7 +1174,7 @@ describe('confirmation cards (#269)', () => {
       expect(card.lines).not.toContain('Publishes Storm closure too: it was never published.');
       // The spot's page changes, and is published: the card did not show it.
       const row = (await s.scope.spots.get(spot.id))!;
-      expect((await s.owner.tool('update_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
+      expect((await s.owner.tool('save_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
       expect((await s.owner.tool('publish', {})).status).toBe(200);
       await refusedPress(s, body, 'publish_takeover', /A spot of its playlist was published again since the card was made/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
@@ -1269,9 +1283,9 @@ describe('confirmation cards (#269)', () => {
       role: 'editor',
       steps: (body) => (body.messages.length === 1 ? { calls: [{ name: ask.name!, input: ask.called }] } : ANSWER),
     });
-    expect(
-      (await s.owner.tool('create_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status,
-    ).toBe(200);
+    expect((await s.owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
     const before = await s.scope.dataSources.get('menu');
     expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
     const cardFor = async (name: string, called: Record<string, unknown>) => {
@@ -1280,10 +1294,10 @@ describe('confirmation cards (#269)', () => {
     };
     // A change that reaches screens, and a provider source: who may, and no token, nothing read for the card.
     const refused = { token: null, lines: [], why: expect.stringContaining('Only owners publish in this organization') };
-    expect(await cardFor('update_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' })).toMatchObject(refused);
-    expect(await cardFor('update_data_source', { dataSourceId: 'menu', refreshS: 900 })).toMatchObject(refused);
+    expect(await cardFor('save_data_source', { dataSourceId: 'menu', feedUrl: 'https://menu.example.com/tomorrow.json' })).toMatchObject(refused);
+    expect(await cardFor('save_data_source', { dataSourceId: 'menu', refreshS: 900 })).toMatchObject(refused);
     expect(
-      await cardFor('create_data_source', {
+      await cardFor('save_data_source', {
         name: 'Rota',
         format: 'provider',
         connectionId: 'con_rota',
@@ -1293,7 +1307,7 @@ describe('confirmation cards (#269)', () => {
     ).toMatchObject(refused);
     expect(await s.scope.dataSources.get('menu')).toEqual(before);
     // A name alone reaches no screen: its card can be pressed.
-    expect(await cardFor('update_data_source', { dataSourceId: 'menu', name: 'Menu board' })).toMatchObject({ token: expect.any(String), why: null });
+    expect(await cardFor('save_data_source', { dataSourceId: 'menu', name: 'Menu board' })).toMatchObject({ token: expect.any(String), why: null });
   });
 
   it("keeps a provider's resource out of the audit row, and audits a source refused in its handler, writing nothing", async () => {
@@ -1305,7 +1319,7 @@ describe('confirmation cards (#269)', () => {
       {
         calls: [
           {
-            name: 'create_data_source',
+            name: 'save_data_source',
             input: { id: 'rota', name: 'Rota', format: 'provider', connectionId: 'con_rota', resource, idempotencyKey: 'rota-key-0001' },
           },
         ],
@@ -1314,7 +1328,7 @@ describe('confirmation cards (#269)', () => {
     );
     const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
     expect(card.lines).toContain(`Reads this at the provider, through its connection: ${resource}`);
-    await refusedPress(s, body, 'create_data_source', /data source rota exists/);
+    await refusedPress(s, body, 'save_data_source', /data source rota exists/);
     const rows = await s.scope.auditLog.list({ limit: 10 });
     expect(JSON.stringify(rows)).not.toContain('RESOURCE-0001');
     expect(await s.scope.dataSources.list()).toHaveLength(1);
@@ -1365,7 +1379,7 @@ async function drafting(options: Parameters<typeof setup>[0] & { script: (ids: {
     const row = await s.scope.spots.get(spot.id);
     return { version: row?.rowVersion, data: JSON.parse(row?.dataJson ?? '{}') };
   };
-  return { ...s, spot, web, apply, stored };
+  return { ...s, spot, web, apply, stored, steps };
 }
 
 const CUT = JSON.stringify({ type: 'cut' });
@@ -1391,14 +1405,10 @@ describe('the drafting tools the drawer offers (#268)', () => {
     'end_takeover',
     'set_default_playlist',
     'set_template_version_status',
-    'create_data_source',
-    'update_data_source',
-    'set_display_override',
-    'restart_screen',
-    'identify_screen',
+    'save_data_source',
+    'screen_command',
     'revoke_screen_credential',
     'claim_screen',
-    'create_spot',
   ];
 
   it('are, for each role, drafts of content and screens: none of publish, takeover, delete, revoke, an address or live screens, though editors may call them', async () => {
@@ -1420,8 +1430,7 @@ describe('the drafting tools the drawer offers (#268)', () => {
       ).toEqual(DRAFTING);
     }
     // An editor may call them: they are left out, not out of reach.
-    for (const name of ['start_takeover', 'delete_schedule_entry', 'publish', 'set_display_override', 'restart_screen', 'identify_screen'])
-      expect(registry.get(name)?.minRole, name).toBe('editor');
+    for (const name of ['start_takeover', 'delete_schedule_entry', 'publish', 'screen_command']) expect(registry.get(name)?.minRole, name).toBe('editor');
   });
 });
 
@@ -1433,7 +1442,7 @@ describe('the drawer drafting changes (#268)', () => {
         {
           calls: [
             {
-              name: 'update_spot',
+              name: 'save_spot',
               input: { spotId: spot, data: { headline: 'Hot breakfast, fast', theme: 'night', qr: 'https://order.example/menu' }, ifVersion: 999 },
             },
           ],
@@ -1446,14 +1455,14 @@ describe('the drawer drafting changes (#268)', () => {
     const card = answerOf(await events(await d.ask('Make the headline punchier, switch to the night look, add a QR link')));
     expect(card.drafts).toEqual([
       {
-        tool: 'update_spot',
+        tool: 'save_spot',
         // The version read now, whatever the model wrote.
         input: { spotId: d.spot.id, data: { headline: 'Hot breakfast, fast', theme: 'night', qr: 'https://order.example/menu' }, ifVersion: before.version },
         target: { kind: 'spot', id: d.spot.id },
         before: expect.objectContaining({ id: d.spot.id, data: { headline: 'Breakfast served', theme: 'day' }, version: before.version }),
       },
     ]);
-    expect(card.trace).toEqual([shown('get_spot', 'Read a spot'), shown('update_spot', 'Drafted a change to a spot')]);
+    expect(card.trace).toEqual([shown('get_spot', 'Read a spot'), shown('save_spot', 'Drafted a change to a spot')]);
     // Nothing written.
     expect(await d.stored()).toEqual(before);
     expect(await d.scope.auditLog.list({ limit: 50 })).toEqual(auditBefore);
@@ -1463,12 +1472,12 @@ describe('the drawer drafting changes (#268)', () => {
     const body = await res.json<any>();
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(body.results).toEqual([
-      { tool: 'update_spot', ok: true, output: expect.objectContaining({ spot: expect.objectContaining({ version: before.version! + 1 }) }) },
+      { tool: 'save_spot', ok: true, output: expect.objectContaining({ spot: expect.objectContaining({ version: before.version! + 1 }) }) },
     ]);
     expect((await d.stored()).data).toEqual({ headline: 'Hot breakfast, fast', theme: 'night', qr: 'https://order.example/menu' });
     const [entry] = await d.scope.auditLog.list({ limit: 1 });
     const { user } = (await d.member.session()).body;
-    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'update_spot', targetId: d.spot.id });
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms-agent', action: 'save_spot', targetId: d.spot.id });
   });
 
   it("refuses a draft that sets a spot's address, changes a web page spot, binds or takes over, or calls a tool it is not given", async () => {
@@ -1476,11 +1485,11 @@ describe('the drawer drafting changes (#268)', () => {
       script: ({ spot, web }) => [
         {
           calls: [
-            { name: 'update_spot', input: { spotId: spot, url: 'https://evil.example' } },
-            { name: 'update_spot', input: { spotId: web, name: 'Evil' } },
-            { name: 'update_spot', input: { spotId: spot, bindings: {} } },
-            { name: 'update_schedule_entry', input: { scheduleEntryId: 'sch_x', startsAt: '2026-11-23T12:00:00Z' } },
-            { name: 'set_display_override', input: { screenId: 'scr_x', mode: 'off' } },
+            { name: 'save_spot', input: { spotId: spot, url: 'https://evil.example' } },
+            { name: 'save_spot', input: { spotId: web, name: 'Evil' } },
+            { name: 'save_spot', input: { spotId: spot, bindings: {} } },
+            { name: 'save_schedule_entry', input: { scheduleEntryId: 'sch_x', startsAt: '2026-11-23T12:00:00Z' } },
+            { name: 'screen_command', input: { screenId: 'scr_x', command: 'off' } },
           ],
         },
         ANSWER,
@@ -1503,12 +1512,40 @@ describe('the drawer drafting changes (#268)', () => {
     expect(results[4][0]).toBe(true);
   });
 
+  it("refuses a draft of a screen's setting in the turn by name, rather than proposing its name alone (review of #499)", async () => {
+    const d = await drafting({ script: () => [] });
+    const [screen] = await d.scope.screens.list();
+    d.steps.push({ calls: [{ name: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo' } }] }, ANSWER);
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts).toEqual([]);
+    const [[refused, content]] = d.model.asked[1].messages.at(-1).content.map((r: { is_error: boolean; content: string }) => [r.is_error, r.content]);
+    expect(refused).toBe(true);
+    expect(content).toMatch(/name alone, not its timezone/);
+  });
+
+  it("drafts a screen's name alone: offered no setting, and refused one at save (#345)", async () => {
+    const offered = draftTools(await grantOf({ org: { orgId: 'org_x' } as never, role: 'editor', scopes: undefined })).find((t) => t.name === 'update_screen');
+    expect(Object.keys(z.toJSONSchema(offered!.input).properties ?? {})).toEqual(['screenId', 'name']);
+    const d = await drafting({ script: () => [ANSWER] });
+    const [screen] = await d.scope.screens.list();
+    const res = await d.apply([
+      { tool: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo', ifVersion: screen!.rowVersion } },
+    ]);
+    expect(res.status).toBe(403);
+    expect((await res.json<any>()).results.at(-1)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: expect.stringMatching(/name alone, not its timezone/),
+    });
+    expect(await d.scope.screens.get(screen!.id)).toMatchObject({ name: screen!.name, timezone: screen!.timezone });
+  });
+
   it('refuses at save what it refuses in the turn, and a tool it does not draft, writing nothing', async () => {
     const d = await drafting({ script: () => [ANSWER] });
     const before = await d.stored();
     for (const calls of [
-      [{ tool: 'update_spot', input: { spotId: d.spot.id, url: 'https://evil.example', ifVersion: before.version } }],
-      [{ tool: 'update_spot', input: { spotId: d.web.id, name: 'Evil', ifVersion: 1 } }],
+      [{ tool: 'save_spot', input: { spotId: d.spot.id, url: 'https://evil.example', ifVersion: before.version } }],
+      [{ tool: 'save_spot', input: { spotId: d.web.id, name: 'Evil', ifVersion: 1 } }],
       [{ tool: 'publish', input: {} }],
       [{ tool: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_x' } }],
     ]) {
@@ -1521,23 +1558,23 @@ describe('the drawer drafting changes (#268)', () => {
 
   it('is refused at save, overwriting nothing, when someone saved the spot since it was drafted', async () => {
     const d = await drafting({
-      script: ({ spot }) => [{ calls: [{ name: 'update_spot', input: { spotId: spot, data: { headline: 'Agent headline', theme: 'day' } } }] }, ANSWER],
+      script: ({ spot }) => [{ calls: [{ name: 'save_spot', input: { spotId: spot, data: { headline: 'Agent headline', theme: 'day' } } }] }, ANSWER],
     });
     const card = answerOf(await events(await d.ask()));
     const was = await d.stored();
-    expect((await d.owner.tool('update_spot', { spotId: d.spot.id, data: { headline: 'Their headline', theme: 'day' }, ifVersion: was.version })).status).toBe(
+    expect((await d.owner.tool('save_spot', { spotId: d.spot.id, data: { headline: 'Their headline', theme: 'day' }, ifVersion: was.version })).status).toBe(
       200,
     );
     const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
     expect(res.status).toBe(409);
-    expect((await res.json<any>()).results).toEqual([{ tool: 'update_spot', ok: false, error: 'conflict', message: expect.any(String) }]);
+    expect((await res.json<any>()).results).toEqual([{ tool: 'save_spot', ok: false, error: 'conflict', message: expect.any(String) }]);
     expect((await d.stored()).data).toEqual({ headline: 'Their headline', theme: 'day' });
   });
 
   it("drafts a viewer's change as a request they cannot save", async () => {
     const d = await drafting({
       role: 'viewer',
-      script: ({ spot }) => [{ calls: [{ name: 'update_spot', input: { spotId: spot, data: { headline: 'A request', theme: 'day' } } }] }, ANSWER],
+      script: ({ spot }) => [{ calls: [{ name: 'save_spot', input: { spotId: spot, data: { headline: 'A request', theme: 'day' } } }] }, ANSWER],
     });
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts).toHaveLength(1);
@@ -1550,9 +1587,9 @@ describe('the drawer drafting changes (#268)', () => {
   it('saves an update only at the version it was drafted on: one without ifVersion is refused, writing nothing', async () => {
     const d = await drafting({ script: () => [ANSWER] });
     const before = await d.stored();
-    const res = await d.apply([{ tool: 'update_spot', input: { spotId: d.spot.id, name: 'Unguarded' } }]);
+    const res = await d.apply([{ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Unguarded' } }]);
     expect(res.status).toBe(400);
-    expect((await res.json<any>()).results).toEqual([{ tool: 'update_spot', ok: false, error: 'invalid_input', message: expect.stringMatching(/ifVersion/) }]);
+    expect((await res.json<any>()).results).toEqual([{ tool: 'save_spot', ok: false, error: 'invalid_input', message: expect.stringMatching(/ifVersion/) }]);
     expect(await d.stored()).toEqual(before);
   });
 
@@ -1561,8 +1598,8 @@ describe('the drawer drafting changes (#268)', () => {
       script: ({ spot }) => [
         {
           calls: [
-            { name: 'update_spot', input: { spotId: spot, name: 'Breakfast' } },
-            { name: 'update_spot', input: { spotId: spot, durationMs: 12_000 } },
+            { name: 'save_spot', input: { spotId: spot, name: 'Breakfast' } },
+            { name: 'save_spot', input: { spotId: spot, durationMs: 12_000 } },
           ],
         },
         ANSWER,
@@ -1571,7 +1608,7 @@ describe('the drawer drafting changes (#268)', () => {
     const was = await d.stored();
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts).toEqual([
-      expect.objectContaining({ tool: 'update_spot', input: { spotId: d.spot.id, name: 'Breakfast', durationMs: 12_000, ifVersion: was.version } }),
+      expect.objectContaining({ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Breakfast', durationMs: 12_000, ifVersion: was.version } }),
     ]);
     expect(d.model.asked[1].messages.at(-1).content[1].content).toMatch(/with your earlier change to the same thing/);
     const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
@@ -1587,8 +1624,8 @@ describe('the drawer drafting changes (#268)', () => {
     const group = await d.scope.screenGroups.insert({ name: 'Bayside' });
     const entry = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
     calls.push(
-      { name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, target: 'group', groupId: group.id, priority: 2 } },
-      { name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, target: 'org' } },
+      { name: 'save_schedule_entry', input: { scheduleEntryId: entry.id, target: 'group', groupId: group.id, priority: 2 } },
+      { name: 'save_schedule_entry', input: { scheduleEntryId: entry.id, target: 'org' } },
     );
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts.map((c) => c.input)).toEqual([{ scheduleEntryId: entry.id, priority: 2, target: 'org', ifVersion: entry.rowVersion }]);
@@ -1605,8 +1642,8 @@ describe('the drawer drafting changes (#268)', () => {
     const playlist = await d.scope.playlists.insert({ name: 'Breakfast', transitionJson: CUT });
     const entry = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
     const gone = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', deletedAt: 1 });
-    first.push({ name: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 4 } });
-    second.push({ name: 'update_schedule_entry', input: { scheduleEntryId: gone.id, priority: 4 } });
+    first.push({ name: 'save_schedule_entry', input: { scheduleEntryId: entry.id, priority: 4 } });
+    second.push({ name: 'save_schedule_entry', input: { scheduleEntryId: gone.id, priority: 4 } });
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts).toEqual([
       expect.objectContaining({
@@ -1649,15 +1686,15 @@ describe('the drawer drafting changes (#268)', () => {
       const group = await d.scope.screenGroups.insert({ name: 'Bayside' });
       const aimed = await d.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'group', groupId: group.id });
       const calls = [
-        { tool: 'update_spot', input: { spotId: d.spot.id, name: 'Breakfast', ifVersion: (await d.stored()).version } },
-        { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds, ifVersion: playlist.rowVersion } },
-        { tool: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 3, ifVersion: entry.rowVersion } },
-        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'org', idempotencyKey: 'budget-create-1' } },
-        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        { tool: 'save_spot', input: { spotId: d.spot.id, name: 'Breakfast', ifVersion: (await d.stored()).version } },
+        { tool: 'save_playlist', input: { playlistId: playlist.id, spotIds, ifVersion: playlist.rowVersion } },
+        { tool: 'save_schedule_entry', input: { scheduleEntryId: entry.id, priority: 3, ifVersion: entry.rowVersion } },
+        { tool: 'save_schedule_entry', input: { playlistId: playlist.id, target: 'org', idempotencyKey: 'budget-create-1' } },
+        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
         // Aimed at a group or a screen, the save reads it too (review of #341, #344).
-        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'group', groupId: group.id, idempotencyKey: 'budget-create-2' } },
-        { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'screen', screenId: screen.id, idempotencyKey: 'budget-create-3' } },
-        { tool: 'update_schedule_entry', input: { scheduleEntryId: aimed.id, priority: 2, ifVersion: aimed.rowVersion } },
+        { tool: 'save_schedule_entry', input: { playlistId: playlist.id, target: 'group', groupId: group.id, idempotencyKey: 'budget-create-2' } },
+        { tool: 'save_schedule_entry', input: { playlistId: playlist.id, target: 'screen', screenId: screen.id, idempotencyKey: 'budget-create-3' } },
+        { tool: 'save_schedule_entry', input: { scheduleEntryId: aimed.id, priority: 2, ifVersion: aimed.rowVersion } },
       ];
       for (const call of calls) {
         const { status, body, statements } = await measured(d, [call]);
@@ -1671,9 +1708,9 @@ describe('the drawer drafting changes (#268)', () => {
       const { playlist, screen } = await content(d, 0);
       const other = await d.scope.screens.insert({ name: 'Drive-thru', timezone: 'UTC', orientation: 'landscape' });
       const calls = [
-        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
-        { tool: 'rename_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
-        { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
+        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        { tool: 'update_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
+        { tool: 'save_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
       ];
       expect(saveStatements(calls)).toBe(SAVE_STATEMENTS);
       const { status, body, statements } = await measured(d, calls);
@@ -1686,7 +1723,7 @@ describe('the drawer drafting changes (#268)', () => {
       const playlists = [];
       for (let i = 0; i < 5; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
       const calls = playlists.map((p) => ({
-        tool: 'update_playlist',
+        tool: 'save_playlist',
         input: { playlistId: p.id, spotIds: Array(200).fill(d.spot.id), ifVersion: p.rowVersion },
       }));
       const { status, body, statements } = await measured(d, calls);

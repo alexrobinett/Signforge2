@@ -101,8 +101,8 @@
     }
   },
   "files": {
-    "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
-      "size": 401879,
+    "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b": {
+      "size": 400892,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -121,13 +121,13 @@
       "size": 12704,
       "type": "font/woff2"
     },
+    "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd": {
+      "size": 393916,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c": {
-      "size": 396225,
-      "type": "text/html"
     },
     "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
       "size": 125360,
@@ -137,9 +137,17 @@
       "size": 23664,
       "type": "font/woff2"
     },
+    "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953": {
+      "size": 395766,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637": {
+      "size": 399570,
+      "type": "text/html"
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
@@ -161,16 +169,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72": {
-      "size": 385461,
-      "type": "text/html"
-    },
-    "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
-      "size": 398206,
-      "type": "text/html"
-    },
-    "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c": {
-      "size": 403253,
+    "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119": {
+      "size": 383289,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -179,10 +179,10 @@
     }
   },
   "templates": {
-    "base/announcement@1.0.2": {
+    "base/announcement@1.1.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -304,12 +304,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a"
+      "html": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953"
     },
-    "base/countdown@1.0.2": {
+    "base/countdown@1.1.0": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -432,7 +432,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c"
+      "html": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -601,10 +601,10 @@
       },
       "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
-    "base/info-frame@1.0.2": {
+    "base/info-frame@1.1.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -889,14 +889,14 @@
         },
         "protocol": 2
       },
-      "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
+      "html": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b"
     },
-    "base/news@2.0.0": {
+    "base/news@2.1.1": {
       "manifest": {
         "id": "news",
-        "version": "2.0.0",
+        "version": "2.1.1",
         "name": "News",
-        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
           "title": {
             "type": "text",
@@ -979,17 +979,12 @@
           },
           "showList": {
             "type": "boolean",
-            "label": "Show the story list",
+            "label": "Show the story strip",
             "default": true
           },
           "showMeta": {
             "type": "boolean",
             "label": "Show the source and age",
-            "default": true
-          },
-          "showCrawl": {
-            "type": "boolean",
-            "label": "Show the crawl",
             "default": true
           }
         },
@@ -1013,12 +1008,12 @@
         },
         "protocol": 2
       },
-      "html": "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72"
+      "html": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119"
     },
-    "base/room-status@1.0.2": {
+    "base/room-status@1.1.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1139,7 +1134,7 @@
         },
         "protocol": 2
       },
-      "html": "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28"
+      "html": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637"
     }
   },
   "spots": {
@@ -1147,7 +1142,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.0.2",
+      "template": "base/announcement@1.1.0",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1182,7 +1177,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.0.2",
+      "template": "base/countdown@1.1.0",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1251,7 +1246,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.0.2",
+      "template": "base/info-frame@1.1.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1314,7 +1309,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1325,8 +1320,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1345,7 +1339,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1356,8 +1350,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1376,7 +1369,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1387,8 +1380,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1407,7 +1399,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.0.2",
+      "template": "base/room-status@1.1.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1532,5 +1524,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "3c1bb63d55456297cbd9d741f48e22a90cdab22d51e156a8d060c96f6d51492a"
+  "id": "99ff55c4ba0c8f919020399f5a7416bb89075ef16226b095190402b0c427d6e2"
 }

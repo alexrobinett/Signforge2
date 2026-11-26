@@ -176,7 +176,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   // out before the stage shows it. The time is logged, not asserted.
   const greeting = page.getByLabel('Greeting (empty for good morning/afternoon/evening)');
   const trips: string[] = [];
-  const trip = (r: Request) => void (!r.url().endsWith('/api/tools/update_spot') && trips.push(r.url()));
+  const trip = (r: Request) => void (!r.url().endsWith('/api/tools/save_spot') && trips.push(r.url()));
   page.on('request', trip);
   const typedAt = Date.now();
   await greeting.fill('Welcome to Northside');
@@ -219,7 +219,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   // A template the player drew no thumbnail for: its name, clamped, in a frame that stays 16:9 in the row's 64 px slot.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const fixture = templates.find((t: { name: string }) => t.name === 'Weather and headlines (test)').versions.at(-1).id;
-  const { spot: undrawn } = await tool(page, 'create_spot', { name: 'Undrawn', kind: 'template', templateVersionId: fixture });
+  const { spot: undrawn } = await tool(page, 'save_spot', { name: 'Undrawn', kind: 'template', templateVersionId: fixture });
   await page.reload();
   await hydrated(page);
   const frame = page
@@ -245,7 +245,7 @@ test('a change someone else made while the editor was open is not overwritten', 
   const url = new URL(page.url());
   const spotId = url.pathname.split('/').at(-1);
   // Stands in for an agent: a change lands after the page read the spot.
-  await tool(page, 'update_spot', { spotId, data: { message: 'From the agent' } });
+  await tool(page, 'save_spot', { spotId, data: { message: 'From the agent' } });
   await page.getByLabel('Message').fill('From the person');
   await expect(page.getByText('This changed since you opened it.')).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
@@ -475,7 +475,7 @@ test('an Announcement with its photo off draws once the stage is in view, and th
   await page.setViewportSize({ width: 390, height: 844 });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const announcement = templates.find((t: { key: string }) => t.key.endsWith('announcement') || t.key === 'announcement');
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'No photo',
     kind: 'template',
     templateVersionId: announcement.versions.at(-1).id,
@@ -532,7 +532,7 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
   await page.setViewportSize({ width: 1280, height: 720 });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const announcement = templates.find((t: { key: string }) => t.key === 'announcement');
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Room to draw',
     kind: 'template',
     templateVersionId: announcement.versions.at(-1).id,
@@ -603,7 +603,7 @@ test("an editor gives the stage the room: the sidebar folded to its rail, the st
   await expect(page.getByRole('button', { name: 'Fold the sidebar' })).toBeVisible();
 });
 
-const site = async (name: string) => (await tool(page, 'create_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
+const site = async (name: string) => (await tool(page, 'save_spot', { name, kind: 'url', url: 'https://example.com/board' })).spot.id as string;
 
 /** Delete…, from the editor's ⋯ menu (#378), away from Publish. */
 async function chooseDelete() {
@@ -685,7 +685,7 @@ test('a spot no playlist plays is deleted after its confirmation, at desktop and
 
 test('a spot a playlist plays is refused, naming the playlist with a link to it, and kept (#242)', async () => {
   const spotId = await site('Weekend specials');
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Saturday loop', spotIds: [spotId] });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Saturday loop', spotIds: [spotId] });
   const dialog = await askToDelete(spotId);
   await dialog.getByRole('button', { name: 'Delete' }).click();
   await expect(dialog.getByRole('alert')).toContainText('Playlists play this spot, so it cannot be deleted');

@@ -13,7 +13,7 @@ vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({ 'x-signforge-org
 const entry = (at: number): AuditEntry => ({
   at,
   actor: { kind: 'user', id: 'usr_jun', clientId: 'cms' },
-  action: 'rename_screen',
+  action: 'update_screen',
   target: { kind: 'screen', id: 'scr_1' },
   detail: { input: { screenId: 'scr_1', name: `Lobby ${at}` } },
 });
@@ -51,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals());
 function exporter() {
   const store = createStore<AuditSlice>()((set, get) => createAuditSlice(set as never, get as never, {} as never));
   const names = new Map([['usr_jun', 'Jun Takahashi']]);
-  return { store, run: () => store.getState().exportAuditLog({ action: 'rename_screen' }, (e) => csvRow(e, names)) };
+  return { store, run: () => store.getState().exportAuditLog({ action: 'update_screen' }, (e) => csvRow(e, names)) };
 }
 
 describe('exporting the audit log', () => {
@@ -71,7 +71,7 @@ describe('exporting the audit log', () => {
     expect(text.startsWith('time,who,')).toBe(true);
     const lines = text.trimEnd().split('\r\n');
     expect(lines).toHaveLength(4);
-    expect(lines[1]).toContain(',Jun Takahashi,user,usr_jun,CMS,rename_screen,Renamed to Lobby 3,');
+    expect(lines[1]).toContain(',Jun Takahashi,user,usr_jun,CMS,update_screen,Renamed to Lobby 3,');
     expect(store.getState().audit.exportNote).toEqual({ text: 'Exported 3 entries.', failed: false });
   });
 

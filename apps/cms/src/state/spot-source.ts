@@ -1,7 +1,7 @@
 /**
  * Where a spot's live data comes from (issue #79): the spot editor's Source section. People choose
  * the source, never the values: a place and units for a weather template, a news feed, a calendar.
- * Choosing one finds or makes the org's data source (`create_data_source`) and binds every field
+ * Choosing one finds or makes the org's data source (`save_data_source`) and binds every field
  * the template's source declares (`live.fields`) to it, in the draft the editor saves
  * (src/state/spot-editor.ts). A source another spot uses is left as it is. A template with several
  * named sources (#193) has a picker for each, with state of its own.
@@ -23,7 +23,7 @@ import type { SliceCreator } from './store';
 
 /** How long typing a place pauses before it is looked up. */
 const SEARCH_DELAY_MS = 300;
-/** A new calendar's look-ahead, as `create_data_source` defaults it. */
+/** A new calendar's look-ahead, as `save_data_source` defaults it. */
 const DEFAULT_HORIZON_DAYS = 30;
 
 /** One source picker's state. */
@@ -194,7 +194,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
    */
   async function create(orgId: string, input: Record<string, unknown> & { id?: string }): Promise<string> {
     try {
-      return (await callTool('create_data_source', { ...input, idempotencyKey: crypto.randomUUID() })).dataSource.id;
+      return (await callTool('save_data_source', { ...input, idempotencyKey: crypto.randomUUID() })).dataSource.id;
     } finally {
       void queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
     }

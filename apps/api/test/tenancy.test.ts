@@ -33,7 +33,7 @@ describe('a session for org A', () => {
 
   it("cannot read or change org B's screen by id", async () => {
     expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(404);
-    expect((await alice.tool('rename_screen', { screenId: screenB, name: 'hijacked' })).status).toBe(404);
+    expect((await alice.tool('update_screen', { screenId: screenB, name: 'hijacked' })).status).toBe(404);
     expect(await testScope(env.DB, orgB).screens.get(screenB)).toMatchObject({ name: 'B lobby' });
   });
 

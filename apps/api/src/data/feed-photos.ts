@@ -16,8 +16,8 @@
  *   1.25× SCREEN_BOX.landscape and PASS_THROUGH_MAX_BYTES or scaled via the Images binding, thumb
  *   reusing `file` when within NEWS_THUMB_BOX, written under `o/<org>/f/<sha256>` (`feedBlobKey`)
  *   through `PhotoBlobs`, and recorded with `org.feedPhotos.delivered`.
- * - **The 01:00 UTC sweep (`sweepFeedPhotos`)**: expires rows unnamed for a week past their check
- *   and deletes unreferenced blobs past their grace window, bounded to 11 D1 calls per run.
+ * - **The hourly sweep (`sweepFeedPhotos`, at :30)**: expires rows unnamed for a week past their check
+ *   and deletes unreferenced blobs past their grace window, bounded to 14 D1 calls per run.
  *
  * Ports: `PhotoBlobs` (R2 in production via `r2PhotoBlobs`) and `PhotoQueue` (FEED_IMAGES in
  * production via `cfPhotoQueue`). Every timestamp comes from the injected `now`.
@@ -26,12 +26,17 @@ import { coverSize, fitsScreenBox, NEWS_THUMB_BOX, type NewsFeed, SCREEN_BOX } f
 import {
   type DataSourceRow,
   expiredFeedImages,
+  DEFAULT_PHOTO_BUDGET,
+  imagesMonth,
+  imagesTransformsUsed,
   type OrgScope,
   PHOTOS_PER_SOURCE,
+  type PhotoBudget,
   type PhotoRead,
   pendingFeedImageDeletes,
   photoRead,
   scoped,
+  takeImagesTransforms,
 } from '@signforge/db';
 import type { ParsedNews } from '@signforge/feeds';
 import { readImageInfo } from '@signforge/media/image-info';
@@ -50,12 +55,35 @@ const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
 /**
- * Rows expired and delete candidates scanned per daily run: a day's at the cap (60 rows, up to 120 blobs an org) for
- * each of the CLEANUP_ORGS_PER_RUN orgs, so the sweep keeps up. The org cap bounds the run to 11 D1 calls, whatever these are.
+ * What one hourly sweep run takes of what is due (rows unnamed past their check, blobs past their grace), the oldest
+ * first, from up to CLEANUP_ORGS_PER_RUN orgs: 24 runs a day forget 7,200 rows and delete 14,400 blobs, so the sweep
+ * keeps up with three orgs at MOST_PER_ORG_PER_DAY whatever their cap, and a cap lowered later strands nothing. A run
+ * stays within 14 D1 calls and R2 deletes, and each statement's list of URLs within a few hundred kB (review of #497).
  */
-const FORGET_PER_RUN = 180;
-const DELETE_PER_RUN = 360;
+const FORGET_PER_RUN = 300;
+const DELETE_PER_RUN = 600;
 const CLEANUP_ORGS_PER_RUN = 3;
+/** The most `FEED_PHOTOS_ORG_DAILY` and `FEED_PHOTOS_SOURCE_DAILY` may be: the sweep keeps up with three orgs this busy. */
+const MOST_PHOTOS_PER_DAY = 1800;
+
+/**
+ * The day's photo caps the environment sets (`FEED_PHOTOS_ORG_DAILY`, `FEED_PHOTOS_SOURCE_DAILY`; the demo's real-feed
+ * test lifts them), or 60 an org and 30 a source. Read once a run, before any source is claimed. A value that is not
+ * written as a whole number from 1 to MOST_PHOTOS_PER_DAY (no sign, exponent, hex or spaces) fails the run, loudly,
+ * rather than polling under caps nobody set.
+ */
+export function photoBudget(env: Pick<Env, 'FEED_PHOTOS_ORG_DAILY' | 'FEED_PHOTOS_SOURCE_DAILY'>): PhotoBudget {
+  const read = (name: string, value: string | undefined, unset: number) => {
+    if (value === undefined) return unset;
+    if (!/^[1-9]\d*$/.test(value) || Number(value) > MOST_PHOTOS_PER_DAY)
+      throw new Error(`${name} must be a whole number from 1 to ${MOST_PHOTOS_PER_DAY}, not ${JSON.stringify(value)}`);
+    return Number(value);
+  };
+  return {
+    perOrg: read('FEED_PHOTOS_ORG_DAILY', env.FEED_PHOTOS_ORG_DAILY, DEFAULT_PHOTO_BUDGET.perOrg),
+    perSource: read('FEED_PHOTOS_SOURCE_DAILY', env.FEED_PHOTOS_SOURCE_DAILY, DEFAULT_PHOTO_BUDGET.perSource),
+  };
+}
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */
 const QUALITY = 85;
 
@@ -105,17 +133,57 @@ export function cfPhotoQueue(queue: { sendBatch(messages: Iterable<{ body: FeedI
   };
 }
 
+/**
+ * The month's Images transformations (#500): the account has 5,000 on the Free plan, past which Images fails (9422) for
+ * every environment until the month resets. Each environment counts its own against its ceiling; their ceilings should
+ * add up to fewer than the account's allowance.
+ */
+export interface TransformBudget {
+  /** Whether the month's are used up: the consumer then fetches no photo. */
+  spent(): Promise<boolean>;
+  /** Takes `n` of the month's, all or none: whether they were. */
+  take(n: number): Promise<boolean>;
+}
+
+/** The environment's count in D1, against `ceiling` a UTC month: one read a batch, and one write a photo that needs Images. */
+export function d1TransformBudget(db: D1Database, ceiling: number, now: number): TransformBudget {
+  const month = imagesMonth(now);
+  return {
+    spent: async () => (await imagesTransformsUsed(db, month)) >= ceiling,
+    take: (n) => takeImagesTransforms(db, month, n, ceiling),
+  };
+}
+
+/** The most transformations a month the feed photos may ask for, unless `IMAGES_MONTHLY_TRANSFORMS` says: under the Free plan's 5,000. */
+const DEFAULT_MONTHLY_TRANSFORMS = 4500;
+
+/** `IMAGES_MONTHLY_TRANSFORMS`, a whole number from 1 to 1,000,000 (no sign, exponent, hex or spaces), or 4,500 when unset. */
+export function monthlyTransforms(env: Pick<Env, 'IMAGES_MONTHLY_TRANSFORMS'>): number {
+  const value = env.IMAGES_MONTHLY_TRANSFORMS;
+  if (value === undefined) return DEFAULT_MONTHLY_TRANSFORMS;
+  if (!/^[1-9]\d*$/.test(value) || Number(value) > 1_000_000)
+    throw new Error(`IMAGES_MONTHLY_TRANSFORMS must be a whole number from 1 to 1000000, not ${JSON.stringify(value)}`);
+  return Number(value);
+}
+
 /** What the consumer fetches, decodes and writes with. Production builds it via `photoDeps`; tests inject stubs. */
 export interface PhotoDeps {
   now: number;
   blobs: PhotoBlobs;
   guards: FetchGuards;
   images: Pick<ImagesBinding, 'info' | 'input'>;
+  transforms: TransformBudget;
 }
 
 /** Production dependencies for `storeFeedImages`, built at the Worker boundary with an explicit `now`. */
 export function photoDeps(env: Env, now: number): PhotoDeps {
-  return { now, blobs: r2PhotoBlobs(env.BLOBS), guards: feedGuards(env, workerFetch), images: env.IMAGES };
+  return {
+    now,
+    blobs: r2PhotoBlobs(env.BLOBS),
+    guards: feedGuards(env, workerFetch),
+    images: env.IMAGES,
+    transforms: d1TransformBudget(env.DB, monthlyTransforms(env), now),
+  };
 }
 
 /** Photo state for one RSS poll: whether anything shows its photos (a screen's desired manifest or a published spot), and the D1 read token. */
@@ -190,12 +258,12 @@ export async function enqueueFeedPhotos(queue: PhotoQueue, orgId: string, source
  * its allowance (`images-quota`) or failing (`images-unavailable`); or, on a message's last try, an
  * error of the consumer's own (`internal`).
  */
-type PhotoError = FetchErrorCode | 'svg' | 'not-an-image' | 'undecodable' | 'images-quota' | 'images-unavailable' | 'internal';
+type PhotoError = FetchErrorCode | 'svg' | 'not-an-image' | 'undecodable' | 'images-quota' | 'images-month-budget' | 'images-unavailable' | 'internal';
 
 /** A photo that could not be stored, for a reason it is recorded with. */
 class PhotoFailure extends Error {
   constructor(
-    readonly code: Extract<PhotoError, 'svg' | 'not-an-image' | 'undecodable' | 'too-large' | 'images-quota' | 'images-unavailable'>,
+    readonly code: Extract<PhotoError, 'svg' | 'not-an-image' | 'undecodable' | 'too-large' | 'images-quota' | 'images-month-budget' | 'images-unavailable'>,
     options?: ErrorOptions,
   ) {
     super(code, options);
@@ -229,10 +297,12 @@ function imagesCode(e: unknown): number | undefined {
  * with a backoff, so a photo that keeps failing leaves the queue until a poll names it again later.
  */
 export async function storeFeedImages(batch: MessageBatch<FeedImageJob>, db: D1Database, deps: PhotoDeps): Promise<void> {
+  // The month's transformations used up: no photo is fetched, each recorded as waiting for the next month (#500).
+  const spent = await deps.transforms.spent();
   for (const message of batch.messages) {
     const job = message.body;
     try {
-      await deliverFeedPhoto(db, job, deps);
+      await deliverFeedPhoto(db, job, deps, spent);
       message.ack();
     } catch (e) {
       console.error(`[feed images] a photo of ${job.orgId}/${job.sourceId} could not be stored (try ${message.attempts} of ${ATTEMPTS})`, e);
@@ -253,13 +323,19 @@ export async function storeFeedImages(batch: MessageBatch<FeedImageJob>, db: D1D
 }
 
 /** Fetch, check and store one queued photo, reporting its result to `org.feedPhotos.delivered`. */
-async function deliverFeedPhoto(db: D1Database, { orgId, sourceId, url }: FeedImageJob, { now, blobs, guards, images }: PhotoDeps): Promise<void> {
+async function deliverFeedPhoto(
+  db: D1Database,
+  { orgId, sourceId, url }: FeedImageJob,
+  { now, blobs, guards, images, transforms }: PhotoDeps,
+  spent: boolean,
+): Promise<void> {
   const org = scoped(db, orgId);
   const source = await org.dataSources.get(sourceId);
   const [row] = await org.feedPhotos.get([url]);
   // Deleted, or its photos switched off, since the poll queued it; or forgotten since (rows are made before they are queued).
   if (!source?.photos || !row) return;
   try {
+    if (spent) throw new PhotoFailure('images-month-budget');
     const fetched = await guardedImageFetch(httpsOf(url), row, guards);
     if (fetched.status === 'not-modified') {
       await org.feedPhotos.delivered(url, { result: 'unchanged', now, sourceId, checked: row });
@@ -277,7 +353,7 @@ async function deliverFeedPhoto(db: D1Database, { orgId, sourceId, url }: FeedIm
       await org.feedPhotos.delivered(url, { result: 'reused', now, sourceId, sourceSha256, copy: existing, validators });
       return;
     }
-    const { file, thumb } = await copies(images, fetched.body);
+    const { file, thumb } = await copies(images, transforms, fetched.body);
     const fileSha = file.bytes === fetched.body ? sourceSha256 : await sha256Hex(file.bytes);
     const thumbSha = thumb.bytes === file.bytes ? fileSha : await sha256Hex(thumb.bytes);
     await org.feedPhotos.delivered(url, {
@@ -332,6 +408,7 @@ function sniffed(bytes: Uint8Array): { type: Raster; width?: number; height?: nu
  */
 async function copies(
   images: PhotoDeps['images'],
+  transforms: TransformBudget,
   bytes: Uint8Array,
 ): Promise<{ file: { bytes: Uint8Array; type: string }; thumb: { bytes: Uint8Array; type: string } }> {
   const source = sniffed(bytes);
@@ -347,9 +424,12 @@ async function copies(
       (source.type === 'image/jpeg' || source.type === 'image/webp') &&
       fitsScreenBox(size.width, size.height, PASS_THROUGH_BOX) &&
       bytes.length <= PASS_THROUGH_MAX_BYTES;
-    const file = passThrough ? { bytes, type } : { bytes: await scaled(images, bytes, cover, type), type };
     const fileSize = passThrough ? size : cover;
     const small = coverSize(fileSize.width, fileSize.height, NEWS_THUMB_BOX);
+    // What Images is asked for, taken from the month's before it is: none for a small photo that passes through.
+    const needed = (passThrough ? 0 : 1) + (small.scaled ? 1 : 0);
+    if (needed && !(await transforms.take(needed))) throw new PhotoFailure('images-month-budget');
+    const file = passThrough ? { bytes, type } : { bytes: await scaled(images, bytes, cover, type), type };
     const thumb = small.scaled ? { bytes: await scaled(images, file.bytes, small, type), type } : file;
     return { file, thumb };
   } catch (e) {
@@ -375,7 +455,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Group items by org, keeping at most `maxOrgs` orgs so a daily run stays well inside Free D1's 50-query limit. */
+/** Group items by org, keeping at most `maxOrgs` orgs so a run stays well inside Free D1's 50-query limit. */
 function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T) => string, maxOrgs: number): Map<string, string[]> {
   const byOrg = new Map<string, string[]>();
   for (const item of items) {
@@ -391,7 +471,7 @@ function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T
 }
 
 /**
- * The daily sweep, bounded to 11 D1 calls for Free D1's 50-query limit:
+ * The hourly sweep, bounded to 14 D1 calls for Free D1's 50-query limit:
  * 1. Expire `feed_images` rows unnamed for a week past their check (`expiredFeedImages`), keeping
  *    any still named by a snapshot, and durably queue their hashes into `feed_image_deletes`.
  * 2. Drain `feed_image_deletes` rows whose grace window has elapsed (`pendingFeedImageDeletes`),

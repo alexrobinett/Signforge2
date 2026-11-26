@@ -113,7 +113,7 @@ export type InlineProblem =
   | 'busy';
 
 export interface InlineAnswer {
-  /** The new spot, as `create_spot` gave it. */
+  /** The new spot, as `save_spot` gave it. */
   spot: SpotView;
   marks: Record<string, FieldMark>;
 }

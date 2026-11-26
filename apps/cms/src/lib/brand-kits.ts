@@ -83,7 +83,7 @@ export function shownColors(d: KitDraft, saved: BrandColors): BrandColors {
   };
 }
 
-/** `update_brand_kit`'s input for saving the draft, with the version the draft started from as `ifVersion`. */
+/** `save_brand_kit`'s input for saving the draft, with the version the draft started from as `ifVersion`. */
 export const updateInput = (brandKitId: string, d: KitDraft, ifVersion: number) => ({
   brandKitId,
   name: d.name.trim(),
@@ -96,7 +96,7 @@ export const updateInput = (brandKitId: string, d: KitDraft, ifVersion: number) 
   ifVersion,
 });
 
-/** `create_brand_kit`'s input for a copy of `kit`: it takes no nulls, so what is derived or unset is left out. */
+/** `save_brand_kit`'s input for a copy of `kit`: it takes no nulls, so what is derived or unset is left out. */
 export function duplicateInput(kit: BrandKitView, idempotencyKey: string) {
   const d = kitDraftOf(kit);
   const present = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null));

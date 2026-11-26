@@ -76,7 +76,7 @@ const NEEDS_YOU: Record<NonNullable<ScreenView['state']['reason']>, string> = {
 };
 
 /**
- * Whether a screen is in touch, so a restart can reach it (#253): `restart_screen` goes only down an
+ * Whether a screen is in touch, so a restart can reach it (#253): `screen_command`'s restart goes only down an
  * open socket. Not one that is unreachable, not heard from yet, or unreachable and behind.
  */
 export const reachable = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason'> }) =>

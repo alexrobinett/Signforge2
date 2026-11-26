@@ -398,70 +398,57 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     run: run('revoke_screen_credential'),
   },
-  set_display_override: {
-    tools: ['set_display_override'],
-    input: ofRegistry('set_display_override'),
-    description: describedAs('set_display_override'),
+  screen_command: {
+    tools: ['screen_command'],
+    input: ofRegistry('screen_command'),
+    description: describedAs('screen_command'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
-      const state = called.state === 'on' || called.state === 'off' ? called.state : null;
-      return {
-        input: { screenId: screen.id, state },
-        card: {
-          title: state === null ? 'Follow display hours again' : `Turn the display ${state}`,
-          lines: [
-            state === null
-              ? `${screen.name} follows its display hours again.`
-              : `${screen.name}'s display turns ${state} now, whatever its display hours say, until its next scheduled display change, or ${OVERRIDE_LIMIT_MS / 3_600_000} hours at most, then follows its hours again.`,
-          ],
-          address: null,
-          when: 'Now, on the live screen',
-          undo: state === null ? 'Turn it on or off again here.' : 'Set it to follow its display hours again, or wait: it ends by itself.',
-          press: state === null ? 'Follow hours' : `Turn ${state}`,
-        },
-      };
-    },
-    run: run('set_display_override'),
-  },
-  restart_screen: {
-    tools: ['restart_screen'],
-    input: ofRegistry('restart_screen'),
-    description: describedAs('restart_screen'),
-    async make(org, called) {
-      const screen = await screenNamed(org, called.screenId);
-      return {
-        input: { screenId: screen.id },
-        card: {
-          title: 'Restart a screen',
-          lines: [`${screen.name} restarts now: it goes blank for a moment, then plays again.`],
-          address: null,
-          when: 'Now, on the live screen',
-          undo: 'Nothing to undo.',
-          press: 'Restart',
-        },
-      };
-    },
-    run: run('restart_screen'),
-  },
-  identify_screen: {
-    tools: ['identify_screen'],
-    input: ofRegistry('identify_screen'),
-    description: describedAs('identify_screen'),
-    async make(org, called) {
-      const screen = await screenNamed(org, called.screenId);
-      return {
-        input: { screenId: screen.id },
-        card: {
+      const live = 'Now, on the live screen';
+      const command = str(called.command);
+      // Each command its own card: what the person sees before they press is what that command does.
+      const cards: Record<string, Made['card']> = {
+        identify: {
           title: 'Identify a screen',
           lines: [`${screen.name} shows its name over what it plays, for a few seconds.`],
           address: null,
-          when: 'Now, on the live screen',
+          when: live,
           undo: 'Nothing to undo.',
           press: 'Identify',
         },
+        restart: {
+          title: 'Restart a screen',
+          lines: [`${screen.name} restarts now: it goes blank for a moment, then plays again.`],
+          address: null,
+          when: live,
+          undo: 'Nothing to undo.',
+          press: 'Restart',
+        },
+        display_auto: {
+          title: 'Follow display hours again',
+          lines: [`${screen.name} follows its display hours again.`],
+          address: null,
+          when: live,
+          undo: 'Turn it on or off again here.',
+          press: 'Follow hours',
+        },
       };
+      for (const state of ['on', 'off'] as const)
+        cards[`display_${state}`] = {
+          title: `Turn the display ${state}`,
+          lines: [
+            `${screen.name}'s display turns ${state} now, whatever its display hours say, until its next scheduled display change, or ${OVERRIDE_LIMIT_MS / 3_600_000} hours at most, then follows its hours again.`,
+          ],
+          address: null,
+          when: live,
+          undo: 'Set it to follow its display hours again, or wait: it ends by itself.',
+          press: `Turn ${state}`,
+        };
+      const card = cards[command];
+      if (!card) throw new CardProblem(`${command} is not a screen command: identify, restart, display_on, display_off or display_auto`);
+      return { input: { screenId: screen.id, command }, card };
     },
-    run: run('identify_screen'),
+    run: run('screen_command'),
   },
   read_table: {
     tools: ['read_table'],
@@ -482,37 +469,30 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     run: run('read_table'),
   },
-  create_data_source: {
-    tools: ['create_data_source'],
-    input: ofRegistry('create_data_source'),
-    description: describedAs('create_data_source'),
-    needsPublish: (called) => called.format === 'provider',
-    async make(_org, called) {
-      const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
-      return {
-        input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
-        withheld: resourceLines(called),
-        card: {
-          title: 'Add a data source',
-          lines: [
-            `Adds ${str(called.name) || 'a data source'}, read from ${called.resource === undefined ? 'the address below' : 'its connection'}.`,
-            ...resourceLines(called),
-          ],
-          address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, `The poller, every ${minutes === 1 ? 'minute' : `${minutes} minutes`}`),
-          when: 'Now: the poller starts reading it',
-          undo: 'Delete the data source on the Integrations page.',
-          press: 'Add it',
-        },
-      };
-    },
-    run: run('create_data_source'),
-  },
-  update_data_source: {
-    tools: ['update_data_source'],
-    input: ofRegistry('update_data_source'),
-    description: describedAs('update_data_source'),
-    needsPublish: reachesScreens,
+  save_data_source: {
+    tools: ['save_data_source'],
+    input: ofRegistry('save_data_source'),
+    description: describedAs('save_data_source'),
+    needsPublish: (called) => (called.dataSourceId === undefined ? called.format === 'provider' : reachesScreens(called)),
     async make(org, called) {
+      if (called.dataSourceId === undefined) {
+        const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
+        return {
+          input: { ...called, idempotencyKey: str(called.idempotencyKey) || crypto.randomUUID() },
+          withheld: resourceLines(called),
+          card: {
+            title: 'Add a data source',
+            lines: [
+              `Adds ${str(called.name) || 'a data source'}, read from ${called.resource === undefined ? 'the address below' : 'its connection'}.`,
+              ...resourceLines(called),
+            ],
+            address: called.feedUrl === undefined ? null : addressOf(called.feedUrl, `The poller, every ${minutes === 1 ? 'minute' : `${minutes} minutes`}`),
+            when: 'Now: the poller starts reading it',
+            undo: 'Delete the data source on the Integrations page.',
+            press: 'Add it',
+          },
+        };
+      }
       const source = await org.dataSources.get(str(called.dataSourceId));
       if (!source) throw new CardProblem(`no data source ${str(called.dataSourceId)}`);
       return {
@@ -523,7 +503,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
           lines: [
             `Changes ${source.name}: ${
               Object.keys(called)
-                .filter((k) => k !== 'dataSourceId' && k !== 'ifVersion')
+                .filter((k) => !['dataSourceId', 'ifVersion', 'idempotencyKey'].includes(k))
                 .join(', ') || 'nothing'
             }.`,
             ...resourceLines(called),
@@ -535,10 +515,10 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('update_data_source'),
+    run: run('save_data_source'),
   },
   set_spot_url: {
-    tools: ['update_spot'],
+    tools: ['save_spot'],
     input: () => z.object({ spotId: z.string().describe('The web page spot'), url: z.string().describe('The https address it shows') }).strict(),
     description: () =>
       "Set a web page spot's address: the page its stage and screens open. From the drawer the person sees the address in full and presses to save it as the spot's draft.",
@@ -558,7 +538,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('update_spot'),
+    run: run('save_spot'),
   },
 };
 

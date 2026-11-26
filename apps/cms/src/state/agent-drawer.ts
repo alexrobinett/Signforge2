@@ -140,11 +140,10 @@ const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !
 
 /** Each drafting tool's target in its input and in its output, for Undo and Publish. */
 const TARGETS: Record<string, { id: string; out: string }> = {
-  update_spot: { id: 'spotId', out: 'spot' },
-  update_playlist: { id: 'playlistId', out: 'playlist' },
-  update_schedule_entry: { id: 'scheduleEntryId', out: 'entry' },
-  create_schedule_entry: { id: 'scheduleEntryId', out: 'entry' },
-  rename_screen: { id: 'screenId', out: 'screen' },
+  save_spot: { id: 'spotId', out: 'spot' },
+  save_playlist: { id: 'playlistId', out: 'playlist' },
+  save_schedule_entry: { id: 'scheduleEntryId', out: 'entry' },
+  update_screen: { id: 'screenId', out: 'screen' },
 };
 
 /** A saved draft's record, as its tool gave it back. */
@@ -162,8 +161,9 @@ const savedOf = (tool: string, output: unknown): Row | undefined => {
 function undoOf(call: ProposedCall, saved: Row, version: number | undefined): { tool: string; input: Row } {
   const id = TARGETS[call.tool]?.id ?? '';
   const before = call.before ?? {};
-  if (call.tool === 'create_schedule_entry') return { tool: 'delete_schedule_entry', input: { scheduleEntryId: saved.id, ifVersion: version } };
-  if (call.tool === 'update_schedule_entry')
+  if (call.tool === 'save_schedule_entry' && call.input.scheduleEntryId === undefined)
+    return { tool: 'delete_schedule_entry', input: { scheduleEntryId: saved.id, ifVersion: version } };
+  if (call.tool === 'save_schedule_entry')
     return {
       tool: call.tool,
       input: {
@@ -346,7 +346,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       ]);
       let versions = versionsById(templates.templates);
       // A spot on a template version added since the templates were read: read them again.
-      const wanted = calls.flatMap((c) => (c.tool === 'update_spot' && typeof c.before?.templateVersionId === 'string' ? [c.before.templateVersionId] : []));
+      const wanted = calls.flatMap((c) => (c.tool === 'save_spot' && typeof c.before?.templateVersionId === 'string' ? [c.before.templateVersionId] : []));
       if (wanted.some((id) => !versions.has(id))) versions = versionsById((await queryClient.query({ ...templatesQuery(orgId), staleTime: 0 })).templates);
       const context = {
         screens: fleet.screens,
@@ -370,7 +370,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   function markSpot(call: ProposedCall, output: unknown) {
     const spot = savedOf(call.tool, output);
     const orgId = orgOnScreen(router);
-    if (call.tool !== 'update_spot' || !spot || !orgId || !isRow(call.before)) return;
+    if (call.tool !== 'save_spot' || !spot || !orgId || !isRow(call.before)) return;
     const versions = versionsById(queryClient.getQueryData(templatesQuery(orgId).queryKey)?.templates ?? []);
     const fields = versions.get(String(call.before.templateVersionId))?.manifest.fields ?? {};
     const was = isRow(call.before.data) ? call.before.data : {};
@@ -438,9 +438,11 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         });
         // Every page reads again what changed: the editor shows the spot as saved, and its stage plays it.
         await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+        // Forgotten meanwhile (the org changed): the editor open now is the next org's (#479).
+        if (!kept(at.card)) return;
         for (const [i, r] of answer.results.entries()) {
           const spot = r.ok ? savedOf(r.tool, r.output) : undefined;
-          if (r.tool === 'update_spot' && spot) await get().reloadSpot(orgId, String(at.card.drafts[i]?.target?.id ?? spot.id));
+          if (r.tool === 'save_spot' && spot) await get().reloadSpot(orgId, String(at.card.drafts[i]?.target?.id ?? spot.id));
         }
         // The version each save left, the last of a target's: what Undo puts it back at.
         const versions: Record<string, number> = {};
@@ -484,7 +486,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           }
           undone = [...undone, i];
           drafts(at.card, (d) => ({ ...d, undone, versions }));
-          const spot = call?.tool === 'update_spot' ? call.target?.id : undefined;
+          const spot = call?.tool === 'save_spot' ? call.target?.id : undefined;
           if (spot) set((s) => ({ agent: { ...s.agent, filled: Object.fromEntries(Object.entries(s.agent.filled).filter(([k]) => k !== spot)) } }));
         }
         drafts(at.card, (d) => ({ ...d, status: 'undone' }));
@@ -493,7 +495,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       }
       if (!kept(at.card)) return;
       await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
-      for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
+      for (const call of at.card.drafts) if (call.tool === 'save_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
     },
 
     confirmPublish(index, confirming) {
@@ -510,13 +512,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const items = at.drafts.results.flatMap((r) => {
         const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
         const kind: 'spot' | 'playlist' | 'schedule_entry' | null =
-          r.tool === 'update_spot'
-            ? 'spot'
-            : r.tool === 'update_playlist'
-              ? 'playlist'
-              : r.tool === 'create_schedule_entry' || r.tool === 'update_schedule_entry'
-                ? 'schedule_entry'
-                : null;
+          r.tool === 'save_spot' ? 'spot' : r.tool === 'save_playlist' ? 'playlist' : r.tool === 'save_schedule_entry' ? 'schedule_entry' : null;
         return saved && kind ? [{ kind, id: String(saved.id) }] : [];
       });
       // Not published (Edit first on sample text, or a refusal the toast told): nothing went live, the drafts stay saved, and the card says so.

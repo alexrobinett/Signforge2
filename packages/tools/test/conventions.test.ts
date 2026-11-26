@@ -57,12 +57,12 @@ describe('every registered tool', () => {
   });
 
   it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
-    // An update tool is named for the change (update_*, rename_*) or replaces a list (set_*_members).
-    // update_screen_labels merges, as add_group_members does, so it drops nothing it did not read and needs no version.
+    // An update tool is named for the change (update_*, rename_*, save_*, which creates or changes) or replaces a list (set_*_members).
+    // update_screen_labels merges, as save_group's add does, so it drops nothing it did not read and needs no version.
     // update_member_role sets one field of Better Auth's row, which has no version, and D1 guards the last owner (#292).
     const unversioned = new Set(['update_screen_labels', 'update_member_role']);
-    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name) && !unversioned.has(t.name));
-    expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['rename_screen', 'update_screen_settings', 'set_group_members']));
+    const updates = all.filter((t) => /^(update|rename|save)_|^set_\w+_members$/.test(t.name) && !unversioned.has(t.name));
+    expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['update_screen', 'save_group']));
     for (const t of updates) {
       expect(t.mutates, t.name).toBe(true);
       expect(shapeOf(t.input)?.ifVersion, `${t.name} input needs ifVersion (fields.ts)`).toBeDefined();

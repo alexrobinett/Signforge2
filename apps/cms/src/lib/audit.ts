@@ -89,9 +89,13 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
  * under: each tool that changes something (test/registry checks), Better Auth's membership changes
  * (apps/api src/auth/options.ts) and an agent refused for its limits.
  */
-export const ACTIONS: Record<string, { group: string; words: string }> = {
+export const ACTIONS: Record<string, { group: string; words: string; unlisted?: true }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
+  update_screen: { group: 'Screens', words: 'Changed' },
+  // Not a What option of its own: Identified, Player restarted and Woken or put to sleep find its rows (list_audit_log).
+  screen_command: { group: 'Screens', words: 'Command sent', unlisted: true },
+  // Recorded before #345 merged them into update_screen, screen_command and save_group and the content saves: their rows keep these names.
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
   set_display_override: { group: 'Screens', words: 'Woken or put to sleep' },
@@ -99,23 +103,27 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   restart_screen: { group: 'Screens', words: 'Player restarted' },
   revoke_screen_credential: { group: 'Screens', words: 'Credential revoked' },
   publish_manifest_to_screen: { group: 'Screens', words: 'Published' },
+  save_group: { group: 'Groups', words: 'Saved' },
   create_group: { group: 'Groups', words: 'Created' },
   rename_group: { group: 'Groups', words: 'Renamed' },
   delete_group: { group: 'Groups', words: 'Deleted' },
   set_group_members: { group: 'Groups', words: 'Screens set' },
   add_group_members: { group: 'Groups', words: 'Screens added' },
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
+  save_spot: { group: 'Spots', words: 'Saved' },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
   revert_spot_draft: { group: 'Spots', words: "Agent's draft rejected, or put back" },
   keep_spot_draft: { group: 'Spots', words: "Agent's draft kept" },
   delete_spot: { group: 'Spots', words: 'Deleted' },
+  save_playlist: { group: 'Playlists', words: 'Saved' },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
   revert_playlist_draft: { group: 'Playlists', words: "Agent's draft rejected, or put back" },
   keep_playlist_draft: { group: 'Playlists', words: "Agent's draft kept" },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
+  save_schedule_entry: { group: 'Schedule', words: 'Schedule saved' },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
   publish_takeover: { group: 'Schedule', words: 'Takeover made and published' },
@@ -134,10 +142,12 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   create_video_upload: { group: 'Assets', words: 'Video upload started' },
   finalize_video_upload: { group: 'Assets', words: 'Video checked' },
   delete_asset: { group: 'Assets', words: 'Deleted' },
+  save_brand_kit: { group: 'Brand kits', words: 'Saved' },
   create_brand_kit: { group: 'Brand kits', words: 'Created' },
   update_brand_kit: { group: 'Brand kits', words: 'Changed' },
   set_default_brand_kit: { group: 'Brand kits', words: 'Made the default' },
   assign_brand_kit: { group: 'Brand kits', words: 'Brand kit changed' },
+  save_data_source: { group: 'Data sources', words: 'Saved' },
   create_data_source: { group: 'Data sources', words: 'Created' },
   update_data_source: { group: 'Data sources', words: 'Changed' },
   delete_data_source: { group: 'Data sources', words: 'Deleted' },
@@ -173,7 +183,8 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
 
 /** The What filter's options, in ACTIONS' groups. */
 export const ACTION_GROUPS = Object.entries(ACTIONS).reduce<{ group: string; actions: { value: string; label: string }[] }[]>(
-  (groups, [value, { group, words }]) => {
+  (groups, [value, { group, words, unlisted }]) => {
+    if (unlisted) return groups;
     const last = groups.at(-1);
     if (last?.group === group) last.actions.push({ value, label: words });
     else groups.push({ group, actions: [{ value, label: words }] });
@@ -189,6 +200,28 @@ const SETTINGS: [string, string][] = [
   ['locale', 'language'],
 ];
 
+/**
+ * Each content save (#345 PR 4), said as the tools it replaced said it: without its id it was their create, with it
+ * their update. A brand kit made the default by it says so.
+ */
+const SAVES: Record<string, { id: string; created: string; changed: string }> = {
+  save_spot: { id: 'spotId', created: 'create_spot', changed: 'update_spot' },
+  save_playlist: { id: 'playlistId', created: 'create_playlist', changed: 'update_playlist' },
+  save_schedule_entry: { id: 'scheduleEntryId', created: 'create_schedule_entry', changed: 'update_schedule_entry' },
+  save_brand_kit: { id: 'brandKitId', created: 'create_brand_kit', changed: 'update_brand_kit' },
+  save_data_source: { id: 'dataSourceId', created: 'create_data_source', changed: 'update_data_source' },
+};
+
+/** What each of `screen_command`'s commands did, as the tools it replaced said it. */
+const SCREEN_COMMANDS: Record<string, string> = {
+  identify: 'Identified',
+  restart: 'Player restarted',
+  display_on: 'Woken from the CMS',
+  display_off: 'Put to sleep from the CMS',
+  display_auto: 'Back to its display hours',
+};
+const MEMBERSHIP: Record<string, string> = { add: 'Screens added', remove: 'Screens removed', set: 'Screens set' };
+
 const capital = (s: string) => `${s[0]!.toUpperCase()}${s.slice(1)}`;
 const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -196,16 +229,32 @@ const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 export function eventText(e: { action: string; input: Readonly<Record<string, unknown>> }): string {
   const name = text(e.input.name);
   const role = text(e.input.role);
+  const save = SAVES[e.action];
+  if (save) {
+    const words = ACTIONS[e.input[save.id] === undefined ? save.created : save.changed]!.words;
+    return e.action === 'save_brand_kit' && e.input.makeDefault === true ? `${words} · made the default` : words;
+  }
   switch (e.action) {
+    case 'screen_command':
+      return SCREEN_COMMANDS[text(e.input.command) ?? ''] ?? ACTIONS.screen_command!.words;
     case 'set_display_override':
       return e.input.state === 'on' ? 'Woken from the CMS' : e.input.state === 'off' ? 'Put to sleep from the CMS' : 'Back to its display hours';
+    case 'save_group': {
+      const membership = text(e.input.membership);
+      const screens = MEMBERSHIP[membership ?? ''];
+      if (e.input.groupId === undefined) return name ? `Created ${name}` : 'Created';
+      if (name && screens) return `Renamed to ${name} · ${screens.toLowerCase()}`;
+      return name ? `Renamed to ${name}` : (screens ?? ACTIONS.save_group!.words);
+    }
     case 'rename_screen':
     case 'rename_group':
     case 'update_organization':
       return name ? `Renamed to ${name}` : (ACTIONS[e.action]?.words ?? 'Renamed');
+    case 'update_screen':
     case 'update_screen_settings': {
       const changed = SETTINGS.filter(([key]) => key in e.input).map(([, word]) => word);
-      if (!changed.length) return 'Settings changed';
+      if (!changed.length) return name ? `Renamed to ${name}` : 'Settings changed';
+      if (name) changed.unshift('name');
       const list = changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]!;
       return `${capital(list)} changed`;
     }

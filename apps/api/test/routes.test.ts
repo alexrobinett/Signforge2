@@ -24,9 +24,9 @@ const WRITERS: Record<string, string> = {
   'POST /api/agent/chat':
     "a turn of the agent's drawer (#267): a question reads only, POST because the body is a conversation (it writes nothing of ours, checked below); a press of its confirmation card (#269) runs that one tool through the dispatcher as the member via cms-agent, once, its audit row carrying the card (agent-chat.test.ts)",
   'POST /api/agent/inline/keep':
-    "Keep of the agent's update of a spot (#264): one update_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
+    "Keep of the agent's update of a spot (#264): one save_spot through the dispatcher as the member via cms-agent, with ifVersion (its writes and their audit row are checked below)",
   'POST /api/agent/inline':
-    "the agent's fill from a flyer, photo or link (#263): one create_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
+    "the agent's fill from a flyer, photo or link (#263): one save_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /admin/screens/:screen/missing': 'reads only: POST because the body is a manifest',
   'PUT /admin/screens/:screen/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
   'PUT /admin/base/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
@@ -206,12 +206,12 @@ describe('requests', () => {
     }
 
     writes.length = 0;
-    expect((await owner.tool('rename_screen', { screenId, name: 'Renamed' })).status).toBe(200);
+    expect((await owner.tool('update_screen', { screenId, name: 'Renamed' })).status).toBe(200);
     expect(ours()).toEqual(['screens', 'audit_log']);
 
     // A change that finds nothing (its UPDATE matched no row) is not audited.
     writes.length = 0;
-    expect((await owner.tool('rename_screen', { screenId: 'scr_nobody', name: 'x' })).status).toBe(404);
+    expect((await owner.tool('update_screen', { screenId: 'scr_nobody', name: 'x' })).status).toBe(404);
     expect(ours()).not.toContain('audit_log');
   });
 
@@ -264,7 +264,7 @@ describe('requests', () => {
     expect(ours()).toEqual([]);
 
     // Its drafts, saved (#268): the change and its audit row, and nothing else.
-    const made = await owner.tool('create_spot', {
+    const made = await owner.tool('save_spot', {
       name: 'Clock',
       kind: 'template',
       templateVersionId: baseVersion,
@@ -274,7 +274,7 @@ describe('requests', () => {
     const { spot } = (await made.json()) as { spot: { id: string; version: number } };
     writes.length = 0;
     const saved = await member.post('/api/agent/apply', {
-      calls: [{ tool: 'update_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
+      calls: [{ tool: 'save_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
     });
     expect(saved.status, await saved.clone().text()).toBe(200);
     // A draft saved from the drawer is the agent's proposal (#116): the draft it replaced is kept beside it.
@@ -305,9 +305,9 @@ describe('POST /api/tools/:name', () => {
   it('maps refusals to HTTP statuses', async () => {
     const cases: [Client, string, unknown, number, string][] = [
       [owner, 'no_such_tool', {}, 404, 'unknown_tool'],
-      [owner, 'rename_screen', { screenId, name: '' }, 400, 'invalid_input'],
-      [owner, 'rename_screen', { screenId: 'scr_nobody', name: 'x' }, 404, 'not_found'],
-      [viewer, 'rename_screen', { screenId, name: 'x' }, 403, 'forbidden'],
+      [owner, 'update_screen', { screenId, name: '' }, 400, 'invalid_input'],
+      [owner, 'update_screen', { screenId: 'scr_nobody', name: 'x' }, 404, 'not_found'],
+      [viewer, 'update_screen', { screenId, name: 'x' }, 403, 'forbidden'],
     ];
     for (const [who, name, input, status, error] of cases) {
       const res = await who.tool(name, input);
@@ -317,15 +317,15 @@ describe('POST /api/tools/:name', () => {
   });
 
   it('records the session user as the actor, through the cms client', async () => {
-    const res = await owner.tool('rename_screen', { screenId, name: 'Front desk' });
+    const res = await owner.tool('update_screen', { screenId, name: 'Front desk' });
     expect(await res.json()).toMatchObject({ screen: { id: screenId, name: 'Front desk' } });
     const { user, organization } = (await owner.session()).body;
     const [entry] = await testScope(env.DB, organization.id).auditLog.list({ limit: 1 });
-    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms', action: 'rename_screen', targetKind: 'screen', targetId: screenId });
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms', action: 'update_screen', targetKind: 'screen', targetId: screenId });
   });
 
   it('takes JSON only', async () => {
-    const form = await owner.request('POST', '/api/tools/rename_screen', undefined, { 'content-type': 'text/plain' });
+    const form = await owner.request('POST', '/api/tools/update_screen', undefined, { 'content-type': 'text/plain' });
     expect(form.status).toBe(415);
     const broken = await owner.request('POST', '/api/tools/list_screens', undefined, { 'content-type': 'application/json' });
     expect(broken.status).toBe(200); // an empty body is an empty input

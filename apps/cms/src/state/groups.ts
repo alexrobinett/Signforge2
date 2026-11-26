@@ -94,7 +94,7 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     clock: realClock,
     state: { read: () => get().groups.renames, write: (change) => patch((s) => ({ ...s, renames: change(s.renames) })) },
     async save({ draft: { orgId, record, edit, version } }) {
-      const out = await callTool('rename_group', { groupId: record, name: edit.name.trim(), ifVersion: version });
+      const out = await callTool('save_group', { groupId: record, name: edit.name.trim(), ifVersion: version });
       putGroup(queryClient, orgId, out.group);
       return { version: out.group.version };
     },
@@ -186,9 +186,9 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
         const remove = of(false);
         // Closed meanwhile (Cancel): nothing is sent. The removal goes first, closest to that read.
         if (dialog()?.id !== d.id) return;
-        if (remove.length) putGroup(queryClient, orgId, (await callTool('remove_group_members', { groupId: group.id, screenIds: remove })).group);
+        if (remove.length) putGroup(queryClient, orgId, (await callTool('save_group', { groupId: group.id, screenIds: remove, membership: 'remove' })).group);
         if (add.length && dialog()?.id === d.id)
-          putGroup(queryClient, orgId, (await callTool('add_group_members', { groupId: group.id, screenIds: add })).group);
+          putGroup(queryClient, orgId, (await callTool('save_group', { groupId: group.id, screenIds: add, membership: 'add' })).group);
       });
     },
 

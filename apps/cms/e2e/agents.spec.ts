@@ -1,6 +1,6 @@
 // Settings › Connected agents (MCP) (M4-07, #112): a stub MCP client connects through /connect and is listed
 // with its last 7 days of calls (M4-08, #113); turning screens:manage off on its page refuses its next
-// rename_screen with forbidden, which its page shows as its last refusal; Disconnect gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
+// update_screen with forbidden, which its page shows as its last refusal; Disconnect gives its next call 401. Light and dark, desktop and phone, with axe at each. A client whose name
 // reads as SignForge is named by its host on the list, the audit log and its CSV, never by its name.
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
@@ -28,10 +28,10 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   expect(tokens.status).toBe(200);
   const accessToken = tokens.body.access_token!;
   // With screens:manage, renaming a screen that is not there is not found, not refused.
-  const rename = () => stub.mcp(accessToken, 'tools/call', { name: 'rename_screen', arguments: { screenId: 'scr_nowhere', name: 'Lobby' } });
+  const rename = () => stub.mcp(accessToken, 'tools/call', { name: 'update_screen', arguments: { screenId: 'scr_nowhere', name: 'Lobby' } });
   expect((await rename()).result.structuredContent.error).toBe('not_found');
   // With content:draft it makes a playlist: a change, in the audit log and in its calls.
-  const made = await stub.mcp(accessToken, 'tools/call', { name: 'create_playlist', arguments: { name: 'Kestrel specials' } });
+  const made = await stub.mcp(accessToken, 'tools/call', { name: 'save_playlist', arguments: { name: 'Kestrel specials' } });
   expect(made.result.isError).toBeUndefined();
 
   // It is listed, by its quoted name, with its scopes and who granted it.
@@ -74,8 +74,8 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await expect(count('Changes')).toHaveText('1');
   await expect(count('Draft changes')).toHaveText('1');
   await expect(count('Refused')).toHaveText('1');
-  await expect(page.getByText('calling rename_screen: Refused · Needs screens:manage.')).toBeVisible();
-  await expect(page.getByRole('listitem').filter({ hasText: 'rename_screen' }).last()).toContainText('Not found');
+  await expect(page.getByText('calling update_screen: Refused · Needs screens:manage.')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'update_screen' }).last()).toContainText('Not found');
   await axe(page);
   await page.setViewportSize({ width: 1280, height: 1700 });
   await shots(page, '31-agent-detail');
@@ -85,7 +85,7 @@ test('a connected agent is listed, loses a scope and is disconnected, each from 
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // Its change links to its row in the audit log: the agent's, on that playlist.
-  await page.getByRole('link', { name: 'See the change by create_playlist' }).click();
+  await page.getByRole('link', { name: 'See the change by save_playlist' }).click();
   await expect(page).toHaveURL(/\/audit\?.*target=playlist/);
   await hydrated(page);
   await expect(page.getByRole('row', { name: /Created/ })).toBeVisible();

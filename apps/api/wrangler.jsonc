@@ -101,7 +101,14 @@
         "ENVIRONMENT": "demo",
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
-        "AGENT_CALLS_DATASET": "signforge_agent_calls_demo"
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_demo",
+        // The demo's real-feed test: every shown story gets its photo. Past what six feeds polling hourly can bring in a
+        // day (250 each, at ten a poll); unset elsewhere, which keeps 60 an org and 30 a source (docs/backend-plan.md).
+        "FEED_PHOTOS_ORG_DAILY": "1800",
+        "FEED_PHOTOS_SOURCE_DAILY": "300",
+        // Its share of the account's 5,000 Images transformations a month (Free plan, #500): with prod's 1,000, 4,500
+        // together. The two must stay under 5,000 together (docs/backend-plan.md).
+        "IMAGES_MONTHLY_TRANSFORMS": "3500"
       },
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
@@ -163,7 +170,10 @@
         "ENVIRONMENT": "prod",
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
-        "AGENT_CALLS_DATASET": "signforge_agent_calls_prod"
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_prod",
+        // Its share of the account's 5,000 Images transformations a month (Free plan, #500): no users yet; with demo's
+        // 3,500, 4,500 together. The two must stay under 5,000 together (docs/backend-plan.md).
+        "IMAGES_MONTHLY_TRANSFORMS": "1000"
       },
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.

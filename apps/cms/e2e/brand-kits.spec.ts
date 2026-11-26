@@ -27,11 +27,11 @@ test.beforeAll(async ({ browser }) => {
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
   const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
-  await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: { greeting: 'Good to see you' } });
+  await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: { greeting: 'Good to see you' } });
   const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.133' } });
   const { code } = await start.json();
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Coffee bar', timezone: 'UTC', orientation: 'landscape' });
-  await tool(page, 'create_group', { name: 'Café screens', screenIds: [screen.id] });
+  await tool(page, 'save_group', { name: 'Café screens', screenIds: [screen.id] });
 });
 
 test.afterAll(() => page.context().close());
@@ -65,7 +65,7 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await expect.poll(() => themed(page, 'primary'), { timeout: 30_000 }).toEqual(['#2563eb']);
 
   // A colour reaches the player before anything is saved: its save is held, however long the player takes.
-  const saving = await holdFirst(page, '/api/tools/update_brand_kit');
+  const saving = await holdFirst(page, '/api/tools/save_brand_kit');
   const typedAt = Date.now();
   await page.getByLabel('Primary', { exact: true }).fill('#7a3e1d');
   await expect.poll(() => themed(page, 'primary'), { intervals: [20], timeout: 5_000 }).toEqual(['#7a3e1d']);
@@ -73,7 +73,7 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await expect(page.getByText(/^Default kit · (Unsaved changes|Saving…)$/)).toBeVisible();
   expect(saving.calls()).toBeLessThan(2);
   await (await saving.arrived).continue();
-  await page.unroute('**/api/tools/update_brand_kit');
+  await page.unroute('**/api/tools/save_brand_kit');
 
   // A pair set by hand that fails: its verdict in words, and a fix that derives it again.
   const contrast = page.getByRole('listitem').filter({ hasText: 'On accent on accent' });
@@ -171,7 +171,7 @@ test('a change someone else made while the kit was open is not overwritten: its 
   await hydrated(page);
   const kitId = new URL(page.url()).pathname.split('/').at(-1);
   // Stands in for someone else: rounder corners land after the page read the kit.
-  await tool(page, 'update_brand_kit', { brandKitId: kitId, shape: 'round' });
+  await tool(page, 'save_brand_kit', { brandKitId: kitId, shape: 'round' });
   // The edit saves itself from the version the page read: refused, said in place, the edit kept.
   await page.getByLabel('Primary', { exact: true }).fill('#c8102e');
   await expect(page.getByRole('alert').filter({ hasText: 'This kit changed since you opened it.' })).toBeVisible();
@@ -192,7 +192,7 @@ test('a save that gets no answer offers Try again, which saves the edit; until t
   await hydrated(page);
   // The first save never reaches SignForge, as on a dropped connection.
   let aborted = false;
-  await page.route('**/api/tools/update_brand_kit', (route) => {
+  await page.route('**/api/tools/save_brand_kit', (route) => {
     if (aborted) return route.continue();
     aborted = true;
     return route.abort('internetdisconnected');
@@ -204,7 +204,7 @@ test('a save that gets no answer offers Try again, which saves the edit; until t
   await alert.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByText(/kit · Saved \d/)).toBeVisible();
   await expect(alert).toHaveCount(0);
-  await page.unroute('**/api/tools/update_brand_kit');
+  await page.unroute('**/api/tools/save_brand_kit');
 });
 
 test('closing the tab with an edit still to be saved asks first, and sends the save (review of #461)', async () => {
@@ -214,7 +214,7 @@ test('closing the tab with an edit still to be saved asks first, and sends the s
   await tab.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
   await hydrated(tab);
   // Held, so it is still to be saved however soon the tab is closed.
-  const saving = await holdFirst(tab, '/api/tools/update_brand_kit');
+  const saving = await holdFirst(tab, '/api/tools/save_brand_kit');
   await tab.getByLabel('Primary', { exact: true }).fill('#7a3e1e');
   const asked = tab.waitForEvent('dialog');
   await tab.close({ runBeforeUnload: true });
@@ -228,7 +228,7 @@ test('closing the tab with an edit still to be saved asks first, and sends the s
 
 test("a kit's long name wraps in its title, balanced, to two lines at most, at desktop and phone width (#382)", async () => {
   // At a phone's width it would take four lines: two are shown.
-  const { brandKit } = await tool(page, 'create_brand_kit', {
+  const { brandKit } = await tool(page, 'save_brand_kit', {
     name: 'Northside Bakery winter menu boards, the café counter screens and the window displays on Main St',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `long-kit-${Date.now()}`,
@@ -247,7 +247,7 @@ test("a kit's long name wraps in its title, balanced, to two lines at most, at d
 test("the kit's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
   // The editor hydrates after the page (body[data-hydrated]): a field changed in between was set
   // back by React, and the change lost.
-  const { brandKit } = await tool(page, 'create_brand_kit', {
+  const { brandKit } = await tool(page, 'save_brand_kit', {
     name: 'Server kit',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `server-kit-${Date.now()}`,
@@ -265,7 +265,7 @@ test("the kit's fields and actions are disabled in the server's HTML, until the 
 test('kit actions run one at a time: Duplicate during a save is ignored, then copies what was saved; New kit waits for Duplicate (review of #143, 3)', async () => {
   // A Duplicate during Save copied the colours from before it; New kit and Duplicate both ran,
   // and both navigate when they finish.
-  const { brandKit } = await tool(page, 'create_brand_kit', {
+  const { brandKit } = await tool(page, 'save_brand_kit', {
     name: 'Serial kit',
     colors: { primary: '#2563eb', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `serial-kit-${Date.now()}`,
@@ -273,8 +273,9 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
   await page.goto(`/brand-kits/${brandKit.id}`);
   await hydrated(page);
   await expect(page.getByLabel('Primary', { exact: true })).toBeEnabled();
-  const copies = await holdFirst(page, '/api/tools/create_brand_kit');
-  const saving = await holdFirst(page, '/api/tools/update_brand_kit');
+  // One tool creates a kit and changes one (#345): a copy is a save with no brandKitId.
+  const copies = await holdFirst(page, '/api/tools/save_brand_kit', (body) => body.brandKitId === undefined);
+  const saving = await holdFirst(page, '/api/tools/save_brand_kit', (body) => body.brandKitId !== undefined);
   // Its autosave, held on its way.
   await page.getByLabel('Primary', { exact: true }).fill('#335577');
   const saveAnswer = await saving.arrived;
@@ -306,7 +307,7 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
 });
 
 test('the old addresses under Settings go to Brand kits, and to the kit (#381)', async () => {
-  const { brandKit } = await tool(page, 'create_brand_kit', {
+  const { brandKit } = await tool(page, 'save_brand_kit', {
     name: 'Moved kit',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     idempotencyKey: `moved-kit-${Date.now()}`,

@@ -20,7 +20,6 @@ defineTemplate({
     const url = String(data.qrUrl);
     // Unpainted until prepare returns: a frame that paints the photo has it decoded for the screen
     // first, and the SDK's decode before ready then waits behind that one (photo-promo, #168).
-    // Poster's photo, which no intro hides (its ink block covers it), stays unpainted until play.
     const img = document.querySelector<HTMLImageElement>('.photo img');
     if (img) img.style.visibility = 'hidden';
     // An element with nothing to show is off, as if switched off, so the layout closes up around it:
@@ -54,11 +53,6 @@ defineTemplate({
     document.getElementById('qr')?.replaceChildren(qrSvg(url, String(data.qrLabel) || url));
 
     fit();
-    if (img && data.look !== 'poster') img.style.visibility = '';
-  },
-  // Poster's ink block covers the photo whole as play starts, then wipes away: no frame shows the change.
-  play() {
-    const img = document.querySelector<HTMLImageElement>('.photo img');
     if (img) img.style.visibility = '';
   },
 });

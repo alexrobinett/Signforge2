@@ -65,7 +65,7 @@ describe('setSourcePhotos', () => {
 
     resolveCall();
     await saving;
-    expect(callTool).toHaveBeenCalledWith('update_data_source', { dataSourceId: 'src_news', photos: false, ifVersion: 3 });
+    expect(callTool).toHaveBeenCalledWith('save_data_source', { dataSourceId: 'src_news', photos: false, ifVersion: 3 });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: dataSourceKeys.all(ORG), exact: true });
     expect(store.getState().integrations).toMatchObject({ settingPhotos: null, pending: false, error: null });
   });

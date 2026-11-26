@@ -368,7 +368,7 @@ h1 {
   font-weight: 600;
 }
 [data-look='pop'] .weather {
-  --lk-motion: lk-pop-rise;
+  --lk-motion: lk-rise;
   gap: 1.11vmin;
   padding: 2.96vmin;
   border-radius: 2.96vmin;
@@ -404,7 +404,7 @@ h1 {
   padding-top: 1.67vmin;
 }
 [data-look='pop'] .day {
-  --lk-motion: lk-pop-in;
+  --lk-motion: lk-pop-press;
   font-size: 2.22vmin;
   font-weight: 600;
 }
@@ -417,7 +417,7 @@ h1 {
   object-position: left center;
 }
 [data-look='pop'] .ticker {
-  --lk-motion: lk-pop-rise;
+  --lk-motion: lk-rise;
   border-radius: var(--lk-radius-pill);
   background: var(--lk-text);
   --ink: var(--lk-bg);

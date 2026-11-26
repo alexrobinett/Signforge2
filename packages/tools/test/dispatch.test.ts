@@ -61,7 +61,6 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
-      'add_group_members',
       'approve_publish_request',
       'assign_brand_kit',
       'cancel_invitation',
@@ -69,12 +68,6 @@ describe('the registry', () => {
       'claim_screen',
       'count_drafts',
       'create_asset_upload',
-      'create_brand_kit',
-      'create_data_source',
-      'create_group',
-      'create_playlist',
-      'create_schedule_entry',
-      'create_spot',
       'create_video_upload',
       'decline_publish_request',
       'delete_asset',
@@ -106,7 +99,6 @@ describe('the registry', () => {
       'get_spot',
       'get_spot_preview',
       'get_template',
-      'identify_screen',
       'invite_member',
       'keep_playlist_draft',
       'keep_spot_draft',
@@ -138,14 +130,10 @@ describe('the registry', () => {
       'register_template_version',
       'remove_ai_provider',
       'remove_alert_channel',
-      'remove_group_members',
       'remove_member',
-      'rename_group',
-      'rename_screen',
       'renew_asset_upload',
       'reopen_publish_request',
       'request_publish',
-      'restart_screen',
       'retry_alert_delivery',
       'revert_playlist_draft',
       'revert_spot_draft',
@@ -153,10 +141,14 @@ describe('the registry', () => {
       'revoke_screen_credential',
       'roll_back_publish',
       'save_ai_provider',
-      'set_default_brand_kit',
+      'save_brand_kit',
+      'save_data_source',
+      'save_group',
+      'save_playlist',
+      'save_schedule_entry',
+      'save_spot',
+      'screen_command',
       'set_default_playlist',
-      'set_display_override',
-      'set_group_members',
       'set_slack_alert_channel',
       'set_template_version_status',
       'set_webhook_alert_channel',
@@ -165,15 +157,10 @@ describe('the registry', () => {
       'test_ai_provider',
       'test_alert_channel',
       'update_agent_grant_scopes',
-      'update_brand_kit',
-      'update_data_source',
       'update_member_role',
       'update_org_settings',
-      'update_playlist',
-      'update_schedule_entry',
+      'update_screen',
       'update_screen_labels',
-      'update_screen_settings',
-      'update_spot',
     ]);
   });
 
@@ -184,14 +171,14 @@ describe('the registry', () => {
     expect(keyed).toEqual([
       'claim_screen',
       'create_asset_upload',
-      'create_brand_kit',
-      'create_data_source',
-      'create_group',
-      'create_playlist',
-      'create_schedule_entry',
-      'create_spot',
       'create_video_upload',
       'request_publish',
+      'save_brand_kit',
+      'save_data_source',
+      'save_group',
+      'save_playlist',
+      'save_schedule_entry',
+      'save_spot',
       'start_takeover',
     ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
@@ -221,7 +208,7 @@ describe('roles and scopes', () => {
 
   it('let viewers read and nothing else', async () => {
     expect(await dispatch(registry, 'list_screens', {}, caller('viewer'))).toMatchObject({ ok: true });
-    expect(await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'x' }, caller('viewer'))).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'update_screen', { screenId: o.screen, name: 'x' }, caller('viewer'))).toMatchObject({ ok: false, error: 'forbidden' });
     expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, caller('viewer'))).toMatchObject({
       ok: false,
       error: 'forbidden',
@@ -229,7 +216,7 @@ describe('roles and scopes', () => {
   });
 
   it('let editors publish and manage screens, and keep credential revocation for owners', async () => {
-    expect(await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'Editor named' }, caller('editor'))).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'update_screen', { screenId: o.screen, name: 'Editor named' }, caller('editor'))).toMatchObject({ ok: true });
     // Forbidden on role, before the input is looked at.
     expect(await dispatch(registry, 'revoke_screen_credential', {}, caller('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
     // Allowed past the check: the manifest was never uploaded, so it is not found.
@@ -245,7 +232,7 @@ describe('roles and scopes', () => {
       ok: false,
       error: 'forbidden',
     });
-    expect(await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'x' }, draftOnly)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'update_screen', { screenId: o.screen, name: 'x' }, draftOnly)).toMatchObject({ ok: false, error: 'forbidden' });
   });
 
   it('decide what GET /api/tools lists', () => {
@@ -299,9 +286,9 @@ describe('roles and scopes', () => {
     expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('editor')).not.toContain('update_org_settings');
     expect(names('owner')).toHaveLength(TOOLS.length);
-    const listed = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === 'rename_screen')!;
+    const listed = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === 'update_screen')!;
     expect(listed).toMatchObject({ scope: 'screens:manage', minRole: 'editor', mutates: true });
-    expect(listed.inputSchema).toMatchObject({ type: 'object', required: ['screenId', 'name'] });
+    expect(listed.inputSchema).toMatchObject({ type: 'object', required: ['screenId'] });
     expect(ROLES).toEqual(['viewer', 'editor', 'owner']);
   });
 });
@@ -339,7 +326,7 @@ describe('whether editors publish (Q7, an org setting)', () => {
     expect(await publish(editorsAgent())).toMatchObject(refused);
     expect(await publish(as('owner'))).toMatchObject({ ok: false, error: 'not_found' });
     // The editor keeps the rest of the role.
-    expect(await dispatch(registry, 'rename_screen', { screenId: q.screen, name: 'Still mine' }, as('editor'))).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'update_screen', { screenId: q.screen, name: 'Still mine' }, as('editor'))).toMatchObject({ ok: true });
     expect(await dispatch(registry, 'list_screens', {}, editorsAgent())).toMatchObject({ ok: true });
     await setEditorsPublish(true);
     expect(await publish(as('editor'))).toMatchObject({ ok: false, error: 'not_found' });
@@ -350,14 +337,14 @@ describe('whether editors publish (Q7, an org setting)', () => {
     expect(await offered()).toContain('publish_manifest_to_screen');
     await setEditorsPublish(false);
     expect(await offered()).not.toContain('publish_manifest_to_screen');
-    expect(await offered()).toContain('rename_screen');
+    expect(await offered()).toContain('update_screen');
     await setEditorsPublish(true);
   });
 });
 
 describe('input', () => {
   it('is validated before the handler runs', async () => {
-    const r = await dispatch(registry, 'rename_screen', { screenId: 'not/an id', name: '' }, caller('owner'));
+    const r = await dispatch(registry, 'update_screen', { screenId: 'not/an id', name: '' }, caller('owner'));
     expect(r).toMatchObject({ ok: false, error: 'invalid_input' });
     expect((r as { details: { path: string }[] }).details.map((d) => d.path).sort()).toEqual(['name', 'screenId']);
   });
@@ -371,13 +358,13 @@ describe('the audit log', () => {
   it('records each change with actor kind and id, client, action, target and input', async () => {
     const org = testScope(env.DB, o.orgId);
     const agent = caller('editor', undefined, { kind: 'agent', id: 'grant-9', clientId: 'oauth-client-9' });
-    expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Audited' }, agent)).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'save_group', { groupId: o.group, name: 'Audited' }, agent)).toMatchObject({ ok: true });
     const [entry] = await org.auditLog.list({ limit: 1 });
     expect(entry).toMatchObject({
       actorKind: 'agent',
       actorId: 'grant-9',
       clientId: 'oauth-client-9',
-      action: 'rename_group',
+      action: 'save_group',
       targetKind: 'group',
       targetId: o.group,
     });
@@ -390,9 +377,9 @@ describe('the audit log', () => {
     const n = await count();
     await dispatch(registry, 'list_screens', {}, caller('owner'));
     await dispatch(registry, 'get_screen', { screenId: o.screen }, caller('owner'));
-    await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'x' }, caller('viewer'));
-    await dispatch(registry, 'rename_screen', { screenId: 'nope', name: 'x' }, caller('owner'));
-    await dispatch(registry, 'rename_screen', { screenId: o.screen, name: '' }, caller('owner'));
+    await dispatch(registry, 'update_screen', { screenId: o.screen, name: 'x' }, caller('viewer'));
+    await dispatch(registry, 'update_screen', { screenId: 'nope', name: 'x' }, caller('owner'));
+    await dispatch(registry, 'update_screen', { screenId: o.screen, name: '' }, caller('owner'));
     expect(await count()).toBe(n);
   });
 
@@ -513,7 +500,7 @@ describe('write safety', () => {
     const before = await org.screenGroups.get(o.group);
     await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
     try {
-      await expect(dispatch(registry, 'rename_group', { groupId: o.group, name: 'Never recorded' }, caller('owner'))).rejects.toThrow();
+      await expect(dispatch(registry, 'save_group', { groupId: o.group, name: 'Never recorded' }, caller('owner'))).rejects.toThrow();
     } finally {
       await env.DB.exec('DROP TRIGGER audit_down');
     }
@@ -524,10 +511,10 @@ describe('write safety', () => {
     const audits = async () => (await org.auditLog.list({ limit: 1000 })).length;
     const groups = async () => (await org.screenGroups.list()).filter((g) => g.name === 'Retried').length;
     const input = { name: 'Retried', screenIds: [o.screen], idempotencyKey: 'retry-key-1' };
-    const first = await dispatch(registry, 'create_group', input, caller('editor'));
+    const first = await dispatch(registry, 'save_group', input, caller('editor'));
     expect(first).toMatchObject({ ok: true });
     const n = await audits();
-    const again = await dispatch(registry, 'create_group', input, caller('editor'));
+    const again = await dispatch(registry, 'save_group', input, caller('editor'));
     expect(again).toEqual(first);
     expect(await groups()).toBe(1);
     expect(await audits()).toBe(n);
@@ -535,7 +522,7 @@ describe('write safety', () => {
 
   it('creates once when two calls with the same key race', async () => {
     const input = { name: 'Raced', idempotencyKey: 'retry-key-race' };
-    const [x, y] = await Promise.all([1, 2].map(() => dispatch(registry, 'create_group', input, caller('editor'))));
+    const [x, y] = await Promise.all([1, 2].map(() => dispatch(registry, 'save_group', input, caller('editor'))));
     expect(x).toMatchObject({ ok: true });
     expect(y).toEqual(x);
     expect((await testScope(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Raced')).toHaveLength(1);
@@ -543,10 +530,10 @@ describe('write safety', () => {
 
   it('refuses a key reused for a different input, and keeps keys apart between orgs', async () => {
     const input = { name: 'Keyed', idempotencyKey: 'retry-key-2' };
-    expect(await dispatch(registry, 'create_group', input, caller('editor'))).toMatchObject({ ok: true });
-    expect(await dispatch(registry, 'create_group', { ...input, name: 'Other' }, caller('editor'))).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await dispatch(registry, 'save_group', input, caller('editor'))).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'save_group', { ...input, name: 'Other' }, caller('editor'))).toMatchObject({ ok: false, error: 'conflict' });
     const other = await seedOrg(env.DB, 'disp-org-2');
-    const r = await dispatch(registry, 'create_group', input, { ...caller('editor'), org: testScope(env.DB, other.orgId) });
+    const r = await dispatch(registry, 'save_group', input, { ...caller('editor'), org: testScope(env.DB, other.orgId) });
     expect(r).toMatchObject({ ok: true });
     expect(await testScope(env.DB, other.orgId).screenGroups.list()).toContainEqual(expect.objectContaining({ name: 'Keyed' }));
   });
@@ -574,7 +561,7 @@ describe("an agent grant's limits", () => {
     const { agentLimiter } = scripted(() => (over ? { ok: false, limit: 'writes_per_minute', retryAfterSeconds: 12 } : { ok: true }));
     const input = { name: 'Limited', idempotencyKey: 'limited-key-1' };
     const n = (await audits()).length;
-    const refused = await dispatch(registry, 'create_group', input, { ...caller('editor', undefined, agent), agentLimiter });
+    const refused = await dispatch(registry, 'save_group', input, { ...caller('editor', undefined, agent), agentLimiter });
     expect(refused).toEqual({
       ok: false,
       error: 'rate_limited',
@@ -585,7 +572,7 @@ describe("an agent grant's limits", () => {
     expect(await audits()).toHaveLength(n);
     // After the reset, the same key creates.
     over = false;
-    expect(await dispatch(registry, 'create_group', input, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'save_group', input, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({ ok: true });
     expect((await testScope(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(1);
   });
 
@@ -595,20 +582,20 @@ describe("an agent grant's limits", () => {
     const { agentLimiter, audited } = scripted(() => ({ ok: false, limit: 'writes_per_day', retryAfterSeconds: 3600, audit: window }));
     const before = (await audits()).length;
     for (let i = 0; i < 3; i++) {
-      expect(
-        await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Over' }, { ...caller('editor', undefined, agent), agentLimiter }),
-      ).toMatchObject({
-        ok: false,
-        error: 'rate_limited',
-        message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
-      });
+      expect(await dispatch(registry, 'save_group', { groupId: o.group, name: 'Over' }, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject(
+        {
+          ok: false,
+          error: 'rate_limited',
+          message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
+        },
+      );
     }
     const all = await audits();
     expect(all).toHaveLength(before + 1);
     expect(audited).toEqual([1, 2, 3].map(() => ({ grantId: 'grant-limits', window })));
     expect(all[0]).toMatchObject({ actorKind: 'agent', actorId: 'grant-limits', clientId: 'agent-app', action: 'rate_limited', targetKind: null });
     expect(JSON.parse(all[0]!.detailJson!)).toEqual({
-      tool: 'rename_group',
+      tool: 'save_group',
       refused: {
         error: 'rate_limited',
         message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
@@ -621,8 +608,8 @@ describe("an agent grant's limits", () => {
     const { asked, agentLimiter } = scripted(() => ({ ok: true }));
     const as = { ...caller('editor', undefined, agent), agentLimiter };
     await dispatch(registry, 'list_screens', {}, as);
-    await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Counted' }, as);
-    await dispatch(registry, 'identify_screen', { screenId: o.screen }, as);
+    await dispatch(registry, 'save_group', { groupId: o.group, name: 'Counted' }, as);
+    await dispatch(registry, 'screen_command', { screenId: o.screen, command: 'identify' }, as);
     expect(asked).toEqual([
       { grantId: 'grant-limits', write: false },
       { grantId: 'grant-limits', write: true },
@@ -632,7 +619,7 @@ describe("an agent grant's limits", () => {
 
   it('never count a person', async () => {
     const { asked, agentLimiter } = scripted(() => ({ ok: false, limit: 'calls_per_minute', retryAfterSeconds: 1, audit: { window: 'minute', start: 0 } }));
-    expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'By a person' }, { ...caller('editor'), agentLimiter })).toMatchObject({
+    expect(await dispatch(registry, 'save_group', { groupId: o.group, name: 'By a person' }, { ...caller('editor'), agentLimiter })).toMatchObject({
       ok: true,
     });
     expect(asked).toEqual([]);
@@ -677,7 +664,7 @@ describe("the warning when a refusal's audit row is not settled", () => {
     try {
       const r = await dispatch(
         registry,
-        'rename_group',
+        'save_group',
         { groupId: o.group, name: 'Warned' },
         {
           ...caller('editor', undefined, agent),
@@ -696,7 +683,7 @@ describe("the warning when a refusal's audit row is not settled", () => {
     const warn = warnings();
     const r = await dispatch(
       registry,
-      'rename_group',
+      'save_group',
       { groupId: o.group, name: 'Warned' },
       {
         ...caller('editor', undefined, agent),
