@@ -12,6 +12,7 @@
   "dependencies": {
     "@signforge/contract": "workspace:*",
     "@signforge/media": "workspace:*",
+    "@signforge/player-core": "workspace:*",
     "@signforge/template-build": "workspace:*",
     "esbuild": "^0.28.2",
     "playwright": "1.65.1",

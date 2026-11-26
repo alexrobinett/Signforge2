@@ -24,22 +24,19 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     return async (data: Data, at: number) => {
       await hst.init('fresh', spotData(t().manifest, data), {}, at);
       await hst.waitFor('fresh', 'ready', ++inits);
-      return hst.page
-        .mainFrame()
-        .childFrames()[0]!
-        .evaluate(() => {
-          // Every animation to just after the intro: the orb at rest, before the outro.
-          for (const a of document.getAnimations()) a.currentTime = 1500;
-          const r = document.querySelector('.orb')!.getBoundingClientRect();
-          const stage = document.getElementById('stage')!;
-          return {
-            x: (r.left + r.width / 2) / innerWidth,
-            y: (r.top + r.height / 2) / innerHeight,
-            classes: [...stage.classList].filter((c) => ['day', 'night', 'dawn', 'dusk'].includes(c)).sort(),
-            sun: getComputedStyle(document.querySelector('.orb .rays')!).display !== 'none',
-            glow: getComputedStyle(document.querySelector('.glow')!).backgroundImage !== 'none',
-          };
-        });
+      return hst.frame('fresh').evaluate(() => {
+        // Every animation to just after the intro: the orb at rest, before the outro.
+        for (const a of document.getAnimations()) a.currentTime = 1500;
+        const r = document.querySelector('.orb')!.getBoundingClientRect();
+        const stage = document.getElementById('stage')!;
+        return {
+          x: (r.left + r.width / 2) / innerWidth,
+          y: (r.top + r.height / 2) / innerHeight,
+          classes: [...stage.classList].filter((c) => ['day', 'night', 'dawn', 'dusk'].includes(c)).sort(),
+          sun: getComputedStyle(document.querySelector('.orb .rays')!).display !== 'none',
+          glow: getComputedStyle(document.querySelector('.glow')!).backgroundImage !== 'none',
+        };
+      });
     };
   }
 
@@ -126,7 +123,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
         for (const code of codes) {
           await hst.init('fresh', spotData(t().manifest, { ...data, code }), {}, clock(at), theme);
           await hst.waitFor('fresh', 'ready', ++inits);
-          const low = await paintedContrast(hst.page, hst.page.mainFrame().childFrames()[0]!);
+          const low = await paintedContrast(hst.page, hst.frame('fresh'));
           for (const l of low) found.push(`${kit}, ${phase}, code ${code}: ${l}`);
         }
     expect(found).toEqual([]);

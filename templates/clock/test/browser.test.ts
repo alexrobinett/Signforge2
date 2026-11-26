@@ -9,7 +9,7 @@ describe('template time', () => {
 
   it('shows the time from init, not the device clock', async () => {
     const hst = await host();
-    const text = async (sel: string) => (await hst.page.mainFrame().childFrames()[0]!.locator(sel).first().textContent())?.trim();
+    const text = async (sel: string) => (await hst.frame('fresh').locator(sel).first().textContent())?.trim();
     await hst.open('fresh', t().html);
     await hst.init('fresh', spotData(t().manifest, {}), {}, later);
     await hst.waitFor('fresh', 'ready', 1);

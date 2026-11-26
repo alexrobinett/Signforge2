@@ -64,7 +64,7 @@ describe('info frame (#201)', () => {
       async show(data: Data, theme: FrameTheme | null = demo, now = NOW, timezone = 'UTC') {
         await hst.init('fresh', spotData(t().manifest, data), { photo: '#963', '$brand.logo': '#fff' }, now, theme ?? undefined, false, 15_000, timezone);
         await hst.waitFor('fresh', 'ready', ++inits);
-        return hst.page.mainFrame().childFrames()[0]!;
+        return hst.frame('fresh');
       },
     };
   }
@@ -391,7 +391,7 @@ describe('info frame (#201)', () => {
     await hst.open('fresh', t().html);
     // 15:00:59.5 on the screen.
     await hst.init('fresh', spotData(t().manifest, { look: 'corporate', ...news }), { photo: '#963' }, NOW + 59_500, undefined, false, 300_000);
-    const f = hst.page.mainFrame().childFrames()[0]!;
+    const f = hst.frame('fresh');
     const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
     for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
     expect(await f.evaluate(() => document.querySelector('.rail-time .time')!.textContent)).toBe('3:00');
@@ -481,7 +481,7 @@ describe('info frame (#201)', () => {
       for (const [i, look] of looks.entries()) {
         await r.hst.init('fresh', spotData(t().manifest, { look, ...longest }), { photo: '#963', '$brand.logo': '#fff' }, NOW, demo, false, durationMs);
         await r.hst.waitFor('fresh', 'ready', i + 1);
-        const f = r.hst.page.mainFrame().childFrames()[0]!;
+        const f = r.hst.frame('fresh');
         const seen = await motion(f, durationMs);
         expect(seen, look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
         // D's motion, read by seeking; the colon's blink and Night's minute bar are the clock's own loops.

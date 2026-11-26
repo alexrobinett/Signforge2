@@ -52,7 +52,7 @@ describe('alert (#200)', () => {
       async play(data: Data, theme?: FrameTheme, durationMs?: number) {
         await hst.init('fresh', spotData(t().manifest, { qrUrl, ...data }), {}, NOW, theme, false, durationMs);
         await hst.waitFor('fresh', 'ready', ++inits);
-        return hst.page.mainFrame().childFrames()[0]!;
+        return hst.frame('fresh');
       },
     };
   }
@@ -516,15 +516,10 @@ describe('alert (#200)', () => {
     await hst.waitFor('fresh', 'ready', 1);
     const fresh = await hst.dom('fresh');
     expect(fresh).toMatch(/--fit: 0\.\d+;/);
-    for (const [name, index] of [
-      ['reset', 1],
-      ['again', 2],
-    ] as const) {
-      await hst.open(name, t().html);
-      const f = hst.page.mainFrame().childFrames()[index]!;
+    for (const name of ['reset', 'again'] as const) {
       // The first read of `document.fonts.ready` is the first prepare's: it waits there until the
       // test lets it go, and says when it has got there.
-      await f.evaluate(() => {
+      await hst.open(name, t().html, () => {
         const w = window as unknown as { held: Promise<void>; release: () => void };
         const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
         const gate = new Promise<void>((r) => (w.release = r));
@@ -540,12 +535,11 @@ describe('alert (#200)', () => {
         });
       });
       await hst.init(name, a, {}, NOW);
+      await hst.waitFor(name, 'loaded', 1);
+      const f = hst.frame(name);
       await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
-      if (name === 'reset') {
-        await hst.post(name, 'reset');
-        await hst.waitFor(name, 'loaded', 2);
-      }
-      await hst.init(name, b, {}, NOW);
+      // With a reset between, as the editor sends new data; and with none, which the SDK takes the same way.
+      await (name === 'reset' ? hst.init : hst.initAgain)(name, b, {}, NOW);
       await hst.waitFor(name, 'ready', 1);
       // Let the first prepare go, then wait a task: what it does next runs in microtasks before it.
       await f.evaluate(async () => {
