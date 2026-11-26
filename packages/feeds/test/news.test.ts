@@ -1,7 +1,7 @@
 import { NEWS_SUMMARY_MAX } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews } from '../src/index';
+import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews, rendition } from '../src/index';
 import atom03 from './fixtures/atom-03.xml?raw';
 import atom from './fixtures/atom.xml?raw';
 import atomEnclosures from './fixtures/atom-enclosures.xml?raw';
@@ -335,49 +335,53 @@ describe('images', () => {
 // Recorded 2026-11-26. Each CDN's copies were fetched and measured: BBC's 1920 is 1920×1080, Le
 // Monde's 2160/1080 is 2160×1080, Fox's upload 1280×720 and Wired's w_1920 1920×1281.
 describe('photo renditions (#488)', () => {
+  const renditions = (body: string) => images(body).map((i) => i && rendition(i.url));
+
+  it('keeps the feed’s own URL as the photo’s', () => {
+    expect(images(bbc)[0]).toEqual({
+      url: 'https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/cdd4/live/6fdb6db0-e946-11f1-8b2f-671485cea0be.jpg',
+      width: 240,
+      height: 135,
+    });
+  });
+
   it("asks BBC's ichef for its 1920 copy, not the feed's 240", () => {
-    expect(images(bbc)).toEqual([
-      { url: 'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/cdd4/live/6fdb6db0-e946-11f1-8b2f-671485cea0be.jpg', width: 1920, height: 1080 },
-      { url: 'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/8562/live/1f8d5d00-e8ec-11f1-a094-5fdc692f3e33.jpg', width: 1920, height: 1080 },
+    expect(renditions(bbc)).toEqual([
+      'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/cdd4/live/6fdb6db0-e946-11f1-8b2f-671485cea0be.jpg',
+      'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/8562/live/1f8d5d00-e8ec-11f1-a094-5fdc692f3e33.jpg',
     ]);
   });
 
   it("asks Le Monde for the size that covers the screen at the photo's 2:1, within its crop", () => {
-    expect(images(leMonde)).toEqual([
-      { url: 'https://img.lemde.fr/2026/11/19/0/0/7056/3528/2160/1080/60/0/416287a_ftp-1-o72zp5beoynf-afp-d7yy2df.jpg', width: 2160, height: 1080 },
-      {
-        url: 'https://img.lemde.fr/2026/11/24/685/0/8225/4112/2160/1080/60/0/3dac54a_ftp-1-5hapjx1d3y1y-f6c999cf0f7b4c7daded4d5d29e15f89-0-b1859d1fb08648d3bcf4638b6964951a.jpg',
-        width: 2160,
-        height: 1080,
-      },
+    expect(renditions(leMonde)).toEqual([
+      'https://img.lemde.fr/2026/11/19/0/0/7056/3528/2160/1080/60/0/416287a_ftp-1-o72zp5beoynf-afp-d7yy2df.jpg',
+      'https://img.lemde.fr/2026/11/24/685/0/8225/4112/2160/1080/60/0/3dac54a_ftp-1-5hapjx1d3y1y-f6c999cf0f7b4c7daded4d5d29e15f89-0-b1859d1fb08648d3bcf4638b6964951a.jpg',
     ]);
   });
 
   it('never asks Le Monde for more than its crop, which it would upscale', () => {
-    const small = rss(
-      '<item xmlns:media="http://search.yahoo.com/mrss/"><title>a</title><media:content width="644" height="322" url="https://img.lemde.fr/2026/11/19/0/0/1000/500/644/322/60/0/a.jpg"/></item>',
+    expect(rendition('https://img.lemde.fr/2026/11/19/0/0/1000/500/644/322/60/0/a.jpg')).toBe(
+      'https://img.lemde.fr/2026/11/19/0/0/1000/500/1000/500/60/0/a.jpg',
     );
-    expect(images(small)).toEqual([{ url: 'https://img.lemde.fr/2026/11/19/0/0/1000/500/1000/500/60/0/a.jpg', width: 1000, height: 500 }]);
-    const tiny = small.replace('/1000/500/', '/600/300/');
-    expect(images(tiny)).toEqual([{ url: 'https://img.lemde.fr/2026/11/19/0/0/600/300/644/322/60/0/a.jpg', width: 644, height: 322 }]);
+    expect(rendition('https://img.lemde.fr/2026/11/19/0/0/600/300/644/322/60/0/a.jpg')).toBeUndefined();
   });
 
   it("takes Fox's upload rather than a57's resize, whose larger sizes are upscaled", () => {
-    expect(images(fox)).toEqual([
-      { url: 'https://static.foxnews.com/foxnews.com/content/uploads/2026/11/myles-garrett-jordan-love-rams-packers.jpg' },
-      { url: 'https://static.foxnews.com/foxnews.com/content/uploads/2025/12/fcc-brendan-carr.png' },
+    expect(renditions(fox)).toEqual([
+      'https://static.foxnews.com/foxnews.com/content/uploads/2026/11/myles-garrett-jordan-love-rams-packers.jpg',
+      'https://static.foxnews.com/foxnews.com/content/uploads/2025/12/fcc-brendan-carr.png',
     ]);
   });
 
-  it("scales Wired's 5184 upload down to the screen on its CDN, and leaves a 1200 one as it is", () => {
-    expect(images(wired)).toEqual([
-      { url: 'https://media.wired.com/photos/6b070bb9c3af37e5a5192585/master/w_1920,c_limit/GettyImages-2306835116.jpg', width: 1920, height: 1281 },
-      { url: 'https://media.wired.com/photos/6b064e68966159a4e56ddef8/master/pass/The-36-Very-Best-Gifts-for-Dads.jpg', width: 1200, height: 800 },
+  it("asks Wired's CDN for its uploads at most 1920 wide, which it never upscales", () => {
+    expect(renditions(wired)).toEqual([
+      'https://media.wired.com/photos/6b070bb9c3af37e5a5192585/master/w_1920,c_limit/GettyImages-2306835116.jpg',
+      'https://media.wired.com/photos/6b064e68966159a4e56ddef8/master/w_1920,c_limit/The-36-Very-Best-Gifts-for-Dads.jpg',
     ]);
   });
 
   it("keeps Der Spiegel's 520, which its CDN serves at no other width", () => {
-    expect(images(spiegel)).toEqual([{ url: 'https://cdn.prod.www.spiegel.de/images/dfe530bb-2d5c-4016-8869-e1efea6fcba7_w520_r2.08_fpx43.33_fpy45.jpg' }]);
+    expect(renditions(spiegel)).toEqual([undefined]);
   });
 });
 

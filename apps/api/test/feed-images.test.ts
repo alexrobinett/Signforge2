@@ -1652,6 +1652,68 @@ describe('a photo that may not be stored', () => {
   });
 });
 
+// #488: a CDN's copy at the screen's size is fetched first, and the feed's own when that copy is refused.
+describe("a CDN's copy at the size the screen needs", () => {
+  /** A BBC photo of its own, as the feed names it and as its 1920 copy. */
+  const bbc = () => {
+    const name = `cpsprodpb/cdd4/live/${++n}.jpg`;
+    return { feedPhoto: `https://ichef.bbci.co.uk/ace/standard/240/${name}`, copy: `https://ichef.bbci.co.uk/ace/standard/1920/${name}` };
+  };
+
+  /** One story naming `feedPhoto`, polled and queued; then the queue drained against `answers`. */
+  async function delivered({ feedPhoto }: { feedPhoto: string }, answers: Parameters<typeof web>[0]) {
+    const feedUrl = `https://rendition-${++n}.test/rss`;
+    await news(feedUrl);
+    await poll({ now: NOW, guards: web({ [feedUrl]: { body: feedOf(1, () => feedPhoto) } }).guards });
+    const photos = web(answers);
+    const stub = imagesStub();
+    await consume(take(), { guards: photos.guards, images: stub.images });
+    return { asked: photos.requests.map((r) => r.url), draws: stub.draws, stored: await row(feedPhoto) };
+  }
+
+  it("fetches the CDN's copy and stores it under the feed's URL", async () => {
+    const { feedPhoto, copy } = bbc();
+    const lead = jpeg(1920, 1080, 'lead');
+    const { asked, draws, stored } = await delivered({ feedPhoto }, { [copy]: { body: lead } });
+    expect(asked).toEqual([copy]);
+    expect(draws).toEqual(['image/jpeg@480x270']);
+    expect(stored).toMatchObject({ fileSha256: await sha256Hex(lead), lastError: null });
+  });
+
+  it("falls back to the feed's own URL when the CDN refuses the size", async () => {
+    const { feedPhoto, copy } = bbc();
+    const thumb = jpeg(240, 135, 'small');
+    const { asked, draws, stored } = await delivered({ feedPhoto }, { [copy]: { status: 404 }, [feedPhoto]: { body: thumb } });
+    expect(asked).toEqual([copy, feedPhoto]);
+    expect(draws).toEqual([]);
+    expect(stored).toMatchObject({ fileSha256: await sha256Hex(thumb), lastError: null });
+  });
+
+  it("falls back when the CDN's copy is not a photo, or will not decode", async () => {
+    for (const body of ['<html>gone</html>', jpeg(1920, 1080, 'BROKEN')]) {
+      const { feedPhoto, copy } = bbc();
+      const thumb = jpeg(240, 135, `small-${n}`);
+      const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { body }, [feedPhoto]: { body: thumb } });
+      expect(asked).toEqual([copy, feedPhoto]);
+      expect(stored).toMatchObject({ fileSha256: await sha256Hex(thumb), lastError: null });
+    }
+  });
+
+  it("does not fall back on the CDN's own trouble, which passes", async () => {
+    const { feedPhoto, copy } = bbc();
+    const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { status: 503 }, [feedPhoto]: { body: jpeg(240, 135) } });
+    expect(asked).toEqual([copy]);
+    expect(stored).toMatchObject({ fileSha256: null, lastError: 'http-status', nextCheckAt: NOW + RETRY_MS });
+  });
+
+  it("records the feed's failure when both are refused", async () => {
+    const { feedPhoto, copy } = bbc();
+    const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { status: 404 }, [feedPhoto]: { status: 410 } });
+    expect(asked).toEqual([copy, feedPhoto]);
+    expect(stored).toMatchObject({ fileSha256: null, lastError: 'http-status', nextCheckAt: NOW + FAIL_WAIT_MS });
+  });
+});
+
 describe('photos switched off', () => {
   const setPhotos = (dataSourceId: string, photos: boolean) =>
     dispatch(
