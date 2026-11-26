@@ -739,6 +739,16 @@ export function scoped(d1: D1Database, orgId: string) {
     ).map((part) => db.insert(pi).values(part));
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
+  const snapshotColumns = {
+    orgId: snap.orgId,
+    dataSourceId: snap.dataSourceId,
+    version: snap.version,
+    fetchedAt: snap.fetchedAt,
+    checkedAt: snap.checkedAt,
+    dataJson: snap.dataJson,
+    format: s.dataSources.format,
+    refreshS: s.dataSources.refreshS,
+  };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
   /** The org's member rows with their user's name and address, narrowed by `where`. */
@@ -2178,16 +2188,18 @@ export function scoped(d1: D1Database, orgId: string) {
           .all(),
       snapshot: async (dataSourceId: string) =>
         db
-          .select()
+          .select(snapshotColumns)
           .from(snap)
+          .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
           .where(and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId)))
           .get(),
-      /** Latest snapshots of several sources. */
+      /** Latest snapshots of several sources, each with its source's format and poll interval as they are now, for its stale age. */
       snapshots: async (dataSourceIds: readonly string[]) =>
         dataSourceIds.length
           ? db
-              .select({ dataSourceId: snap.dataSourceId, version: snap.version, fetchedAt: snap.fetchedAt, checkedAt: snap.checkedAt, dataJson: snap.dataJson })
+              .select(snapshotColumns)
               .from(snap)
+              .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
               .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
               .all()
           : [],

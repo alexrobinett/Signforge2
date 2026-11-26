@@ -101,7 +101,7 @@ const sync = (held: Record<string, number> = {}) => syncAs(credential, syncBody(
 
 /** What the screen draws for the spot, from the snapshots it holds. */
 const played = (snapshots: SyncResponse['snapshots'], at: number) =>
-  resolveSpotData(spot, manifest.fields, new Map(snapshots.map((s) => [s.id, s])), {}, at, 'en-US').data.items as {
+  resolveSpotData(spot, manifest.fields, new Map(snapshots.map((s) => [s.id, s])), at, true, 'en-US').data.items as {
     name: string;
     price: string;
     tag: string;

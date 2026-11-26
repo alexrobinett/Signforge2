@@ -65,13 +65,13 @@ describe('a source in words', () => {
     expect(failingWords({ ...lastMonday, failures: 2, lastCheckedAt: NOW - 23 * 3_600_000 }, clock)).toContain('Its screens show the Tue 10:40 AM copy.');
   });
 
-  it("says a calendar's spots fall back once its last good copy is older than its own stale age, two missed polls and ten minutes (#624)", () => {
-    // Polled every 5 minutes: 20 minutes. 9:20 is the edge at 9:40.
-    expect(failingWords(source({ failures: 2, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:20:00Z') }), clock)).toContain(
-      'Its screens show the 9:20 AM copy.',
+  it("says a calendar's spots fall back once its last good copy is older than its own stale age, one failed poll, its retry and ten minutes (#624)", () => {
+    // Polled every 5 minutes: 25 minutes. 9:15 is the edge at 9:40.
+    expect(failingWords(source({ failures: 2, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:15:00Z') }), clock)).toContain(
+      'Its screens show the 9:15 AM copy.',
     );
-    expect(failingWords(source({ failures: 3, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:19:59Z') }), clock)).toContain(
-      'Its spots show their fallback values: the last good copy, from 9:19 AM, is more than 20 min old.',
+    expect(failingWords(source({ failures: 3, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:14:59Z') }), clock)).toContain(
+      'Its spots show their fallback values: the last good copy, from 9:14 AM, is more than 25 min old.',
     );
   });
 

@@ -261,9 +261,13 @@ export const keepsFor = (source: { format: string; refreshS: number }) => (sourc
 /** `keepsFor` in words: "a day", or how many minutes or hours. */
 export const keepsForWords = (source: { format: string; refreshS: number }) => (keepsFor(source) === SNAPSHOT_STALE_MS ? 'a day' : ago(keepsFor(source)));
 
-/** Whether screens show the snapshot: not stale by the age the server gives its source (player-core's `isStale`). */
+/**
+ * Whether screens show the snapshot: not stale by the age the server gives its source (player-core's `isStale`). The
+ * browser's clock counts as trusted: a screen's untrusted clock rule is about the screen, and a browser clock a little
+ * behind the server's is no reason to call fresh data stale.
+ */
 export const isFresh = (source: { format: string; refreshS: number }, snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
-  snapshot !== null && !isStale(snapshot, { staleS: sourceStaleS(source.format, source.refreshS) }, now);
+  snapshot !== null && !isStale({ checkedAt: snapshot.checkedAt, staleS: keepsFor(source) / 1000 }, now, true);
 
 /** How fresh the source's data is, and what screens do about it. */
 export function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {

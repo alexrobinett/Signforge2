@@ -10,6 +10,7 @@
 import { BINDING_PATH, type DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
 import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
+import { staleAge } from '@signforge/player-core';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
@@ -156,6 +157,7 @@ const getDataSource = defineTool({
           version: snap.fetchedAt,
           fetchedAt: new Date(snap.fetchedAt).toISOString(),
           checkedAt: new Date(snap.checkedAt).toISOString(),
+          ...staleAge(snap),
           data: JSON.parse(snap.dataJson),
         }
       : null;

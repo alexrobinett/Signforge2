@@ -21,7 +21,7 @@ import {
   type SyncResponse,
 } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
-import { boundImageHashes, hasBoundListImage, snapshotFit } from '@signforge/player-core';
+import { boundImageHashes, hasBoundListImage, snapshotFit, staleAge } from '@signforge/player-core';
 import { liveOverride, type ScreenHeartbeat, sha256Hex } from '@signforge/tools';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
@@ -94,7 +94,9 @@ async function snapshotsFor(
   const repeat: string[] = [];
   for (const r of rows) {
     const checkedAt = new Date(r.checkedAt).toISOString();
-    if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
+    // From the source as it is now, not as it was published: a new poll interval reaches the screen with this reply (#624).
+    const age = staleAge(r);
+    if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt, ...age };
     const bound = desired.bound.get(r.dataSourceId) ?? [];
     const newer = r.fetchedAt > (held[r.dataSourceId] ?? -1);
     const wantBlobs = includeBlobs && hasBoundListImage(bound);
@@ -104,7 +106,7 @@ async function snapshotsFor(
     if (snapshotFit(bound, data).refused) continue;
     const key = newer ? await snapshotKey(r.dataSourceId, r.fetchedAt) : undefined;
     if (key) {
-      snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
+      snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, ...age, data });
       sent.push(key);
       if (lastSent.has(key)) repeat.push(key);
     }

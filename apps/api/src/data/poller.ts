@@ -28,7 +28,16 @@
 import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, type PhotoBudget, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed, parseNews } from '@signforge/feeds';
-import { type BindingSpot, type BoundField, boundFields, hasBoundListImage, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
+import {
+  BACKOFF_MAX_MS,
+  type BindingSpot,
+  type BoundField,
+  boundFields,
+  hasBoundListImage,
+  PLAYER_LOCALE,
+  pollBackoffMs,
+  snapshotFit,
+} from '@signforge/player-core';
 import { manifestSummary } from '../device/manifests';
 import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
@@ -56,7 +65,6 @@ import {
 const POLLS_PER_RUN = 6;
 /** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
 const LEASE_MS = 2 * 60_000;
-export const BACKOFF_MAX_MS = 6 * 3_600_000;
 /** Fetches in flight to one host at once (docs/backend-plan.md, Limits), or through one connection. */
 const PER_HOST = 2;
 /** A grant running out sooner than this is refreshed before it is used: past the poll's own lease. */
@@ -233,7 +241,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
     const failures = row.failures + 1;
-    const backoff = Math.min(row.refreshS * 1000 * 2 ** failures, BACKOFF_MAX_MS);
+    const backoff = pollBackoffMs(row.refreshS, failures);
     await org.dataSources.savePoll(row.id, {
       source: { nextPollAt: now + backoff, failures, lastError: e.code },
       ...(photo ? { photos: { read: photo.read } } : {}),

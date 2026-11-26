@@ -17,7 +17,6 @@
  */
 import type { SampleFields } from '@signforge/contract';
 import { brandFont, compileScreen, targetIdOf, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
-import { sourceStaleS } from '@signforge/player-core';
 import { resolveGroups } from './memberships';
 import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
@@ -123,12 +122,8 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     groups,
     templateVersions,
     assets: new Map(assets.map((a) => [a.id, { asset: a, renditions: byAsset.get(a.id) ?? [] }])),
-    // The feed URL stays on the server; a screen learns the id, the refresh rate and, for a calendar, how soon its data
-    // goes stale (#624).
-    dataSources: dataSources.map((d) => {
-      const staleS = sourceStaleS(d.format, d.refreshS);
-      return { id: d.id, refreshS: d.refreshS, ...(staleS === undefined ? {} : { staleS }) };
-    }),
+    // The feed URL stays on the server; a screen learns the id and refresh rate.
+    dataSources: dataSources.map((d) => ({ id: d.id, refreshS: d.refreshS })),
     spots,
     playlists,
     items,

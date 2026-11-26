@@ -136,17 +136,6 @@ async function brokenSide(org: Awaited<ReturnType<typeof seedSmallOrg>>['org'], 
   return side;
 }
 
-describe("a data source's stale age (#624)", () => {
-  it('gives a calendar its own age, two missed polls and ten minutes, and every other kind none', async () => {
-    const { org } = await seedSmallOrg('pub-stale');
-    await org.dataSources.insert({ id: x('rooms'), name: 'Rooms', format: 'ical', urlEncrypted: 'enc:test', refreshS: 300 });
-    await org.dataSources.insert({ id: x('menu'), name: 'Menu', format: 'csv', urlEncrypted: 'enc:test', refreshS: 300 });
-    const sources = Object.fromEntries((await loadOrg(org)).dataSources.map((d) => [d.id, d]));
-    expect(sources[x('rooms')]).toEqual({ id: x('rooms'), refreshS: 300, staleS: 1200 });
-    expect(sources[x('menu')]).toEqual({ id: x('menu'), refreshS: 300 });
-  });
-});
-
 describe('publishOrg', () => {
   it('publishes every screen when one draft spot is broken, and reports that spot', async () => {
     const { org, lobby, hall, version } = await seedSmallOrg('pub-broken');

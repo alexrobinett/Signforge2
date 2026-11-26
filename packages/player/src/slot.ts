@@ -460,7 +460,7 @@ export class Slot {
     const protocol = t.manifest.protocol ?? 1;
     if (!playsProtocol(THIS_PLAYER, protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const locale = screenLocale(manifest);
-    const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, manifest.dataSources, now(), locale);
+    const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), clock.trusted, locale);
     if (report) reportRejected(rejected);
     const [{ wrapper: wrapperHtml, template: templateHtml }, baseAssets, rowImages, theme] = await Promise.all([
       framesFor(manifest, t.html),
@@ -546,7 +546,7 @@ export class Slot {
     const signal = this.abort.signal;
     const work = (async () => {
       const locale = screenLocale(manifest);
-      const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, manifest.dataSources, now(), locale);
+      const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), clock.trusted, locale);
       reportRejected(rejected);
       const [baseAssets, rowImages, theme] = await Promise.all([
         spotAssets(spot, manifest),

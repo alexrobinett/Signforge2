@@ -9,7 +9,6 @@ import {
   SNAPSHOT_STALE_MS,
   requiredFiles,
   type DataSnapshot,
-  type DataSource,
   type DisplayHours,
   type Playlist,
   type ScheduleEntry,
@@ -322,42 +321,53 @@ export interface Rejected {
   problem: string;
 }
 
-/**
- * How far ahead of a screen's clock a snapshot's `checkedAt` may be and still count as just checked. A screen sets its
- * clock from the server's on each sync, so a confirmed snapshot is never ahead by more than that leaves; further, the
- * screen's clock is wrong (a Pi after a power cut, before its first sync) and the snapshot's age cannot be told.
- */
-export const CHECKED_AHEAD_MS = 60_000;
+/** The poller's longest wait between tries of a failing source. */
+export const BACKOFF_MAX_MS = 6 * 3_600_000;
+
+/** How long the poller waits before polling a source again after its `failures`th failure in a row. */
+export const pollBackoffMs = (refreshS: number, failures: number) => Math.min(refreshS * 1000 * 2 ** failures, BACKOFF_MAX_MS);
 
 /**
- * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its source's `staleS`, or a day
- * (`SNAPSHOT_STALE_MS`) without one; with no `checkedAt` the screen can read; or confirmed more than CHECKED_AHEAD_MS
- * after `now`, when the screen's clock is behind and the age is unknown. A stale snapshot plays the spot's fallback,
- * which the template is told of (`InitPayload.fallback`): unknown data is not shown as current.
- */
-export function isStale(snapshot: Pick<DataSnapshot, 'checkedAt'>, source: Pick<DataSource, 'staleS'> | undefined, now: number): boolean {
-  const at = Date.parse(snapshot.checkedAt);
-  if (!Number.isFinite(at)) return true;
-  const age = now - at;
-  return age > (source?.staleS === undefined ? SNAPSHOT_STALE_MS : source.staleS * 1000) || age < -CHECKED_AHEAD_MS;
-}
-
-/**
- * The `staleS` the server gives a source of `format` polled every `refreshS` seconds, at publish (#624). A calendar
- * (`ical`) is stale once it has missed two polls, plus the ten minutes a screen takes to hear of one (its sync, and
- * the poller's minute): 20 minutes at its default 5-minute poll, and at most a day. Any other kind keeps the day: old
- * weather, news or a menu misleads no one into a booked room.
+ * The `staleS` the server gives a snapshot of a source of `format` polled every `refreshS` seconds (#624), from the
+ * source as it is when the snapshot is sent, so a new poll interval reaches screens with no publish. A calendar
+ * (`ical`) outlives one failed poll and its retry (`pollBackoffMs`): the poll due `refreshS` after the last success
+ * fails, the retry comes `2 * refreshS` later, and ten minutes cover a screen hearing of it (its sync, and the
+ * poller's minute). That is 25 minutes at a calendar's default 5-minute poll, and at most a day. The ten minutes
+ * assume the poller keeps up: it polls at most 6 sources a minute platform-wide (`POLLS_PER_RUN` in apps/api), so
+ * more than 60 sources due in the same ten minutes delay some past it. Any other kind keeps the day: old weather,
+ * news or a menu misleads no one into a booked room.
  */
 export function sourceStaleS(format: string, refreshS: number): number | undefined {
   if (format !== 'ical') return undefined;
-  return Math.min(2 * refreshS + 600, SNAPSHOT_STALE_MS / 1000);
+  return Math.min((refreshS * 1000 + pollBackoffMs(refreshS, 1)) / 1000 + 600, SNAPSHOT_STALE_MS / 1000);
+}
+
+/** A snapshot's `staleS` field from its source as it is now: none for a source that keeps the day. */
+export function staleAge(source: { format: string; refreshS: number }): { staleS?: number } {
+  const staleS = sourceStaleS(source.format, source.refreshS);
+  return staleS === undefined ? {} : { staleS };
+}
+
+/**
+ * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its `staleS`, or a day
+ * (`SNAPSHOT_STALE_MS`) without one, or with no `checkedAt` the screen can read. On a clock the screen does not trust
+ * (`Clock.trusted`: a Pi restarted from a saved clock, before its first sync) the age cannot be told, so a snapshot
+ * with a shorter `staleS` than a day is stale, and any other is judged by the day as before: a menu keeps playing
+ * offline. A stale snapshot plays the spot's fallback, which the template is told of (`InitPayload.fallback`).
+ */
+export function isStale(snapshot: Pick<DataSnapshot, 'checkedAt' | 'staleS'>, now: number, clockTrusted: boolean): boolean {
+  const at = Date.parse(snapshot.checkedAt);
+  if (!Number.isFinite(at)) return true;
+  const staleMs = snapshot.staleS === undefined ? SNAPSHOT_STALE_MS : snapshot.staleS * 1000;
+  if (!clockTrusted && staleMs < SNAPSHOT_STALE_MS) return true;
+  return now - at > staleMs;
 }
 
 /**
  * The data a template spot plays with at `now`: its static values, with each bound field replaced
  * by the latest snapshot value when that value fits the field (the contract's `boundValue`; a
  * table's rows mapped onto a list field, numbers written in `locale`). A missing source, or a
- * stale snapshot (`isStale`, by its source in `sources`), leaves the static fallback in place quietly; a value that is missing at its path or does not fit also leaves the
+ * stale snapshot (`isStale`, on a clock the screen trusts or not), leaves the static fallback in place quietly; a value that is missing at its path or does not fit also leaves the
  * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
  * `fallback` names each bound field left on its static value, for `init` to tell the template (#225); a list that
  * kept some rows of a table is live.
@@ -366,8 +376,8 @@ export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
-  sources: Readonly<Record<string, DataSource>>,
   now: number,
+  clockTrusted: boolean,
   locale: string,
 ): { data: Record<string, unknown>; rejected: Rejected[]; fallback: string[] } {
   const data = { ...spot.data };
@@ -375,7 +385,7 @@ export function resolveSpotData(
   const fallback: string[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot || isStale(snapshot, sources[b.source], now)) {
+    if (!snapshot || isStale(snapshot, now, clockTrusted)) {
       fallback.push(field);
       continue;
     }

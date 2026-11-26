@@ -4,8 +4,11 @@ import { useHarness } from './harness';
 
 const h = useHarness();
 const DATA = /^\/content\/data\/news\.json$/;
-/** The page's clock, Playwright's, from this instant: every age below counts from it, never from the wall clock (#625). */
-const NOW = Date.parse('2026-11-17T12:00:00.000Z');
+/**
+ * The page's clock, Playwright's, from this instant: every age below counts from it, never from the wall clock (#625).
+ * It is after any build of this player, so the screen trusts its clock (src/clock.ts) and a calendar's minutes count.
+ */
+const NOW = Date.parse('2100-01-01T12:00:00.000Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 
 /** A news spot whose headline and items are bound to the `news` source; the static values are its fallback. */
@@ -104,14 +107,13 @@ describe('a template with two sources (#193)', () => {
   /** A day and an hour unconfirmed: stale for a source with no age of its own. */
   const stale = ago(25 * 60);
 
-  /** `weatherStaleS`: the weather source's own stale age, as the server gives a calendar (#624). */
+  /** `weatherStaleS`: the weather snapshot's own stale age, as the server gives a calendar's (#624). */
   async function playWith(data: { weather?: string; news?: string }, weatherStaleS?: number) {
     const p = await h.openPlayer(
       (s) => {
         s.publish(
           h.content([frame], {
             edit: (m) => {
-              if (weatherStaleS !== undefined) m.dataSources.weather!.staleS = weatherStaleS;
               for (const t of Object.values(m.templates))
                 t.manifest = {
                   ...t.manifest,
@@ -125,7 +127,8 @@ describe('a template with two sources (#193)', () => {
             },
           }),
         );
-        if (data.weather) s.setData('weather', at('weather', { current: { summary: 'Sunny, 21°' } }, data.weather));
+        const age = weatherStaleS === undefined ? {} : { staleS: weatherStaleS };
+        if (data.weather) s.setData('weather', { ...at('weather', { current: { summary: 'Sunny, 21°' } }, data.weather), ...age });
         if (data.news) s.setData('news', at('news', live, data.news));
       },
       {},
@@ -147,8 +150,8 @@ describe('a template with two sources (#193)', () => {
   });
 
   it("plays a source's fallback once it is older than its own stale age, a calendar's minutes, not a day (#624)", async () => {
-    // Confirmed 19 minutes ago, with 20 minutes to live: live. The feed is failing, so its snapshot is not confirmed again.
-    const p = await playWith({ weather: ago(19), news: ago(0) }, 1200);
+    // Confirmed 24 minutes ago, with 25 minutes to live: live. The feed is failing, so its snapshot is not confirmed again.
+    const p = await playWith({ weather: ago(24), news: ago(0) }, 1500);
     await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Sunny, 21°', fallback: '' });
     // Two minutes on, the next play of the spot finds it stale.
     await p.page.clock.fastForward(2 * 60_000);

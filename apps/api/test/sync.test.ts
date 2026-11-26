@@ -304,6 +304,18 @@ describe('snapshots', () => {
     ]);
     expect(changed.checked).toEqual({});
   });
+
+  it("carry a calendar's stale age from its source as it is now, with no publish (#624)", async () => {
+    const s = await setUp('sync-stale-age');
+    const cal = await s.seed.scope.dataSources.insert({ name: 'Rooms', format: 'ical', urlEncrypted: 'enc:c', refreshS: 300 });
+    await s.seed.scope.dataSources.putSnapshot(cal.id, { version: 'c1', fetchedAt: 1000, checkedAt: 1000, dataJson: '{"events":[]}' });
+    await publish(s, 'm-cal', { schema: MANIFEST_SCHEMA, dataSources: { [cal.id]: { id: cal.id, refreshS: 300 } } });
+    expect((await sync(s, body())).snapshots).toMatchObject([{ id: cal.id, staleS: 1500 }]);
+    await s.seed.scope.dataSources.update(cal.id, { refreshS: 600 });
+    expect((await sync(s, body({ snapshots: { [cal.id]: 1000 } }))).checked).toEqual({
+      [cal.id]: { version: 1000, checkedAt: new Date(1000).toISOString(), staleS: 2400 },
+    });
+  });
 });
 
 describe('a snapshot that fits none of the fields the screen binds to it', () => {

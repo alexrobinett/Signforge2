@@ -13,7 +13,7 @@ import {
   planSync,
   resolvePlaylist,
   resolveSpotData,
-  CHECKED_AHEAD_MS,
+  pollBackoffMs,
   sourceStaleS,
   boundFields,
   boundImageHashes,
@@ -346,7 +346,7 @@ describe('live data', () => {
   };
 
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), {}, NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW, true, 'en-US')).toEqual({
       data: { city: 'Atlanta', temp: 41.2, high: 60.6 },
       rejected: [],
       fallback: [],
@@ -354,49 +354,60 @@ describe('live data', () => {
   });
 
   it('falls back to the static value when there is no snapshot yet, and names each bound field', () => {
-    expect(resolveSpotData(bound, fields, new Map(), {}, NOW, 'en-US')).toEqual({ data: bound.data, rejected: [], fallback: ['temp', 'high'] });
+    expect(resolveSpotData(bound, fields, new Map(), NOW, true, 'en-US')).toEqual({ data: bound.data, rejected: [], fallback: ['temp', 'high'] });
   });
 
   it('falls back to the static value once the server has not confirmed the snapshot for a day, and says so', () => {
-    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), {}, NOW, 'en-US');
+    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, true, 'en-US');
     expect(SNAPSHOT_STALE_MS).toBe(24 * 3_600_000);
     expect(at('2026-11-16T12:00:00Z')).toMatchObject({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, fallback: [] });
     expect(at('2026-11-16T11:59:59Z')).toMatchObject({ data: bound.data, fallback: ['temp', 'high'] });
   });
 
-  it("goes stale at its source's own age, a calendar's in minutes, and a day for a source with none (#624)", () => {
-    const at = (checkedAt: string, sources = {}) =>
-      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), sources, NOW, 'en-US').fallback;
-    const twentyMinutes = { weather: { id: 'weather', refreshS: 300, staleS: 1200 } };
-    // NOW is 12:00: confirmed 11:40 is 20 minutes old, the edge.
-    expect(at('2026-11-17T11:40:00Z', twentyMinutes)).toEqual([]);
-    expect(at('2026-11-17T11:39:59Z', twentyMinutes)).toEqual(['temp', 'high']);
+  it("goes stale at the snapshot's own age, a calendar's in minutes, and a day for one with none (#624)", () => {
+    const at = (checkedAt: string, age = {}) =>
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt, ...age }]]), NOW, true, 'en-US').fallback;
+    const minutes = { staleS: 1500 };
+    // NOW is 12:00: confirmed 11:35 is 25 minutes old, the edge.
+    expect(at('2026-11-17T11:35:00Z', minutes)).toEqual([]);
+    expect(at('2026-11-17T11:34:59Z', minutes)).toEqual(['temp', 'high']);
     // Without its own age, the same snapshot is current for a day.
-    expect(at('2026-11-17T11:39:59Z')).toEqual([]);
+    expect(at('2026-11-17T11:34:59Z')).toEqual([]);
+    // A check ahead of a trusted clock is a check just made.
+    expect(at('2026-11-17T12:05:00Z', minutes)).toEqual([]);
   });
 
-  it('is stale with a checkedAt it cannot read, and with one ahead of its clock by more than a sync leaves (#624)', () => {
+  it('is stale with a checkedAt it cannot read (#624)', () => {
     const at = (checkedAt: unknown) =>
-      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt } as DataSnapshot]]), {}, NOW, 'en-US').fallback;
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt } as DataSnapshot]]), NOW, true, 'en-US').fallback;
     expect(at(undefined)).toEqual(['temp', 'high']);
     expect(at('')).toEqual(['temp', 'high']);
     expect(at('yesterday')).toEqual(['temp', 'high']);
-    // The device's clock behind the server's: a minute ahead is a check just made, more is an age the screen cannot tell.
-    expect(CHECKED_AHEAD_MS).toBe(60_000);
-    expect(at('2026-11-17T12:01:00Z')).toEqual([]);
-    expect(at('2026-11-17T12:01:01Z')).toEqual(['temp', 'high']);
   });
 
-  it('gives a calendar two missed polls and ten minutes, at most a day, and any other kind none (#624)', () => {
-    expect(sourceStaleS('ical', 300)).toBe(1200);
-    expect(sourceStaleS('ical', 3600)).toBe(7800);
+  it("on a clock it does not trust, drops a calendar's data but keeps a day source's, as before (review of #630)", () => {
+    // A Pi restarted from a saved clock with no network: its NOW may be hours behind or ahead of the real time.
+    const at = (checkedAt: string, age = {}) =>
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt, ...age }]]), NOW, false, 'en-US').fallback;
+    expect(at('2026-11-17T11:59:00Z', { staleS: 1500 })).toEqual(['temp', 'high']);
+    expect(at('2026-11-17T11:59:00Z', { staleS: 86_400 })).toEqual([]);
+    expect(at('2026-11-17T11:59:00Z')).toEqual([]);
+    expect(at('2026-11-17T18:00:00Z')).toEqual([]);
+    expect(at('2026-11-16T11:59:59Z')).toEqual(['temp', 'high']);
+  });
+
+  it('gives a calendar one failed poll, its retry and ten minutes, at most a day, and any other kind none (#624)', () => {
+    // The poll due 5 minutes after a success fails, the retry comes 10 minutes later.
+    expect(pollBackoffMs(300, 1)).toBe(600_000);
+    expect(sourceStaleS('ical', 300)).toBe(1500);
+    expect(sourceStaleS('ical', 3600)).toBe(11_400);
     expect(sourceStaleS('ical', 86_400)).toBe(86_400);
     for (const format of ['json', 'rss', 'csv', 'json-table', 'provider']) expect(sourceStaleS(format, 300), format).toBeUndefined();
   });
 
   it('keeps the static value for a live value that does not fit its field, and says why', () => {
     const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
-    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), {}, NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW, true, 'en-US')).toEqual({
       data: bound.data,
       rejected: [
         { source: 'weather', problem: 'field "temp" must be at most 100' },
@@ -429,7 +440,7 @@ describe('live data', () => {
       },
     };
     const spot = { ...bound, data: { items: [] }, bindings: { items: { source: 'menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } } };
-    expect(resolveSpotData(spot, listFields, new Map([['menu', menu]]), {}, NOW, 'de-DE')).toEqual({
+    expect(resolveSpotData(spot, listFields, new Map([['menu', menu]]), NOW, true, 'de-DE')).toEqual({
       data: {
         items: [
           { name: 'Soup', price: '4,50' },
@@ -442,7 +453,7 @@ describe('live data', () => {
     });
     // A mapped column the file lost: the fallback, and why.
     const lost = { ...menu, data: { columns: ['Dish', 'Price'], rows: [] } };
-    expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), {}, NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), NOW, true, 'en-US')).toEqual({
       data: { items: [] },
       rejected: [{ source: 'menu', problem: 'field "items": the table has no column "Item"' }],
       fallback: ['items'],
@@ -559,7 +570,7 @@ describe('a template with two sources (#193)', () => {
   const forecast = snap('forecast', { current: { temperature_2m: 41.2 } });
   const live = [{ title: 'Live 1', published: '', source: 'Desk' }];
   const news = snap('news', { title: 'Desk', language: 'en', items: live });
-  const play = (...snapshots: DataSnapshot[]) => resolveSpotData(frame, fields, new Map(snapshots.map((x) => [x.id, x])), {}, NOW, 'en-US');
+  const play = (...snapshots: DataSnapshot[]) => resolveSpotData(frame, fields, new Map(snapshots.map((x) => [x.id, x])), NOW, true, 'en-US');
 
   it('is a template a player plays, and its manifest binds each field to its own source', () => {
     const m = manifest({
