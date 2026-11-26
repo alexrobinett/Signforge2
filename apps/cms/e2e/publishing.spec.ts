@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, tool, toolResponse } from './helpers';
+import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, testScreenToPair, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -34,10 +34,9 @@ test.beforeAll(async ({ browser }) => {
   } = await tool(page, 'save_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
 
   // A test screen, paired by its code as the Screens page pairs one.
-  screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
-  const code = (await playing(screen))!.pairing;
+  const pairing = await testScreenToPair(browser);
+  screen = pairing.screen;
+  const { code } = pairing;
   await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   await expect.poll(async () => (await playing(screen))?.pairing, { timeout: 20_000 }).toBe('');
 });
