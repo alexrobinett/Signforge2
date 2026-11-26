@@ -184,8 +184,9 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
 }
 
 /**
- * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a bundle
- * with the HTML parser takes about 12 ms on a Pi 4 (90 ms the first time): once per bundle, not per play.
+ * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a 400 kB
+ * bundle again cost about 150 ms of a prepare on a Pi 4 (spike/pi-perf/RESULTS.md, #213): once per
+ * bundle, not per play. By hash, so a new bundle is a new entry, never another's.
  */
 let framesCache: { manifest: string; frames: Map<string, ReturnType<typeof containedFrames>> } | undefined;
 

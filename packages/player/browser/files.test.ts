@@ -1,14 +1,27 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Spot } from '@signforge/contract';
-import type { Content } from './content';
-import { png, spotsPlayed, useHarness, type Player } from './harness';
+import { TEMPLATE_KEY, type Content } from './content';
+import { png, spotsPlayed, useHarness, visibleFrame, type Player } from './harness';
 
 const h = useHarness();
 const BLOBS = /^\/content\/blobs\//;
 
 /** The hash of spot `id`'s own file. */
 const assetOf = (c: Content, id: string) => (c.manifest.spots[id] as Extract<Spot, { kind: 'template' }>).assets.file!;
+/** The hash of the content's template bundle. */
+const bundleOf = (c: Content) => c.manifest.templates[TEMPLATE_KEY]!.html;
+/** The comments in the template document on screen: a content `variant` marks its bundle with one. */
+const onScreenComments = async (p: Player) => {
+  const frame = await visibleFrame(p.page, 'label');
+  return frame?.evaluate(() => {
+    const walk = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+    const found: string[] = [];
+    while (walk.nextNode()) found.push(walk.currentNode.textContent?.trim() ?? '');
+    return found;
+  });
+};
+
 /** Every key in the player's file cache. */
 const cached = (p: Player) => p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
 
@@ -44,6 +57,46 @@ describe('content files', () => {
     // Once `a` has left the screen, its file goes at the next sync.
     await expect.poll(() => cached(p), { timeout: 5000 }).not.toContain(`/_sf/blob/${assetOf(first, 'a')}`);
     expect(await cached(p)).toContain(`/_sf/blob/${assetOf(second, 'b')}`);
+  });
+
+  it('reads a template bundle once, however often its spots play (#213)', async () => {
+    // Two spots of one template, so each plays the bundle the other loaded.
+    const content = h.content(['a', 'b'].map((id) => ({ id, durationMs: 600 })));
+    // Counts the reads of each file out of the player's file cache, the only reads of a bundle.
+    const p = await h.openPlayer(
+      (s) => s.publish(content),
+      {},
+      {
+        before: (page) =>
+          page.addInitScript(() => {
+            const reads: Record<string, number> = {};
+            Object.assign(window, { sfReads: reads });
+            const match = Cache.prototype.match;
+            Cache.prototype.match = function (request, options) {
+              const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
+              reads[url] = (reads[url] ?? 0) + 1;
+              return match.call(this, request, options);
+            };
+          }),
+      },
+    );
+    await p.until((s) => s.log.length >= 5);
+    const reads = await p.page.evaluate(() => (window as unknown as { sfReads: Record<string, number> }).sfReads);
+    const bundle = bundleOf(content);
+    expect(Object.entries(reads).filter(([url]) => url.endsWith(bundle))).toEqual([[expect.stringContaining(bundle), 1]]);
+  });
+
+  it('never shows a template from the bundle it had for another hash (#213)', async () => {
+    const one = h.content([{ id: 'a', durationMs: 600 }], { variant: 'bundle-one' });
+    const p = await h.openPlayer((s) => s.publish(one));
+    await expect.poll(() => onScreenComments(p)).toContain('bundle-one');
+    // The same template key and spot, built into another bundle: a new hash.
+    const two = h.content([{ id: 'a', durationMs: 600 }], { variant: 'bundle-two' });
+    expect(bundleOf(two)).not.toBe(bundleOf(one));
+    p.server.publish(two);
+    await p.until((s) => s.log.some((l) => l.manifest === two.manifest.id));
+    await expect.poll(() => onScreenComments(p)).toContain('bundle-two');
+    expect(await onScreenComments(p)).not.toContain('bundle-one');
   });
 
   it('never uses a file whose hash does not match', async () => {
