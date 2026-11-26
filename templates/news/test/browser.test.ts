@@ -293,6 +293,11 @@ describe('news 2.0 (#202)', () => {
               a.pause();
               a.currentTime = 4000;
             }
+            // The thumbnails square, in both shots: with a clip gone, Linux draws a few pixels of their round corners
+            // some levels apart, and no text is clipped by them.
+            const square = document.createElement('style');
+            square.textContent = '.thumb { border-radius: 0 !important; }';
+            document.head.append(square);
             const b = document.querySelector('.stage')!.getBoundingClientRect();
             return { x: b.x, y: b.y, width: b.width, height: b.height };
           });
