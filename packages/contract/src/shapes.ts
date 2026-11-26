@@ -1068,6 +1068,8 @@ export interface SyncRequest {
   dataRejected?: Record<string, number>;
   /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
   blobs?: Sha256[];
+  /** A player release the device supervisor rolled back since the last sync (#628), as its `/alive` reply said. */
+  failedRelease?: FailedPlayerRelease;
 }
 
 export interface SyncResponse {
@@ -1113,6 +1115,77 @@ export type DeviceCommand =
 
 /** The longest an `identify` command shows the screen's name. */
 export const MAX_IDENTIFY_SECONDS = 60;
+
+// ------------------------------------------------------------ player releases
+// A player build reaches a screen through its device supervisor (#628): CI packs `dist/player` as a
+// tarball, writes a release manifest and signs it with Ed25519, and registers it on the `canary`
+// channel; a person promotes it to `stable`. The supervisor asks the API for its screen's channel's
+// release (`GET /v1/device/player-release`), and installs it only when the signature verifies
+// against the public key it ships with, the version is above the one installed, the release plays
+// the schema the server compiles, the tarball's hash matches and every file's does. It switches to
+// it, and rolls back when the new player does not beat `/alive` with its version.
+
+/** A release's channel: canary screens (the demo Pi, the N100) get it first; every other screen follows `stable`. */
+export const PLAYER_CHANNELS = ['canary', 'stable'] as const;
+export type PlayerChannel = (typeof PLAYER_CHANNELS)[number];
+
+/** One file of a release: its path inside the tarball, relative, and its sha256. */
+export interface PlayerReleaseFile {
+  path: string;
+  sha256: Sha256;
+}
+
+/**
+ * A player release, as CI writes and signs it. Its fields `manifestSchemas` and `protocols` are what the build plays,
+ * as a player reports them (`PlayerPlays`), so `canPlay` reads a release as it reads a player.
+ */
+export interface PlayerReleaseManifest {
+  /** A build number that only goes up: a screen never installs one at or below the one it runs. */
+  version: number;
+  /** The tarball's sha256, which `GET /v1/device/player-release/:sha256` serves. */
+  sha256: Sha256;
+  /** The tarball's size in bytes. */
+  size: number;
+  files: PlayerReleaseFile[];
+  manifestSchemas: readonly number[];
+  protocols: readonly number[];
+  createdAt: string;
+}
+
+/**
+ * `GET /v1/device/player-release`: the release on the screen's channel, or none. `manifest` is the exact JSON text CI
+ * signed, `signature` its Ed25519 signature in base64: the supervisor verifies those bytes before it parses them.
+ */
+export interface PlayerReleaseOffer {
+  /** The manifest schema this server compiles (`MANIFEST_SCHEMA`): a release that does not play it is not installed. */
+  manifestSchema: number;
+  release: { manifest: string; signature: string } | null;
+}
+
+/** `POST /alive` on the device supervisor: the player's beat, with its version, which the health gate after an install waits for. */
+export interface SupervisorAliveRequest {
+  version: string;
+}
+
+/**
+ * Why the supervisor rolled a release back: its player never beat `/alive` with its version within the gate's first
+ * window (`not-alive`), or stopped beating before the gate closed (`stopped`).
+ */
+export const FAILED_RELEASE_REASONS = ['not-alive', 'stopped'] as const;
+
+/** A release the supervisor rolled back and will not install again. */
+export interface FailedPlayerRelease {
+  version: number;
+  reason: (typeof FAILED_RELEASE_REASONS)[number];
+}
+
+/**
+ * The supervisor's answer to `/alive`: the last release it rolled back, on every beat until it installs a newer one.
+ * The player sends it on each sync (`SyncRequest.failedRelease`); the server keeps one per version.
+ */
+export interface SupervisorAliveResponse {
+  failedRelease?: FailedPlayerRelease;
+}
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
 export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };

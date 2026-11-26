@@ -11,8 +11,11 @@ import {
   pairPollResponseShape,
   pairStartRequestShape,
   pairStartResponseShape,
+  playerReleaseManifestShape,
+  playerReleaseOfferShape,
   previewHostMessageShape,
   serverSocketMessageShape,
+  supervisorAliveResponseShape,
   syncRequestShape,
   syncResponseShape,
   templateManifestShape,
@@ -39,3 +42,6 @@ export const parseServerSocketMessage = serverSocketMessageShape.read;
 export const parseDeviceSocketMessage = deviceSocketMessageShape.read;
 export const parsePreviewHostMessage = previewHostMessageShape.read;
 export const parseTemplateRuntimeReport = templateRuntimeReportShape.read;
+export const parsePlayerReleaseManifest = playerReleaseManifestShape.read;
+export const parsePlayerReleaseOffer = playerReleaseOfferShape.read;
+export const parseSupervisorAliveResponse = supervisorAliveResponseShape.read;

@@ -27,6 +27,9 @@ import {
   parsePairPollResponse,
   parsePairStartRequest,
   parsePairStartResponse,
+  parsePlayerReleaseManifest,
+  parsePlayerReleaseOffer,
+  parseSupervisorAliveResponse,
   parsePreviewHostMessage,
   parseServerSocketMessage,
   parseSyncRequest,
@@ -1181,6 +1184,47 @@ describe("a snapshot's stale age (#624)", () => {
     const checked = { feed: { version: 1, checkedAt: '2026-11-17T12:00:00Z', staleS: 1200 }, menu: { version: 2, checkedAt: '2026-11-17T12:00:00Z' } };
     expect(parseSyncResponse({ ...validSyncResponse(), checked })).toEqual({ ok: true, value: { ...validSyncResponse(), checked } });
     expect(parseSyncResponse({ ...validSyncResponse(), checked: { feed: { ...checked.feed, staleS: 30 } } }).ok).toBe(false);
+  });
+});
+
+describe('player releases (#628)', () => {
+  const sha = (c: string) => c.repeat(64);
+  const release = () => ({
+    version: 42,
+    sha256: sha('a'),
+    size: 123_456,
+    files: [
+      { path: 'index.html', sha256: sha('b') },
+      { path: 'assets/index-abc.js', sha256: sha('c') },
+    ],
+    manifestSchemas: [8, 9],
+    protocols: [1, 2],
+    createdAt: '2026-11-26T12:00:00.000Z',
+  });
+
+  it('reads a release manifest, and refuses a version below 1 and a path that leaves the tarball', () => {
+    expect(parsePlayerReleaseManifest(release())).toEqual({ ok: true, value: release() });
+    expect(parsePlayerReleaseManifest({ ...release(), version: 0 })).toMatchObject({ ok: false, problems: ['version must be a whole number from 1'] });
+    for (const path of ['/etc/passwd', '../outside', 'assets/../../x', 'a//b', './a', 'a\\b', '']) {
+      const r = parsePlayerReleaseManifest({ ...release(), files: [{ path, sha256: sha('b') }] });
+      expect(r.ok, path).toBe(false);
+    }
+  });
+
+  it("reads the release endpoint's offer: the signed text and its signature, or none", () => {
+    const offer = { manifestSchema: 9, release: { manifest: JSON.stringify(release()), signature: 'c2lnbmF0dXJl' } };
+    expect(parsePlayerReleaseOffer(offer)).toEqual({ ok: true, value: offer });
+    expect(parsePlayerReleaseOffer({ manifestSchema: 9, release: null })).toEqual({ ok: true, value: { manifestSchema: 9, release: null } });
+    expect(parsePlayerReleaseOffer({ manifestSchema: 9, release: { manifest: '{}' } }).ok).toBe(false);
+  });
+
+  it("reads the supervisor's /alive reply, and a sync carries the release it rolled back", () => {
+    expect(parseSupervisorAliveResponse({})).toEqual({ ok: true, value: {} });
+    const failedRelease = { version: 42, reason: 'not-alive' } as const;
+    expect(parseSupervisorAliveResponse({ failedRelease })).toEqual({ ok: true, value: { failedRelease } });
+    expect(parseSupervisorAliveResponse({ failedRelease: { version: 42, reason: 'bored' } }).ok).toBe(false);
+    expect(parseSyncRequest({ ...validSyncRequest(), failedRelease })).toEqual({ ok: true, value: { ...validSyncRequest(), failedRelease } });
+    expect(parseSyncRequest({ ...validSyncRequest(), failedRelease: { version: 0, reason: 'stopped' } }).ok).toBe(false);
   });
 });
 

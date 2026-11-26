@@ -22,6 +22,7 @@ import {
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
   SNAPSHOT_STALE_MS,
+  FAILED_RELEASE_REASONS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
   MAX_SYNC_RESPONSE_BLOBS,
@@ -40,6 +41,10 @@ import {
   type DisplayOutput,
   type SyncResponse,
   type SyncRequest,
+  type FailedPlayerRelease,
+  type PlayerReleaseManifest,
+  type PlayerReleaseOffer,
+  type SupervisorAliveResponse,
   type Sha256,
   type ServerSocketMessage,
   type ScreenKind,
@@ -1459,6 +1464,58 @@ const blobList = (max: number) =>
   });
 
 /** `POST /v1/device/sync`, as the server receives it. */
+// ------------------------------------------------------------ player releases (#628)
+
+const isReleaseVersion = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
+const isFailedReason = (v: unknown): v is FailedPlayerRelease['reason'] => FAILED_RELEASE_REASONS.some((r) => r === v);
+/** A path inside a release's tarball: relative, `/`-separated, with no `..`, `.` or empty segment and no backslash. */
+const isReleasePath = (v: unknown): v is string =>
+  typeof v === 'string' && v.length > 0 && v.length <= 512 && !v.includes('\\') && v.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+
+const failedReleaseShape = said(
+  `failedRelease needs a version (a whole number from 1) and a reason (${FAILED_RELEASE_REASONS.join(', ')})`,
+  object({ version: is(isReleaseVersion, ''), reason: is(isFailedReason, '') }, ''),
+);
+
+export const playerReleaseManifestShape = object(
+  {
+    version: is(isReleaseVersion, 'version must be a whole number from 1'),
+    sha256: is(isSha256, 'sha256 must be a lowercase hex sha256'),
+    size: is(isCount, 'size must be a whole number, 0 or more'),
+    files: listOf(
+      'file',
+      object(
+        { path: is(isReleasePath, 'path must be relative, with no "..", "." or empty segment'), sha256: is(isSha256, 'sha256 must be a lowercase hex sha256') },
+        'is not an object',
+      ),
+    ),
+    manifestSchemas: is(versions, 'manifestSchemas must list the schemas it plays'),
+    protocols: is(versions, 'protocols must list the protocols it plays'),
+    createdAt: is(isInstant, 'createdAt must be an ISO 8601 time'),
+  },
+  'release manifest is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseManifestShape>, PlayerReleaseManifest>>();
+
+export const playerReleaseOfferShape = object(
+  {
+    manifestSchema: is(isReleaseVersion, 'manifestSchema must be a whole number from 1'),
+    release: custom<PlayerReleaseOffer['release']>((r) => {
+      if (r === null) return accepted(null);
+      const manifest = own(r, 'manifest');
+      const signature = own(r, 'signature');
+      return isText(manifest) && isText(signature)
+        ? accepted({ manifest, signature })
+        : refused(['release needs the manifest text and its signature, or is null']);
+    }),
+  },
+  'offer is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseOfferShape>, PlayerReleaseOffer>>();
+
+export const supervisorAliveResponseShape = object({ failedRelease: optional(failedReleaseShape) }, 'reply is not an object');
+assertSame<Same<Infer<typeof supervisorAliveResponseShape>, SupervisorAliveResponse>>();
+
 export const syncRequestShape = object(
   {
     seq: is(isCount, 'seq must be a whole number, 0 or more'),
@@ -1487,6 +1544,7 @@ export const syncRequestShape = object(
     snapshots: sourceMap('snapshots', 'snapshots must map source ids to versions', 'a version number'),
     dataRejected: optional(sourceMap('dataRejected', 'dataRejected must map source ids to counts', 'a count')),
     blobs: optional(blobList(MAX_SYNC_BLOBS)),
+    failedRelease: optional(failedReleaseShape),
   },
   'request is not an object',
 );
