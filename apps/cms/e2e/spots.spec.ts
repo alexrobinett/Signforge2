@@ -160,6 +160,13 @@ test('make a spot from a template, see it on the real player as you type, and ke
   // What the stage is doing, said politely as it changes.
   await expect(stage.getByRole('status')).toHaveText(/^(Drawing…|Preview ready)$/);
   await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
+  // The stage's toggles fit their frame, at a 20 px default text size too (#454).
+  for (const size of ['', '20px']) {
+    await page.evaluate((s) => void (document.documentElement.style.fontSize = s), size);
+    const segment = await innerCorner(stage.getByRole('group', { name: 'Orientation' }).getByRole('button', { name: 'Landscape' }));
+    expect(segment.radius, size).toBeCloseTo(segment.fits, 5);
+  }
+  await page.evaluate(() => void (document.documentElement.style.fontSize = ''));
   // The orientation and the scale, never a pixel size: templates fit any resolution (#463).
   await expect(stage.getByRole('button', { name: 'Landscape' })).toHaveAttribute('aria-pressed', 'true');
   await expect(stage.getByText(/^Shown at \d+%$/)).toBeVisible();
