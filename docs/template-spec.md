@@ -58,6 +58,8 @@ The player and the template talk only through messages. The SDK handles all of i
 
 A template that has not reported `ready` within 2 seconds is skipped.
 
+**A new size for a template on screen** (a rotation or an HDMI mode change without a reload, #457). The player gives the frame the new size and, as for new data below, sends `reset` and an `init` with the new orientation and viewport, then `play` if the spot was playing (its animations restart). A protocol-1 bundle is loaded again instead. So a template fits its copy in `prepare`, from `ctx.viewport`, and needs no resize handler of its own. The spot loading underneath is fitted the same way, and is not played until it is. Resizes that arrive while one of these is under way are coalesced into one more, so a burst costs at most two inits, and the last has the final size; one that leaves the size as it was costs none. A template that fails to become ready again within 2 seconds is removed: the screen is blank for the rest of the spot if it was on screen, and the spot is skipped if it was loading.
+
 **New data for a template on screen** (the editor's preview, protocol 2). The player sends `reset`: the SDK calls `stop`, cancels animations, releases the image URLs, restores the document exactly as it loaded, and reports `loaded` again. The usual `init`, `ready` and `play` follow. An `init` that arrives without a `reset` is handled the same way. So `prepare` always starts from the markup in `index.html`, and a list is never built twice. What this asks of a template:
 - Look elements up inside the hooks, not once at the top of `main.ts`: a reset replaces them.
 - Clear any state kept outside the DOM (a timer, a module variable) in `stop`.
