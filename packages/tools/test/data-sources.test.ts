@@ -117,6 +117,17 @@ describe('data sources', () => {
     await call('delete', { type: 'data_source', id: 'cal' });
   });
 
+  it('shows photos off for anything but a news feed, stored so, and as read from a row stored before (#345)', async () => {
+    const { dataSource } = await call('save_data_source', { id: 'forecast', name: 'Forecast', format: 'json', feedUrl: 'https://api.example.com/f.json' });
+    expect(dataSource).toMatchObject({ photos: false });
+    expect(await owner.org.dataSources.get('forecast')).toMatchObject({ photos: false });
+    // A row stored with the old default, true: read as off all the same.
+    await o.scope.dataSources.update('forecast', { photos: true });
+    const listed = await call('list_data_sources', {});
+    expect(listed.dataSources.find((d: { id: string }) => d.id === 'forecast')).toMatchObject({ photos: false });
+    await call('delete', { type: 'data_source', id: 'forecast' });
+  });
+
   it('refuses a feed URL the poller would refuse, before storing it', async () => {
     for (const feedUrl of ['http://feed.example.com/a', 'https://feed.example.com:8443/a', 'https://10.0.0.1/a', 'https://printer.local/a', 'nope'])
       expect(await refusal('save_data_source', { name: 'x', format: 'rss', feedUrl }), feedUrl).toMatchObject({ ok: false, error: 'invalid_input' });

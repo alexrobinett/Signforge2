@@ -285,7 +285,7 @@ export const sampleAcks = z
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, each at the version given (a conflict, details { id, version }, if one changed since); with drafts: [], none, but every screen compiled again, as a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why. describe(publish) has the rules: the default playlist, what is removed, and a spot still holding sample text, which refuses it. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
+    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, each at the version given (a conflict, details { id, version }, if one changed since); with drafts: [], none, but every screen compiled again, as a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why. Set a default playlist first, or its screens get nothing. describe(publish) has the rules: the default playlist, what is removed, and a spot still holding sample text, which refuses it. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -572,6 +572,7 @@ const getPublish = defineTool({
         filesMissing: outcome === 'downloading' ? state.filesMissing : null,
         wakesAt: outcome === 'asleep' ? state.wakesAt : null,
         lastSeenAt: r.lastSeenAt,
+        state: state.kind,
       };
     });
     return { publish: publishView(found), screens };

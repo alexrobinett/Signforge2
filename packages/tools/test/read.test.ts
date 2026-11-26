@@ -193,6 +193,8 @@ describe('describe', () => {
       ['spot', 'save_spot', 'fallback'],
       ['brand_kit', 'save_brand_kit', 'none from its groups'],
       ['schedule_entry', 'start_takeover', 'network down'],
+      ['schedule_entry', 'save_schedule_entry', 'end of the spot on screen'],
+      ['publish', 'publish', 'cannot compile keeps what it plays'],
       ['asset', 'start_upload', 'smallest that covers its screen box'],
     ] as const) {
       expect(await rules(type), `${type}: ${fact}`).toContain(fact);

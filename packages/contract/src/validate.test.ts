@@ -548,6 +548,22 @@ describe('validateTemplateManifest', () => {
     ]);
   });
 
+  it('takes an image field’s portraitBox only as whole pixels, and never on a list row’s image (#224)', () => {
+    const withBox = (photo: unknown, row?: unknown) => {
+      const m = structuredClone(template) as unknown as { fields: Record<string, unknown> };
+      m.fields.photo = photo;
+      if (row) m.fields.rows = { type: 'list', label: 'Rows', item: { image: row } };
+      return validateTemplateManifest(m);
+    };
+    expect(withBox({ type: 'image', label: 'Photo', portraitBox: { w: 1120, h: 910 } })).toEqual([]);
+    const shape = 'field "photo": portraitBox must be { w, h }, each a whole number from 1 to 4096';
+    for (const portraitBox of [{ w: 0, h: 910 }, { w: 1120.5, h: 910 }, { w: 1120 }, { w: 4097, h: 1 }, [1120, 910]])
+      expect(withBox({ type: 'image', label: 'Photo', portraitBox })).toEqual([shape]);
+    expect(withBox({ type: 'image', label: 'Photo' }, { type: 'image', label: 'Image', portraitBox: { w: 10, h: 10 } })).toEqual([
+      'field "rows.image": a list row\'s image cannot have a portraitBox',
+    ]);
+  });
+
   it('checks each field definition, so the spot check can trust it', () => {
     const bad = structuredClone(template) as unknown as { fields: Record<string, unknown> };
     bad.fields.price = { type: 'number', label: 'Price', min: 10, max: 1, step: 0 };

@@ -33,6 +33,23 @@ describe('findDeviceScreen', () => {
     await o.scope.screens.update(o.screen, { status: 'active' });
   });
 
+  it("reads the last sync's photos, and a #514 heartbeat's one fingerprint of what it sent as no keys (#531)", async () => {
+    const photos = { held: 3, missing: 21, retried: true, ask: ['a'.repeat(16)] };
+    const lastPhotos = async (heartbeat: unknown) => {
+      await o.scope.screens.update(o.screen, { heartbeatJson: JSON.stringify({ photos: heartbeat }) });
+      return (await findDeviceScreen(env.DB, o.screen))?.lastPhotos;
+    };
+    expect(await lastPhotos({ ...photos, sent: ['b'.repeat(16)], repeat: [] })).toEqual({
+      missing: 21,
+      retried: true,
+      ask: ['a'.repeat(16)],
+      sent: ['b'.repeat(16)],
+      repeat: [],
+    });
+    expect(await lastPhotos({ ...photos, sent: 'c'.repeat(16) })).toEqual({ missing: 21, retried: true, ask: ['a'.repeat(16)] });
+    await o.scope.screens.update(o.screen, { heartbeatJson: null });
+  });
+
   it('returns nothing for an unknown or malformed id', async () => {
     expect(await findDeviceScreen(env.DB, 'scr_nope')).toBeUndefined();
     expect(await findDeviceScreen(env.DB, "x' OR 1=1 --")).toBeUndefined();

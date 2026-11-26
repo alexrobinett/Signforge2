@@ -25,7 +25,11 @@ interface UploadSettings {
 }
 /** The data-source poller (src/data). */
 interface DataSourceSettings {
-  /** Encrypts feed URLs and alert channels' URLs and signing secrets at rest (src/data/cipher.ts), 32+ random bytes. Required outside dev; changing it loses every stored URL and secret. */
+  /**
+   * Encrypts feed URLs and alert channels' URLs and signing secrets at rest, and seals every list's cursors (src/data/cipher.ts,
+   * #345), 32+ random bytes. Required outside dev, by any paginated list too, so an environment's first deploy must set it;
+   * changing it loses every stored URL and secret, and every cursor given out.
+   */
   DATA_SOURCE_KEY?: string;
   /** Dev only: where `find_places` searches instead of Open-Meteo's geocoding (src/data/places.ts). The CMS e2e points it at a stub. */
   GEOCODING_URL?: string;

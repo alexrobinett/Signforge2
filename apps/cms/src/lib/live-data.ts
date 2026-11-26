@@ -158,6 +158,16 @@ export function withUnit(units: WeatherUnits, kind: keyof WeatherUnits, value: s
   return isWind(value) ? { ...units, wind: value } : units;
 }
 
+/**
+ * What every weather source asks Open-Meteo for: the variables and days the base templates' live paths read, Weather's
+ * and Info frame's (each one's template.json under templates/). A source for a place and units then serves them all (#345).
+ */
+const BASE_WEATHER = {
+  current: ['is_day', 'relative_humidity_2m', 'temperature_2m', 'weather_code', 'wind_speed_10m'],
+  daily: ['sunrise', 'sunset', 'temperature_2m_max', 'temperature_2m_min', 'weather_code'],
+  days: 4,
+};
+
 /** The ids `weatherSource` makes. */
 const WEATHER_SOURCE_ID = /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/;
 
@@ -174,15 +184,16 @@ async function shortHash(text: string): Promise<string> {
 }
 
 /**
- * The Open-Meteo forecast for a place, in these units, with the variables the template's live
- * paths read (`current.x`, `daily.x.N`). Its id follows from the place, the units and the
- * variables, so a second spot for the same place reuses the source, and a template that reads
- * other variables gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
+ * The Open-Meteo forecast for a place, in these units: the variables every base template reads
+ * (`BASE_WEATHER`), and any other the template's live paths read (`current.x`, `daily.x.N`). Its id
+ * follows from the place, the units and the variables, sorted, so every spot for the same place and
+ * units shares one source whichever base template it is (#345), and only a template reading more
+ * gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
  */
 export async function weatherSource(live: LiveSourceDef, place: PlaceView, units: WeatherUnits) {
-  const current = new Set<string>();
-  const daily = new Set<string>();
-  let days = 1;
+  const current = new Set<string>(BASE_WEATHER.current);
+  const daily = new Set<string>(BASE_WEATHER.daily);
+  let days = BASE_WEATHER.days;
   for (const path of Object.values(live.fields)) {
     const [block, variable, index] = path.split('.');
     if (!variable) continue;
@@ -193,12 +204,15 @@ export async function weatherSource(live: LiveSourceDef, place: PlaceView, units
       days = Math.max(days, Number(index ?? 0) + 1);
     }
   }
-  const variables = `current=${[...current].join(',')}&daily=${[...daily].join(',')}`;
+  const currentList = [...current].sort().join(',');
+  const dailyList = [...daily].sort().join(',');
+  const variables = `current=${currentList}&daily=${dailyList}&days=${days}`;
   const params = new URLSearchParams({
     latitude: String(place.latitude),
     longitude: String(place.longitude),
-    ...(current.size ? { current: [...current].join(',') } : {}),
-    ...(daily.size ? { daily: [...daily].join(','), forecast_days: String(days) } : {}),
+    current: currentList,
+    daily: dailyList,
+    forecast_days: String(days),
     temperature_unit: TEMPERATURE_PARAM[units.temperature],
     wind_speed_unit: WIND_PARAM[units.wind],
     timezone: place.timezone,

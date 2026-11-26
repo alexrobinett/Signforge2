@@ -73,7 +73,7 @@ const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
 export const byWord = (p: Pick<PublishView, 'by'>, me: string) =>
   p.by.kind === 'user' && p.by.id === me ? 'you' : p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
 
-export const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'offline', 'fell_back', 'revoked', 'replaced'];
+export const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'unreachable', 'fell_back', 'revoked', 'replaced'];
 
 /** Each outcome's mark on the bar: the chart tokens, and the one red for a screen that needs a person. */
 export const OUTCOME_COLOR: Record<Outcome, string> = {
@@ -81,7 +81,7 @@ export const OUTCOME_COLOR: Record<Outcome, string> = {
   waiting: 'var(--chart-5)',
   downloading: 'var(--chart-2)',
   asleep: 'var(--chart-3)',
-  offline: 'var(--chart-4)',
+  unreachable: 'var(--chart-4)',
   fell_back: 'var(--status-needs-you)',
   revoked: 'var(--status-needs-you)',
   replaced: 'var(--border-strong)',
@@ -121,10 +121,10 @@ export function segments(publish: Pick<PublishView, 'revision' | 'restoresRevisi
         const wakes = these.flatMap((s) => (s.wakesAt ? [Date.parse(s.wakesAt)] : [])).sort((a, b) => a - b)[0];
         return [{ ...base, label: wakes ? `asleep, update at ${time(wakes)}` : 'asleep', why: 'Outside their display hours. They take it when they wake.' }];
       }
-      case 'offline': {
+      case 'unreachable': {
         const since = these.flatMap((s) => (s.lastSeenAt ? [s.lastSeenAt] : [])).sort((a, b) => a - b)[0];
         const unheard = since ? `Unreachable for ${agoWords(now - since)}` : 'Never heard from';
-        return [{ ...base, label: 'offline, update when back', why: `${unheard}, playing what they have from their cache.` }];
+        return [{ ...base, label: 'unreachable, update when back', why: `${unheard}, playing what they have from their cache.` }];
       }
       case 'fell_back':
         return [{ ...base, label: 'went back to their last good version', why: `${v} played nothing on them. Open each screen to see why.` }];

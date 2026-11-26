@@ -26,7 +26,7 @@ export function outcomeOf(f: Facts, state: ScreenState): Outcome {
   if (done) return done;
   if (state.kind === 'asleep') return 'asleep';
   if (state.kind === 'updating') return 'downloading';
-  if (state.kind === 'unreachable' || state.reason === 'behind') return 'offline';
+  if (state.kind === 'unreachable' || state.reason === 'behind') return 'unreachable';
   if (state.reason === 'fallback') return 'fell_back';
   return 'waiting';
 }

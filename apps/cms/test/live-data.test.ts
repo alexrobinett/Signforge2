@@ -2,6 +2,7 @@
 // normalised feed through canonicalJson, which sorts every object's keys.
 import { canonicalJson, liveSources, parseTemplateManifest, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import twoSources from '../e2e/fixtures/two-sources/template.json';
 import { bindAll, guessMapping, madeByEditor, rowTitles, tableRows, typedFields, weatherSource } from '../src/lib/live-data';
@@ -38,23 +39,25 @@ describe('rowTitles', () => {
   });
 });
 
+/** A place as find_places gives it. */
+const ATLANTA = {
+  id: 4180439,
+  name: 'Atlanta',
+  region: 'Georgia',
+  country: 'United States',
+  latitude: 33.749,
+  longitude: -84.38798,
+  timezone: 'America/New_York',
+};
+
 describe('madeByEditor', () => {
   it('knows the weather sources the editor makes from a place and units, and nothing a person typed', async () => {
     const live = { source: 'open-meteo' as const, fields: { temp: 'current.temperature_2m', high: 'daily.temperature_2m_max.0' } };
-    const place = {
-      id: 4180439,
-      name: 'Atlanta',
-      region: 'Georgia',
-      country: 'United States',
-      latitude: 33.749,
-      longitude: -84.38798,
-      timezone: 'America/New_York',
-    };
     for (const units of [
       { temperature: '°F', wind: 'mph' },
       { temperature: '°C', wind: 'km/h' },
     ] as const)
-      expect(madeByEditor((await weatherSource(live, place, units)).id)).toBe(true);
+      expect(madeByEditor((await weatherSource(live, ATLANTA, units)).id)).toBe(true);
     // A feed or calendar added by its address gets the server's id, or one a person or agent chose.
     for (const id of ['src_8f2k3j4h5g6f7d8s', 'weather', 'news-bbc', 'weather-atlanta', 'weather-4180439-f-mph']) expect(madeByEditor(id), id).toBe(false);
   });
@@ -70,19 +73,20 @@ describe('madeByEditor', () => {
         day3Time: 'daily.time.3',
       },
     };
-    const place = {
-      id: 4180439,
-      name: 'Atlanta',
-      region: 'Georgia',
-      country: 'United States',
-      latitude: 33.749,
-      longitude: -84.38798,
-      timezone: 'America/New_York',
-    };
-    const url = new URL((await weatherSource(live, place, { temperature: '°F', wind: 'mph' })).feedUrl);
-    expect(url.searchParams.get('current')).toBe('temperature_2m');
-    expect(url.searchParams.get('daily')).toBe('temperature_2m_max');
+    const url = new URL((await weatherSource(live, ATLANTA, { temperature: '°F', wind: 'mph' })).feedUrl);
+    expect(url.searchParams.get('current')?.split(',')).not.toContain('time');
+    expect(url.searchParams.get('daily')?.split(',')).not.toContain('time');
     expect(url.searchParams.get('forecast_days')).toBe('4');
+  });
+
+  it('gives every base template the one source for a place and units, and a template reading more its own (#345)', async () => {
+    const units = { temperature: '°F', wind: 'mph' } as const;
+    const weather = JSON.parse(readFileSync(new URL('../../../templates/weather/template.json', import.meta.url), 'utf8')).live;
+    const infoFrame = JSON.parse(readFileSync(new URL('../../../templates/info-frame/template.json', import.meta.url), 'utf8')).live.sources.weather;
+    const ids = await Promise.all([weather, infoFrame].map(async (live) => (await weatherSource(live, ATLANTA, units)).id));
+    expect(ids[0]).toBe(ids[1]);
+    const more = { source: 'open-meteo' as const, fields: { gust: 'current.wind_gusts_10m' } };
+    expect((await weatherSource(more, ATLANTA, units)).id).not.toBe(ids[0]);
   });
 });
 

@@ -657,6 +657,19 @@ describe('snapshot feed blobs (#196)', () => {
 
   // Review of #514, round 3: a screen that cannot fetch its new manifest does not report its new feeds either, so
   // their snapshots come again with every reply; only the first brings their photos first and a sync soon.
+  // #531: a screen past its retry, then a publish that swaps its feeds and leaves as many photos missing.
+  it('asks soon after a publish that leaves exactly as many missing, past the retry', async () => {
+    const s = await setUp('sync-equal-count');
+    const before = await newsSources(s, OLD, 0, 2);
+    const paces = [];
+    for (let i = 0; i < 3; i++) paces.push((await sync(s, body({ snapshots: before.snapshots }))).nextSyncS);
+    expect(paces).toEqual([15, 15, 300]);
+    await newsSources(s, NEW, 2, 2);
+    const r = await sync(s, body({ snapshots: before.snapshots }));
+    expect(new Set(r.blobs)).toEqual(new Set([2, 3].flatMap((n) => photosOf(n).slice(0, 10))));
+    expect(r.nextSyncS).toBe(15);
+  });
+
   it('settles when a manifest that cannot be fetched adds feeds with more than 20 photos', async () => {
     const s = await setUp('sync-unfetched-manifest');
     const old = await newsSources(s, OLD, 0, 1);
@@ -665,6 +678,23 @@ describe('snapshot feed blobs (#196)', () => {
     const paces = [];
     for (let i = 0; i < 6; i++) paces.push((await sync(s, body({ snapshots: old.snapshots, blobs: photosOf(0) }))).nextSyncS);
     expect(paces).toEqual([15, 15, 300, 300, 300, 300]);
+    // #531: the feed it holds turns over. The new story's photos come first, the screen stores them and takes the
+    // snapshot, and that costs one sync soon: the stuck feeds' snapshots, sent with every reply, count for nothing.
+    const photos = photosOf(0);
+    const lead = [hash(95_001), hash(95_002)];
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      title: `Story ${i}`,
+      published: '',
+      source: '',
+      image: i === 0 ? { file: lead[0], thumb: lead[1] } : { file: photos[2 * i], thumb: photos[2 * i + 1] },
+    }));
+    await s.seed.scope.dataSources.putSnapshot(old.ids[0]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
+    const r = await sync(s, body({ snapshots: old.snapshots, blobs: photos }));
+    expect(r.blobs!.slice(0, 2)).toEqual(lead);
+    const after = { snapshots: { [old.ids[0]!]: 7000 }, blobs: [...lead, ...photos.slice(2)] };
+    const turnover = [r.nextSyncS];
+    for (let i = 0; i < 3; i++) turnover.push((await sync(s, body(after))).nextSyncS);
+    expect(turnover).toEqual([300, 15, 300, 300]);
   });
 
   it('syncs at the full interval while the photos it was asked for never arrive, and soon again once they do', async () => {
@@ -711,10 +741,12 @@ describe('snapshot feed blobs (#196)', () => {
     expect(r2.nextSyncS).toBe(15);
     const r3 = await sync(s, body(held));
     expect(r3.nextSyncS).toBe(300);
-    // Each ask starts after the photo the last one ended on, so photos that never come cannot hold the front.
-    expect(new Set([...r1.blobs!, ...r2.blobs!, ...r3.blobs!])).toEqual(new Set([0, 1, 2].flatMap(photos)));
+    // The retry asks for the same 20, as its reply may have been lost (#531); after it, each ask starts after the photo
+    // the last one ended on, so photos that never come cannot hold the front.
+    expect(r2.blobs).toEqual(r1.blobs);
     const r4 = await sync(s, body(held));
     expect(r4.nextSyncS).toBe(300);
+    expect(new Set([...r1.blobs!, ...r3.blobs!, ...r4.blobs!])).toEqual(new Set([0, 1, 2].flatMap(photos)));
     // Once those it was last asked for come in, soon again.
     expect((await sync(s, body({ ...held, blobs: r4.blobs }))).nextSyncS).toBe(15);
   });
@@ -805,8 +837,8 @@ describe('snapshot feed blobs (#196)', () => {
     const lacking = [...photosOf(6, 20).slice(-2), ...photosOf(7, 20).slice(-2)];
     const report = { snapshots: feeds.snapshots, blobs: all.filter((sha) => !lacking.includes(sha)).slice(0, MAX_SYNC_BLOBS) };
     const asked = new Set<string>();
-    // 64 look missing, 20 an ask: every one is asked for within four replies.
-    for (let i = 0; i < 4; i++) for (const sha of (await sync(s, body(report))).blobs ?? []) asked.add(sha);
+    // 64 look missing, 20 an ask, the second reply its retry of the first: every one is asked for within five replies.
+    for (let i = 0; i < 5; i++) for (const sha of (await sync(s, body(report))).blobs ?? []) asked.add(sha);
     expect(asked).toEqual(new Set(all.filter((sha) => !report.blobs.includes(sha))));
   });
 
@@ -883,6 +915,19 @@ describe('snapshot feed blobs (#196)', () => {
       const { fresh } = await turnOver(s, feeds, 7);
       const r = await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }));
       expect(r.blobs!.slice(0, 2)).toEqual(fresh);
+    });
+
+    // #531: the reply carrying a turnover is lost, so the screen syncs again as before it.
+    it("asks for a new story's photos first again on the next sync, when that reply was lost, at no sync soon more", async () => {
+      const { s, feeds, all, paces: pre } = await overCap('sync-turnover-lost');
+      expect(pre).toEqual([15, 15, 300]);
+      const { fresh } = await turnOver(s, feeds, 7);
+      const before = { snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) };
+      const replies = [];
+      for (let i = 0; i < 3; i++) replies.push(await sync(s, body(before)));
+      expect(replies.map((r) => r.blobs!.slice(0, 2))).toEqual([fresh, fresh, expect.not.arrayContaining(fresh)]);
+      // The feed past the 256 looks wholly missing, so its new snapshot's photos buy one sync soon; sent again, none.
+      expect(replies.map((r) => r.nextSyncS)).toEqual([15, 300, 300]);
     });
   });
 

@@ -73,7 +73,8 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   refreshS: d.refreshS,
   horizonDays: d.horizonDays,
   rowsPath: d.rowsPath,
-  photos: d.photos,
+  // An rss source's switch; no other format has photos, whatever an older row stored (#345).
+  photos: d.format === 'rss' && d.photos,
   nextPollAt: d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
@@ -260,7 +261,7 @@ const saveDataSource = defineTool({
           refreshS: input.refreshS ?? (format === 'rss' ? RSS_REFRESH_S : MIN_REFRESH_S),
           horizonDays: input.horizonDays ?? null,
           rowsPath: input.rowsPath ?? null,
-          photos: input.photos ?? true,
+          photos: format === 'rss' && (input.photos ?? true),
         }),
       );
       return { dataSource: viewOf(row) };
