@@ -5,9 +5,17 @@
  */
 import { foldValue } from '@signforge/compiler/selector';
 import type { ToolOutput } from '@signforge/tools/outputs';
+import { shownAs } from './label-filter';
 
 /** One key and its values across the org's screens, as `list_label_keys` counts them. */
 export type LabelKey = ToolOutput<'list_label_keys'>['keys'][number];
+
+/**
+ * The most screens one `update_screen_labels` changes, as the tool's input takes them (packages/tools/src/labels.ts).
+ * A bulk change to more is refused whole, so the dialog says so before sending rather than in parts (#605): split
+ * parts would lose the change's all-or-nothing write.
+ */
+export const MAX_BULK_SCREENS = 1000;
 
 /** One label as an editor holds it: what is typed, untrimmed, until it is saved. */
 export interface LabelRow {
@@ -78,3 +86,39 @@ export function lonelyValue(keys: readonly LabelKey[], row: LabelRow, own: Reado
   const others = (known.values.find((v) => foldValue(v.value) === foldValue(value))?.screens ?? 0) - mine;
   return others > 0 ? undefined : `${value}: no other screen has this value`;
 }
+
+/** One key across a selection: each value with how many of the screens have it (folded, named as most spell it), and how many have none. */
+export interface KeyAcross {
+  key: string;
+  values: { value: string; screens: number }[];
+  none: number;
+}
+
+/**
+ * The selection's labels by key, as the bulk dialog lists them: "region: north (6), south (2), none (4)". Values
+ * compare as selectors fold them; each is named as most of the screens spell it, then in code-unit order.
+ */
+export function labelsAcross(screens: readonly { labels: Readonly<Record<string, string>> }[]): KeyAcross[] {
+  const by = new Map<string, Map<string, Map<string, number>>>();
+  for (const s of screens)
+    for (const [key, value] of Object.entries(s.labels)) {
+      const values = by.get(key) ?? new Map<string, Map<string, number>>();
+      by.set(key, values);
+      const spellings = values.get(foldValue(value)) ?? new Map<string, number>();
+      values.set(foldValue(value), spellings.set(value, (spellings.get(value) ?? 0) + 1));
+    }
+  return [...by.keys()]
+    .toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((key) => {
+      const values = [...by.get(key)!.values()]
+        .map((spellings) => ({
+          value: shownAs(spellings),
+          screens: [...spellings.values()].reduce((x, y) => x + y, 0),
+        }))
+        .toSorted((a, b) => b.screens - a.screens || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+      return { key, values, none: screens.length - values.reduce((n, v) => n + v.screens, 0) };
+    });
+}
+
+/** "north (6), south (2), none (4)": a key across a selection, in words. */
+export const acrossWords = ({ values, none }: KeyAcross) => [...values.map((v) => `${v.value} (${v.screens})`), ...(none ? [`none (${none})`] : [])].join(', ');

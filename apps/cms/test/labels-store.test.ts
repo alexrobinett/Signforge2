@@ -4,7 +4,8 @@ import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ScreenView } from '../src/lib/screen-types';
-import { createLabelsSlice, labelRowsOf, type LabelsSlice } from '../src/state/labels';
+import { MAX_BULK_SCREENS } from '../src/lib/labels';
+import { connectLabels, createLabelsSlice, labelRowsOf, type LabelsSlice } from '../src/state/labels';
 import { createScreensSlice, searchText, type ScreensSlice } from '../src/state/screens';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -137,5 +138,90 @@ describe('the Screens page’s search and "+ Filter" (review of #601)', () => {
     s.getState().tickFilterValue('north', true);
     s.getState().tickFilterValue('NORTH ', true);
     expect(s.getState().labels.filter?.values).toEqual(['NORTH ']);
+  });
+});
+
+describe('bulk "Labels…" on a selection', () => {
+  it('sets one key to one value on every screen in one call, or removes it, and closes', async () => {
+    const s = store();
+    s.getState().openBulkLabels(ORG, ['scr_1', 'scr_2', 'scr_3']);
+    s.getState().chooseBulkKey(' Store ');
+    s.getState().typeBulkValue(' 0142 ');
+    await s.getState().applyBulkLabels();
+    expect(calls).toEqual([{ name: 'update_screen_labels', input: { screenIds: ['scr_1', 'scr_2', 'scr_3'], set: { store: '0142' } } }]);
+    expect(s.getState().labels.bulk).toBeNull();
+
+    s.getState().openBulkLabels(ORG, ['scr_1']);
+    s.getState().chooseBulkKey('store');
+    s.getState().chooseBulkMode('remove');
+    await s.getState().applyBulkLabels();
+    expect(calls[1]).toEqual({ name: 'update_screen_labels', input: { screenIds: ['scr_1'], remove: ['store'] } });
+  });
+
+  it('sends nothing without a key, or a value to set, and keeps a refusal on the dialog', async () => {
+    const s = store();
+    s.getState().openBulkLabels(ORG, ['scr_1']);
+    s.getState().chooseBulkKey('store');
+    await s.getState().applyBulkLabels();
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.bulk?.error).toBe('Choose a label and a value.');
+
+    s.getState().typeBulkValue('0142');
+    replies.push({ status: 409, body: { error: 'conflict', message: 'a screen has at most 32 labels' } });
+    await s.getState().applyBulkLabels();
+    expect(s.getState().labels.bulk).toMatchObject({ pending: false, error: 'a screen has at most 32 labels' });
+  });
+
+  it('sends nothing for more screens than one change takes', async () => {
+    const s = store();
+    s.getState().openBulkLabels(
+      ORG,
+      Array.from({ length: MAX_BULK_SCREENS + 1 }, (_, i) => `scr_${i}`),
+    );
+    s.getState().chooseBulkKey('store');
+    s.getState().typeBulkValue('0142');
+    await s.getState().applyBulkLabels();
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.bulk).toMatchObject({ pending: false, error: null });
+  });
+
+  it('leaves a dialog opened since alone when a cancelled save answers, as a refusal or as done', async () => {
+    for (const reply of [
+      { status: 409, body: { error: 'conflict', message: 'a screen has at most 32 labels' } },
+      { status: 200, body: {} },
+    ]) {
+      const s = store();
+      let answer: () => void = () => {};
+      const answered = new Promise<void>((r) => (answer = r));
+      vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+        await answered;
+        return new Response(JSON.stringify(reply.body), { status: reply.status });
+      });
+      s.getState().openBulkLabels(ORG, ['scr_1']);
+      s.getState().chooseBulkKey('store');
+      s.getState().typeBulkValue('0142');
+      const saving = s.getState().applyBulkLabels();
+      // Cancelled while it saves, and another selection's dialog opened before the reply comes.
+      s.getState().closeBulkLabels();
+      s.getState().openBulkLabels(ORG, ['scr_2', 'scr_3']);
+      s.getState().chooseBulkKey('region');
+      answer();
+      await saving;
+      expect(s.getState().labels.bulk).toMatchObject({ screenIds: ['scr_2', 'scr_3'], key: 'region', pending: false, error: null });
+    }
+  });
+
+  it('closes when the page is left, so coming back opens no old draft', () => {
+    const s = store();
+    let navigated: (e: { pathChanged: boolean }) => void = () => {};
+    connectLabels(s as never, { router: { subscribe: (_: string, fn: typeof navigated) => (navigated = fn) } } as never);
+    s.getState().openBulkLabels(ORG, ['scr_1']);
+    s.getState().chooseBulkKey('store');
+    // A filter or a sort on the page itself keeps it.
+    navigated({ pathChanged: false });
+    expect(s.getState().labels.bulk).toMatchObject({ key: 'store' });
+    navigated({ pathChanged: true });
+    expect(s.getState().labels.bulk).toBeNull();
   });
 });

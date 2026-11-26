@@ -1,6 +1,6 @@
 // The label editor's rules (#185): rows to labels, the change update_screen_labels takes, and the typo guard.
 import { describe, expect, it } from 'vitest';
-import { labelChange, labelProblems, labelRows, labelsOf, labelsReady, lonelyValue, type LabelKey } from '../src/lib/labels';
+import { acrossWords, labelChange, labelProblems, labelRows, labelsAcross, labelsOf, labelsReady, lonelyValue, type LabelKey } from '../src/lib/labels';
 
 const keys: LabelKey[] = [
   {
@@ -90,5 +90,29 @@ describe('rows that cannot be saved as they are (review of #597)', () => {
         { key: '', value: '' },
       ]),
     ).toBe(true);
+  });
+});
+
+describe('a selection’s labels, for the bulk dialog', () => {
+  it('counts each key’s values, folded and named as most spell them, and the screens with none', () => {
+    const across = labelsAcross([
+      { labels: { region: 'north', store: '0142' } },
+      { labels: { region: 'North' } },
+      { labels: { region: 'north' } },
+      { labels: { region: 'south' } },
+      { labels: {} },
+    ]);
+    expect(across).toEqual([
+      {
+        key: 'region',
+        values: [
+          { value: 'north', screens: 3 },
+          { value: 'south', screens: 1 },
+        ],
+        none: 1,
+      },
+      { key: 'store', values: [{ value: '0142', screens: 1 }], none: 4 },
+    ]);
+    expect(across.map(acrossWords)).toEqual(['north (3), south (1), none (1)', '0142 (1), none (4)']);
   });
 });
