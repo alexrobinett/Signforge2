@@ -5,7 +5,7 @@ import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
 import { matches, systemLabels } from '@signforge/compiler/selector';
 import { displayHours, id, ifVersion, locale, name, orientation, selector, timezone } from './fields';
-import { labelsByScreen } from './labels';
+import { labelsByScreen } from './memberships';
 import { parseHeartbeat } from './heartbeat';
 import { keysetPage, page, pageInput } from './paging';
 import { manifestKey } from './r2';
@@ -163,7 +163,7 @@ const EVENTS = 20;
 const listScreens = defineTool({
   name: 'list_screens',
   description:
-    'List the screens in the organization with their settings, labels, status and manifests, ordered by id, a page at a time. Give a selector to list only the screens it matches, such as every north drive-thru ({ all: [{ key: "region", op: "eq", values: ["north"] }, { key: "type", op: "eq", values: ["drive-thru"] }] }) or every portrait screen ({ all: [{ key: "orientation", op: "eq", values: ["portrait"] }] }); list_label_keys says which keys and values exist. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
+    'List the screens in the organization with their settings, labels, status and manifests, ordered by id, a page at a time. A selector lists only the screens it matches, such as every north drive-thru: { all: [{ key: "region", op: "eq", values: ["north"] }, { key: "type", op: "eq", values: ["drive-thru"] }] }; list_label_keys says which keys and values exist. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,

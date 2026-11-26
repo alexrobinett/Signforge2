@@ -458,7 +458,16 @@ const takeover = defineTool({
         throw new ToolError('conflict', 'the screens it would play on have changed since they were shown', { screens: reach });
       // A screen deleted from the org, or a member added or removed, before the batch refuses it; one screen is the entry's own key.
       if (fields.target === 'org') write(org.screens.stage.are(reach));
-      if (fields.target === 'group') write(org.screenGroups.stage.membersAre(fields.groupId!, reach));
+      if (fields.target === 'group') {
+        // A smart group reaches the screens its rule matches as labelled when it is sent (owner decision, #186): its
+        // rule and the labels as read hold the press to the screens shown. A group of listed screens, its rows.
+        const rule = read.rules.find((g) => g.id === fields.groupId)?.selectorJson ?? null;
+        if (rule === null) write(org.screenGroups.stage.membersAre(fields.groupId!, reach));
+        else {
+          write(org.screenGroups.stage.ruleIs(fields.groupId!, rule));
+          write(org.screens.labels.stage.are(read.labels));
+        }
+      }
     }
     // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
     const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, fields, Date.now())));

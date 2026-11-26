@@ -1,7 +1,11 @@
-/** Screen group tools. A group is a named set of screens that schedules can target. */
+/**
+ * Screen group tools. A group is a named set of screens that schedules can target: screens listed, or a smart group
+ * (#186), every screen its selector matches when a publish resolves it (./memberships.ts).
+ */
 import type { OrgScope, ScreenGroup } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name } from './fields';
+import { id, idempotencyKey, ifVersion, name, rule } from './fields';
+import { orgGroups, ruleOf } from './memberships';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
 import { defineTool, notFound, ToolError } from './tool';
@@ -11,12 +15,11 @@ const viewOf = (g: ScreenGroup, screenIds: string[]): GroupView => ({
   id: g.id,
   name: g.name,
   screenIds: screenIds.toSorted(),
+  selector: ruleOf(g),
   version: g.rowVersion,
   createdAt: g.createdAt,
   updatedAt: g.updatedAt,
 });
-
-const groupView = async (org: OrgScope, g: ScreenGroup) => viewOf(g, await org.screenGroups.members(g.id));
 
 async function requireGroup(org: OrgScope, groupId: string) {
   const row = await org.screenGroups.get(groupId);
@@ -29,7 +32,7 @@ const target = (input: { groupId: string }) => ({ kind: 'group', id: input.group
 const listGroups = defineTool({
   name: 'list_groups',
   description:
-    'List the screen groups in the organization with the ids of their screens, ordered by id, a page at a time. Returns { groups: Group[], next }; pass next as cursor for the following page.',
+    "List the organization's screen groups with their screens' ids, a smart group's as its rule matches now, ordered by id, a page at a time. Returns { groups: Group[], next }; pass next as cursor for the following page.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -37,15 +40,16 @@ const listGroups = defineTool({
   output: outputs.list_groups,
   example: {},
   handler: async ({ org, input }) => {
-    const { rows, next } = page(await org.screenGroups.list(), (g) => [g.id], input);
-    return { groups: await Promise.all(rows.map((g) => groupView(org, g))), next };
+    const { groups, screensIn } = await orgGroups(org);
+    const { rows, next } = page(groups, (g) => [g.id], input);
+    return { groups: rows.map((g) => viewOf(g, screensIn(g.id))), next };
   },
 });
 
 const saveGroup = defineTool({
   name: 'save_group',
   description:
-    "Create a screen group, or change one: its name and its screens. Without groupId it creates one, with a name and optionally its first screens in screenIds; pass an idempotencyKey so a retry cannot create it twice. With groupId it changes what you give: name renames it, and screenIds with membership changes its screens. membership add puts them in and remove takes them out, leaving every other screen as it is, so both are safe alongside other changes; set makes them exactly the group's screens (an empty list empties it). Every screen must be in this organization, or nothing changes; remove ignores a screen not in the group. Pass the version you read as ifVersion with name or set, so a change made since is not overwritten. Returns { group }.",
+    'Create or change a screen group: listed screens, or a smart group, the screens its selector matches at each publish. Without groupId: a name, screenIds or a selector, and an idempotencyKey. With groupId: name renames; selector sets the rule; screenIds with membership changes a list. Pass ifVersion with name, selector or set. Returns { group }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -55,33 +59,38 @@ const saveGroup = defineTool({
     .strictObject({
       groupId: id('group').optional().describe('The group to change; omit to create one'),
       name: name('group').optional(),
-      screenIds: z.array(id('screen')).max(1000).optional().describe("A new group's first screens, or the screens membership adds, removes or sets"),
-      membership: z.enum(['add', 'remove', 'set']).optional().describe("How screenIds change a group's screens; needed with groupId"),
+      screenIds: z.array(id('screen')).max(1000).optional().describe("A new list's screens, or those membership changes"),
+      membership: z.enum(['add', 'remove', 'set']).optional().describe('How screenIds change a list; needed with groupId'),
+      selector: rule.nullable().optional().describe('Screens matching every { key, op, values } term; null: a list'),
       ifVersion,
       idempotencyKey,
     })
     // A key on a change is refused: it replays its first answer, so a keyed add repeated after a remove would change nothing (#503).
     .superRefine((v, ctx) => {
       const problem =
-        v.membership !== undefined && v.screenIds === undefined
-          ? 'membership needs the screenIds it adds, removes or sets'
-          : v.groupId === undefined
-            ? v.name === undefined
-              ? 'a new group needs a name; give groupId to change one'
-              : v.membership === 'remove'
-                ? 'a new group has no screens to remove'
-                : v.ifVersion !== undefined
-                  ? 'a new group has no version yet: ifVersion is for a change'
-                  : undefined
-            : v.idempotencyKey !== undefined
-              ? 'idempotencyKey is for a new group: a change is safe to repeat, and ifVersion guards a rename or set'
-              : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
-                ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
-                : v.screenIds !== undefined && v.membership === undefined
-                  ? 'give membership with screenIds: add, remove or set'
-                  : v.name === undefined && v.screenIds === undefined
-                    ? 'give a name or screenIds to change'
-                    : undefined;
+        v.selector !== undefined && (v.screenIds !== undefined || v.membership !== undefined)
+          ? "a smart group's screens are the ones its selector matches: give a selector or screenIds, not both"
+          : v.groupId === undefined && v.selector === null
+            ? 'a new group with no rule needs no selector: leave it out'
+            : v.membership !== undefined && v.screenIds === undefined
+              ? 'membership needs the screenIds it adds, removes or sets'
+              : v.groupId === undefined
+                ? v.name === undefined
+                  ? 'a new group needs a name; give groupId to change one'
+                  : v.membership === 'remove'
+                    ? 'a new group has no screens to remove'
+                    : v.ifVersion !== undefined
+                      ? 'a new group has no version yet: ifVersion is for a change'
+                      : undefined
+                : v.idempotencyKey !== undefined
+                  ? 'idempotencyKey is for a new group: a change is safe to repeat, and ifVersion guards a rename or set'
+                  : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
+                    ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
+                    : v.screenIds !== undefined && v.membership === undefined
+                      ? 'give membership with screenIds: add, remove or set'
+                      : v.name === undefined && v.screenIds === undefined && v.selector === undefined
+                        ? 'give a name, screenIds or a selector to change'
+                        : undefined;
       if (problem) ctx.addIssue({ code: 'custom', message: problem });
     }),
   output: outputs.save_group,
@@ -89,19 +98,30 @@ const saveGroup = defineTool({
   target: (input, output) => ({ kind: 'group', id: input.groupId ?? output.group.id }),
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds ?? [])];
+    const { matching } = await orgGroups(org);
     if (input.groupId === undefined) {
       // The group and its members are written together, so a bad screen id leaves no empty group behind.
-      const group = write(org.screenGroups.stage.insert({ name: input.name! }));
+      const rule = input.selector ?? null;
+      const group = write(org.screenGroups.stage.insert({ name: input.name!, selectorJson: rule && JSON.stringify(rule) }));
       if (screenIds.length) write(await org.screenGroups.stage.setMembers(group, screenIds, { newGroup: true }));
-      return { group: viewOf(group, screenIds) };
+      return { group: viewOf(group, rule ? matching(rule) : screenIds) };
     }
     let group = await requireGroup(org, input.groupId);
+    // A smart group's screens are its rule's: membership changes are refused until it is a list again (selector null).
+    if (input.membership !== undefined && ruleOf(group) !== null)
+      throw new ToolError('conflict', `group ${group.id} is defined by a rule: change its selector, or set selector null to list its screens`);
     let members = input.membership === 'set' ? screenIds : await org.screenGroups.members(group.id);
     // The version read guards the first change; a second follows it in the same batch.
     let guard = input.ifVersion;
-    if (input.name !== undefined) {
-      group = write(org.screenGroups.stage.update(group, { name: input.name }, guard));
+    if (input.name !== undefined || input.selector !== undefined) {
+      const rule = input.selector === undefined ? {} : { selectorJson: input.selector && JSON.stringify(input.selector) };
+      group = write(org.screenGroups.stage.update(group, { ...(input.name === undefined ? {} : { name: input.name }), ...rule }, guard));
       guard = undefined;
+    }
+    // A rule replaces the list: its member rows go, so nothing stale stands if it is made a list again.
+    if (input.selector && members.length) {
+      group = write(await org.screenGroups.stage.setMembers(group, []));
+      members = [];
     }
     if (input.membership === 'set') group = write(await org.screenGroups.stage.setMembers(group, screenIds, { ifVersion: guard }));
     if (input.membership === 'add') {
@@ -112,7 +132,8 @@ const saveGroup = defineTool({
       group = write(await org.screenGroups.stage.removeMembers(group, screenIds, guard));
       members = members.filter((s) => !screenIds.includes(s));
     }
-    return { group: viewOf(group, members) };
+    const rule = ruleOf(group);
+    return { group: viewOf(group, rule ? matching(rule) : members) };
   },
 });
 

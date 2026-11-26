@@ -580,6 +580,21 @@ export function scoped(d1: D1Database, orgId: string) {
 
   const m = s.screenGroupMembers;
   const sl = s.screenLabels;
+  /**
+   * Nothing written: a guard that refuses the batch (`StaleVersionError`, `id`) unless `holds` is true as it commits,
+   * and reads it again to say so: what keeps a card's press to what it showed (#408, #186).
+   */
+  const holdsGuard = (id: string, holds: SQL): Staged => {
+    const stale = async () => {
+      const held = await db
+        .select({ ok: sql<number>`${holds}` })
+        .from(s.organization)
+        .where(eq(s.organization.id, orgId))
+        .get();
+      return held?.ok ? undefined : 0;
+    };
+    return { row: undefined, writes: [staleGuard(db, orgId, id, 0, holds, stale)] };
+  };
   const os = s.orgSettings;
   const ac = s.alertChannels;
   const ai = s.orgAiProviders;
@@ -921,6 +936,19 @@ export function scoped(d1: D1Database, orgId: string) {
             .all(),
         stage: {
           /**
+           * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless the org's labels are exactly
+           * `rows`, so a smart group's takeover plays on the screens its card showed, whoever labelled one meanwhile (#186).
+           */
+          are: (rows: readonly { screenId: string; key: string; value: string }[]): Staged => {
+            const line = (r: { screenId: string; key: string; value: string }) => `${r.screenId}\u001f${r.key}\u001f${r.value}`;
+            const want = rows
+              .map(line)
+              .toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+              .join('\u001e');
+            const now = sql`COALESCE((SELECT group_concat(${sl.screenId} || char(31) || ${sl.key} || char(31) || ${sl.value}, char(30) ORDER BY ${sl.screenId}, ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId}), '')`;
+            return holdsGuard('labels', sql`${now} = ${want}`);
+          },
+          /**
            * A merge into each screen's labels: a key in `set` takes that value, a key in `remove`
            * goes, the rest stay. Pass `newScreen` for a screen staged in the same batch (a claim),
            * not stored yet. The batch fails, writing nothing, if a screen then has more labels or
@@ -1058,6 +1086,22 @@ export function scoped(d1: D1Database, orgId: string) {
 
     screenGroups: {
       ...screenGroups,
+      /**
+       * Every membership in the org, and every smart group's rule (#186), in one statement: a list group's screens are
+       * its rows, a smart group's the screens its rule matches, read from the labels only when an org has one.
+       */
+      membership: async () => {
+        const g = s.screenGroups;
+        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null }>(sql`
+            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson FROM ${m} WHERE ${m.orgId} = ${orgId}
+            UNION ALL
+            SELECT ${g.id}, NULL, ${g.selectorJson} FROM ${g} WHERE ${g.orgId} = ${orgId} AND ${g.selectorJson} IS NOT NULL
+            ORDER BY 1, 2`);
+        return {
+          members: rows.flatMap((r) => (r.screenId === null ? [] : [{ groupId: r.groupId, screenId: r.screenId }])),
+          rules: rows.flatMap((r) => (r.selectorJson === null ? [] : [{ id: r.groupId, selectorJson: r.selectorJson }])),
+        };
+      },
       /** Every membership in the org, by group then screen. */
       allMembers: () =>
         db.select({ groupId: m.groupId, screenId: m.screenId }).from(m).where(eq(m.orgId, orgId)).orderBy(asc(m.groupId), asc(m.screenId)).all(),
@@ -1110,15 +1154,15 @@ export function scoped(d1: D1Database, orgId: string) {
         membersAre: (groupId: string, screenIds: readonly string[]): Staged => {
           const want = [...screenIds].sort().join(',');
           const now = sql`COALESCE((SELECT group_concat(${m.screenId}, ',' ORDER BY ${m.screenId}) FROM ${m} WHERE ${m.orgId} = ${orgId} AND ${m.groupId} = ${groupId}), '')`;
-          const stale = async () => {
-            const held = await db
-              .select({ ok: sql<number>`${now} = ${want}` })
-              .from(s.organization)
-              .where(eq(s.organization.id, orgId))
-              .get();
-            return held?.ok ? undefined : 0;
-          };
-          return { row: undefined, writes: [staleGuard(db, orgId, 'group', 0, sql`${now} = ${want}`, stale)] };
+          return holdsGuard('group', sql`${now} = ${want}`);
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `group`) unless the group's rule is still
+         * `selectorJson` (#186): with `labels.stage.are`, what holds a smart group's takeover to the screens it showed.
+         */
+        ruleIs: (groupId: string, selectorJson: string): Staged => {
+          const now = sql`(SELECT ${s.screenGroups.selectorJson} FROM ${s.screenGroups} WHERE ${s.screenGroups.orgId} = ${orgId} AND ${s.screenGroups.id} = ${groupId})`;
+          return holdsGuard('group', sql`${now} IS ${selectorJson}`);
         },
         /** Remove screens; ones not in the group are ignored. */
         removeMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {

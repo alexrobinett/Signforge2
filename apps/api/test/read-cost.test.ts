@@ -63,7 +63,7 @@ it('reads at most maxIds of each type by ids within 40 statements and under 50 q
   // Measured, as the most each may take: a new statement fails this on purpose. Look at the cap, then raise it.
   expect(costs).toEqual({
     'editor asset': '12 ids: 39 queries',
-    'editor brand_kit': '9 ids: 39 queries',
+    'editor brand_kit': '9 ids: 30 queries',
     'editor data_source': '18 ids: 39 queries',
     'editor playlist': '12 ids: 39 queries',
     'editor publish': '7 ids: 38 queries',
@@ -72,7 +72,7 @@ it('reads at most maxIds of each type by ids within 40 statements and under 50 q
     'editor spot': '30 ids: 33 queries',
     'editor template': '18 ids: 39 queries',
     'owner asset': '12 ids: 38 queries',
-    'owner brand_kit': '9 ids: 38 queries',
+    'owner brand_kit': '9 ids: 29 queries',
     'owner data_source': '18 ids: 38 queries',
     'owner playlist': '12 ids: 38 queries',
     'owner publish': '7 ids: 37 queries',

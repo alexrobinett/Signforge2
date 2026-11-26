@@ -340,6 +340,12 @@ describe('rows a scope writes', () => {
     await expect(b.commit(b.screenGroups.stage.membersAre(a.group, aMembers).writes), 'stage.membersAre: A group').rejects.toBeInstanceOf(StaleVersionError);
     await b.commit(b.screenGroups.stage.membersAre(a.group, []).writes);
     await s.a.scope.commit(s.a.scope.screenGroups.stage.membersAre(a.group, [...aMembers].reverse()).writes);
+    // A smart group's guards (#186): its rule, and the labels, each read in the org that stages them, never another's.
+    const aLabels = await s.a.scope.screens.labels.list();
+    expect(aLabels.length).toBeGreaterThan(0);
+    await expect(b.commit(b.screens.labels.stage.are(aLabels).writes), 'labels.stage.are: A labels').rejects.toBeInstanceOf(StaleVersionError);
+    await s.a.scope.commit(s.a.scope.screens.labels.stage.are([...aLabels].reverse()).writes);
+    await expect(b.commit(b.screenGroups.stage.ruleIs(a.group, '{}').writes), 'stage.ruleIs: A group').rejects.toBeInstanceOf(StaleVersionError);
     await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
       NotInOrgError,
     );
@@ -713,5 +719,21 @@ describe('feed photos', () => {
       validators,
     });
     expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('7')]);
+  });
+});
+
+describe("a smart group's guards (#186)", () => {
+  it('hold while the rule and the labels are as read, and refuse the batch once either moved', async () => {
+    const a = s.a.scope;
+    const rule = JSON.stringify({ all: [{ key: 'region', op: 'exists', values: [] }] });
+    const group = await a.screenGroups.insert({ name: 'Rule', selectorJson: rule });
+    const labels = await a.screens.labels.list();
+    await a.commit([...a.screenGroups.stage.ruleIs(group.id, rule).writes, ...a.screens.labels.stage.are(labels).writes]);
+    // Someone labels a screen between the read and the press.
+    await a.commit((await a.screens.labels.stage.update([s.a.screen], { set: { floor: '2' }, remove: [] })).writes);
+    await expect(a.commit(a.screens.labels.stage.are(labels).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    // Or changes the rule.
+    await a.screenGroups.update(group.id, { selectorJson: JSON.stringify({ all: [] }) });
+    await expect(a.commit(a.screenGroups.stage.ruleIs(group.id, rule).writes)).rejects.toBeInstanceOf(StaleVersionError);
   });
 });
