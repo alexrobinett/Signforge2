@@ -495,7 +495,8 @@ export class Slot {
         locale: live!.locale,
         clock: frameClock(),
         ...(live!.theme ? { theme: live!.theme } : {}),
-        fallback: live!.fallback,
+        // Protocol 2, as `theme` is: a protocol 1 bundle's SDK predates the list.
+        ...(live!.protocol >= 2 ? { fallback: live!.fallback } : {}),
       }),
       label: spot.template,
       signal,

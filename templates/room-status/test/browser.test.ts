@@ -198,7 +198,7 @@ describe('room status (#199)', () => {
     for (const look of looks)
       for (const [day, events] of [
         ['none', []],
-        ['a meeting on now', today],
+        ['a meeting on now', [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)]],
       ] as const)
         found[`${look}, ${day}`] = await says(await r.show({ look, events: [...events] }, undefined, NOW, 'UTC', ['events']));
     const unavailable = {
