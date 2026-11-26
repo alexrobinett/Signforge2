@@ -39,6 +39,8 @@ export interface PlayerState {
   clock: { offsetMs: number; trusted: boolean };
   /** The last 50 prepares: start of loading to ready. */
   prepares: { spot: string; ms: number }[];
+  /** Syncs the player has finished with. */
+  syncs: number;
 }
 
 export interface Player {
@@ -161,6 +163,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
             clock,
             pairing,
             prepares,
+            syncs,
           } = s;
           return {
             manifestId,
@@ -181,6 +184,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
             pairing,
             clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
             prepares: prepares.map(({ spot, ms }) => ({ spot, ms })),
+            syncs,
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
