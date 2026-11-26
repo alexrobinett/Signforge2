@@ -114,20 +114,41 @@ export const labels = z.preprocess(
 /** How many values each op takes. */
 const valueCount = (op: (typeof SELECTOR_OPS)[number], n: number) => (op === 'eq' || op === 'neq' ? n === 1 : op === 'in' || op === 'notin' ? n >= 1 : n === 0);
 
+/**
+ * `field`'s checks as one refinement, in its words: a listed schema shows no refinement, so a rule that `list_screens`'
+ * selector already describes is listed as bare strings, and checked all the same (#186).
+ */
+const quietly = <T extends z.ZodType<unknown, string>>(field: T) =>
+  z.string().superRefine((v, ctx) => {
+    for (const issue of field.safeParse(v).error?.issues ?? []) ctx.addIssue({ code: 'custom', message: issue.message });
+  });
+
+/** A selector's term, checked: `eq` and `neq` take one value, `in` and `notin` one or more, `exists` and `missing` none. */
+const term = (described: boolean) =>
+  z
+    .object({
+      key: described ? anyKey.describe('A label key, or a system label: orientation, kind (device or browser), timezone, locale') : quietly(anyKey),
+      op: z.enum(SELECTOR_OPS),
+      values: described
+        ? z.array(labelValue).default([]).describe('One for eq and neq, one or more for in and notin, none for exists and missing')
+        : z.array(quietly(labelValue).transform((v) => v.trim())).default([]),
+    })
+    .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none');
+
+/** A smart group's rule (#186): a selector as `list_screens` describes one, so its parts are not described again. */
+export const rule = z.object({
+  // An empty rule would match every screen: that is the target org, not a group (review of #608). Refined, not a
+  // minItems the catalogue would carry.
+  all: z
+    .array(term(false))
+    .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`)
+    .refine((terms) => terms.length > 0, 'a rule needs at least one term'),
+});
+
 /** `@signforge/compiler/selector`'s `Selector`, checked. */
 export const selector = z
   .object({
-    all: z
-      .array(
-        z
-          .object({
-            key: anyKey.describe('A label key, or a system label: orientation, kind (device or browser), timezone, locale'),
-            op: z.enum(SELECTOR_OPS),
-            values: z.array(labelValue).default([]).describe('One for eq and neq, one or more for in and notin, none for exists and missing'),
-          })
-          .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none'),
-      )
-      .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`),
+    all: z.array(term(true)).max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`),
   })
   .describe(
     'Screens whose labels match every term: { all: [{ key, op, values }] }. Values match case-insensitively; a screen without the key matches only missing, so neq and notin need it. System labels count: { key: "orientation", op: "eq", values: ["portrait"] }',

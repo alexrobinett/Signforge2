@@ -105,3 +105,35 @@ export function labelProblem(key: string, value: string): string | undefined {
   if (!LABEL_VALUE.test(v)) return LABEL_WORDS.printable;
   return undefined;
 }
+
+/** A screen as a smart group's rule reads it: its id, its labels and the settings its system labels come from. */
+export interface GroupedScreen {
+  id: string;
+  labels: Readonly<Record<string, string>>;
+  orientation: Orientation;
+  kind: ScreenKind;
+  timezone: string;
+  locale: string | null;
+}
+
+/**
+ * Which groups each screen is in (#186): a group of listed screens by its rows, a smart group (one of `rules`) by its
+ * selector over each screen's labels and system labels; a row under a smart group counts for nothing. The publish,
+ * the takeover tool, publish requests, the takeover card and the brand kits all ask this, so a group means the same
+ * screens everywhere. Screens in no group are absent.
+ */
+export function groupsOf(
+  screens: readonly GroupedScreen[],
+  rules: readonly { id: string; selector: Selector }[],
+  members: readonly { groupId: string; screenId: string }[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (screenId: string, groupId: string) => out.set(screenId, [...(out.get(screenId) ?? []), groupId]);
+  const ruled = new Set(rules.map((g) => g.id));
+  for (const m of members) if (!ruled.has(m.groupId)) add(m.screenId, m.groupId);
+  for (const s of screens) {
+    const facts = { ...systemLabels(s), ...s.labels };
+    for (const g of rules) if (matches(g.selector, facts)) add(s.id, g.id);
+  }
+  return out;
+}

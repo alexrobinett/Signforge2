@@ -7,18 +7,12 @@ import { foldValue, systemLabels } from '@signforge/compiler/selector';
 import { LABEL_LIMITS } from '@signforge/db';
 import { z } from 'zod';
 import { id, labelKey, labels } from './fields';
+import { labelsByScreen, ruleOf } from './memberships';
 import { outputs } from './outputs';
 import { page, pageInput } from './paging';
 import { defineTool, ToolError } from './tool';
 
 type LabelRow = { screenId: string; key: string; value: string };
-
-/** Each screen's labels, by screen id: a screen without any is absent. */
-export function labelsByScreen(rows: readonly LabelRow[]): Map<string, Record<string, string>> {
-  const by = new Map<string, Record<string, string>>();
-  for (const r of rows) by.set(r.screenId, { ...by.get(r.screenId), [r.key]: r.value });
-  return by;
-}
 
 /** A merge into one screen's labels. */
 type Change = { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] };
@@ -63,7 +57,7 @@ const change = z
 
 const updateScreenLabels = defineTool({
   name: 'update_screen_labels',
-  description: `Set and remove labels on screens, as a merge: each key in set takes that value on every screen given, each key in remove goes, and the screens' other labels stay, so it is safe alongside other changes. Values are stored as typed and matched case-insensitively. A screen has at most ${LABEL_LIMITS.perScreen} labels, and an organization's screens at most ${LABEL_LIMITS.keys} keys between them (conflict past either). orientation, kind, timezone and locale are system labels, from the screen's settings, and cannot be set. A screen picks a label change up with the next publish. Returns { screens: [{ id, labels }] }, ordered by id.`,
+  description: `Set and remove labels on screens, as a merge: each key in set takes its value on every screen given, each in remove goes, the others stay. Values are stored as typed and matched case-insensitively. At most ${LABEL_LIMITS.perScreen} labels a screen and ${LABEL_LIMITS.keys} keys an organization (conflict past either). orientation, kind, timezone and locale are system labels, from the screen's settings. Screens get a change at the next publish. Returns { screens: [{ id, labels }], groupsUsingRemoved }: the smart groups whose rule names a removed key.`,
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -78,7 +72,10 @@ const updateScreenLabels = defineTool({
     if (over) throw over;
     write(await org.screens.labels.stage.update(screenIds, input));
     const before = labelsByScreen(rows);
+    // A removed key a smart group's rule names: allowed, and said, as that group may now match fewer screens (#186).
+    const rules = input.remove.length ? (await org.screenGroups.list()).filter((g) => ruleOf(g)?.all.some((t) => input.remove.includes(t.key))) : [];
     return {
+      groupsUsingRemoved: rules.map((g) => ({ id: g.id, name: g.name })).toSorted((a, b) => (a.id < b.id ? -1 : 1)),
       screens: screenIds.map((s) => {
         const kept = Object.entries(before.get(s) ?? {}).filter(([k]) => !input.remove.includes(k));
         return { id: s, labels: { ...Object.fromEntries(kept), ...input.set } };

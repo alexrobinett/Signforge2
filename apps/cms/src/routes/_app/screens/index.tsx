@@ -47,7 +47,7 @@ import { needingAttention } from '~/lib/groups';
 import { matchesTerms, searchFinds, sectionsBy, termsOf, termsParam, typedTerm, withTerm, type LabelSection, type LabelTerm } from '~/lib/label-filter';
 import { acrossWords, labelsAcross, lonelyValue, MAX_BULK_SCREENS, type LabelKey } from '~/lib/labels';
 import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
-import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
+import { isStateKind, listedGroups, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
@@ -589,7 +589,7 @@ function SelectionBar({ orgId, selected, groups, screens }: { orgId: string; sel
   const add = useAppStore((s) => s.addScreensToGroup);
   const remove = useAppStore((s) => s.removeScreensFromGroup);
   const clear = useAppStore((s) => s.clearScreenSelection);
-  const byNameGroups = [...groups].sort(byName);
+  const byNameGroups = listedGroups(groups).toSorted(byName);
   const holding = byNameGroups.filter((g) => g.screenIds.some((id) => selected.includes(id)));
   const menu = (label: string, choices: GroupView[], act: (g: GroupView) => void) => (
     <DropdownMenu>

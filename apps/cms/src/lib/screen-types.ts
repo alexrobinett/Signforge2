@@ -24,6 +24,9 @@ export type ScreenStatus = ToolOutput<'list_screen_status'>['screens'][number];
 
 export type GroupView = ToolOutput<'list_groups'>['groups'][number];
 
+/** The groups a screen is put in or taken out of by hand: a smart group's screens are the ones its rule matches (#186). */
+export const listedGroups = (groups: readonly GroupView[]) => groups.filter((g) => g.selector === null);
+
 /** Why display hours would be refused, as the player checks them (the contract's `displayHoursProblems`), and a window with no day. */
 export function hoursProblems(hours: DisplayHours | null): string[] {
   if (!hours) return [];
