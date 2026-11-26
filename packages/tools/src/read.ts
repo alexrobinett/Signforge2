@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { effectiveScopes, type Grant, permits } from './dispatch';
 import { outputs } from './outputs';
 import { id } from './fields';
-import { pageInput } from './paging';
+import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
 import { type AnyTool, defineTool, ToolError, type ToolContext, type ToolServices } from './tool';
 
 type Row = Record<string, unknown>;
@@ -59,7 +59,7 @@ export const READ_TYPES = {
   screen: {
     about: 'screens: name, state, settings, labels, what they play',
     list: { tool: 'list_screens', items: 'screens' },
-    get: { tool: 'get_screen', id: 'screenId', item: 'screen', maxIds: 5 },
+    get: { tool: 'get_screen', id: 'screenId', item: 'screen', maxIds: 4 },
     summary: ['id', 'name', 'state', 'lastSeenAt', 'timezone', 'orientation', 'labels', 'version'],
   },
   screen_status: {
@@ -284,17 +284,14 @@ export const readInput = (types: readonly ReadType[]) =>
   z.strictObject(
     {
       type: typeField(types),
-      ids: z
-        .array(id('record'))
-        .min(1)
-        .max(50)
-        .optional()
-        .describe("Read these by id, at most as many as describe's maxIds (publish takes 'latest'); omit to list"),
+      ids: z.array(id('record')).min(1).optional().describe("Read these by id, at most as many as describe's maxIds (publish takes 'latest'); omit to list"),
       filter: z.record(z.string(), z.unknown()).optional().describe("The type's filters, as describe lists them; with ids, only its idOptions"),
       query: z.string().min(1).max(100).optional().describe('Words in the name, where the type can search (asset, audit_entry)'),
       detail: z.enum(['summary', 'full']).optional().describe('summary (the default): the fields most tasks need; full: every field'),
       fields: z.array(z.string()).min(1).max(40).optional().describe('Only these top-level fields of each row'),
-      ...pageInput,
+      // A list's page: the list's own default when omitted, and none with ids.
+      limit: z.number().int().min(1).max(MAX_PAGE_LIMIT).optional().describe(`How many to list, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
+      cursor: z.string().max(1000).optional().describe("The previous page's next, to list the page after it"),
     },
     { error: (issue) => (issue.code === 'unrecognized_keys' ? `read takes no ${issue.keys.join(', ')}: put a type's filters under filter` : undefined) },
   );
@@ -433,6 +430,7 @@ export function readTools(tools: Tools) {
           type,
         );
       if (byIds && !def.get) throw teach(`${type} cannot be read by ids: list it, with a filter`, type);
+      if (byIds && (limit !== undefined || cursor !== undefined)) throw teach(`limit and cursor page a list: read ${type} by ids without them`, type);
       if (byIds && def.get && ids.length > def.get.maxIds) throw teach(`at most ${def.get.maxIds} ${type} ids a call: read the rest in another call`, type);
 
       const shown = (row: Row): Row => {
@@ -454,14 +452,21 @@ export function readTools(tools: Tools) {
         for (const one of ids) {
           const input = one === 'latest' && get.latest ? filter : { ...filter, [get.id]: one };
           const { [get.item]: main, ...extras } = await runRead(ctx, get.tool, input, type);
+          // None to read: the newest publish of an org that has never published (`publish: null`).
+          if (!isRow(main)) continue;
           const renamed = Object.fromEntries(Object.entries(extras).map(([k, v]) => [get.rename?.[k] ?? k, v]));
-          rows.push(shown({ ...(isRow(main) ? main : {}), ...renamed }));
+          rows.push(shown({ ...main, ...renamed }));
         }
         return { type, items: rows, next: null };
       }
       if (!def.list) throw teach(`${type} cannot be listed`, type);
       const { items: key } = def.list;
-      const out = await runRead(ctx, def.list.tool, { ...filter, ...(query === undefined ? {} : { query }), limit, cursor }, type);
+      const out = await runRead(
+        ctx,
+        def.list.tool,
+        { ...filter, ...(query === undefined ? {} : { query }), ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) },
+        type,
+      );
       const { [key]: rows, next, total, ...extra } = out;
       return {
         type,

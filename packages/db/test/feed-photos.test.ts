@@ -59,10 +59,11 @@ function pollSaves(
   hold?: { again: readonly string[]; fresh: readonly string[] },
 ) {
   const dataJson = JSON.stringify({ items: stories.map(({ image }, i) => ({ title: `Story ${i}`, ...(image ? { image } : {}) })) });
+  const version = `v-${++n}`;
   return o.scope.dataSources.savePoll(id, {
     source: { nextPollAt: read.now + 5 * MIN, failures: 0, lastError: null, etag: '"feed"', lastModified: null },
-    snapshot: { version: `v-${++n}`, fetchedAt: read.now, checkedAt: read.now, dataJson },
-    photos: { read, stories: stories.map((s) => s.url), hold },
+    snapshot: { version, fetchedAt: read.now, checkedAt: read.now, dataJson },
+    photos: { read, stories: { version, urls: stories.map((s) => s.url) }, hold },
   });
 }
 

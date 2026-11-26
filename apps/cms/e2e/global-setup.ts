@@ -66,11 +66,12 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 
 /**
  * The drawer's scripted turn: a tool to call, or the answer's card (#350: the card as JSON text, the
- * structured output asked with the tools). On a spot's page (#268): read the spot, draft a punchier
- * headline and a QR link from its data as read, then `STUB_DRAFTED`. Asked about the storm (#269): read
- * the playlists, take every screen over with the first for an hour (the run pauses there for the
- * person's press), then `STUB_TAKEN`. Asked to cancel an invitation by its id (#321): cancel it (a card the
- * person presses), then `STUB_CANCELLED`. Anywhere else (#267): read the screens' status, then `STUB_CARD`.
+ * structured output asked with the tools). Every read is `read` (#345). On a spot's page (#268): read the
+ * spot in full, draft a punchier headline and a QR link from its data as read, then `STUB_DRAFTED`. Asked
+ * about the storm (#269): read the playlists, take every screen over with the first for an hour (the run
+ * pauses there for the person's press), then `STUB_TAKEN`. Asked to cancel an invitation by its id (#321):
+ * cancel it (a card the person presses), then `STUB_CANCELLED`. Anywhere else (#267): read the screens'
+ * status, then `STUB_CARD`.
  */
 function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } | { card: object } {
   // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
@@ -83,26 +84,26 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
   const asked = messages.at(-2)?.content;
   const lastCall = Array.isArray(asked) ? asked.find((b: { type: string }) => b.type === 'tool_use')?.name : undefined;
   if (/storm/i.test(first)) {
-    if (!result) return { name: 'list_playlists', input: {} };
-    if (lastCall === 'list_playlists') {
+    if (!result) return { name: 'read', input: { type: 'playlist' } };
+    if (lastCall === 'read') {
       const read = JSON.parse(result.replace(/^<data>\n/, '').replace(/\n<\/data>$/, ''));
-      return { name: 'start_takeover', input: { playlistId: read.playlists[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() } };
+      return { name: 'start_takeover', input: { playlistId: read.items[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() } };
     }
     return { card: { groups: [], steps: [], ...STUB_TAKEN } };
   }
   // The drawer offers no org:manage read, so the question names the invitation.
   const invitation = /cancel the invitation (inv_[\w-]+)/i.exec(first)?.[1];
   if (invitation) return result ? { card: { groups: [], steps: [], ...STUB_CANCELLED } } : { name: 'cancel_invitation', input: { invitationId: invitation } };
-  if (!spotId) return result ? { card: STUB_CARD } : { name: 'list_screen_status', input: {} };
-  if (!result) return { name: 'get_spot', input: { spotId } };
-  if (lastCall === 'get_spot') {
+  if (!spotId) return result ? { card: STUB_CARD } : { name: 'read', input: { type: 'screen_status' } };
+  if (!result) return { name: 'read', input: { type: 'spot', ids: [spotId], detail: 'full' } };
+  if (lastCall === 'read') {
     const read = JSON.parse(
       result
         .replace(/^<data>\n/, '')
         .replace(/\n<\/data>$/, '')
         .replaceAll('&lt;', '<'),
     );
-    return { name: 'update_spot', input: { spotId, data: { ...read.spot.data, ...STUB_DRAFT } } };
+    return { name: 'update_spot', input: { spotId, data: { ...read.items[0].data, ...STUB_DRAFT } } };
   }
   return { card: { groups: [], steps: [], ...STUB_DRAFTED } };
 }

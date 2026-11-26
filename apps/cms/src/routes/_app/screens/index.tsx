@@ -211,7 +211,7 @@ function ScreensPage() {
                 key={v}
                 selected={view === v}
                 onClick={() => set({ view: v === 'tiles' ? undefined : v })}
-                className="flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium"
+                className="flex h-9 items-center gap-1.5 rounded-[calc(var(--radius-lg)-(--spacing(0.5)))] px-3 text-sm font-medium"
               >
                 <Icon className="size-4" aria-hidden /> {label}
               </Choice>

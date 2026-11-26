@@ -17,7 +17,7 @@ export function Logo({ className, inverse = false }: { className?: string; inver
   return (
     <span className={cn('flex items-center gap-2.5 font-semibold tracking-tight', className)}>
       <LogoMark inverse={inverse} />
-      <span className="text-[1.05rem]">SignForge</span>
+      <span className="text-base">SignForge</span>
     </span>
   );
 }

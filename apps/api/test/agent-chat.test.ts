@@ -307,6 +307,27 @@ describe('POST /api/agent/chat', () => {
     }
   });
 
+  it("cards a read by ids as its type's own: one in the get's words, several titled as the list (#345)", async () => {
+    const ids: string[] = [];
+    const s = await setup({
+      steps: (body) =>
+        body.messages.length === 1
+          ? {
+              calls: [
+                { name: 'read', input: { type: 'screen', ids } },
+                { name: 'read', input: { type: 'screen', ids: ids.slice(0, 1) } },
+              ],
+            }
+          : ANSWER,
+    });
+    ids.push(...(await s.scope.screens.list()).slice(0, 2).map((x) => x.id));
+    const lines = await events(await s.ask());
+    expect(lines.filter((e) => e.type === 'call').map((e) => e.type === 'call' && e.card)).toEqual([
+      shown('list_screens', 'Read 2 screens'),
+      shown('get_screen', "Read a screen's details"),
+    ]);
+  });
+
   it('stops a turn the browser abandons: its model call aborted, and no tool runs after it (#335)', async () => {
     const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }, { hang: true }, ANSWER] });
     const before = await s.scope.auditLog.list({ limit: 50 });
@@ -771,11 +792,23 @@ describe('confirmation cards (#269)', () => {
     expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
   });
 
-  it('offers no card a member may not press (#345); a call to one all the same shows no card and runs nothing', async () => {
+  it('offers no card a member may not press (#345); a call to one all the same ends at a card saying who may, running nothing', async () => {
     const s = await takeover({ role: 'viewer' });
     const all = await raw(await s.ask('q'));
     expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('start_takeover');
-    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)).toBeUndefined();
+    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)?.value).toEqual({
+      tool: 'start_takeover',
+      title: 'Takeover',
+      lines: [],
+      address: null,
+      when: '',
+      undo: '',
+      press: '',
+      token: null,
+      why: 'You can view only: ask an editor.',
+      expiresAt: expect.any(Number),
+    });
+    expect(all.at(-1)).toMatchObject({ type: 'RUN_FINISHED' });
     expect(await s.scope.scheduleEntries.list()).toEqual([]);
   });
 
@@ -924,7 +957,7 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
-  it('offers a viewer or an editor no card to cancel an invitation, and a call to one shows nothing of it: not whose, nor its role (review of #414, #345)', async () => {
+  it('offers a viewer or an editor no card to cancel an invitation, and a call to one shows who may and nothing of it: not whose, nor its role (review of #414, #345)', async () => {
     for (const role of ['viewer', 'editor'] as const) {
       const ask: { called?: Record<string, unknown> } = {};
       const s = await setup({ role, steps: () => ({ calls: [{ name: 'cancel_invitation', input: ask.called }] }) });
@@ -936,10 +969,13 @@ describe('confirmation cards (#269)', () => {
         s.model.asked[0].tools.map((t: { name: string }) => t.name),
         role,
       ).not.toContain('cancel_invitation');
-      expect(
-        all.find((e) => e.name === CHAT_EVENTS.confirm),
-        role,
-      ).toBeUndefined();
+      expect(all.find((e) => e.name === CHAT_EVENTS.confirm)?.value, role).toMatchObject({
+        tool: 'cancel_invitation',
+        title: 'Cancel an invitation',
+        lines: [],
+        token: null,
+        why: 'Only owners can do this: ask an owner.',
+      });
       // Nowhere in what reaches the browser.
       expect(JSON.stringify(all), role).not.toContain(email);
       expect(JSON.stringify(all), role).not.toMatch(/as owner/);

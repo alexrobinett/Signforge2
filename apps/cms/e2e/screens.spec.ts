@@ -243,6 +243,13 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await shots(page, '14-screens-tiles');
   // A landscape tile does not say 16:9: only a portrait one says its ratio (#374).
   await expect(page.getByRole('main').getByText('16:9', { exact: true })).toHaveCount(0);
+  // The view toggle's segments fit its frame, at a 20 px default text size too, where rem and px drift apart (#454).
+  for (const size of ['', '20px']) {
+    await page.evaluate((s) => void (document.documentElement.style.fontSize = s), size);
+    const segment = await innerCorner(page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Tiles' }));
+    expect(segment.radius, size).toBeCloseTo(segment.fits, 5);
+  }
+  await page.evaluate(() => void (document.documentElement.style.fontSize = ''));
   await page.getByRole('button', { name: 'Table' }).click();
   await expect(page).toHaveURL(/view=table/);
   await expect(page.getByRole('rowheader', { name: /Lobby/ })).toBeVisible();

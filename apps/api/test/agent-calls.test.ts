@@ -91,6 +91,23 @@ describe('a data point per call', () => {
     expect(JSON.stringify(w.points)).not.toContain(SECRET);
   });
 
+  it("records read and describe as the type they read, with the scope that type's own read needs (#345)", async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const w = watched();
+    await call(access_token, 'read', { type: 'playlist' }, w.bindings);
+    await call(access_token, 'read', { type: 'invitation' }, w.bindings);
+    await call(access_token, 'describe', { type: 'spot' }, w.bindings);
+    // A type that is none is the agent's text: recorded as the tool alone.
+    await call(access_token, 'read', { type: 'secret_thing' }, w.bindings);
+    expect(w.points.map((p) => p.blobs?.slice(3, 6))).toEqual([
+      ['read:playlist', 'ok', 'content:read'],
+      ['read:invitation', 'forbidden', 'org:manage'],
+      ['describe:spot', 'ok', 'content:read'],
+      ['read', 'invalid_input', 'content:read'],
+    ]);
+  });
+
   it('records a call that fails unexpectedly as an error, with no message', async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read']);

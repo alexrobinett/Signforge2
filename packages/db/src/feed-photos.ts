@@ -98,8 +98,8 @@ export function sourceEdited(current: DataSourceRow, patch: { photos?: boolean; 
 
 /**
  * The read token a news source's poll takes from the row it claimed, with what the row says about
- * its photos: whether the feed must be read whole (photos shown but no story's photo recorded yet,
- * so a 304 would leave the snapshot without any), and the photo URLs it last saw.
+ * its photos: whether the feed must be read whole (photos shown, but no read with them shown is
+ * recorded, so a 304 would leave the snapshot without any, #481), and the photo URLs it last saw.
  */
 export interface PhotoRead {
   rowVersion: number;
@@ -114,9 +114,23 @@ export function photoRead(row: DataSourceRow, shown: boolean, now: number): Phot
     rowVersion: row.rowVersion,
     generation: row.photoGeneration,
     now,
-    readWhole: shown && row.photoUrlsJson === null,
+    readWhole: shown && (row.photoUrlsJson === null || !readWithVersion(row.photoUrlsJson)),
     lastSeen: shown && row.photoUrlsJson ? lastSeenOf(row.photoUrlsJson) : [],
   };
+}
+
+/**
+ * Whether a row's `photo_urls_json` says the snapshot version it was read from (`{ version, stories }`, #481). Every read
+ * with photos shown records it, so a row without one may never have been read for photos (a feed that answered 304 since
+ * photos were turned on): it is read whole once more, and its photos queued.
+ */
+function readWithVersion(raw: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return !!parsed && typeof parsed === 'object' && 'version' in parsed && typeof parsed.version === 'string';
+  } catch {
+    return false;
+  }
 }
 
 /** The distinct URLs in `photo_urls_json`: `{ stories }` in snapshot order, or an older row's flat list. */
@@ -132,12 +146,13 @@ function lastSeenOf(raw: string): string[] {
 
 /**
  * What a news source's poll saves about photos: the token it read with, after a full read the photo
- * URL of each of the first stories in snapshot order (null: none shown; left out after a 304), and
- * optionally the URLs to hold within the daily budgets if the save stands.
+ * URL of each of the first stories in snapshot order (null: none shown; left out after a 304) and
+ * the version of the snapshot they were read from, and optionally the URLs to hold within the daily
+ * budgets if the save stands.
  */
 export interface PollPhotos {
   read: PhotoRead;
-  stories?: (string | null)[] | null;
+  stories?: { version: string; urls: (string | null)[] } | null;
   hold?: { again: readonly string[]; fresh: readonly string[] };
 }
 
@@ -197,7 +212,7 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
           .returning({ url: fi.url })
       : undefined;
   return {
-    patch: stories === undefined ? {} : { photoUrlsJson: stories ? JSON.stringify({ stories }) : null },
+    patch: stories === undefined ? {} : { photoUrlsJson: stories ? JSON.stringify({ version: stories.version, stories: stories.urls }) : null },
     sameVersion,
     current,
     hold: holdWrite,
