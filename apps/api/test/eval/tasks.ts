@@ -228,13 +228,30 @@ export const TASKS: Task[] = [
     role: 'owner',
     script: both((w) => [
       [{ name: 'read', input: { type: 'screen' } }],
-      [{ name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }],
+      [{ name: 'update_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }],
     ]),
     async check(o) {
       if (o.arm === 'drawer')
-        return draftOf(o, 'rename_screen', o.world.screens.harbor)?.input.name === 'Harbor entrance' ? undefined : 'no draft renaming Harbor lobby';
+        return draftOf(o, 'update_screen', o.world.screens.harbor)?.input.name === 'Harbor entrance' ? undefined : 'no draft renaming Harbor lobby';
       const name = (await o.scope.screens.get(o.world.screens.harbor))?.name;
       return name === 'Harbor entrance' ? undefined : `Harbor lobby is named ${name}`;
+    },
+  },
+  {
+    id: 'write-group-add',
+    prompt: 'Add the Harbor lobby screen to the Cafe group.',
+    role: 'editor',
+    // The drawer drafts no group change: /mcp's.
+    script: {
+      mcp: (w) => [
+        [{ name: 'read', input: { type: 'group' } }],
+        [{ name: 'save_group', input: { groupId: w.groups.cafe, screenIds: [w.screens.harbor], membership: 'add' } }],
+      ],
+    },
+    async check(o) {
+      const members = await o.scope.screenGroups.members(o.world.groups.cafe);
+      if (!members.includes(o.world.screens.harbor)) return 'Harbor lobby is not in Cafe';
+      return members.includes(o.world.screens.cafe) ? undefined : 'Cafe lost its own screen';
     },
   },
   {
@@ -429,13 +446,13 @@ export const TASKS: Task[] = [
           { name: 'read', input: { type: 'spot' } },
         ],
         [
-          { name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
+          { name: 'update_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
           { name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } },
         ],
       ],
     },
     check(o) {
-      if (draftOf(o, 'rename_screen', o.world.screens.harbor)?.input.name !== 'Harbor entrance') return 'no draft renaming Harbor lobby';
+      if (draftOf(o, 'update_screen', o.world.screens.harbor)?.input.name !== 'Harbor entrance') return 'no draft renaming Harbor lobby';
       return draftOf(o, 'update_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
     },
   },
@@ -449,6 +466,20 @@ export const TASKS: Task[] = [
     script: both((w) => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'delete_playlist', input: { playlistId: w.playlists.winter } }]]),
     async check(o) {
       return (await o.scope.playlists.get(o.world.playlists.winter)) ? 'Winter promo is still there' : undefined;
+    },
+  },
+  {
+    id: 'card-screen-sleep',
+    prompt: "Put the Cafe screen's display to sleep now.",
+    role: 'editor',
+    press: true,
+    script: both((w) => [
+      [{ name: 'read', input: { type: 'screen' } }],
+      [{ name: 'screen_command', input: { screenId: w.screens.cafe, command: 'display_off' } }],
+    ]),
+    async check(o) {
+      const override = (await o.scope.screens.get(o.world.screens.cafe))?.displayOverrideJson;
+      return override && JSON.parse(override).state === 'off' ? undefined : `the Cafe screen's display override is ${override}`;
     },
   },
   {

@@ -34,7 +34,7 @@ describe('row versions', () => {
     const org = testScope(env.DB, o.orgId);
     const read = (await org.screens.get(o.screen))!;
     const mine = org.screens.stage.update(read, { name: 'Mine' }, read.rowVersion);
-    const audit = org.auditLog.stage({ actorKind: 'user', actorId: 'u', action: 'rename_screen' });
+    const audit = org.auditLog.stage({ actorKind: 'user', actorId: 'u', action: 'update_screen' });
     // Someone else's change lands between the read and the commit.
     await org.commit(org.screens.stage.update(read, { timezone: 'Asia/Tokyo' }).writes);
 
@@ -43,7 +43,7 @@ describe('row versions', () => {
     expect(err).toMatchObject({ id: o.screen, version: 2 });
     const now = (await org.screens.get(o.screen))!;
     expect(now).toMatchObject({ name: read.name, timezone: 'Asia/Tokyo', rowVersion: 2 });
-    expect((await org.auditLog.list()).filter((a) => a.action === 'rename_screen')).toEqual([]);
+    expect((await org.auditLog.list()).filter((a) => a.action === 'update_screen')).toEqual([]);
   });
 
   it('commit a change made at the current version', async () => {

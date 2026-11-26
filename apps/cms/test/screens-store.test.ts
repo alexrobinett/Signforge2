@@ -56,15 +56,15 @@ describe('the settings editor (versioned draft)', () => {
     store.getState().nameNewGroup('Front');
     replies.push({ status: 200, body: { screen: { ...screen, name: 'Front lobby', version: 4 } } }, null);
     await store.getState().saveScreenSettings(screen, groups);
-    expect(calls.map((c) => c.name)).toEqual(['rename_screen', 'create_group']);
+    expect(calls.map((c) => c.name)).toEqual(['update_screen', 'save_group']);
     expect(editorDraft(store.getState().screens)).toMatchObject({ error: 'Could not reach SignForge. Check your connection and try again.', stale: false });
 
     // The page has not read the screen again: the retry compares with what it showed.
     replies.push({ status: 200, body: { screen: { ...screen, name: 'Front lobby', version: 5 } } }, { status: 200, body: { group: { id: 'grp_1' } } });
     await store.getState().saveScreenSettings(screen, groups);
     expect(calls.slice(2)).toMatchObject([
-      { name: 'rename_screen', input: { ifVersion: 4 } },
-      { name: 'create_group', input: { name: 'Front', idempotencyKey: calls[1]!.input.idempotencyKey } },
+      { name: 'update_screen', input: { ifVersion: 4 } },
+      { name: 'save_group', input: { name: 'Front', idempotencyKey: calls[1]!.input.idempotencyKey } },
     ]);
     expect(store.getState().screens.page.editing).toBeNull();
     expect(editorDraft(store.getState().screens)).toBeUndefined();
@@ -99,10 +99,10 @@ describe('the settings editor (versioned draft)', () => {
     store.getState().editDraftHours(null);
     const hours = store.getState().saveDisplayHours(screen);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(calls.map((c) => c.name)).toEqual(['rename_screen']);
+    expect(calls.map((c) => c.name)).toEqual(['update_screen']);
     answer({ status: 200, body: { screen: { ...screen, name: 'Front lobby', version: 4 } } });
     await Promise.all([renaming, hours]);
-    expect(calls[1]).toMatchObject({ name: 'update_screen_settings', input: { displayHours: null, ifVersion: 4 } });
+    expect(calls[1]).toMatchObject({ name: 'update_screen', input: { displayHours: null, ifVersion: 4 } });
   });
 
   it('a settings dialog closed while it saves and opened again before the answer conflicts, rather than undoing that save (re-check of #153)', async () => {
@@ -120,7 +120,7 @@ describe('the settings editor (versioned draft)', () => {
     expect(editorDraft(store.getState().screens)?.version).toBe(3);
     // The page has read the rename; the reopened form, saved as it is, would put the old name back.
     await store.getState().saveScreenSettings({ ...screen, name: 'Front lobby', version: 4 } as never, groups);
-    expect(calls[1]).toMatchObject({ name: 'rename_screen', input: { name: 'Lobby', ifVersion: 3 } });
+    expect(calls[1]).toMatchObject({ name: 'update_screen', input: { name: 'Lobby', ifVersion: 3 } });
   });
 });
 
@@ -138,7 +138,7 @@ describe('the Screens table selection (#183)', () => {
     const { store, queryClient } = withList();
     replies.push({ status: 200, body: { group: { ...front, screenIds: ['scr_0', 'scr_1', 'scr_2', 'scr_3'], version: 3 } } });
     await store.getState().addScreensToGroup(ORG, front, ['scr_1', 'scr_2', 'scr_3']);
-    expect(calls).toEqual([{ name: 'add_group_members', input: { groupId: 'grp_front', screenIds: ['scr_1', 'scr_2', 'scr_3'] } }]);
+    expect(calls).toEqual([{ name: 'save_group', input: { groupId: 'grp_front', screenIds: ['scr_1', 'scr_2', 'scr_3'], membership: 'add' } }]);
     expect(queryClient.getQueryData(screensQuery(ORG).queryKey)?.groups[0]).toMatchObject({ screenIds: ['scr_0', 'scr_1', 'scr_2', 'scr_3'], version: 3 });
     expect(toast.success).toHaveBeenCalledWith('Added 3 screens to Front');
   });
@@ -147,7 +147,7 @@ describe('the Screens table selection (#183)', () => {
     const { store } = withList();
     replies.push({ status: 200, body: { group: { ...front, screenIds: [], version: 3 } } });
     await store.getState().removeScreensFromGroup(ORG, front, ['scr_0', 'scr_1']);
-    expect(calls).toEqual([{ name: 'remove_group_members', input: { groupId: 'grp_front', screenIds: ['scr_0', 'scr_1'] } }]);
+    expect(calls).toEqual([{ name: 'save_group', input: { groupId: 'grp_front', screenIds: ['scr_0', 'scr_1'], membership: 'remove' } }]);
     expect(toast.success).toHaveBeenCalledWith('Removed 2 screens from Front');
   });
 
@@ -169,7 +169,7 @@ describe('the Screens table selection (#183)', () => {
     await store.getState().removeScreensFromGroup(ORG, front, ['scr_1']);
     answer({ status: 200, body: { group: front } });
     await first;
-    expect(calls.map((c) => c.name)).toEqual(['add_group_members']);
+    expect(calls.map((c) => c.name)).toEqual(['save_group']);
     expect(store.getState().screens.bulkPending).toBe(false);
   });
 

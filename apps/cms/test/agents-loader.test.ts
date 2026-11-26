@@ -22,7 +22,7 @@ vi.mock('~/server/api.server', () => ({
   callApi: async (path: string) =>
     path.startsWith('/api/auth/organization/list-members')
       ? Response.json({ members: [{ userId: 'usr_1', user: { name: 'Ada', email: 'ada@example.com' } }] })
-      : Response.json({ tools: [{ name: 'rename_screen', scope: 'screens:manage', minRole: 'editor' }] }),
+      : Response.json({ tools: [{ name: 'update_screen', scope: 'screens:manage', minRole: 'editor' }] }),
 }));
 vi.mock('~/server/tools.server', () => ({ tool: vi.fn(), all: vi.fn(), inOrg: (read: () => unknown) => read() }));
 

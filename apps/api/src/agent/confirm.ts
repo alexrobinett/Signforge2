@@ -398,70 +398,57 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     run: run('revoke_screen_credential'),
   },
-  set_display_override: {
-    tools: ['set_display_override'],
-    input: ofRegistry('set_display_override'),
-    description: describedAs('set_display_override'),
+  screen_command: {
+    tools: ['screen_command'],
+    input: ofRegistry('screen_command'),
+    description: describedAs('screen_command'),
     async make(org, called) {
       const screen = await screenNamed(org, called.screenId);
-      const state = called.state === 'on' || called.state === 'off' ? called.state : null;
-      return {
-        input: { screenId: screen.id, state },
-        card: {
-          title: state === null ? 'Follow display hours again' : `Turn the display ${state}`,
-          lines: [
-            state === null
-              ? `${screen.name} follows its display hours again.`
-              : `${screen.name}'s display turns ${state} now, whatever its display hours say, until its next scheduled display change, or ${OVERRIDE_LIMIT_MS / 3_600_000} hours at most, then follows its hours again.`,
-          ],
-          address: null,
-          when: 'Now, on the live screen',
-          undo: state === null ? 'Turn it on or off again here.' : 'Set it to follow its display hours again, or wait: it ends by itself.',
-          press: state === null ? 'Follow hours' : `Turn ${state}`,
-        },
-      };
-    },
-    run: run('set_display_override'),
-  },
-  restart_screen: {
-    tools: ['restart_screen'],
-    input: ofRegistry('restart_screen'),
-    description: describedAs('restart_screen'),
-    async make(org, called) {
-      const screen = await screenNamed(org, called.screenId);
-      return {
-        input: { screenId: screen.id },
-        card: {
-          title: 'Restart a screen',
-          lines: [`${screen.name} restarts now: it goes blank for a moment, then plays again.`],
-          address: null,
-          when: 'Now, on the live screen',
-          undo: 'Nothing to undo.',
-          press: 'Restart',
-        },
-      };
-    },
-    run: run('restart_screen'),
-  },
-  identify_screen: {
-    tools: ['identify_screen'],
-    input: ofRegistry('identify_screen'),
-    description: describedAs('identify_screen'),
-    async make(org, called) {
-      const screen = await screenNamed(org, called.screenId);
-      return {
-        input: { screenId: screen.id },
-        card: {
+      const live = 'Now, on the live screen';
+      const command = str(called.command);
+      // Each command its own card: what the person sees before they press is what that command does.
+      const cards: Record<string, Made['card']> = {
+        identify: {
           title: 'Identify a screen',
           lines: [`${screen.name} shows its name over what it plays, for a few seconds.`],
           address: null,
-          when: 'Now, on the live screen',
+          when: live,
           undo: 'Nothing to undo.',
           press: 'Identify',
         },
+        restart: {
+          title: 'Restart a screen',
+          lines: [`${screen.name} restarts now: it goes blank for a moment, then plays again.`],
+          address: null,
+          when: live,
+          undo: 'Nothing to undo.',
+          press: 'Restart',
+        },
+        display_auto: {
+          title: 'Follow display hours again',
+          lines: [`${screen.name} follows its display hours again.`],
+          address: null,
+          when: live,
+          undo: 'Turn it on or off again here.',
+          press: 'Follow hours',
+        },
       };
+      for (const state of ['on', 'off'] as const)
+        cards[`display_${state}`] = {
+          title: `Turn the display ${state}`,
+          lines: [
+            `${screen.name}'s display turns ${state} now, whatever its display hours say, until its next scheduled display change, or ${OVERRIDE_LIMIT_MS / 3_600_000} hours at most, then follows its hours again.`,
+          ],
+          address: null,
+          when: live,
+          undo: 'Set it to follow its display hours again, or wait: it ends by itself.',
+          press: `Turn ${state}`,
+        };
+      const card = cards[command];
+      if (!card) throw new CardProblem(`${command} is not a screen command: identify, restart, display_on, display_off or display_auto`);
+      return { input: { screenId: screen.id, command }, card };
     },
-    run: run('identify_screen'),
+    run: run('screen_command'),
   },
   read_table: {
     tools: ['read_table'],

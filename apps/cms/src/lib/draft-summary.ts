@@ -172,7 +172,7 @@ export function summarize(call: ProposedCall, d: DraftContext): DraftSummary | {
       ];
       return { title: `Schedule entry ${name(before.playlistId)}`, lines, reach: wins(merged, str(before.id), d) };
     }
-    case 'rename_screen':
+    case 'update_screen':
       return { title: `Screen ${str(before.name)}`, lines: line('Name', before.name, input.name), reach: 'This screen' };
     default:
       return { title: call.tool.replaceAll('_', ' '), lines: [], reach: '' };

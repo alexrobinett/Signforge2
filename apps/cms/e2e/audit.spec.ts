@@ -21,7 +21,7 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': SCREEN_ADDRESS } });
   const { code } = (await start.json()) as { code: string };
   const { screen } = (await tool(page, 'claim_screen', { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })) as { screen: { id: string } };
-  for (let i = 1; i <= 55; i++) await tool(page, 'rename_screen', { screenId: screen.id, name: `Lobby ${i}` });
+  for (let i = 1; i <= 55; i++) await tool(page, 'update_screen', { screenId: screen.id, name: `Lobby ${i}` });
 
   /** Narrow the log to the screen from its first row's target link. */
   const onlyTheScreen = async () => {

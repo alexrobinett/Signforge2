@@ -224,11 +224,11 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           else get().openTakeover(orgId, preset);
           return;
         }
-        case 'tool': {
+        case 'command': {
           const from = start();
           if (from === null) return;
           try {
-            await callTool(action.tool, { screenId: action.screenId });
+            await callTool('screen_command', { screenId: action.screenId, command: action.command });
             finish(from, true);
             toast.success(`${action.label}: ${action.screenName}`, { description: action.done });
           } catch (err) {

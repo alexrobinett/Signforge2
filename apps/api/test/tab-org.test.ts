@@ -30,7 +30,7 @@ beforeAll(async () => {
 
 describe("a tab on the session's old org", () => {
   it('is refused a write, which changes nothing', async () => {
-    const res = await alice.tool('rename_screen', { screenId: screen, name: 'Moved' }, from(north));
+    const res = await alice.tool('update_screen', { screenId: screen, name: 'Moved' }, from(north));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual(switched);
     expect(await testScope(env.DB, north).screens.get(screen)).toMatchObject({ name: 'Lobby' });

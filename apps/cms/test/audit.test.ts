@@ -4,7 +4,7 @@ import { agentWho, auditInput, auditTime, csvLine, csvRow, detailText, eventText
 const entry = (e: Partial<AuditEntry>): AuditEntry => ({
   at: Date.UTC(2026, 10, 17, 14, 20),
   actor: { kind: 'user', id: 'usr_jun', clientId: 'cms' },
-  action: 'rename_screen',
+  action: 'update_screen',
   target: { kind: 'screen', id: 'scr_1' },
   detail: { input: { screenId: 'scr_1', name: 'Lobby' } },
   ...e,
@@ -15,10 +15,18 @@ describe('eventText', () => {
     expect(eventText({ action: 'set_display_override', input: { state: 'on' } })).toBe('Woken from the CMS');
     expect(eventText({ action: 'set_display_override', input: { state: 'off' } })).toBe('Put to sleep from the CMS');
     expect(eventText({ action: 'set_display_override', input: { state: null } })).toBe('Back to its display hours');
-    expect(eventText({ action: 'update_screen_settings', input: { displayHours: null, timezone: 'UTC' } })).toBe('Display hours and time zone changed');
-    expect(eventText({ action: 'update_screen_settings', input: { orientation: 'portrait' } })).toBe('Orientation changed');
-    expect(eventText({ action: 'rename_screen', input: { name: 'Lobby' } })).toBe('Renamed to Lobby');
+    expect(eventText({ action: 'update_screen', input: { displayHours: null, timezone: 'UTC' } })).toBe('Display hours and time zone changed');
+    expect(eventText({ action: 'update_screen', input: { orientation: 'portrait' } })).toBe('Orientation changed');
+    expect(eventText({ action: 'update_screen', input: { name: 'Lobby' } })).toBe('Renamed to Lobby');
+    expect(eventText({ action: 'update_screen', input: { name: 'Lobby', timezone: 'UTC' } })).toBe('Name and time zone changed');
+    expect(eventText({ action: 'screen_command', input: { command: 'display_on' } })).toBe('Woken from the CMS');
+    expect(eventText({ action: 'screen_command', input: { command: 'restart' } })).toBe('Player restarted');
+    expect(eventText({ action: 'save_group', input: { name: 'Windows', screenIds: ['scr_1'] } })).toBe('Created Windows');
+    expect(eventText({ action: 'save_group', input: { groupId: 'grp_1', name: 'Shop windows' } })).toBe('Renamed to Shop windows');
+    expect(eventText({ action: 'save_group', input: { groupId: 'grp_1', screenIds: ['scr_1'], membership: 'remove' } })).toBe('Screens removed');
+    // Rows from before #345 merged the screen and group tools keep their own words.
     expect(eventText({ action: 'restart_screen', input: {} })).toBe('Player restarted');
+    expect(eventText({ action: 'rename_screen', input: { name: 'Lobby' } })).toBe('Renamed to Lobby');
     expect(eventText({ action: 'some_new_tool', input: {} })).toBe('Some new tool');
   });
 });

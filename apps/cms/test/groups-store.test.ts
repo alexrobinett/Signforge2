@@ -106,7 +106,7 @@ describe('rename', () => {
     store.getState().nameGroup('Front of house');
     answer({ group: { ...front, name: 'Front of house', version: 5 } });
     await store.getState().renameGroup(ORG);
-    expect(calls()).toEqual([{ name: 'rename_group', input: { groupId: 'grp_front', name: 'Front of house', ifVersion: 4 } }]);
+    expect(calls()).toEqual([{ name: 'save_group', input: { groupId: 'grp_front', name: 'Front of house', ifVersion: 4 } }]);
     expect(groups()?.[0]).toMatchObject({ name: 'Front of house', version: 5 });
     expect(store.getState().groups.dialog).toBeNull();
   });
@@ -222,8 +222,8 @@ describe('members', () => {
     await store.getState().saveGroupMembers(ORG, front);
     // The removal first, straight after the status read that cleared it.
     expect(calls()).toEqual([
-      { name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } },
-      { name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2', 'scr_3'] } },
+      { name: 'save_group', input: { groupId: front.id, screenIds: ['scr_1'], membership: 'remove' } },
+      { name: 'save_group', input: { groupId: front.id, screenIds: ['scr_2', 'scr_3'], membership: 'add' } },
     ]);
     expect(groups()?.[0]).toMatchObject({ screenIds: ['scr_2', 'scr_3', 'scr_old'], version: 6 });
     expect(store.getState().groups.dialog).toBeNull();
@@ -244,7 +244,7 @@ describe('members', () => {
     store.getState().chooseGroupMember('scr_1', false);
     answer({ group: { ...now, screenIds: ['scr_9', 'scr_old'], version: 6 } });
     await store.getState().saveGroupMembers(ORG, now);
-    expect(calls()).toEqual([{ name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } }]);
+    expect(calls()).toEqual([{ name: 'save_group', input: { groupId: front.id, screenIds: ['scr_1'], membership: 'remove' } }]);
   });
 
   it('never removes a screen revoked while the dialog was open: its status is read again before the call (review of #205)', async () => {
@@ -255,7 +255,7 @@ describe('members', () => {
     status('scr_old', 'scr_1');
     answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_old'], version: 5 } });
     await store.getState().saveGroupMembers(ORG, front);
-    expect(calls()).toEqual([{ name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2'] } }]);
+    expect(calls()).toEqual([{ name: 'save_group', input: { groupId: front.id, screenIds: ['scr_2'], membership: 'add' } }]);
   });
 
   it('Save reads status afresh: a poll already on its way, from before a revoke, is not what it goes by (re-check of #205)', async () => {
@@ -279,7 +279,7 @@ describe('members', () => {
       store.getState().chooseGroupMember('scr_3', true);
       expect(memberChecked(store.getState().groups.dialog, front, 'scr_3')).toBe(false);
     });
-    expect(sent).toEqual([{ name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2'] } }]);
+    expect(sent).toEqual([{ name: 'save_group', input: { groupId: front.id, screenIds: ['scr_2'], membership: 'add' } }]);
   });
 
   it('Cancel while Save reads status sends nothing (re-check of #205)', async () => {
@@ -303,7 +303,7 @@ describe('members', () => {
     store.getState().closeGroupDialog();
     removal.answer({ group: { ...front, screenIds: ['scr_old'], version: 5 } });
     await saving;
-    expect(calls()).toEqual([{ name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } }]);
+    expect(calls()).toEqual([{ name: 'save_group', input: { groupId: front.id, screenIds: ['scr_1'], membership: 'remove' } }]);
   });
 
   it('Cancel waits while Save runs: the save is all or nothing (follow-up to #205)', async () => {
@@ -318,7 +318,7 @@ describe('members', () => {
       },
       { scr_1: false, scr_2: true },
     );
-    expect(sent.map((c) => c.name)).toEqual(['remove_group_members', 'add_group_members']);
+    expect(sent.map((c) => c.name)).toEqual(['save_group', 'save_group']);
     expect(store.getState().groups.dialog).toBeNull();
   });
 

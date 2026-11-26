@@ -104,7 +104,7 @@ describe('update_screen_labels', () => {
       expect(await run('update_screen_labels', { screenIds: [o.screen], remove: [key] }), key).toMatchObject({ ok: false, error: 'invalid_input' });
     }
     expect(await run('update_screen_labels', { screenIds: [o.screen], set: { orientation: 'portrait' } })).toMatchObject({
-      message: expect.stringContaining('update_screen_settings'),
+      message: expect.stringContaining('update_screen'),
     });
   });
 

@@ -70,7 +70,7 @@ describe('roles', () => {
       expect((await m.c.tool('get_org_settings')).status).toBe(200);
     }
     // A viewer changes nothing at all.
-    expect((await viewer.c.tool('create_group', { name: 'Mine' })).status).toBe(403);
+    expect((await viewer.c.tool('save_group', { name: 'Mine' })).status).toBe(403);
   });
 
   it('an owner changes roles, removes members and settings; the removed member is out at once', async () => {

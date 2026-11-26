@@ -47,7 +47,7 @@ export const screenOutput = z.object({
   reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
   lastSeenAt: z.number().nullable(),
   playerVersion: z.string().nullable(),
-  displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with set_display_override'),
+  displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with screen_command'),
   state: z
     .object({
       kind: z.enum(STATE_KINDS),
@@ -900,11 +900,12 @@ export const outputs = {
       }),
     ),
   }),
-  rename_screen: z.object({ screen: screenOutput }),
-  update_screen_settings: z.object({ screen: screenOutput }),
-  set_display_override: z.object({ screen: screenOutput }),
-  identify_screen: z.object({ screenId: z.string(), seconds: z.number() }),
-  restart_screen: z.object({ screenId: z.string() }),
+  update_screen: z.object({ screen: screenOutput }),
+  screen_command: z.object({
+    screenId: z.string(),
+    command: z.string().describe('The command sent'),
+    displayOverride: displayOverrideOutput.nullable().describe('The wake now or sleep now in force after it, null for none'),
+  }),
   revoke_screen_credential: z.object({ credential: credentialOutput }),
   claim_screen: z.object({ screen: screenOutput }),
   update_screen_labels: z.object({
@@ -922,12 +923,8 @@ export const outputs = {
     next: nextOutput,
   }),
   list_groups: z.object({ groups: z.array(groupOutput), next: nextOutput }),
-  create_group: groupResult,
-  rename_group: groupResult,
+  save_group: groupResult,
   delete_group: z.object({ deleted: z.string().describe("The deleted group's id") }),
-  set_group_members: groupResult,
-  add_group_members: groupResult,
-  remove_group_members: groupResult,
   publish_manifest_to_screen: z.object({
     screenId: z.string(),
     manifestId: z.string(),
