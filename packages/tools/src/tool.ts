@@ -122,31 +122,6 @@ export type AlertDeliverer = (deliveryId: string) => void;
  */
 export type TemplateChecker = (template: { orgId: string; manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
 
-/** A pending invitation, as `list_invitations` shows it. */
-export interface Invitation {
-  id: string;
-  email: string;
-  role: Role;
-  status: 'pending';
-  expiresAt: string;
-  inviterId: string;
-  createdAt: string;
-}
-
-/**
- * Changes an org's members and invitations through Better Auth's organization endpoints, as the
- * caller, in the org the service was made for: Better Auth keeps its rules (one of our roles each),
- * D1 keeps an owner (#292), Better Auth sends the invitation, and its after hook writes the change's
- * audit row, so the member tools stage nothing. Its refusal is a `ToolError`. A tool checks the row is in its
- * org (`org.members`, `org.invitations`) before it asks.
- */
-export interface Members {
-  /** Invites the address with the role. Returns the invitation, as Better Auth made it. */
-  invite(email: string, role: Role): Promise<Invitation>;
-  updateRole(memberId: string, role: Role): Promise<void>;
-  remove(memberId: string): Promise<void>;
-}
-
 /**
  * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
  * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
@@ -241,8 +216,6 @@ export interface ToolServices {
   connectors?: Connectors;
   /** The org's own model provider: sealing its key, and testing it (./ai-providers.ts). */
   aiProviders?: AiProviders;
-  /** Better Auth's member and invitation changes (./members.ts). */
-  members?: Members;
   /** Counts attempts against the caller's rate limits: a tool that guards a guessable secret or a third party's allowance. */
   rateLimit?: RateLimiter;
   /** The calls the org's agents made over /mcp, as recorded (M4-08; the API: Analytics Engine). */
@@ -276,7 +249,6 @@ export const SERVICE_WORDS: Record<ServiceName, string> = {
   templateCheck: 'the runtime check',
   connectors: 'the connectors',
   aiProviders: 'the AI providers',
-  members: 'member management',
   rateLimit: 'a rate limit',
   agentCalls: "the agents' call log",
 };

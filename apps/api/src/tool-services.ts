@@ -13,7 +13,6 @@ import type { Context } from 'hono';
 import { aiProviders } from './agent/provider';
 import { agentCallLog } from './agents/calls';
 import type { Auth } from './auth';
-import { betterAuthMembers } from './auth/members';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
 import { alertSecretSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
@@ -64,7 +63,6 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
     templateCheck: templateChecker(env),
     connectors: connectorsFor(env, scope.connectors ?? connectorDeps(env), new URL(CALLBACK_PATH, c.req.url).href),
     aiProviders: aiProviders(env),
-    members: scope.auth && orgId !== null ? betterAuthMembers(scope.auth, c.req.raw.headers, orgId) : undefined,
     // One org's: what its agents called over /mcp (M4-08).
     agentCalls: orgId === null ? undefined : agentCallLog(env, orgId),
     rateLimit: async (bucket) => {

@@ -540,7 +540,7 @@ const listPublishes = defineTool({
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    'Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since. Returns { publish, screens }, or { publish: null } if there has been no publish.',
+    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens }, or { publish: null } if there has been no publish.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,

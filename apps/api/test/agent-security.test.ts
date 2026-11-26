@@ -8,7 +8,7 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mcp } from '../src/mcp';
-import { ORIGIN } from './client';
+import { Client, ORIGIN } from './client';
 import { as, measure } from './counting';
 import { CLIENT_SAYS, plant, reads, SAYS, SOURCES_SAY } from './planted';
 import { agentToken, authorize, check, form, mcpRpc, mcpTool, REDIRECT, RESOURCE, register, sha256Base64Url, team } from './oauth';
@@ -188,8 +188,7 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
     const names = JSON.parse((await listed(access_token)).body).result.tools.map((x: { name: string }) => x.name);
     for (const name of [
       'claim_screen',
-      'set_slack_alert_channel',
-      'set_webhook_alert_channel',
+      'set_alert_channel',
       'remove_alert_channel',
       'test_alert_channel',
       'retry_alert_delivery',
@@ -198,8 +197,6 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
       'remove_ai_provider',
       'start_connection',
       'finish_connection',
-      'update_member_role',
-      'remove_member',
       'set_template_version_status',
     ])
       expect(names, name).not.toContain(name);
@@ -208,6 +205,22 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
       isError: true,
       structuredContent: { error: 'forbidden' },
     });
+  });
+
+  it("gets no member change from Better Auth's endpoints with its /mcp token: no tool makes one, and they take a session alone (#345)", async () => {
+    const { t, owner, org, editorMemberId } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage']);
+    const agent = new Client(t);
+    const bearer = { authorization: `Bearer ${access_token}` };
+    for (const [path, body] of [
+      ['/api/auth/organization/invite-member', { email: 'agent-345@signforge.test', role: 'owner', organizationId: org.id }],
+      ['/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'owner', organizationId: org.id }],
+      ['/api/auth/organization/remove-member', { memberIdOrEmail: editorMemberId, organizationId: org.id }],
+    ] as const)
+      expect((await agent.post(path, body, bearer)).status, path).toBeGreaterThanOrEqual(400);
+    const members = await scoped(env.DB, org.id).members.list();
+    expect(members.map((m) => m.role).sort()).toEqual(['editor', 'owner']);
+    expect(await scoped(env.DB, org.id).invitations.pending()).toEqual([]);
   });
 
   it("refuses a draft-only agent a feed's address, which screens follow with no publish, and keeps the sealed one", async () => {

@@ -543,8 +543,8 @@ export const AUDIENCE_ROLES: Record<Audience, readonly ('owner' | 'editor' | 'vi
 export const rule = z.object({
   who: z.enum(AUDIENCES).describe('Who gets it by email'),
   email: z.boolean().describe('Send it by email'),
-  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_slack_alert_channel)"),
-  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_webhook_alert_channel)"),
+  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_alert_channel)"),
+  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_alert_channel)"),
 });
 export type AlertRule = z.output<typeof rule>;
 
@@ -1001,8 +1001,7 @@ export const outputs = {
   get_org_settings: z.object({ settings: settingsView }),
   update_org_settings: z.object({ settings: settingsView }),
   get_alert_channels: z.object({ slack: channelView.nullable(), webhook: channelView.nullable() }),
-  set_slack_alert_channel: z.object({ channel: channelView }),
-  set_webhook_alert_channel: z.object({ channel: channelView }),
+  set_alert_channel: z.object({ channel: channelView }),
   remove_alert_channel: z.object({ removed: z.boolean() }),
   get_ai_provider: z.object({ provider: aiProviderView.nullable().describe("Null while the org uses SignForge's demo model") }),
   save_ai_provider: z.object({ provider: aiProviderView }),
@@ -1076,6 +1075,7 @@ export const outputs = {
   describe: z.object({
     type: z.string(),
     about: z.string(),
+    rules: z.string().nullable().describe("What to know of it beyond its fields: a rollout's states, which entry wins, the video spec"),
     ids: z.boolean().describe('Whether read takes ids for it'),
     maxIds: z.number().describe('The most ids one read takes for it'),
     idOptions: z.record(z.string(), z.unknown()).describe("What filter takes with ids, as JSON Schema (a spot's published)"),
@@ -1097,10 +1097,7 @@ export const outputs = {
     lastRefusal: agentCallOutput.nullable().describe('With grantId: its latest refused call in the period, if any'),
   }),
   list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
-  invite_member: z.object({ invitation: invitationOutput }),
   cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id"), email: z.string().describe('Who it was for') }),
-  update_member_role: z.object({ member: memberOutput }),
-  remove_member: z.object({ removed: z.string().describe("The removed membership's id") }),
 };
 
 /** A tool's name. */

@@ -16,20 +16,6 @@ export const fakeServices: Pick<Required<ToolServices>, ServiceName> = {
   templateCheck: () => Promise.reject(new Error('this test has no runtime check')),
   connectors,
   aiProviders: { seal: async (_key, apiKey) => `sealed:${apiKey}`, test: async () => ({ ok: true, models: ['model-a'] }) },
-  // Better Auth's stand-in: it changes nothing, and invites as Better Auth would answer.
-  members: {
-    invite: async (email, role) => ({
-      id: 'inv_fake',
-      email,
-      role,
-      status: 'pending',
-      expiresAt: '2030-01-01T00:00:00.000Z',
-      inviterId: 'user-fake',
-      createdAt: '2029-12-25T00:00:00.000Z',
-    }),
-    updateRole: async () => {},
-    remove: async () => {},
-  },
   rateLimit: async () => true,
   // No call recorded: a test that reads calls passes its own log.
   agentCalls: { usage: async () => [], recent: async () => [], lastRefusal: async () => null },

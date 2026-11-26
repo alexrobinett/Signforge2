@@ -1,6 +1,6 @@
 // The registry as `/mcp` lists it, and what a call answers (M4-06): every tool, for every role and
 // scope, as pure functions, with no request. mcp.test.ts runs a few through the route.
-import { type DispatchResult, describeTools, type Grant, type Members, READ_TOOLS, ROLES, registry, SCOPES, type ToolServices } from '@signforge/tools';
+import { type DispatchResult, describeTools, type Grant, READ_TOOLS, ROLES, registry, SCOPES, type ToolServices } from '@signforge/tools';
 import { createExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
@@ -32,35 +32,20 @@ beforeAll(() => {
 /** Every service some tool needs. */
 const NEEDED = [...new Set([...registry.values()].flatMap((t) => t.needs ?? []))];
 
-const members: Members = {
-  invite: async () => {
-    throw new Error('not called');
-  },
-  updateRole: async () => {},
-  remove: async () => {},
-};
-
 describe("/mcp's services", () => {
-  it('are every service a tool needs but the member tools’ session', () => {
-    expect(NEEDED).toContain('members');
-    for (const need of NEEDED) expect(AGENT[need] === undefined, need).toBe(need === 'members');
+  it('are every service a tool needs', () => {
+    for (const need of NEEDED) expect(AGENT[need], need).toBeDefined();
   });
 });
 
 describe('tools/list', () => {
-  it('lists exactly the tools the grant permits but the member tools and the people-only ones, each with an object input', () => {
+  it('lists exactly the tools the grant permits but the people-only ones, each with an object input', () => {
     for (const grant of GRANTS) {
       const permitted = describeTools(registry, grant).map((t) => t.name);
       const listed = listedTools(grant, AGENT);
-      // Only the member tools and the people-only ones drop out: a tool needing any other service would be listed, so losing one fails here.
+      // Only the people-only ones drop out: a tool needing a service would be listed, so losing one fails here.
       // And each type's own read, listed as `read`, and the connection tools, as this deployment connects no provider (#345).
-      const lacking = permitted.filter(
-        (name) =>
-          registry.get(name)?.needs?.includes('members') ||
-          registry.get(name)?.needs?.includes('connectors') ||
-          registry.get(name)?.people ||
-          READ_TOOLS.has(name),
-      );
+      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('connectors') || registry.get(name)?.people || READ_TOOLS.has(name));
       expect(
         listed.map((t) => t.name),
         `${grant.role} ${grant.editorsPublish}`,
@@ -78,21 +63,11 @@ describe('tools/list', () => {
     }
   });
 
-  it('offers the member tools that act through a session only to a caller that has one', () => {
+  it("offers an owner's agent cancel_invitation, and no member change: no tool makes one (#321, #345)", () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
-    const needing = [...registry.values()].filter((t) => t.needs?.includes('members')).map((t) => t.name);
-    expect(needing.length).toBeGreaterThan(0);
-    const without = listedTools(owner, AGENT).map((t) => t.name);
-    const withSession = listedTools(owner, { members }).map((t) => t.name);
-    for (const name of needing) {
-      expect(without, name).not.toContain(name);
-      // A people-only one (invite_member, #321) is listed to no agent, with a session or not.
-      if (registry.get(name)?.people) expect(withSession, name).not.toContain(name);
-      else expect(withSession, name).toContain(name);
-    }
-    // Cancelling an invitation needs no session (#321): offered to an owner's agent as it is.
-    expect(without).toContain('cancel_invitation');
-    expect(without).not.toContain('invite_member');
+    const listed = listedTools(owner, AGENT).map((t) => t.name);
+    expect(listed).toContain('cancel_invitation');
+    for (const name of ['invite_member', 'update_member_role', 'remove_member']) expect(registry.has(name), name).toBe(false);
   });
 
   it('hints from the registry: a read is read-only, a delete, revoke, roll back, takeover or disconnect destructive, a keyed creation idempotent', () => {
