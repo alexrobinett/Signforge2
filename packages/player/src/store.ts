@@ -3,7 +3,7 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import { safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
+import { manifestShape, parseManifest, safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { planSync } from '@signforge/player-core';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
 
@@ -50,44 +50,41 @@ const LAST_GOOD = '/_sf/manifest/last-good';
 const jsonResponse = (text: string) => new Response(text, { headers: { 'content-type': 'application/json' } });
 
 /**
- * What the player needs to run a manifest at all: without these the sequencer cannot pick a spot.
+ * What the player needs to run a manifest at all, beyond its shape: without these the sequencer cannot pick a spot.
  * Also holds the line on what makes a screen unsafe, whatever release stored the manifest.
  */
-function unplayable(m: Partial<ScreenManifest> | null): string | undefined {
-  if (!m || typeof m !== 'object') return 'not an object';
-  if (typeof m.id !== 'string' || !m.id) return 'no id';
-  for (const k of ['files', 'templates', 'spots', 'playlists', 'dataSources'] as const) if (!m[k] || typeof m[k] !== 'object') return `no ${k}`;
-  if (!Array.isArray(m.schedule)) return 'no schedule';
-  if (!m.screen || !validTimezone(m.screen.timezone)) return 'no valid time zone';
-  if (!Object.values(m.playlists!).every((p) => p && Array.isArray(p.items))) return 'a playlist has no items';
-  if (!m.playlists![m.defaultPlaylist ?? '']) return 'no default playlist';
-  if (Object.values(m.spots!).some((sp) => sp?.kind === 'url' && !safeUrl(sp.url))) return 'a URL spot is not https';
+function unplayable(m: ScreenManifest): string | undefined {
+  if (!validTimezone(m.screen.timezone)) return 'no valid time zone';
+  if (!m.playlists[m.defaultPlaylist]) return 'no default playlist';
+  if (Object.values(m.spots).some((sp) => sp.kind === 'url' && !safeUrl(sp.url))) return 'a URL spot is not https';
   return undefined;
 }
 
 /**
  * Read a stored manifest. Everything stored passed the validator of the release that stored it,
  * so one this release's validator rejects (a schema it no longer plays, a tightened rule) is
- * still played when it can be run at all: an offline screen keeps its content across an update.
+ * still played when it can be run at all: when it reads as the manifest's shape (#156) and is playable. An offline
+ * screen keeps its content across an update.
  */
 async function loadStored(key: string): Promise<ScreenManifest | undefined> {
   const text = await (await (await caches.open(STATE)).match(key))?.text();
   if (text === undefined) return undefined;
-  let m: ScreenManifest;
+  let stored: unknown;
   try {
-    m = JSON.parse(text) as ScreenManifest;
+    stored = JSON.parse(text);
   } catch {
     console.warn(`[sf] stored manifest ${key} is not JSON; ignored`);
     return undefined;
   }
-  const broken = unplayable(m);
-  if (broken) {
+  const read = manifestShape.read(stored);
+  const broken = read.ok ? unplayable(read.value) : read.problems[0];
+  if (!read.ok || broken) {
     console.warn(`[sf] stored manifest ${key} cannot be played (${broken}); ignored`);
     return undefined;
   }
-  const problems = validateManifest(m);
-  if (problems.length) console.warn(`[sf] stored manifest ${m.id} is kept although this player rejects it: ${problems[0]}`);
-  return m;
+  const problems = validateManifest(read.value);
+  if (problems.length) console.warn(`[sf] stored manifest ${read.value.id} is kept although this player rejects it: ${problems[0]}`);
+  return read.value;
 }
 
 /** The manifest last made active and the last one that played, as far as the cache holds usable copies. */
@@ -237,13 +234,13 @@ async function syncNow(
     if (!res.ok) throw new Error(`manifest request failed: ${res.status}`);
     text = await res.text();
   }
-  const next = JSON.parse(text) as ScreenManifest;
-  const same = next.id === currentId;
-
-  if (!same) {
-    const problems = validateManifest(next);
-    if (problems.length) throw new Error(`manifest ${next.id} rejected: ${problems[0]}`);
-  }
+  const sent: unknown = JSON.parse(text);
+  const id = typeof sent === 'object' && sent !== null && 'id' in sent ? sent.id : undefined;
+  const same = id === currentId;
+  // The manifest playing, unchanged, is read by its shape alone, as it was when stored; a new one meets every rule.
+  const read = same ? manifestShape.read(sent) : parseManifest(sent);
+  if (!read.ok) throw new Error(`manifest ${String(id)} rejected: ${read.problems[0]}`);
+  const next = read.value;
 
   // Even when the manifest is unchanged, files may have gone: the browser can evict the cache
   // under storage pressure if persistence was refused. Fetch back whatever is missing.
