@@ -10,7 +10,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { LabelKey } from '~/lib/labels';
-import { matching, OP_WORDS, ruleProblem, termWords, unmet, valuesOf, type RuleTerm } from '~/lib/rules';
+import { matching, OP_WORDS, ruleProblem, termWords, unmet, valuesOf, withOp, type RuleTerm } from '~/lib/rules';
 import type { ScreenView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
 import { termsOf } from '~/state/groups';
@@ -34,7 +34,9 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-medium">Screens whose labels meet every condition</legend>
         {terms.map((t, i) => {
-          const known = keys.find((k) => k.key === t.key)?.values ?? [];
+          // A rule may name a label, or values, no screen has any more: they stay shown, so opening it changes nothing (review of #614).
+          const offered = keys.find((k) => k.key === t.key)?.values.map((x) => x.value) ?? [];
+          const known = [...offered, ...t.values.filter((v) => !offered.includes(v))];
           const kind = valuesOf(t.op);
           const at = `${id}-${i}`;
           return (
@@ -48,6 +50,7 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
                 aria-disabled={pending || undefined}
               >
                 <option value="">Choose a label</option>
+                {t.key && !keys.some((k) => k.key === t.key) && <option value={t.key}>{t.key} (no screen has it)</option>}
                 {keys.map((k) => (
                   <option key={k.key} value={k.key}>
                     {k.key}
@@ -58,7 +61,7 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
               <NativeSelect
                 aria-label="Compared"
                 value={t.op}
-                onChange={(e) => isOp(e.target.value) && change(i, { ...t, op: e.target.value })}
+                onChange={(e) => isOp(e.target.value) && change(i, withOp(t, e.target.value))}
                 aria-disabled={pending || undefined}
               >
                 {SELECTOR_OPS.map((op) => (
@@ -80,7 +83,7 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
                   />
                   <datalist id={`${at}-values`}>
                     {known.map((v) => (
-                      <option key={v.value} value={v.value} />
+                      <option key={v} value={v} />
                     ))}
                   </datalist>
                 </>
@@ -90,15 +93,15 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
                   <fieldset className="flex flex-wrap gap-x-3 gap-y-1.5 py-1">
                     <legend className="sr-only">Values</legend>
                     {known.map((v) => (
-                      <label key={v.value} className="flex items-center gap-1.5 text-sm">
+                      <label key={v} className="flex items-center gap-1.5 text-sm">
                         <input
                           type="checkbox"
                           className="size-4 accent-primary"
-                          checked={t.values.includes(v.value)}
-                          onChange={(e) => change(i, { ...t, values: e.target.checked ? [...t.values, v.value] : t.values.filter((x) => x !== v.value) })}
+                          checked={t.values.includes(v)}
+                          onChange={(e) => change(i, { ...t, values: e.target.checked ? [...t.values, v] : t.values.filter((x) => x !== v) })}
                           aria-disabled={pending || undefined}
                         />
-                        {v.value}
+                        {v}
                       </label>
                     ))}
                   </fieldset>

@@ -251,9 +251,11 @@ function Groups() {
                           {g.name}
                         </Link>
                         {g.selector && (
-                          <Badge className="ml-2 align-middle" title={g.selector.all.map(termWords).join(' and ')}>
-                            Rule
-                          </Badge>
+                          <>
+                            <Badge className="ml-2 align-middle">Rule</Badge>
+                            {/* Its conditions as text, so a keyboard, a touch and a screen reader get them too (review of #614). */}
+                            <span className="block text-meta font-normal text-muted-foreground">{g.selector.all.map(termWords).join(' and ')}</span>
+                          </>
                         )}
                       </th>
                       <td className="px-3 py-2.5 tabular-nums">{plural(members, 'screen')}</td>

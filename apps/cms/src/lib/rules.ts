@@ -23,6 +23,12 @@ export const OP_WORDS: Record<RuleOp, string> = {
 /** How many values `op` takes: one, one or more, or none. */
 export const valuesOf = (op: RuleOp) => (op === 'eq' || op === 'neq' ? 'one' : op === 'in' || op === 'notin' ? 'some' : 'none');
 
+/**
+ * The condition compared another way: its values kept while the new comparison takes the same kind (one value, or a
+ * set of them), dropped otherwise, so "NORTH" typed under "is" does not ride into "is one of" unseen (review of #614).
+ */
+export const withOp = (t: RuleTerm, op: RuleOp): RuleTerm => ({ ...t, op, values: valuesOf(op) === valuesOf(t.op) ? t.values : [] });
+
 /** A condition as words: "region is North", "type is one of kiosk, drive-thru", "store is not set". */
 export const termWords = (t: RuleTerm) => [t.key, OP_WORDS[t.op], ...(t.values.length ? [t.values.join(', ')] : [])].join(' ');
 

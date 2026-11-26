@@ -325,6 +325,18 @@ test('a smart group made from a rule, the screens it matches seen before it is s
   await rule.getByRole('button', { name: 'Save' }).click();
   await expect(rule).toBeHidden();
   await expect(groups.getByRole('row', { name: /North/ })).toContainText('1 screen');
+  // Its conditions are text in the row, not a hover's.
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('region is south');
+  // A rule on a label no screen has any more opens with that label still chosen.
+  await tool(page, 'save_group', { name: 'Zoned', selector: { all: [{ key: 'zone', op: 'eq', values: ['a'] }] }, idempotencyKey: `zoned-${Date.now()}` });
+  await page.reload();
+  await hydrated(page);
+  await groups.getByRole('button', { name: 'Change Zoned' }).click();
+  await page.getByRole('menuitem', { name: 'Rule…' }).click();
+  const zoned = page.getByRole('dialog', { name: 'Zoned’s rule' });
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Label')).toHaveValue('zone');
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Value')).toHaveValue('a');
+  await page.keyboard.press('Escape');
   await shotsBoth(page, '186-groups-rule-badge');
 
   // A takeover's picker: the group marked a rule, and whom it reaches when sent.

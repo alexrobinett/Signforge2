@@ -1,7 +1,7 @@
 // A smart group's rule in the CMS (#186): conditions as the tools take them, what keeps one from being saved, and the
 // screens it matches now, matched as the publish matches them.
 import { describe, expect, it } from 'vitest';
-import { matching, ruleOf, ruleProblem, termWords, unmet, type RuleTerm } from '../src/lib/rules';
+import { matching, ruleOf, ruleProblem, termWords, unmet, withOp, type RuleTerm } from '../src/lib/rules';
 
 const screen = (name: string, labels: Record<string, string>, orientation = 'landscape') => ({
   name,
@@ -40,5 +40,12 @@ describe('a rule as the builder holds it', () => {
     expect(unmet(SCREENS, rule).map(termWords)).toEqual(['store is one of 9999, 0001']);
     // Each met alone, but by no screen together: none is named.
     expect(unmet(SCREENS, [term('region', 'eq', 'south'), term('store', 'exists')])).toEqual([]);
+  });
+
+  it('keeps values across a comparison of the same kind, and drops them across kinds (review of #614)', () => {
+    expect(withOp(term('region', 'eq', 'NORTH'), 'neq')).toEqual(term('region', 'neq', 'NORTH'));
+    expect(withOp(term('region', 'eq', 'NORTH'), 'in')).toEqual(term('region', 'in'));
+    expect(withOp(term('type', 'in', 'kiosk'), 'notin')).toEqual(term('type', 'notin', 'kiosk'));
+    expect(withOp(term('type', 'in', 'kiosk'), 'missing')).toEqual(term('type', 'missing'));
   });
 });
