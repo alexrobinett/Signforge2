@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PHOTO_BUDGET,
   DeleteInFlightError,
   FEED_IMAGE_DELETE_GRACE_MS,
   FEED_IMAGE_TTL_MS,
@@ -556,7 +557,10 @@ describe('feed photos', () => {
     const row = (await org.scope.dataSources.get(sourceId))!;
     const { held } = await org.scope.dataSources.savePoll(sourceId, {
       source: { nextPollAt: now + 300_000, failures: 0, lastError: null },
-      photos: { read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] }, hold: urls },
+      photos: {
+        read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] },
+        hold: { ...urls, budget: DEFAULT_PHOTO_BUDGET },
+      },
     });
     return held;
   };

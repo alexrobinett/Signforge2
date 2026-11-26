@@ -26,8 +26,10 @@ import { coverSize, fitsScreenBox, NEWS_THUMB_BOX, type NewsFeed, SCREEN_BOX } f
 import {
   type DataSourceRow,
   expiredFeedImages,
+  DEFAULT_PHOTO_BUDGET,
   type OrgScope,
   PHOTOS_PER_SOURCE,
+  type PhotoBudget,
   type PhotoRead,
   pendingFeedImageDeletes,
   photoRead,
@@ -50,12 +52,29 @@ const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
 /**
- * Rows expired and delete candidates scanned per daily run: a day's at the cap (60 rows, up to 120 blobs an org) for
- * each of the CLEANUP_ORGS_PER_RUN orgs, so the sweep keeps up. The org cap bounds the run to 11 D1 calls, whatever these are.
+ * Orgs a daily run cleans up, each up to a day's photos at its cap (`perOrg` rows, and up to twice as many blobs: a
+ * photo and its thumbnail), so the sweep keeps up with that many orgs at the cap. The org count bounds the run to 11 D1
+ * calls, whatever the cap; a row's or blob's list goes in one statement as JSON.
  */
-const FORGET_PER_RUN = 180;
-const DELETE_PER_RUN = 360;
 const CLEANUP_ORGS_PER_RUN = 3;
+
+/**
+ * The day's photo caps the environment sets (`FEED_PHOTOS_ORG_DAILY`, `FEED_PHOTOS_SOURCE_DAILY`; the demo's real-feed
+ * test lifts them), or 60 an org and 30 a source. Read once a run. A value that is not a whole number above 0 fails the
+ * run, loudly, rather than polling under caps nobody set.
+ */
+export function photoBudget(env: Pick<Env, 'FEED_PHOTOS_ORG_DAILY' | 'FEED_PHOTOS_SOURCE_DAILY'>): PhotoBudget {
+  const read = (name: string, value: string | undefined, unset: number) => {
+    if (value === undefined) return unset;
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a whole number above 0, not ${JSON.stringify(value)}`);
+    return n;
+  };
+  return {
+    perOrg: read('FEED_PHOTOS_ORG_DAILY', env.FEED_PHOTOS_ORG_DAILY, DEFAULT_PHOTO_BUDGET.perOrg),
+    perSource: read('FEED_PHOTOS_SOURCE_DAILY', env.FEED_PHOTOS_SOURCE_DAILY, DEFAULT_PHOTO_BUDGET.perSource),
+  };
+}
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */
 const QUALITY = 85;
 
@@ -399,13 +418,13 @@ function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T
  *    under `o/<org>/f/`, and clearing the delete records only after blob delete succeeds.
  * Returns how many expired rows were forgotten plus how many blobs were deleted.
  */
-export async function sweepFeedPhotos(db: D1Database, blobs: PhotoBlobs, now: number): Promise<number> {
-  const expired = await expiredFeedImages(db, now, FORGET_PER_RUN);
+export async function sweepFeedPhotos(db: D1Database, blobs: PhotoBlobs, now: number, { perOrg }: PhotoBudget): Promise<number> {
+  const expired = await expiredFeedImages(db, now, CLEANUP_ORGS_PER_RUN * perOrg);
   let forgotten = 0;
   for (const [orgId, urls] of groupByOrg(expired, (r) => r.url, CLEANUP_ORGS_PER_RUN)) {
     forgotten += await scoped(db, orgId).feedPhotos.expire(urls, now);
   }
-  const pending = await pendingFeedImageDeletes(db, now, DELETE_PER_RUN);
+  const pending = await pendingFeedImageDeletes(db, now, 2 * CLEANUP_ORGS_PER_RUN * perOrg);
   let deleted = 0;
   const errors: unknown[] = [];
   for (const [orgId, shas] of groupByOrg(pending, (r) => r.sha256, CLEANUP_ORGS_PER_RUN)) {

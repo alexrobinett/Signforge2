@@ -1251,7 +1251,13 @@ export const feedImages = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: updated(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.url] }), index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256)],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.url] }),
+    index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256),
+    // The sweep asks, of each blob queued for delete, whether a row still names it as its file or its thumbnail.
+    index('feed_images_org_file_sha_idx').on(t.orgId, t.fileSha256),
+    index('feed_images_org_thumb_sha_idx').on(t.orgId, t.thumbSha256),
+  ],
 );
 
 /**

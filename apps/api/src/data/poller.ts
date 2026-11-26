@@ -26,7 +26,7 @@
  * up to 6 hours, and keeps the last good snapshot.
  */
 import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
-import { claimDueDataSources, type DataSourceRow, type OrgScope, scoped } from '@signforge/db';
+import { claimDueDataSources, type DataSourceRow, type OrgScope, type PhotoBudget, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed, parseNews } from '@signforge/feeds';
 import { type BindingSpot, type BoundField, boundFields, hasBoundListImage, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
 import { manifestSummary } from '../device/manifests';
@@ -42,6 +42,7 @@ import {
   type PhotoPlan,
   type PhotoPoll,
   type PhotoQueue,
+  photoBudget,
   planPhotoRecheck,
   sha256Hex,
   startPhotoPoll,
@@ -94,6 +95,8 @@ interface Run {
   guards: FetchGuards;
   connectors: ConnectorDeps;
   photoQueue: PhotoQueue;
+  /** The day's photo caps, from the environment, read once a run. */
+  photoBudget: PhotoBudget;
   /** Per connection, the grant this run uses (and per connection again, `!` after its id, the one it refreshed after a refusal): shared by its sources. */
   grants: Map<string, Promise<Held>>;
   /** Per org, the fields published spots bind to each source (`snapshotFit` and photos), loaded in `pollInit` once per org per run. */
@@ -119,7 +122,17 @@ export async function pollDataSources(
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps; photoQueue?: PhotoQueue } = {},
 ): Promise<void> {
   const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
-  const pass: Run = { env, now, guards, connectors, photoQueue, grants: new Map(), boundByOrg: new Map(), playedByOrg: new Map() };
+  const pass: Run = {
+    env,
+    now,
+    guards,
+    connectors,
+    photoQueue,
+    photoBudget: photoBudget(env),
+    grants: new Map(),
+    boundByOrg: new Map(),
+    playedByOrg: new Map(),
+  };
   // Load each org's claimed sources, snapshot versions, and published bound spots in one D1 batch per org.
   const idsByOrg = new Map<string, string[]>();
   for (const { orgId, id } of claimed) {
@@ -188,7 +201,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
       const { held } = await org.dataSources.savePoll(row.id, {
         source: ok,
         checkedAt: now,
-        ...(photo ? { photos: { read: photo.read, hold: res.photos } } : {}),
+        ...(photo ? { photos: { read: photo.read, hold: res.photos && { ...res.photos, budget: run.photoBudget } } } : {}),
       });
       await enqueueFeedPhotos(run.photoQueue, org.orgId, row.id, held);
       return;
@@ -206,7 +219,9 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     const { held } = await org.dataSources.savePoll(row.id, {
       source,
       ...(snapshotChanged ? { snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } } : { checkedAt: now }),
-      ...(photo ? { photos: { read: photo.read, stories: res.stories ? { version, urls: res.stories } : null, hold: photos } } : {}),
+      ...(photo
+        ? { photos: { read: photo.read, stories: res.stories ? { version, urls: res.stories } : null, hold: photos && { ...photos, budget: run.photoBudget } } }
+        : {}),
     });
     await enqueueFeedPhotos(run.photoQueue, org.orgId, row.id, held);
   } catch (e) {

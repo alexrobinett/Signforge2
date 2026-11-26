@@ -3,7 +3,7 @@
 // saves a poll (`savePoll`'s hold), on the test's own clock.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { NEW_PER_ORG_PER_DAY, NEW_PER_SOURCE_PER_DAY } from '../src';
+import { DEFAULT_PHOTO_BUDGET, NEW_PER_ORG_PER_DAY, NEW_PER_SOURCE_PER_DAY } from '../src';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -19,14 +19,14 @@ let T = 2_000_000_000_000;
 type Org = Seeded['a'];
 
 /** A full read of a feed whose photos a screen shows, as the poller saves it: it records the stories' photo URLs. */
-const hold = async (org: Org, sourceId: string, fresh: readonly string[], now: number) => {
+const hold = async (org: Org, sourceId: string, fresh: readonly string[], now: number, budget = DEFAULT_PHOTO_BUDGET) => {
   const row = (await org.scope.dataSources.get(sourceId))!;
   const { held } = await org.scope.dataSources.savePoll(sourceId, {
     source: { nextPollAt: now + HOUR, failures: 0, lastError: null },
     photos: {
       read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] },
       stories: { version: `v-${now}`, urls: [...fresh] },
-      hold: { again: [], fresh },
+      hold: { again: [], fresh, budget },
     },
   });
   return held;
@@ -44,7 +44,7 @@ const unseen = (id: string, n = 10) => Array.from({ length: n }, () => `https://
  * `feeds` busy feeds, ten unseen photos every hourly poll for `days`, in this order every hour: what each held per day.
  * Each was shown before the first day, by a read with no photos new, unless `newAt` says when it was added and first shown.
  */
-async function busy(feeds: string[], days: number, joinsAt: Record<string, number> = {}, newAt: Record<string, number> = {}) {
+async function busy(feeds: string[], days: number, joinsAt: Record<string, number> = {}, newAt: Record<string, number> = {}, budget = DEFAULT_PHOTO_BUDGET) {
   await fresh(s.a);
   for (const id of feeds) {
     if (id in newAt) continue;
@@ -57,7 +57,7 @@ async function busy(feeds: string[], days: number, joinsAt: Record<string, numbe
     for (const id of feeds) {
       if (now < T + (joinsAt[id] ?? newAt[id] ?? 0)) continue;
       if (now === T + (newAt[id] ?? -1)) await add(s.a, id);
-      perDay[id]![Math.floor(hour / 24)]! += (await hold(s.a, id, unseen(id), now)).length;
+      perDay[id]![Math.floor(hour / 24)]! += (await hold(s.a, id, unseen(id), now, budget)).length;
     }
   }
   return perDay;
@@ -80,6 +80,13 @@ describe('the day of new feed photos', () => {
       'new-verge': [NEW_PER_SOURCE_PER_DAY, share, share],
       'new-nyt': [0, share, share],
     });
+  }, 120_000);
+
+  it("holds every story's photo under the demo's lifted caps: six feeds with ten new photos every hourly poll", async () => {
+    // apps/api wrangler.jsonc `env.demo`: FEED_PHOTOS_ORG_DAILY 1800, FEED_PHOTOS_SOURCE_DAILY 300, past the 250 an hourly feed can bring in a day's window.
+    const feeds = Array.from({ length: 6 }, (_, i) => `lifted-${i}`);
+    const perDay = await busy(feeds, 3, {}, {}, { perOrg: 1800, perSource: 300 });
+    for (const id of feeds) expect(perDay[id], id).toEqual([240, 240, 240]);
   }, 120_000);
 
   it('gives each of six busy feeds its share every day', async () => {

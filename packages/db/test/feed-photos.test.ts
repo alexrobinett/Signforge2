@@ -3,6 +3,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PHOTO_BUDGET,
   DELETE_LEASE_MS,
   DeleteInFlightError,
   expiredFeedImages,
@@ -63,7 +64,7 @@ function pollSaves(
   return o.scope.dataSources.savePoll(id, {
     source: { nextPollAt: read.now + 5 * MIN, failures: 0, lastError: null, etag: '"feed"', lastModified: null },
     snapshot: { version, fetchedAt: read.now, checkedAt: read.now, dataJson },
-    photos: { read, stories: { version, urls: stories.map((s) => s.url) }, hold },
+    photos: { read, stories: { version, urls: stories.map((s) => s.url) }, hold: hold && { ...hold, budget: DEFAULT_PHOTO_BUDGET } },
   });
 }
 
@@ -169,7 +170,7 @@ describe('a poll and a delivery at once', () => {
     const held = await o.scope.dataSources.savePoll(id, {
       source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
       checkedAt: NOW,
-      photos: { read: await pollReads(id, NOW), hold: { again: [url], fresh: [] } },
+      photos: { read: await pollReads(id, NOW), hold: { again: [url], fresh: [], budget: DEFAULT_PHOTO_BUDGET } },
     });
     expect(held).toEqual({ stood: true, held: [url] });
 
@@ -252,7 +253,7 @@ describe('the sweep and a delivery at once', () => {
     expect(
       await o.scope.dataSources.savePoll(id, {
         source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
-        photos: { read: await pollReads(id, NOW), hold: { again: [replaced], fresh: [] } },
+        photos: { read: await pollReads(id, NOW), hold: { again: [replaced], fresh: [], budget: DEFAULT_PHOTO_BUDGET } },
       }),
     ).toEqual({ stood: true, held: [replaced] });
     await stored(replaced, id, 'g', NOW);

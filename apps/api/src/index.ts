@@ -29,7 +29,7 @@ import {
 } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
-import { type FeedImageJob, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
+import { type FeedImageJob, photoBudget, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
 import { sweepStorage } from './storage';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
@@ -64,7 +64,7 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
   '* * * * *': (env, now) =>
     now % DAY_MS === FEED_IMAGE_CLEANUP_MS
-      ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now)
+      ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now, photoBudget(env))
       : now % DAY_MS === STORAGE_SWEEP_MS
         ? sweepStorage(env.DB, env.BLOBS, () => Date.now())
         : pollDataSources(env, { now }),
