@@ -792,7 +792,8 @@ export function scoped(d1: D1Database, orgId: string) {
         are: (ids: readonly string[]): Staged => {
           const sc = s.screens;
           const want = [...ids].sort().join(',');
-          const now = sql`COALESCE((SELECT group_concat(id, ',') FROM (SELECT ${sc.id} AS id FROM ${sc} WHERE ${sc.orgId} = ${orgId} ORDER BY ${sc.id})), '')`;
+          // Ordered in the aggregate, as `brandState` is: a subquery's ORDER BY does not order group_concat (#408).
+          const now = sql`COALESCE((SELECT group_concat(${sc.id}, ',' ORDER BY ${sc.id}) FROM ${sc} WHERE ${sc.orgId} = ${orgId}), '')`;
           const stale = async () =>
             (await screens.list())
               .map((x) => x.id)
@@ -1084,6 +1085,23 @@ export function scoped(d1: D1Database, orgId: string) {
         addMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
           if (!(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
           return withTouch(group, ifVersion, ...inserts(group.id, await orgScreens(screenIds)));
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `group`) unless the group's screens are exactly
+         * `screenIds`, so a takeover's card plays on the screens it showed, whoever changed them meanwhile (#408).
+         */
+        membersAre: (groupId: string, screenIds: readonly string[]): Staged => {
+          const want = [...screenIds].sort().join(',');
+          const now = sql`COALESCE((SELECT group_concat(${m.screenId}, ',' ORDER BY ${m.screenId}) FROM ${m} WHERE ${m.orgId} = ${orgId} AND ${m.groupId} = ${groupId}), '')`;
+          const stale = async () => {
+            const held = await db
+              .select({ ok: sql<number>`${now} = ${want}` })
+              .from(s.organization)
+              .where(eq(s.organization.id, orgId))
+              .get();
+            return held?.ok ? undefined : 0;
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'group', 0, sql`${now} = ${want}`, stale)] };
         },
         /** Remove screens; ones not in the group are ignored. */
         removeMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
