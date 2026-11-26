@@ -109,12 +109,15 @@ export async function screenView(
     reportedManifestId: s.reportedManifestId,
     lastSeenAt: s.lastSeenAt,
     playerVersion: s.playerVersion,
+    playerChannel: s.playerChannel,
     displayOverride: override,
     state: screenState(stateInput(s, revoked, hb, afterMs), now),
     heartbeat: hb
       ? {
           at: hb.at,
           playerVersion: hb.player.version,
+          playerRelease: hb.player.release ?? null,
+          failedRelease: hb.failedRelease ?? null,
           activeManifestId: hb.manifest.active ?? null,
           filesMissing: hb.manifest.filesMissing,
           fallbackFrom: hb.manifest.fallbackFrom ?? null,

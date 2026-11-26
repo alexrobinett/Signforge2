@@ -18,6 +18,9 @@ describe('findDeviceScreen', () => {
       lastGoodManifestId: null,
       lastPhotos: null,
       displayOverrideJson: null,
+      // Every screen follows the stable player releases until it is made a canary (#628).
+      playerChannel: 'stable',
+      kind: 'device',
       credentials: [{ id: o.credential, secretHash: '0'.repeat(64), used: false }],
     });
   });

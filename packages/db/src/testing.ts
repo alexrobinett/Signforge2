@@ -494,3 +494,8 @@ export async function claimFileForSweep(db: D1Database, orgId: string, sha256: s
     .onConflictDoUpdate({ target: [schema.blobDeletes.orgId, schema.blobDeletes.sha256], set: claim })
     .run();
 }
+
+/** A player release as CI registers it (#628), on `channel`, for the device release endpoints' tests. */
+export async function seedPlayerRelease(db: D1Database, release: typeof schema.playerReleases.$inferInsert) {
+  await drizzle(db).insert(schema.playerReleases).values(release).run();
+}

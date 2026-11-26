@@ -455,11 +455,32 @@ function ScreenPage() {
               <dt className="text-muted-foreground">Player</dt>
               <dd className="text-meta">
                 {(screen.heartbeat?.playerVersion ?? screen.playerVersion) ? (
-                  <span className="font-mono">{screen.heartbeat?.playerVersion ?? screen.playerVersion}</span>
+                  <>
+                    <span className="font-mono">{screen.heartbeat?.playerVersion ?? screen.playerVersion}</span>
+                    {/* The release number its updates go by (#628), for a build the release workflow made. */}
+                    {screen.heartbeat?.playerRelease != null && (
+                      <>
+                        {' '}
+                        · release <span className="font-mono">{screen.heartbeat.playerRelease}</span>
+                      </>
+                    )}
+                  </>
                 ) : (
                   'none'
                 )}
               </dd>
+              {/* Which player releases its device installs (#628), and one its supervisor rolled back. */}
+              <dt className="text-muted-foreground">Updates</dt>
+              <dd>{screen.playerChannel === 'canary' ? 'Canary: each player release first' : 'Stable: player releases once promoted'}</dd>
+              {screen.heartbeat?.failedRelease && (
+                <>
+                  <dt className="text-muted-foreground">Rolled back</dt>
+                  <dd>
+                    Release <span className="font-mono">{screen.heartbeat.failedRelease.version}</span>:{' '}
+                    {screen.heartbeat.failedRelease.reason === 'not-alive' ? 'it never came up' : 'it stopped running'}, so the screen kept the one before
+                  </dd>
+                </>
+              )}
               <dt className="text-muted-foreground">Clock</dt>
               <dd>
                 {screen.heartbeat

@@ -1,7 +1,7 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
 import { MANIFEST_SCHEMA, MAX_SYNC_BLOBS, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_RESPONSE_BLOBS, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, seedPlayerRelease, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mintCredential } from '../src/device/credential';
@@ -174,6 +174,29 @@ describe('the heartbeat', () => {
     });
     // The device clock is an hour slow: the drift the server saw is an hour.
     expect(beat!.driftMs).toBe(3_600_000);
+  });
+
+  it('keeps the player release the device supervisor rolled back with the heartbeat, only one its channel was offered and only from a device (#628)', async () => {
+    const s = await setUp('sync-failed-release');
+    const release = (version: number, channel: 'canary' | 'stable') =>
+      seedPlayerRelease(env.DB, { version, sha256: String(version % 10).repeat(64), size: 1, manifest: '{}', signature: 'c2ln', channel });
+    await release(42, 'stable');
+    await release(43, 'canary');
+    const beat = async () => parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson)!.failedRelease;
+    await sync(s, syncBody({ failedRelease: { version: 42, reason: 'not-alive' } }));
+    expect(await beat()).toEqual({ version: 42, reason: 'not-alive' });
+    // Not reported again: it has installed a newer release, or the report is spent.
+    await sync(s, syncBody({ seq: 1 }));
+    expect(await beat()).toBeUndefined();
+    // A canary release on a stable screen, and a version no release has: never offered to it, so not kept.
+    await sync(s, syncBody({ seq: 2, failedRelease: { version: 43, reason: 'stopped' } }));
+    expect(await beat()).toBeUndefined();
+    await sync(s, syncBody({ seq: 3, failedRelease: { version: 99, reason: 'stopped' } }));
+    expect(await beat()).toBeUndefined();
+    // A browser screen has no supervisor to roll anything back.
+    await s.seed.scope.screens.update(s.seed.screen, { kind: 'browser' });
+    await sync(s, syncBody({ seq: 4, failedRelease: { version: 42, reason: 'not-alive' } }));
+    expect(await beat()).toBeUndefined();
   });
 
   it('takes a heartbeat from a player that reports every source it has seen, and stores at most MAX_SYNC_SOURCES', async () => {

@@ -22,6 +22,12 @@ export interface ScreenHeartbeat {
    * the pace only when new. Absent before the fast sync.
    */
   photos?: { held: number; missing: number; retried: boolean; ask: string[]; sent?: string[]; repeat?: string[] };
+  /**
+   * The player release the device supervisor last rolled back (#628), as the sync carried it: kept with the heartbeat,
+   * which every sync writes anyway, so a report costs no write of its own. The supervisor reports it on every beat
+   * until it installs a newer one.
+   */
+  failedRelease?: NonNullable<SyncRequest['failedRelease']>;
 }
 
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {
