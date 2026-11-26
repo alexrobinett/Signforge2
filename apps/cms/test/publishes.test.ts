@@ -50,6 +50,20 @@ describe('a rollout', () => {
     );
   });
 
+  it('counts screens in an outcome this page does not know, as a server newer than it sends, rather than leaving them out (#541)', () => {
+    // The API's word for one, deployed ahead of the CMS: this page's types cannot name it.
+    const newer = screen('Lobby', 'playing', { outcome: 'resting' as RolloutScreen['outcome'] });
+    const segs = segments({ revision: 15, restoresRevision: null }, [screen('Deli', 'playing'), newer], NOW);
+    expect(segs.map((s) => [s.outcome, s.count, s.names])).toEqual([
+      ['playing', 1, ['Deli']],
+      ['unknown', 1, ['Lobby']],
+    ]);
+    expect(segs[1]!.why).toBe('The server is newer than this page: reload it to see where they stand.');
+    expect(rolloutLabel({ revision: 15, restoresRevision: null }, segs, 2)).toBe(
+      'Rollout of v15: 1 playing v15, 1 in a state this page does not know, of 2 screens',
+    );
+  });
+
   it('calls a rollout complete once no screen is open: one playing and one revoked is, one still switching is not (#155)', () => {
     // As get_publish counts them: playing, replaced and revoked screens are settled, any other is open.
     expect(rolloutComplete({ screens: 2, open: 0 })).toBe(true);

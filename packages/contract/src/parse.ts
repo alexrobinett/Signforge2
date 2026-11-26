@@ -1,39 +1,24 @@
 /**
  * Each validator in `validate.ts` as a parser: the same check, but a value that passes comes back
- * typed, so a caller never casts what it has just checked. This file holds the contract's only
- * cast from a checked `unknown` to its shape.
+ * typed, so a caller never casts what it has just checked. The device messages are read by their declared shapes
+ * (`shape.ts`, #156) and come back as exactly the shape, any key they do not declare left out; the rest still pass
+ * the input itself through this file's cast until #156's next steps.
  */
-import type {
-  BrandKit,
-  DataSnapshot,
-  DeviceCommand,
-  DeviceSocketMessage,
-  DisplayHours,
-  PairPollResponse,
-  PairStartRequest,
-  PairStartResponse,
-  PreviewHostMessage,
-  ScreenManifest,
-  ServerSocketMessage,
-  SyncRequest,
-  SyncResponse,
-  TemplateManifest,
-  TemplateRuntimeReport,
-} from './shapes.ts';
+import type { BrandKit, DataSnapshot, DisplayHours, PreviewHostMessage, ScreenManifest, TemplateManifest, TemplateRuntimeReport } from './shapes.ts';
 import {
+  deviceCommandShape,
+  deviceSocketMessageShape,
   displayHoursProblems,
+  pairPollResponseShape,
+  pairStartRequestShape,
+  pairStartResponseShape,
+  serverSocketMessageShape,
+  syncRequestShape,
+  syncResponseShape,
   validateBrandKit,
   validateDataSnapshot,
-  validateDeviceCommand,
-  validateDeviceSocketMessage,
   validateManifest,
-  validatePairPollResponse,
-  validatePairStartRequest,
-  validatePairStartResponse,
   validatePreviewHostMessage,
-  validateServerSocketMessage,
-  validateSyncRequest,
-  validateSyncResponse,
   validateTemplateManifest,
   validateTemplateRuntimeReport,
 } from './validate.ts';
@@ -53,13 +38,13 @@ export const parseBrandKit = parser<BrandKit>(validateBrandKit);
 export const parseDisplayHours = parser<DisplayHours>(displayHoursProblems);
 export const parseManifest = parser<ScreenManifest>(validateManifest);
 export const parseDataSnapshot = parser<DataSnapshot>(validateDataSnapshot);
-export const parsePairStartRequest = parser<PairStartRequest>(validatePairStartRequest);
-export const parsePairStartResponse = parser<PairStartResponse>(validatePairStartResponse);
-export const parsePairPollResponse = parser<PairPollResponse>(validatePairPollResponse);
-export const parseDeviceCommand = parser<DeviceCommand>(validateDeviceCommand);
-export const parseSyncRequest = parser<SyncRequest>(validateSyncRequest);
-export const parseSyncResponse = parser<SyncResponse>(validateSyncResponse);
-export const parseServerSocketMessage = parser<ServerSocketMessage>(validateServerSocketMessage);
-export const parseDeviceSocketMessage = parser<DeviceSocketMessage>(validateDeviceSocketMessage);
+export const parsePairStartRequest = pairStartRequestShape.read;
+export const parsePairStartResponse = pairStartResponseShape.read;
+export const parsePairPollResponse = pairPollResponseShape.read;
+export const parseDeviceCommand = deviceCommandShape.read;
+export const parseSyncRequest = syncRequestShape.read;
+export const parseSyncResponse = syncResponseShape.read;
+export const parseServerSocketMessage = serverSocketMessageShape.read;
+export const parseDeviceSocketMessage = deviceSocketMessageShape.read;
 export const parsePreviewHostMessage = parser<PreviewHostMessage>(validatePreviewHostMessage);
 export const parseTemplateRuntimeReport = parser<TemplateRuntimeReport>(validateTemplateRuntimeReport);

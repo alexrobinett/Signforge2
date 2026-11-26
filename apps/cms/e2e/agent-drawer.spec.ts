@@ -122,7 +122,10 @@ test("nothing is asked while the org changes: a question then would be the last 
     const box = drawer.getByLabel('Ask about your screens and content');
     await expect(box).toHaveAttribute('readonly', '');
     await expect(drawer.getByRole('button', { name: 'Ask', exact: true })).toBeDisabled();
-    for (const question of await drawer.getByRole('list', { name: 'Questions to start with' }).getByRole('button').all()) await expect(question).toBeDisabled();
+    // There first: .all() does not wait, so the loop could pass over none (#495).
+    const questions = drawer.getByRole('list', { name: 'Questions to start with' }).getByRole('button');
+    await expect(questions).not.toHaveCount(0);
+    for (const question of await questions.all()) await expect(question).toBeDisabled();
     await box.press('Enter');
     await page.keyboard.press('ControlOrMeta+k');
     const menu = page.getByRole('dialog', { name: 'Command menu' });

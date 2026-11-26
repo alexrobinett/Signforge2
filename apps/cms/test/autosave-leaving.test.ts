@@ -3,7 +3,17 @@
 // test's held save may be in the count. The save is a fake the test answers; the clock is fake.
 import { expect, it, vi } from 'vitest';
 import { Refusal } from '../src/lib/tools';
-import { autosave, createVersionedDrafts, saveWaiting, savesWaiting, type Clock, type Drafts, type Saved } from '../src/state/versioned-draft';
+import {
+  autosave,
+  createVersionedDrafts,
+  noteSaved,
+  noteUnsaved,
+  saveWaiting,
+  savesWaiting,
+  type Clock,
+  type Drafts,
+  type Saved,
+} from '../src/state/versioned-draft';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 
@@ -84,5 +94,67 @@ it('a save that fails with no answer counts until tried again: closing the tab a
   await module.save('a');
   expect(savesWaiting()).toBe(true);
   module.drop('a');
+  expect(savesWaiting()).toBe(false);
+});
+
+it('a failed save of an org the tab has left no longer makes it ask before closing, and counts again back there (#479)', async () => {
+  let drafts: Drafts<{ name: string }> = {};
+  let org = 'org_a';
+  const clock: Clock = { now: () => 0, after: (_ms, run) => (setImmediate(run), () => {}) };
+  let ids = 0;
+  const module = createVersionedDrafts<{ name: string }>({
+    state: { read: () => drafts, write: (change) => (drafts = change(drafts)) },
+    save: async () => {
+      throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.');
+    },
+    makeId: () => `id_${++ids}`,
+    currentOrg: () => org,
+    clock,
+  });
+  module.edit('a', { orgId: 'org_a', record: 'spt_a', version: 1, edit: { name: '' } }, () => ({ name: 'Lunch' }));
+  await module.save('a');
+  expect(savesWaiting()).toBe(true);
+  // Switched away: org_a's edit cannot be saved here, so closing the tab loses nothing it could keep.
+  org = 'org_b';
+  expect(savesWaiting()).toBe(false);
+  org = 'org_a';
+  expect(savesWaiting()).toBe(true);
+  module.drop('a');
+  expect(savesWaiting()).toBe(false);
+});
+
+it('a field typed while its draft saves still counts once that save answers (#479)', async () => {
+  let drafts: Drafts<{ name: string }> = {};
+  const answers: ((saved: Saved<{ name: string }>) => void)[] = [];
+  const clock: Clock = { now: () => 0, after: (_ms, run) => (setImmediate(run), () => {}) };
+  let ids = 0;
+  const module = createVersionedDrafts<{ name: string }>({
+    state: { read: () => drafts, write: (change) => (drafts = change(drafts)) },
+    save: () => new Promise((resolve) => answers.push(resolve)),
+    makeId: () => `id_${++ids}`,
+    currentOrg: () => 'org_a',
+    clock,
+  });
+  module.edit('a', { orgId: 'org_a', record: 'spt_a', version: 1, edit: { name: '' } }, () => ({ name: 'Lunch' }));
+  const first = module.save('a');
+  await settle();
+  // Typed while the first is on its way, and not sent yet.
+  module.edit('a', { orgId: 'org_a', record: 'spt_a', version: 1, edit: { name: '' } }, () => ({ name: 'Lunch specials' }));
+  answers[0]!({ version: 2 });
+  await first;
+  expect(drafts.a).toMatchObject({ edit: { name: 'Lunch specials' } });
+  expect(savesWaiting()).toBe(true);
+  module.drop('a');
+  expect(savesWaiting()).toBe(false);
+});
+
+it('an edit outside the drafts, noted unsaved, counts while it can be saved, and not once saved (#479)', () => {
+  let here = true;
+  noteUnsaved('ai-choices:org_a', () => here);
+  expect(savesWaiting()).toBe(true);
+  here = false;
+  expect(savesWaiting()).toBe(false);
+  here = true;
+  noteSaved('ai-choices:org_a');
   expect(savesWaiting()).toBe(false);
 });

@@ -34,8 +34,7 @@
 import {
   MAX_SYNC_BLOBS,
   MAX_SYNC_SOURCES,
-  SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
+  THIS_PLAYER,
   isDisplayOutput,
   parseSyncResponse,
   type DeviceCommand,
@@ -69,6 +68,7 @@ import { activeOverride, savedOverride, setOverride, wakeable } from './override
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retractPlay } from './plays';
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
+import { bundleHangs } from './bundles';
 import { Slot, warmBundles } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
@@ -220,6 +220,10 @@ const state = {
   },
   get data(): Record<string, string> {
     return dataStatus();
+  },
+  /** Times the bundle worker did not answer in time and was ended (bundles.ts): a healthy parse never counts (#577). */
+  get bundleHangs(): number {
+    return bundleHangs();
   },
   /** Live values and snapshots refused per data source: a broken feed shows here. */
   get dataRejected(): Record<string, number> {
@@ -866,7 +870,7 @@ async function apiSync(): Promise<void> {
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
-    player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
+    player: { version: __SF_PLAYER_VERSION__, ...THIS_PLAYER },
     manifest: {
       ...(manifest ? { active: manifest.id } : {}),
       filesMissing: filesMissing(),

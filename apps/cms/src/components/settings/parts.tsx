@@ -70,8 +70,11 @@ export function useRunning(scope: SettingsScope): string | undefined {
   return useAppStore((s) => runningIn(s.settings, scope));
 }
 
-/** The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made. */
-export function ActionError({ at }: { at: string }) {
+/**
+ * The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made, or,
+ * with `onRetry`, Try again for one that got no answer or was refused, its edit still here (#479).
+ */
+export function ActionError({ at, onRetry }: { at: string; onRetry?: () => void }) {
   const orgId = useOrgOnScreen();
   // One value per selector: errorOf builds the error of a form's save afresh each time.
   const text = useAppStore((s) => errorOf(s.settings, at, orgId)?.text);
@@ -83,6 +86,11 @@ export function ActionError({ at }: { at: string }) {
       {stale && (
         <Button type="button" variant="outline" size="sm" onClick={() => void reload(orgId ?? null, at)}>
           <RotateCwIcon aria-hidden /> Reload
+        </Button>
+      )}
+      {text && !stale && onRetry && (
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Try again
         </Button>
       )}
     </div>

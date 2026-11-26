@@ -3,7 +3,8 @@
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
 import {
-  SUPPORTED_PROTOCOLS,
+  playsProtocol,
+  THIS_PLAYER,
   isNewsImage,
   rowAsset,
   sampleAsset,
@@ -17,7 +18,8 @@ import {
   type TemplateManifest,
   type TemplateMessage,
 } from '@signforge/contract';
-import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
@@ -183,22 +185,22 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
   return themeCache.theme;
 }
 
-type Frames = ReturnType<typeof containedFrames>;
-
 /**
- * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a 400 kB
- * bundle again cost about 150 ms of a prepare on a Pi 4 (spike/pi-perf/RESULTS.md, #213): once per
- * bundle, not per play. By hash, so a new bundle is a new entry, never another's. Held as promises,
- * so a prepare and `warmBundles` reading one bundle at once share the read.
+ * `containedFrames` for each bundle of the manifest last prepared, by bundle hash, parsed in a worker
+ * (`parseBundle`, #561). Reading a 400 kB bundle again cost about 150 ms of a prepare on a Pi 4
+ * (spike/pi-perf/RESULTS.md, #213): once per bundle, not per play. By hash, so a new bundle is a new
+ * entry, never another's. Held as promises, so a prepare and `warmBundles` reading one bundle at once
+ * share the read. `unreadable`: the bundles `warmBundles` failed to read for this manifest, which it
+ * then leaves to the prepare that needs one rather than trying again at every play.
  */
-let framesCache: { manifest: string; frames: Map<string, Promise<Frames>> } | undefined;
+let framesCache: { manifest: string; frames: Map<string, Promise<Frames>>; unreadable: Set<string> } | undefined;
 
 /** `framesCache`, made `manifest`'s if it is another's: what both use is kept. */
 function cacheOf(manifest: ScreenManifest): NonNullable<typeof framesCache> {
   if (framesCache?.manifest !== manifest.id) {
     const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
     const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
-    framesCache = { manifest: manifest.id, frames: new Map(kept) };
+    framesCache = { manifest: manifest.id, frames: new Map(kept), unreadable: new Set() };
   }
   return framesCache;
 }
@@ -207,7 +209,7 @@ function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
   const cache = cacheOf(manifest);
   let frames = cache.frames.get(sha);
   if (!frames) {
-    const read = getFile(sha).then(async (blob) => containedFrames(await blob.text()));
+    const read = getFile(sha).then(parseBundle);
     cache.frames.set(sha, (frames = read));
     // A read that failed is not kept: the next prepare tries again. From the cache as it is then,
     // which a manifest prepared meanwhile has replaced, carrying this read over.
@@ -218,43 +220,49 @@ function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
   return frames;
 }
 
-/** The manifest whose bundles `warmBundles` is reading, if it is. */
-let warming: string | undefined;
+/** The read-ahead running, if one is: the manifest it reads for, and the run, so one that a later run replaced stops. */
+let warming: { manifest: string; run: object } | undefined;
 
 /**
  * Read the bundles of `manifest` not read yet, one at a time when the page is idle, those of the
  * spots in `first` first: while a spot plays, so a template's first prepare does not pay for it
  * (#232). On a Pi 4 a 400 kB bundle's first read and parse took 75 to 210 ms of its first prepare,
- * of 450 to 610 in all; the template plays in its own process. Each read and parse is one task on
- * the player's main thread, started when it is idle. `manifest` is the one playing, so the cache is
+ * of 450 to 610 in all; the template plays in its own process. Each starts when the page is idle and
+ * parses in the bundle worker (`parseBundle`). `manifest` is the one playing, so the cache is
  * made its own here, whatever kind of spot came first; it stops once another manifest has been
  * prepared. Not in a browser without `requestIdleCallback` (Safari): the budget it serves is the
  * Pi's, and a timer could start a parse in the middle of a prepare.
  */
 export function warmBundles(manifest: ScreenManifest, first: readonly string[]): void {
-  // Each play asks again: one read-ahead a manifest at a time.
-  if (typeof requestIdleCallback !== 'function' || warming === manifest.id) return;
-  warming = manifest.id;
+  // Each play asks again: one read-ahead a manifest at a time. Another manifest's in between ends this
+  // one's run, so a manifest that flaps back (A, B, A) within one idle wait starts one run, not two.
+  if (typeof requestIdleCallback !== 'function' || warming?.manifest === manifest.id) return;
+  const run = {};
+  warming = { manifest: manifest.id, run };
   cacheOf(manifest);
   const firstBundles = first.flatMap((id) => {
     const spot = manifest.spots[id];
     const html = spot?.kind === 'template' && manifest.templates[spot.template]?.html;
     return html ? [html] : [];
   });
-  // Each once: a file that cannot be read is left to the prepare that needs it.
+  // Each once: a file that cannot be read is left to the prepare that needs it, at this play and the next.
   const left = new Set([...firstBundles, ...Object.values(manifest.templates).map((t) => t.html)]);
   const done = () => {
-    if (warming === manifest.id) warming = undefined;
+    if (warming?.run === run) warming = undefined;
   };
+  // Another manifest prepared while this waited: reading for this one would put its cache back.
+  const ours = () => warming?.run === run && framesCache?.manifest === manifest.id;
   const next = () => {
     const cache = framesCache;
-    const sha = cache?.manifest === manifest.id ? [...left].find((s) => !cache.frames.has(s)) : undefined;
-    if (!sha) return done();
+    const sha = ours() && cache ? [...left].find((s) => !cache.frames.has(s) && !cache.unreadable.has(s)) : undefined;
+    if (!sha || !cache) return done();
     left.delete(sha);
     requestIdleCallback(() => {
-      // Another manifest prepared while this waited: reading for this one would put its cache back.
-      if (framesCache?.manifest === manifest.id) void framesFor(manifest, sha).then(next, next);
-      else done();
+      if (!ours()) return done();
+      void framesFor(manifest, sha).then(next, () => {
+        cache.unreadable.add(sha);
+        next();
+      });
     });
   };
   next();
@@ -504,7 +512,7 @@ export class Slot {
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
-    if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
+    if (!playsProtocol(THIS_PLAYER, protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const locale = screenLocale(manifest);
     const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
     if (report) reportRejected(rejected);

@@ -6,16 +6,14 @@
  * A manifest's id is the hash of its body, so the object at a manifest key never changes and
  * its parsed summary can be kept for the life of the isolate.
  */
-import { baseTemplateHtml, type ScreenManifest } from '@signforge/contract';
+import { baseTemplateHtml, type ManifestNeeds, manifestNeeds, type ScreenManifest } from '@signforge/contract';
 import type { DeviceScreen } from '@signforge/db';
 import { type BoundField, manifestBoundFields } from '@signforge/player-core';
 import { manifestKey } from '../r2';
 
-export interface ManifestSummary {
+/** A manifest as a screen's sync reads it: what it needs of a player (`manifestNeeds`), and what the screen may fetch. */
+export interface ManifestSummary extends ManifestNeeds {
   id: string;
-  schema: number;
-  /** The frame protocol of each template, 1 where a bundle names none. */
-  protocols: number[];
   /** File hash to content type. */
   files: Map<string, string>;
   /** Hashes of base templates' HTML, which may live under `sys/b/`. */
@@ -31,8 +29,7 @@ const cache = new Map<string, ManifestSummary>();
 function summarise(id: string, m: ScreenManifest): ManifestSummary {
   return {
     id,
-    schema: m.schema,
-    protocols: [...new Set(Object.values(m.templates ?? {}).map((t) => t.manifest?.protocol ?? 1))],
+    ...manifestNeeds(m),
     files: new Map(Object.entries(m.files ?? {}).map(([sha, f]) => [sha, f.type])),
     baseHtml: baseTemplateHtml(m),
     dataSources: new Set(Object.keys(m.dataSources ?? {})),

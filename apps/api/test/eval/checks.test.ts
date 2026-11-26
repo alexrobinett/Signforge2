@@ -17,6 +17,14 @@ describe("a streamed answer's usage and calls", () => {
     expect(used).toEqual({ toolUses: ['read'], input: 12 + 900 + 90, output: 40 });
   });
 
+  it("keeps message_start's cache fields when message_delta sends them as null (review of #566)", () => {
+    const used = streamed([
+      { type: 'message_start', message: { usage: { input_tokens: 10, cache_read_input_tokens: 900, output_tokens: 1 } } },
+      { type: 'message_delta', usage: JSON.parse('{"input_tokens":12,"cache_read_input_tokens":null,"output_tokens":40}') },
+    ]);
+    expect(used).toEqual({ toolUses: [], input: 12 + 900, output: 40 });
+  });
+
   it("takes message_start's usage when message_delta has none", () => {
     expect(streamed([{ type: 'message_start', message: { usage: { input_tokens: 7, output_tokens: 2 } } }, { type: 'message_delta' }])).toEqual({
       toolUses: [],

@@ -39,6 +39,21 @@ interface TypeDef {
 const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
+ * A publish at summary detail: who made it, when, and how it rolled out. Read by id, its `rollout` names each screen it
+ * has not reached yet, with where it stands on it and its state now, so an agent asking which screens it did not reach
+ * needs no full read (#541); those playing it are only counted (`playing`), so the summary stays small however many
+ * screens took it (review of #569). full has every screen, with its manifest, files missing, wake time and last sync.
+ */
+export function publishSummary(row: Row): Row {
+  const pick = ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'] as const;
+  const picked = Object.fromEntries(pick.map((k) => [k, row[k]]));
+  // A listed publish has no rollout: none is given, as its list gives none.
+  if (!Array.isArray(row.rollout)) return picked;
+  const waiting = row.rollout.filter((s) => isRow(s) && s.outcome !== 'playing').filter(isRow);
+  return { ...picked, rollout: waiting.map((s) => ({ screenId: s.screenId, name: s.name, outcome: s.outcome, state: s.state })) };
+}
+
+/**
  * A template's summary: its key and name, and its newest approved version's id, description, orientations and field
  * names, which is what choosing one and filling a spot need. Its versions' whole manifests and check reports are `full`.
  */
@@ -86,7 +101,7 @@ export const READ_TYPES = {
       "Nothing reaches a screen until the organization has a default playlist: when it has none, and the regular schedule entries a publish makes live on every screen at all hours all play one playlist, that playlist becomes the default (madeDefault); a takeover or a narrower entry never sets it, so set one with set_default_playlist first, or its screens get nothing (each listed with that problem). A publish removes the deleted schedule entries it covers (all of them, or the pinned ones) and the takeovers that have ended, listed in removed. A pinned draft that needs no promotion is still checked: one changed since fails the publish as a conflict. A spot it would promote that still holds its template's sample text (its sampleFields) refuses the whole publish with sample_text before any screen is compiled, details { spots: [{ id, name, version, fields }] }: replace the text, or a person publishes again with allowSample naming those spots, versions and fields. A screen a publish cannot compile keeps what it plays and is listed with its problems. A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. unreachable: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. An outcome is where the screen stands on this publish; state is the screen's state now, { kind, reason } as read screen_status gives it: a screen playing it may since be unreachable, and one unreachable before it took it reads needs_you, reason behind. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
     list: { tool: 'list_publishes', items: 'publishes' },
     get: { tool: 'get_publish', id: 'publishId', item: 'publish', maxIds: 7, rename: { screens: 'rollout' }, latest: true },
-    summary: ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'],
+    summary: publishSummary,
   },
   publish_request: {
     about: 'requests to publish drafts, and their decisions',
@@ -281,7 +296,7 @@ const typeField = (types: readonly ReadType[]) => z.enum(types).describe('What t
 /** `read`'s description for `types`: one line each, so a model picks a type without describing it first. */
 export const readDescription = (types: readonly ReadType[]) =>
   [
-    "Read anything in the organization. Give its type, and ids to read those, or a filter, to list a page of them; pass next as cursor for the next page. detail is summary by default: the fields most tasks need, with names beside ids; full has every field, and with ids what the type's own page shows (a screen's credentials and events, a publish's rollout, a data source's snapshot). Read with detail full before you change a thing whole (a spot's data). fields picks fields. A wrong filter or field is refused with the right ones. Types:",
+    "Read anything in the organization. Give its type, and ids to read those, or a filter, to list a page of them; pass next as cursor for the next page. detail is summary by default: the fields most tasks need, with names beside ids; full has every field, and with ids what the type's own page shows (a screen's credentials and events, a data source's snapshot). Read with detail full before you change a thing whole (a spot's data). fields picks fields. A wrong filter or field is refused with the right ones. Types:",
     ...types.map((t) => `${t}: ${defOf(t).about}.`),
     'Returns { type, items, next }.',
   ].join(' ');

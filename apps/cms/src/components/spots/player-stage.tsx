@@ -75,7 +75,8 @@ function Toggle<T extends string>({
 export const EDITOR = '@container flex min-h-(--editor-height) flex-col overflow-clip rounded-xl border';
 export const EDITOR_ROW = 'flex flex-1 flex-col @3xl:flex-row';
 export const EDITOR_FORM = 'flex min-w-0 flex-col border-b bg-card @3xl:w-sm @3xl:shrink-0 @3xl:border-r @3xl:border-b-0';
-export const STAGE_COLUMN = 'flex min-w-0 flex-1 flex-col bg-stage @3xl:sticky @3xl:top-0 @3xl:h-(--editor-height) @3xl:self-start';
+/** The stage's column: sticky under the phone's top bar (3.5rem, below lg), so at 832-1023 px its toggles stay in view (#495). */
+export const STAGE_COLUMN = 'flex min-w-0 flex-1 flex-col bg-stage @3xl:sticky @3xl:top-14 @3xl:h-(--editor-height) @3xl:self-start lg:@3xl:top-0';
 
 export function PlayerStage({
   target,

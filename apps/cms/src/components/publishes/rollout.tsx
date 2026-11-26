@@ -2,7 +2,7 @@
  * A publish's rollout (canvas boards Screens A and Ideas 5-6, kit RolloutBar): a bar of where its
  * screens stand, and a legend that says why each waiting screen waits, never colour alone.
  */
-import { ORDER, OUTCOME_COLOR, rolloutLabel, segments, type PublishView, type RolloutScreen } from '~/lib/publishes';
+import { OUTCOME_COLOR, PARTS, rolloutLabel, segments, type PublishView, type RolloutScreen } from '~/lib/publishes';
 import { cn } from '~/lib/utils';
 
 /**
@@ -15,7 +15,7 @@ export function RolloutBar({ publish, screens, now, className }: { publish: Publ
   const counts = new Map(segs.map((s) => [s.outcome, s.count]));
   return (
     <div role="img" aria-label={rolloutLabel(publish, segs, screens.length)} className={cn('flex h-2.5 overflow-hidden rounded-full bg-muted', className)}>
-      {ORDER.map((outcome) => (
+      {PARTS.map((outcome) => (
         <span
           key={outcome}
           className="basis-0 shadow-[inset_2px_0_0_var(--muted)] transition-[flex-grow] duration-300 ease-out first:shadow-none"

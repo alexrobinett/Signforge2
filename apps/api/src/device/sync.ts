@@ -10,6 +10,7 @@
  * ended, so each (hour, spot) row is written about once.
  */
 import {
+  canPlay,
   MAX_SYNC_REQUEST_BYTES,
   MAX_SYNC_RESPONSE_BLOBS,
   MAX_SYNC_SOURCES,
@@ -17,7 +18,6 @@ import {
   type DataSnapshot,
   type DeviceCommand,
   type DisplayOverride,
-  type SyncRequest,
   type SyncResponse,
 } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
@@ -44,11 +44,6 @@ const ASK_KEPT = 16;
 const FUTURE_SLACK_MS = 3_600_000;
 
 const refuse = (status: number, error: string) => new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
-
-/** Whether the screen's player can play `m`: its schema, and every template's frame protocol. */
-function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
-  return (!Number.isInteger(m.schema) || player.manifestSchemas.includes(m.schema)) && m.protocols.every((p) => player.protocols.includes(p));
-}
 
 /**
  * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it
@@ -224,25 +219,14 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const more = missing > asked.length;
   const soon = more && (fetched || fresh > asked.length || retry);
 
-  const { player, manifest: m, display: d, clock } = req;
-  // Only the contract's fields, copied one by one: the parser lets unknown keys through, and the
-  // device lookup reads this row with json_extract, which a deeply nested unknown key would break.
+  // The parser gives back only the contract's fields (#156): the device lookup reads this row with json_extract, which
+  // a deeply nested unknown key would break.
   const heartbeat: ScreenHeartbeat = {
     at: now,
-    player: { version: player.version, manifestSchemas: [...player.manifestSchemas], protocols: [...player.protocols] },
-    manifest: {
-      filesMissing: m.filesMissing,
-      ...(m.active !== undefined && { active: m.active }),
-      ...(m.fallbackFrom !== undefined && { fallbackFrom: m.fallbackFrom }),
-      ...(m.lastGood !== undefined && { lastGood: m.lastGood }),
-    },
-    display: {
-      on: d.on,
-      ...(d.methods !== undefined && { methods: { ...d.methods } }),
-      ...(d.override !== undefined && { override: { state: d.override.state, until: d.override.until } }),
-      ...(d.output !== undefined && { output: { mode: d.output.mode, resets: d.output.resets } }),
-    },
-    clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
+    player: req.player,
+    manifest: req.manifest,
+    display: req.display,
+    clock: req.clock,
     driftMs: now - Date.parse(req.deviceTime),
     // A player before gh-45 reports every source seen since it started: kept to a bounded row.
     dataRejected: Object.fromEntries(Object.entries(req.dataRejected ?? {}).slice(0, MAX_SYNC_SOURCES)),
@@ -267,7 +251,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     fallbackFrom: req.manifest.fallbackFrom ?? null,
     active: req.manifest.active,
     // The heartbeat was built when it read `active`: the screen's clock then, corrected. An untrusted one cannot be compared.
-    ...(clock.trusted && { observedAt: Date.parse(req.deviceTime) + clock.offsetMs }),
+    ...(req.clock.trusted && { observedAt: Date.parse(req.deviceTime) + req.clock.offsetMs }),
     epoch: req.epoch,
     seq: req.seq,
     counts,

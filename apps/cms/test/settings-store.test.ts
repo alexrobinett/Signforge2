@@ -725,6 +725,17 @@ describe('the org name and the AI version, saved on change (review of #466)', ()
     expect(auth.organization.update.mock.calls.map((c) => c[0].data.name)).toEqual(['Northside Diner', 'Northside']);
   });
 
+  it("a name put back after another owner's rename is sent: the page's name is the one it reads (#479)", async () => {
+    auth.organization.update.mockResolvedValue(ok);
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    // Another owner renames it "Theirs", which the page reads; this tab puts "Mine" back.
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Theirs' });
+    expect(auth.organization.update.mock.calls.map((c) => c[0].data.name)).toEqual(['Mine', 'Mine']);
+  });
+
   it('after the key is removed and saved again, a model choice builds on the provider as read, not a version from before', async () => {
     replies.push(
       { status: 200, body: { provider: { version: 5 } } },
@@ -741,6 +752,30 @@ describe('the org name and the AI version, saved on change (review of #466)', ()
     await store.getState().saveAiKey(A, { provider: 'anthropic', apiKey: 'sk-new', baseUrl: '', acceptsImages: false, jsonSchemaOutput: false });
     await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-2', capableModel: '', dailyTurnCeiling: '' }, 1);
     expect(calls.at(-1)).toMatchObject({ name: 'save_ai_provider', input: { fastModel: 'fast-2', ifVersion: 1 } });
+  });
+
+  it('a refused key save keeps the version this tab made: the next choice builds on it, with no false conflict (#479)', async () => {
+    replies.push(
+      { status: 200, body: { provider: { version: 5 } } },
+      { status: 400, body: { error: 'invalid_input', message: 'That key is not valid.' } },
+      { status: 200, body: { provider: { version: 6 } } },
+    );
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    await store.getState().saveAiKey(A, { provider: 'anthropic', apiKey: 'sk-bad', baseUrl: '', acceptsImages: false, jsonSchemaOutput: false });
+    // The page still shows version 4, which this tab's own choice moved to 5: the next choice sends 5.
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-2', capableModel: '', dailyTurnCeiling: '' }, 4);
+    expect(calls.at(-1)).toMatchObject({ name: 'save_ai_provider', input: { fastModel: 'fast-2', ifVersion: 5 } });
+  });
+
+  it("forgets an org's quiet Saved times when the tab leaves it, and keeps the account's own (#479)", async () => {
+    replies.push({ status: 200, body: { provider: { version: 5 } } });
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    store.setState((s) => ({ settings: { ...s.settings, savedAt: { ...s.settings.savedAt, profile: 1 } } }));
+    expect(store.getState().settings.savedAt).toEqual({ choices: expect.any(Number), profile: 1 });
+    store.getState().forgetOrgSettings();
+    expect(store.getState().settings.savedAt).toEqual({ profile: 1 });
   });
 
   it('display hours the page marks are not sent with the next change', async () => {

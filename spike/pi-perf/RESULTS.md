@@ -1315,6 +1315,37 @@ Of the 300 ms or so between a kit template's first prepare and its later ones, t
 - **A prepare that starts while a read runs waits for it**: a spot of about 5 s or less, whose successor loads at once. Running `containedFrames` in a worker would take it off the main thread; not done here.
 - **The page's first prepare is unchanged** (no spot plays before it to read ahead under): a kit template as the first spot after a page load took 432-558 ms before (one 948) and 455-542 ms after, landscape and portrait together. That is the cold-start cost left: its bundle's first parse and a new template process. Its bundle could be smaller (only the chosen look's fonts, as separate resources; a look-kit change, #232), and the parse itself is the containment check, which this does not touch.
 
+## Template bundles parsed in a worker (issue #561, 2026-11-26)
+
+The read-ahead of #232 parsed each bundle (`containedFrames`) as one 65 to 250 ms task on the player page's main thread; the frame monitor counted it as dropped `play` frames in the first seconds after a page load, and a prepare that started meanwhile waited for it. Now the parse runs in a worker, one for the page (`packages/player/src/bundles.ts`), started as the page loads; a parse asked for before it is ready (the page's first prepare) runs on the page. Master (`83e3f548`) against the branch, served beside the deployed player with the supervisor stopped while measured, landscape, ABBA.
+
+**The first 12 s after a fresh page load**, nothing reset (`room-status+announcement+countdown+info-frame`, cut, three loads a build per order):
+
+| Build | Frame monitor, playing | Stalls while playing | Loading next | Page's first prepare |
+| --- | --- | --- | --- | --- |
+| before | 0.62-2.52% | 50-133 ms, one to three a load | 18.8-28.6% | 438-566 ms |
+| after | 0.00% in all six | none | 7.7-11.3% | 508-558 ms |
+
+- **The read-ahead no longer stalls the player page.** Its parses run in the worker; the only stalls left are the prepares' own (67 ms at most).
+- **The page's first prepare is about 40 ms slower by median** (524 against 482 ms), parsed on the page as before, while the worker loads beside it (157 kB of script, compiled on another core). It stays within the cold-start budget proposed for that prepare (about 600 ms, `docs/template-spec.md`). A first version that waited for the worker took 576 to 845 ms.
+
+**A kit template's first prepare when `clock` plays first** (fresh page loads): the same, as the read-ahead had already done the parse: room-status 265-283 ms in both builds, announcement 362-392 before and 362-379 after; `clock`, the page's first prepare, 282-322 before and 308-349 after.
+
+**From 10 s in** (`isolate.py 60 cut`, the same four): the same in both builds, as the read-ahead is done by then. Overall 1.17, 0.39% before, 0.47, 0.39% after; loading next 11.3, 11.7% against 12.8, 13.1%; playing 0.86, 0.03% against 0.09, 0.00%.
+
+## A parse inside the bundle worker (issue #577, 2026-11-26)
+
+The worker's hang limit (`HUNG_MS`, 750 ms in `packages/player/src/bundles.ts`) was set from the page's main-thread parse (65 to 250 ms). This times the worker itself. Master `b820dd9e`'s player, with a measuring build's timing hooks, served beside the deployed one with the supervisor and soak logger stopped. Each run: a fresh page load playing `clock` (the static content, its twelve templates), 20 s to settle, then the two largest bundles (Info frame, 403,207 bytes, and Room status, 401,771) read from the file cache and parsed through `parseBundle`: ten times one alone, then ten pairs posted together, one of each pair waiting on the other (the worker reads each Blob before it parses, so either may be answered first). Times are from the post to the answer, on the page's clock. Three runs as the player runs (the read-ahead had already used the worker), three with the read-ahead off (`requestIdleCallback` removed), so the first parse is the worker's first.
+
+| | Alone | A pair: answered first | A pair: answered second |
+| --- | --- | --- | --- |
+| worker warmed by the read-ahead | 40-87 ms (the first of a run 76-83) | 41-49 ms | 79-103 ms |
+| worker's first parses | 41-75 ms (the first of a run 72-75) | 41-52 ms | 87-103 ms |
+
+- **Every read was answered by the worker, and none hung** (180 reads, `__sf.bundleHangs` 0).
+- **750 ms has the margin**: the slowest answer, a read queued behind another, took 103 ms, about a seventh of it. A read would need six or seven 400 kB parses ahead of it to reach the limit; the player has at most two in flight (a prepare and the read-ahead's one).
+- **The worker parses a 400 kB bundle in about 45 ms**, against 65 to 250 ms for the page's main thread at a prepare (#232): it parses with nothing else on its thread.
+
 ## The template set on master (issue #203, 2026-11-26)
 
 Every base template at master `c08fbb3f` (after the motion refresh, #501 and #527, and the read-ahead of #555), each in every look: the look kit's four (Pop, Poster, Night, Corporate) for Announcement, Countdown, Info frame, News and Room status; Alert's four severities; Menu board's two themes; Agenda, Clock, C-store promo, Photo promo and Weather as they come. 31 spots per orientation.

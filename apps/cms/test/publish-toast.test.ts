@@ -700,6 +700,10 @@ describe('sample text the server refuses (#360)', () => {
     shown.org = 'org_2';
     expect(await store.getState().publishTogether(ORG, [{ kind: 'schedule_entry', id: 'sch_breakfast' }])).toBe(false);
     expect(callTool).not.toHaveBeenCalled();
+    // Said, as the sidebar's Publish says it, not refused in silence (#495).
+    expect(toast.getToasts().findLast((t) => 'title' in t && t.title === 'Not published')).toMatchObject({
+      description: 'The organization is changing. Publish once it shows.',
+    });
   });
 
   it('says not published when the publish was held back: no publish was made', async () => {

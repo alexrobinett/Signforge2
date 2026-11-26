@@ -42,6 +42,8 @@ export type Action =
 
 export interface RequestRecord {
   path: string;
+  /** The request's method: a CORS preflight (`OPTIONS`) is recorded as a request to its path too. */
+  method: string;
   status: number;
   ifNoneMatch?: string;
   /** When the request arrived, `Date.now()`. */
@@ -238,7 +240,14 @@ export class FixtureServer {
     const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
     const inm = req.headers['if-none-match'];
     const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-    const rec: RequestRecord = { path, status: 0, at: Date.now(), ...(inm ? { ifNoneMatch: String(inm) } : {}), ...(bearer ? { bearer } : {}) };
+    const rec: RequestRecord = {
+      path,
+      method: req.method ?? 'GET',
+      status: 0,
+      at: Date.now(),
+      ...(inm ? { ifNoneMatch: String(inm) } : {}),
+      ...(bearer ? { bearer } : {}),
+    };
     this.requests.push(rec);
     res.on('close', () => {
       if (!res.writableFinished) rec.abortedAt = Date.now();
@@ -431,7 +440,7 @@ export class FixtureServer {
   /** A minimal WebSocket server: text frames, close, and `ping` answered with `pong`. */
   private upgrade(req: IncomingMessage, socket: Socket): void {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
-    const rec: RequestRecord = { path, status: 101, at: Date.now() };
+    const rec: RequestRecord = { path, method: req.method ?? 'GET', status: 101, at: Date.now() };
     this.requests.push(rec);
     const rule = this.rules.find((r) => r.match.test(path));
     const key = req.headers['sec-websocket-key'];
