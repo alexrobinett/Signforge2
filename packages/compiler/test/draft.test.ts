@@ -22,18 +22,18 @@ const photo: DraftAsset = {
   type: 'image/jpeg',
   size: 2000,
   renditions: [
-    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000, sample: null },
-    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: null },
+    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000, width: 1920, height: 1080, sample: null },
+    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, width: 3413, height: 1920, sample: null },
   ],
 };
 const clip: DraftAsset = { kind: 'video', status: 'verified', sha256: sha('d'), type: 'video/mp4', size: 9000, renditions: [] };
 
-/** An org with the promo template (approved), a photo and a clip; `assets` overrides them by id. */
-function reads(assets: Record<string, DraftAsset | undefined> = {}): DraftReads {
+/** An org with the promo template (approved), a photo and a clip; `assets` overrides them by id, `manifest` the template's. */
+function reads(assets: Record<string, DraftAsset | undefined> = {}, manifest = promo): DraftReads {
   const all: Record<string, DraftAsset | undefined> = { photo, clip, ...assets };
   return {
     asset: (id) => all[id],
-    templateVersion: (id) => (id === 'tpv_promo' ? { key: 'base/promo@1.0.0', manifest: promo, html: sha('a'), size: 1000, status: 'approved' } : undefined),
+    templateVersion: (id) => (id === 'tpv_promo' ? { key: 'base/promo@1.0.0', manifest, html: sha('a'), size: 1000, status: 'approved' } : undefined),
   };
 }
 
@@ -137,13 +137,57 @@ describe('spotFromDraft', () => {
       ...photo,
       renditions: [
         photo.renditions[0]!,
-        { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: { sha256: sha('e'), size: 300 } },
+        { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, width: 3413, height: 1920, sample: { sha256: sha('e'), size: 300 } },
       ],
     };
     const into = { templates: {}, files: {} };
     const { spot } = spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'portrait', reads({ photo: sampled }), into);
     expect(spot).toMatchObject({ file: sha('c') });
     expect(into.files).toEqual({ [sha('c')]: { size: 1500, type: 'image/jpeg', sample: sha('e') }, [sha('e')]: { size: 300, type: 'image/png' } });
+  });
+
+  describe("a portrait screen's rendition, by the box the field declares (#224)", () => {
+    const boxed = (portraitBox: { w: number; h: number }) => ({ ...promo, fields: { ...promo.fields, photo: { type: 'image' as const, label: 'Photo', portraitBox } } });
+    /** The file a portrait screen gets for the template's photo. */
+    const portraitFile = (manifest = promo, asset = photo) => {
+      const { spot } = spotFromDraft(
+        draft({ kind: 'template', templateVersionId: 'tpv_promo', assets: { photo: 'photo' } }),
+        'portrait',
+        reads({ photo: asset }, manifest),
+        { templates: {}, files: {} },
+      );
+      return spot?.kind === 'template' ? spot.assets.photo : undefined;
+    };
+
+    it('is the landscape one when it covers the box with fewer pixels', () => {
+      expect(portraitFile(boxed({ w: 1120, h: 910 }))).toBe(sha('b'));
+    });
+
+    it('is the landscape one drawn at most 1.25 times its size, as Announcement draws it with elements off', () => {
+      expect(portraitFile(boxed({ w: 1120, h: 1230 }))).toBe(sha('b'));
+      expect(portraitFile(boxed({ w: 1120, h: 1350 }))).toBe(sha('b'));
+    });
+
+    it('is the portrait one with no box, or a box the landscape one covers only past 1.25 times', () => {
+      expect(portraitFile()).toBe(sha('c'));
+      expect(portraitFile(boxed({ w: 1080, h: 1351 }))).toBe(sha('c'));
+    });
+
+    it("is the portrait one for a tall photo, whose landscape rendition is the larger", () => {
+      const tall: DraftAsset = {
+        ...photo,
+        renditions: [
+          { ...photo.renditions[0]!, width: 1920, height: 2560 },
+          { ...photo.renditions[1]!, width: 1440, height: 1920 },
+        ],
+      };
+      expect(portraitFile(boxed({ w: 1120, h: 910 }), tall)).toBe(sha('c'));
+    });
+
+    it('is its own for an SVG, which has no pixel size', () => {
+      const svg: DraftAsset = { ...photo, renditions: photo.renditions.map((r) => ({ ...r, width: null, height: null })) };
+      expect(portraitFile(boxed({ w: 1120, h: 910 }), svg)).toBe(sha('c'));
+    });
   });
 
   it('gives a spot with no bindings none at all', () => {

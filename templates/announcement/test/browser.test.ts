@@ -1,7 +1,7 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
-import { LIGHT_KIT, motionContract, noDemoAndLight, paintedContrast, screenFrame, useTemplate, type Data } from '@signforge/template-test';
+import { LIGHT_KIT, largestImageBox, motionContract, noDemoAndLight, paintedContrast, screenFrame, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { look: 'pop', showFacts: false },
@@ -99,6 +99,21 @@ describe('announcement (#197)', () => {
         }
       expect(found).toEqual([]);
     }, 180_000);
+
+  // #224: with it, a portrait screen gets the landscape rendition, which must never be drawn larger than it is.
+  it('draws the photo within the portraitBox it declares, in every look and toggle, over the whole spot', async () => {
+    const { manifest } = t();
+    const def = manifest.fields.photo;
+    const box = def?.type === 'image' ? def.portraitBox : undefined;
+    const k = await screenFrame(t(), 'portrait', photo);
+    let drawn = { w: 0, h: 0 };
+    for (const look of looks)
+      for (const [, data] of variants) {
+        const b = await largestImageBox(await k.play({ look, ...everything, ...data }, demo, undefined, logo), '[data-sf-src="photo"]', manifest.duration.defaultMs);
+        drawn = { w: Math.max(drawn.w, b.w), h: Math.max(drawn.h, b.h) };
+      }
+    expect(box && drawn.w <= box.w && drawn.h <= box.h, `drawn up to ${drawn.w}x${drawn.h}`).toBe(true);
+  }, 180_000);
 
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {

@@ -179,10 +179,10 @@
     }
   },
   "templates": {
-    "base/announcement@1.1.1": {
+    "base/announcement@1.1.2": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.1",
+        "version": "1.1.2",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -241,7 +241,11 @@
           },
           "photo": {
             "type": "image",
-            "label": "Photo"
+            "label": "Photo",
+            "portraitBox": {
+              "w": 1120,
+              "h": 1230
+            }
           },
           "qrUrl": {
             "type": "url",
@@ -434,10 +438,10 @@
       },
       "html": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9"
     },
-    "base/cstore-promo@1.3.0": {
+    "base/cstore-promo@1.3.1": {
       "manifest": {
         "id": "cstore-promo",
-        "version": "1.3.0",
+        "version": "1.3.1",
         "name": "C-Store Promo",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
         "fields": {
@@ -485,15 +489,27 @@
           },
           "imageLeft": {
             "type": "image",
-            "label": "Left product"
+            "label": "Left product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           },
           "imageCenter": {
             "type": "image",
-            "label": "Centre product"
+            "label": "Centre product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           },
           "imageRight": {
             "type": "image",
-            "label": "Right product"
+            "label": "Right product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           }
         },
         "duration": {
@@ -1142,7 +1158,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.1.1",
+      "template": "base/announcement@1.1.2",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1205,7 +1221,7 @@
       "id": "energy",
       "name": "Energy drinks 3 for $7",
       "kind": "template",
-      "template": "base/cstore-promo@1.3.0",
+      "template": "base/cstore-promo@1.3.1",
       "data": {
         "quantity": "3",
         "price": "7",
@@ -1421,7 +1437,7 @@
       "id": "sport-drinks",
       "name": "Sport drinks 2 for $4",
       "kind": "template",
-      "template": "base/cstore-promo@1.3.0",
+      "template": "base/cstore-promo@1.3.1",
       "data": {
         "quantity": "2",
         "price": "4",
@@ -1524,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "ed1b3740641e7590019a4d0ca34f93e9dff24843f88fb77661977834bc83c498"
+  "id": "1c719f28a5c42afd6821625e44f855226ec18df61194fd954f70081dcc510bc5"
 }

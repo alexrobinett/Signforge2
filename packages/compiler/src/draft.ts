@@ -9,6 +9,7 @@
  */
 import {
   liveSources,
+  PORTRAIT_BOX_UPSCALE,
   type SampleFields,
   type Binding,
   type DataSource,
@@ -258,7 +259,16 @@ export interface DraftAsset {
   sha256: Sha256;
   size: number;
   type: string;
-  renditions: { orientation: Orientation; sha256: Sha256; size: number; type: string; sample: { sha256: Sha256; size: number } | null }[];
+  /** `width` and `height` are null for an SVG, which is one file for both. */
+  renditions: {
+    orientation: Orientation;
+    sha256: Sha256;
+    size: number;
+    type: string;
+    width: number | null;
+    height: number | null;
+    sample: { sha256: Sha256; size: number } | null;
+  }[];
 }
 
 /** A template version: its key, manifest and bundle. A draft version plays on no screen. */
@@ -286,13 +296,17 @@ export const unverified = (assetId: string, status: DraftAsset['status']): strin
 /**
  * The file an asset plays as on a screen of this orientation, added to `files` with its sample
  * when it has one, or why there is none. Only a verified asset has one: until `finalize_upload` checks an upload, its files are not
- * where screens, or the stage, read them.
+ * where screens, or the stage, read them. In portrait, with the `portraitBox` its field declares, the
+ * landscape rendition when it has fewer pixels and covers that box drawn at most
+ * `PORTRAIT_BOX_UPSCALE` times its size (#224): a photo in a frame needs no copy that covers the
+ * whole portrait screen, 3.2 times the pixels of a 16:9 photo's landscape one.
  */
 export function assetFile(
   reads: Pick<DraftReads, 'asset'>,
   assetId: string,
   orientation: Orientation,
   files: CompileInput['files'],
+  portraitBox?: { w: number; h: number },
 ): { sha?: Sha256; problem?: string } {
   const a = reads.asset(assetId);
   if (!a) return { problem: `asset ${assetId} does not exist` };
@@ -302,8 +316,15 @@ export function assetFile(
     files[a.sha256] = { size: a.size, type: a.type };
     return { sha: a.sha256 };
   }
-  const r = a.renditions.find((x) => x.orientation === orientation);
-  if (!r) return { problem: `asset ${assetId} has no ${orientation} rendition` };
+  const own = a.renditions.find((x) => x.orientation === orientation);
+  if (!own) return { problem: `asset ${assetId} has no ${orientation} rendition` };
+  const wide = a.renditions.find((x) => x.orientation === 'landscape');
+  const coversWithFewer =
+    !!wide?.width && !!wide.height && !!own.width && !!own.height && !!portraitBox &&
+    wide.width * PORTRAIT_BOX_UPSCALE >= portraitBox.w &&
+    wide.height * PORTRAIT_BOX_UPSCALE >= portraitBox.h &&
+    wide.width * wide.height < own.width * own.height;
+  const r = orientation === 'portrait' && wide && coversWithFewer ? wide : own;
   files[r.sha256] = { size: r.size, type: r.type, ...(r.sample ? { sample: r.sample.sha256 } : {}) };
   if (r.sample) files[r.sample.sha256] = { size: r.sample.size, type: 'image/png' };
   return { sha: r.sha256 };
@@ -322,8 +343,8 @@ export function spotFromDraft(
 ): { spot?: Spot; problems: string[] } {
   const base = { id: draft.id, name: draft.name, durationMs: draft.durationMs };
   const problems: string[] = [];
-  const file = (assetId: string) => {
-    const f = assetFile(reads, assetId, orientation, into.files);
+  const file = (assetId: string, portraitBox?: { w: number; h: number }) => {
+    const f = assetFile(reads, assetId, orientation, into.files, portraitBox);
     if (f.problem) problems.push(f.problem);
     return f.sha ?? '';
   };
@@ -335,7 +356,12 @@ export function spotFromDraft(
     if (v.status === 'draft') return { problems: [`template ${v.key} is draft; only an approved version can be published`] };
     into.templates[v.key] = { manifest: v.manifest, html: v.html };
     into.files[v.html] = { size: v.size, type: 'text/html' };
-    const assets = Object.fromEntries(Object.entries(draft.assets ?? {}).map(([field, id]) => [field, file(id)]));
+    const assets = Object.fromEntries(
+      Object.entries(draft.assets ?? {}).map(([field, id]) => {
+        const def = v.manifest.fields[field];
+        return [field, file(id, def?.type === 'image' ? def.portraitBox : undefined)];
+      }),
+    );
     const bindings = Object.entries(draft.bindings ?? {}).map(([field, b]) => [field, bindingOf(b)] as const);
     spot = {
       ...base,
