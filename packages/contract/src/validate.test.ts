@@ -1159,18 +1159,20 @@ describe("a manifest's shape (#156)", () => {
   });
 });
 
-describe("a data source's stale age (#624)", () => {
-  const withStale = (staleS: unknown) => {
-    const m = validManifest() as unknown as { dataSources: Record<string, Record<string, unknown>> };
-    m.dataSources.feed!.staleS = staleS;
-    return m;
-  };
-  it('takes whole seconds from a minute to a day, and none at all', () => {
-    expect(validateManifest(validManifest())).toEqual([]);
-    expect(validateManifest(withStale(60))).toEqual([]);
-    expect(validateManifest(withStale(86_400))).toEqual([]);
-    const problem = ['data source "feed": staleS must be a whole number from 60 to 86400'];
-    for (const bad of [59, 86_401, 90.5, '600', null]) expect(validateManifest(withStale(bad)), String(bad)).toEqual(problem);
+describe("a snapshot's stale age (#624)", () => {
+  const snapshot = { id: 'feed', version: 1, fetchedAt: '2026-11-17T12:00:00Z', checkedAt: '2026-11-17T12:00:00Z', data: {} };
+
+  it('takes whole seconds from a minute to a day on a snapshot, and none at all', () => {
+    expect(parseDataSnapshot(snapshot)).toEqual({ ok: true, value: snapshot });
+    for (const staleS of [60, 1200, 86_400])
+      expect(parseDataSnapshot({ ...snapshot, staleS }), String(staleS)).toEqual({ ok: true, value: { ...snapshot, staleS } });
+    for (const staleS of [59, 86_401, 90.5, '600', null]) expect(parseDataSnapshot({ ...snapshot, staleS }).ok, String(staleS)).toBe(false);
+  });
+
+  it("carries it on a sync's checked, so a source's new poll interval reaches screens with no publish", () => {
+    const checked = { feed: { version: 1, checkedAt: '2026-11-17T12:00:00Z', staleS: 1200 }, menu: { version: 2, checkedAt: '2026-11-17T12:00:00Z' } };
+    expect(parseSyncResponse({ ...validSyncResponse(), checked })).toEqual({ ok: true, value: { ...validSyncResponse(), checked } });
+    expect(parseSyncResponse({ ...validSyncResponse(), checked: { feed: { ...checked.feed, staleS: 30 } } }).ok).toBe(false);
   });
 });
 
@@ -1304,7 +1306,10 @@ describe('snapshots and device bodies', () => {
         ...validSyncResponse(),
         checked: { '../x': { version: 1, checkedAt: 'now' }, feed: { version: -1, checkedAt: '2026-11-17T13:04:00Z' } },
       }),
-    ).toEqual(['checked: "../x" must be a source id with a version and checkedAt', 'checked: "feed" must be a source id with a version and checkedAt']);
+    ).toEqual([
+      'checked: "../x" must be a source id with a version, checkedAt and, at most, a staleS',
+      'checked: "feed" must be a source id with a version, checkedAt and, at most, a staleS',
+    ]);
   });
 
   it('carries the seq epoch and the clock both ways', () => {

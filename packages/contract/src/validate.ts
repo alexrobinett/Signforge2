@@ -113,6 +113,8 @@ const versions: (v: unknown) => v is readonly number[] = wholeNumbers;
 /** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
 export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
+/** A snapshot's stale age: whole seconds from a minute to SNAPSHOT_STALE_MS. */
+const isStaleS = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= MIN_REFRESH_S && (v as number) * 1000 <= SNAPSHOT_STALE_MS;
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
 /** A value from the input, safe to put in a message: never throws, never long. */
@@ -1155,9 +1157,6 @@ function manifestRules(m: unknown): string[] {
     if (!isIdValue(key)) errors.push(`data source id "${key}" is not a valid id`);
     const r = own(d, 'refreshS');
     if (!(isNum(r) && r >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
-    const stale = own(d, 'staleS');
-    if (stale !== undefined && !(typeof stale === 'number' && Number.isSafeInteger(stale) && stale >= MIN_REFRESH_S && stale * 1000 <= SNAPSHOT_STALE_MS))
-      errors.push(`data source "${key}": staleS must be a whole number from ${MIN_REFRESH_S} to ${SNAPSHOT_STALE_MS / 1000}`);
   }
   return errors;
 }
@@ -1285,7 +1284,7 @@ export const manifestShape = object(
     spots: record(spotShape, (k) => `spot "${k}"`, 'spots must be an object'),
     playlists: record(playlistShape, (k) => `playlist "${k}"`, 'playlists must be an object'),
     dataSources: record(
-      object({ id: text('id'), refreshS: number('refreshS'), staleS: optional(number('staleS')) }, 'is not an object'),
+      object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'),
       (k) => `data source "${k}"`,
       'dataSources must be an object',
     ),
@@ -1317,6 +1316,7 @@ export const dataSnapshotShape = object(
     version: is(isCount, 'snapshot version must be a whole number, 0 or more'),
     fetchedAt: is(isInstant, 'snapshot fetchedAt must be an ISO 8601 time'),
     checkedAt: is(isInstant, 'snapshot checkedAt must be an ISO 8601 time'),
+    staleS: optional(is(isStaleS, `snapshot staleS must be a whole number from ${MIN_REFRESH_S} to ${SNAPSHOT_STALE_MS / 1000}`)),
     data: custom((v) =>
       v === undefined
         ? refused(['snapshot has no data'])
@@ -1492,15 +1492,17 @@ export const syncRequestShape = object(
 assertSame<Same<Infer<typeof syncRequestShape>, SyncRequest>>();
 export const validateSyncRequest = (r: unknown) => problemsOf(syncRequestShape, r);
 
-const checkedShape = custom<Record<string, { version: number; checkedAt: string }>>((c) => {
+const checkedShape = custom<Record<string, { version: number; checkedAt: string; staleS?: number }>>((c) => {
   if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);
   const errors: string[] = [];
-  const entries: [string, { version: number; checkedAt: string }][] = [];
+  const entries: [string, { version: number; checkedAt: string; staleS?: number }][] = [];
   for (const [k, v] of Object.entries(c)) {
     const version = own(v, 'version');
     const checkedAt = own(v, 'checkedAt');
-    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt)) errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
-    else entries.push([k, { version, checkedAt }]);
+    const staleS = own(v, 'staleS');
+    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt) || !(staleS === undefined || isStaleS(staleS)))
+      errors.push(`checked: "${k}" must be a source id with a version, checkedAt and, at most, a staleS`);
+    else entries.push([k, { version, checkedAt, ...(staleS === undefined ? {} : { staleS }) }]);
   }
   // fromEntries defines each key as its own, so a `__proto__` key could never set a prototype, whatever an id may be.
   return errors.length ? refused(errors) : accepted(Object.fromEntries(entries));
