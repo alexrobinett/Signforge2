@@ -301,6 +301,17 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+  /* A field focused by Tab or Shift+Tab scrolls clear of an editor's save alert stuck at the top (#479): room for an
+     alert of three lines, and under 64rem for the phone's top bar above it too, 3.5rem (WCAG 2.4.11, review of #485).
+     The alert sticks while the editor is narrow, which a wide window can be too, beside the agent drawer. */
+  html:has([data-save-alert]) {
+    scroll-padding-top: 8.5rem;
+  }
+  @media (width < 64rem) {
+    html:has([data-save-alert]) {
+      scroll-padding-top: 12rem;
+    }
+  }
   /* A fieldset shrinks like any box (browsers default it to its content's width), so a row of chips can wrap. */
   fieldset {
     min-width: 0;

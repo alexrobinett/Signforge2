@@ -561,14 +561,12 @@ function CacheState({ screen }: { screen: ScreenView }) {
   const missing = hb.filesMissing;
   const onLatest = (screen.reportedManifestId ?? hb.activeManifestId) === screen.desiredManifestId;
   return (
-    <>
-      <div className="flex items-baseline gap-2.5">
-        <strong className="text-lg font-semibold">
-          {missing ? `${missing} ${missing === 1 ? 'file' : 'files'} to fetch` : onLatest ? 'Complete' : 'Switching'}
-        </strong>
-        <span className="text-sm text-muted-foreground">{missing ? 'plays the last version meanwhile' : 'can play offline'}</span>
-      </div>
-    </>
+    <div className="flex items-baseline gap-2.5">
+      <strong className="text-lg font-semibold">
+        {missing ? `${missing} ${missing === 1 ? 'file' : 'files'} to fetch` : onLatest ? 'Complete' : 'Switching'}
+      </strong>
+      <span className="text-sm text-muted-foreground">{missing ? 'plays the last version meanwhile' : 'can play offline'}</span>
+    </div>
   );
 }
 
