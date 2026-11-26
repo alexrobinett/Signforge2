@@ -330,7 +330,7 @@ describe('list_audit_log over /api/tools', () => {
     }
   });
 
-  it("gives a sealed cursor that holds no id in the clear, and refuses one given a part more (#345, review of #534)", async () => {
+  it('gives a sealed cursor that holds no id in the clear, and refuses one given a part more (#345, review of #534)', async () => {
     const { owner } = await team();
     const first = await owner.tool('list_audit_log', { limit: 1 });
     const { next, entries } = (await first.json()) as { next: string; entries: { actor: { id: string } }[] };

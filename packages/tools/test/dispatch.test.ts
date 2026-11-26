@@ -877,7 +877,7 @@ describe("a list's cursor (#345)", () => {
     expect(opened).toEqual([]);
   });
 
-  it("audits a refused press of a card whose cursor does not open, as any refused press is (review of #534)", async () => {
+  it('audits a refused press of a card whose cursor does not open, as any refused press is (review of #534)', async () => {
     const pressed: Caller = { ...sealing(), confirmed: { summary: 'Listed', runId: 'run-cursor', callId: 'call-cursor' } };
     const before = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
     expect(await dispatch(registry, 'list_spots', { cursor: 'not-ours' }, pressed)).toMatchObject({ ok: false, error: 'invalid_input' });
