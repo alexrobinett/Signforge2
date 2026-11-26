@@ -20,8 +20,8 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "53cf715dbc3aa710c776e0abc75ab7d3e7a5b1f09799e5307936bb34e024ca3d": {
-      "size": 89841,
+    "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda": {
+      "size": 90311,
       "type": "text/html"
     },
     "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
@@ -1378,10 +1378,10 @@
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.7.0": {
+    "base/weather@1.6.1": {
       "manifest": {
         "id": "weather",
-        "version": "1.7.0",
+        "version": "1.6.1",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1468,6 +1468,7 @@
           "canvas"
         ],
         "background": "#0b1a33",
+        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1486,10 +1487,9 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "53cf715dbc3aa710c776e0abc75ab7d3e7a5b1f09799e5307936bb34e024ca3d"
+      "html": "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda"
     }
   },
   "spots": {
@@ -2023,7 +2023,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2083,7 +2083,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2105,7 +2105,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "32f0ffa5bc4420b3f3b26d468c6efe103e6d7d3b5e7a43a4c7a4f886365dc168"
+  "id": "64d06809aa99d1fab312f91ed965edb9c1364e091050b44002e7f9825a1ca407"
 }
