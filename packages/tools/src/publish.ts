@@ -572,7 +572,7 @@ const getPublish = defineTool({
         filesMissing: outcome === 'downloading' ? state.filesMissing : null,
         wakesAt: outcome === 'asleep' ? state.wakesAt : null,
         lastSeenAt: r.lastSeenAt,
-        state: state.kind,
+        state: { kind: state.kind, reason: state.reason },
       };
     });
     return { publish: publishView(found), screens };

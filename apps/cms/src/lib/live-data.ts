@@ -140,7 +140,10 @@ const WIND_PARAM = { mph: 'mph', 'km/h': 'kmh' } as const;
 const isTemperature = (v: unknown): v is WeatherUnits['temperature'] => v === '°F' || v === '°C';
 const isWind = (v: unknown): v is WeatherUnits['wind'] => v === 'mph' || v === 'km/h';
 
-/** The units the spot's data says for an Open-Meteo source, else the template's defaults, else °F and mph. */
+/** The wind unit that goes with a temperature unit: km/h with °C, mph with °F. */
+const windFor = (temperature: WeatherUnits['temperature']): WeatherUnits['wind'] => (temperature === '°C' ? 'km/h' : 'mph');
+
+/** The units the spot's data says for an Open-Meteo source, else the template's defaults, else °F and the wind unit that goes with it. */
 export function unitsOf(m: TemplateManifest, live: LiveSourceDef, data: Record<string, unknown>): WeatherUnits {
   const value = (field: string | undefined) => {
     if (!field) return undefined;
@@ -149,7 +152,8 @@ export function unitsOf(m: TemplateManifest, live: LiveSourceDef, data: Record<s
   };
   const t = value(live.units?.temperature);
   const w = value(live.units?.wind);
-  return { temperature: isTemperature(t) ? t : '°F', wind: isWind(w) ? w : 'mph' };
+  const temperature = isTemperature(t) ? t : '°F';
+  return { temperature, wind: isWind(w) ? w : windFor(temperature) };
 }
 
 /** `units` with one of them changed to `value`, if it is a unit of that kind. */
@@ -171,6 +175,17 @@ const BASE_WEATHER = {
 /** The ids `weatherSource` makes. */
 const WEATHER_SOURCE_ID = /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/;
 
+/** Whether two of `weatherSource`'s ids are for the same place and units, whatever variables each asks for. */
+export const sameWeather = (a: string, b: string) => madeByEditor(a) && madeByEditor(b) && a.slice(0, a.lastIndexOf('-')) === b.slice(0, b.lastIndexOf('-'));
+
+/**
+ * The source a spot stays on when `wanted` cannot be made (the org at its ten, #541): one it binds now (`bound`), that
+ * the editor made for the same place and units and the org still has (`existing`). Its variables are fewer, the
+ * template's own; the merge waits until a source is free.
+ */
+export const weatherToKeep = (wanted: string, bound: readonly (string | undefined)[], existing: readonly string[]) =>
+  bound.find((id): id is string => id !== undefined && sameWeather(id, wanted) && existing.includes(id));
+
 /**
  * Whether the editor made this source from a place and units (`weatherSource`), so picking the
  * place again makes it again. A feed or calendar was added by its address, which is never shown
@@ -190,7 +205,10 @@ async function shortHash(text: string): Promise<string> {
  * units shares one source whichever base template it is (#345), and only a template reading more
  * gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
  */
-export async function weatherSource(live: LiveSourceDef, place: PlaceView, units: WeatherUnits) {
+export async function weatherSource(live: LiveSourceDef, place: PlaceView, asked: WeatherUnits) {
+  // A template with no wind unit (Info frame) asks for the one that goes with its temperature, whatever the picker
+  // holds: a metric org's spots of every base template then share one source for a place (#541).
+  const units = live.units?.wind ? asked : { ...asked, wind: windFor(asked.temperature) };
   const current = new Set<string>(BASE_WEATHER.current);
   const daily = new Set<string>(BASE_WEATHER.daily);
   let days = BASE_WEATHER.days;

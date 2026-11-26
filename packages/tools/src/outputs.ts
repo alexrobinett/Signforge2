@@ -950,7 +950,9 @@ export const outputs = {
         filesMissing: z.number().nullable().describe('downloading: files it has still to fetch'),
         wakesAt: z.string().nullable().describe('asleep: when it wakes'),
         lastSeenAt: z.number().nullable(),
-        state: z.enum(STATE_KINDS).describe("The screen's state now, as read screen_status gives it: a screen playing this may since have become unreachable"),
+        state: z
+          .object({ kind: z.enum(STATE_KINDS), reason: z.enum(NEEDS_YOU_REASONS).nullable() })
+          .describe("The screen's state now, its kind and reason as read screen_status gives them"),
       }),
     ),
   }),

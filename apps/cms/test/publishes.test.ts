@@ -11,7 +11,7 @@ const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<R
   filesMissing: null,
   wakesAt: null,
   lastSeenAt: null,
-  state: 'online',
+  state: { kind: 'online', reason: null },
   ...more,
 });
 

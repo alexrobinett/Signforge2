@@ -15,7 +15,7 @@
  * the stage to play until the source's first poll.
  */
 import { type LiveSourceDef, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
-import { bindAll, type PlaceView, type TableFormat, weatherSource, type WeatherUnits } from '~/lib/live-data';
+import { bindAll, type PlaceView, type TableFormat, weatherSource, weatherToKeep, type WeatherUnits } from '~/lib/live-data';
 import type { SpotView } from '~/lib/spots';
 import { callTool, toolMessage } from '~/lib/tools';
 import { dataSourceKeys, dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
@@ -232,7 +232,21 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       attempt(t, async () => {
         const wanted = await weatherSource(t.live, place, units);
         const { dataSources } = await queryClient.query(dataSourcesQuery(t.orgId));
-        const id = dataSources.some((d) => d.id === wanted.id) ? wanted.id : await create(t.orgId, { ...wanted, format: 'json' });
+        // A new one that cannot be made (the org at its ten, #541) leaves the spot on the one it reads, if the same place's.
+        const current = weatherToKeep(
+          wanted.id,
+          Object.keys(t.live.fields).map((f) => t.spot.bindings?.[f]?.dataSourceId),
+          dataSources.map((d) => d.id),
+        );
+        const make = async () => {
+          try {
+            return await create(t.orgId, { ...wanted, format: 'json' });
+          } catch (err) {
+            if (current === undefined) throw err;
+            return current;
+          }
+        };
+        const id = dataSources.some((d) => d.id === wanted.id) ? wanted.id : await make();
         const data: Record<string, unknown> = {};
         const { place: placeField, units: unitFields } = t.live;
         const placeDef = placeField ? t.manifest.fields[placeField] : undefined;
