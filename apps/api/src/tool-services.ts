@@ -12,7 +12,7 @@ import type { Context } from 'hono';
 import { aiProviders } from './agent/provider';
 import { agentCallLog } from './agents/calls';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
-import { alertSecretSealer, feedUrlSealer } from './data/cipher';
+import { alertSecretSealer, cursorSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
 import { openMeteoPlaces } from './data/places';
 import { tableReader } from './data/tables';
@@ -72,6 +72,7 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
       return user.success && ip.success;
     },
     notify: screenNotifier(env),
+    cursors: cursorSealer(env),
     cmsOrigin: env.CMS_ORIGIN,
     deliverNow:
       orgId === null

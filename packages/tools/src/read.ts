@@ -293,7 +293,7 @@ export const readInput = (types: readonly ReadType[]) =>
       fields: z.array(z.string()).min(1).max(40).optional().describe('Only these top-level fields of each row'),
       // A list's page: the list's own default when omitted, and none with ids.
       limit: z.number().int().min(1).max(MAX_PAGE_LIMIT).optional().describe(`How many to list, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
-      cursor: z.string().max(1000).optional().describe("The previous page's next, to list the page after it"),
+      cursor: z.string().max(2000).optional().describe("The previous page's next, to list the page after it"),
     },
     { error: (issue) => (issue.code === 'unrecognized_keys' ? `read takes no ${issue.keys.join(', ')}: put a type's filters under filter` : undefined) },
   );

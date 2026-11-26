@@ -228,16 +228,21 @@ export interface ToolServices {
   /** Sends what a handler queued with `ctx.deliverNow` once the writes are committed. Without it, they go at the next delivery run. */
   deliverNow?: AlertDeliverer;
   /**
+   * Seals each page's `next` and opens a `cursor` given back, for one org and one tool (#345): a cursor names
+   * rows by their ids, which no caller reads or forges. Dispatch's own, around every call. Without it, cursors are plain.
+   */
+  cursors?: CursorSealer;
+  /**
    * The CMS's origin, for links in what a tool sends (a publish request's alert to the approvals queue,
    * #115). The API's `CMS_ORIGIN`; none where it does not know it (dev, or one origin for both), and a link is then null.
    */
   cmsOrigin?: string;
 }
 
-/** The services dispatch uses itself, after the commit. A tool queues for them on its context and never needs one. */
-type AfterCommit = 'notify' | 'deliverNow';
+/** The services dispatch uses itself, around the call or after the commit. A tool never needs one. */
+type DispatchOwn = 'notify' | 'deliverNow' | 'cursors';
 /** A service a tool can need; the CMS's origin is read where there, never needed. */
-export type ServiceName = Exclude<keyof ToolServices, AfterCommit | 'cmsOrigin'>;
+export type ServiceName = Exclude<keyof ToolServices, DispatchOwn | 'cmsOrigin'>;
 
 /** Each service in the refusal of a call that lacks it: `find_places needs a rate limit, and this caller has none`. */
 export const SERVICE_WORDS: Record<ServiceName, string> = {
@@ -370,6 +375,12 @@ export class ToolError extends Error {
     super(message, options);
     this.name = 'ToolError';
   }
+}
+
+/** Seals a list's cursor for one org and tool, and opens it there alone: undefined for any other, or one not sealed. */
+export interface CursorSealer {
+  seal(scope: { orgId: string; tool: string }, cursor: string): Promise<string>;
+  open(scope: { orgId: string; tool: string }, sealed: string): Promise<string | undefined>;
 }
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
