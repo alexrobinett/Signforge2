@@ -291,51 +291,128 @@ function unescapeHtml(v: string): string {
   });
 }
 
-/** HTML's named references that story descriptions use most, beyond XML's five. */
+/** HTML's Latin-1 named references, U+00A0 to U+00FF in order: the accents and symbols descriptions use (#477). */
+const LATIN1 =
+  'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(
+    ' ',
+  );
+
+/**
+ * HTML's named references a story description may hold, beyond XML's five: Latin-1, then typography, letters and
+ * symbols news uses. Names are case-sensitive, as in HTML (`&Eacute;` is not `&eacute;`); one not here stays as written.
+ */
 const NAMED_TEXT: Record<string, string> = {
+  ...Object.fromEntries(LATIN1.map((name, i) => [name, String.fromCodePoint(0xa0 + i)])),
+  // A space a screen may wrap at, and a hyphen it would only show at a break: neither is kept.
   nbsp: ' ',
-  mdash: '—',
+  shy: '',
+  OElig: 'Œ',
+  oelig: 'œ',
+  Scaron: 'Š',
+  scaron: 'š',
+  Yuml: 'Ÿ',
+  fnof: 'ƒ',
+  circ: 'ˆ',
+  tilde: '˜',
+  ensp: ' ',
+  emsp: ' ',
+  thinsp: ' ',
   ndash: '–',
-  hellip: '…',
+  mdash: '—',
   lsquo: '‘',
   rsquo: '’',
+  sbquo: '‚',
   ldquo: '“',
   rdquo: '”',
-  laquo: '«',
-  raquo: '»',
+  bdquo: '„',
+  dagger: '†',
+  Dagger: '‡',
+  bull: '•',
+  hellip: '…',
+  permil: '‰',
+  prime: '′',
+  Prime: '″',
+  lsaquo: '‹',
+  rsaquo: '›',
+  oline: '‾',
+  frasl: '⁄',
+  euro: '€',
+  trade: '™',
+  larr: '←',
+  uarr: '↑',
+  rarr: '→',
+  darr: '↓',
+  harr: '↔',
+  minus: '−',
+  le: '≤',
+  ge: '≥',
+  ne: '≠',
+  asymp: '≈',
+  infin: '∞',
 };
+
+/**
+ * Characters a summary never carries (#477): NUL, and the bidirectional controls that would turn a screen's text
+ * around (U+202A to U+202E, U+2066 to U+2069), whether written or read from a numeric reference.
+ */
+const UNSHOWN = /[\0‪-‮⁦-⁩]/g;
+
+/** Whether `html` at `at` is `word`, any case, read without lower-casing the whole text: `İ` lower-cases to two characters. */
+const isAt = (html: string, at: number, word: string) => html.slice(at, at + word.length).toLowerCase() === word;
+
+/** The end of a script or style's body, `</name` in any case, from `from`; -1 when unclosed. */
+function closeOf(html: string, name: string, from: number): number {
+  const re = new RegExp(`</${name}`, 'gi');
+  re.lastIndex = from;
+  return re.exec(html)?.index ?? -1;
+}
 
 /**
  * A story's description as plain text (the contract's `summary`): tags dropped with the bodies of
  * scripts and styles, character references read, spaces collapsed, and at most `NEWS_SUMMARY_MAX`
  * characters, cut on a word with "…". Undefined when nothing is left or it only repeats the title.
- * Each scan starts where the last ended, so a body of unclosed tags costs linear time.
+ * A `<` opens a tag only before a letter, `/`, `!` or `?`, as in HTML, so "< 5%" is prose; a comment
+ * ends at `-->`, though it holds a `>`. Each scan starts where the last ended, so a body of unclosed
+ * tags costs linear time.
  */
 function summaryOf(html: string, title: string): { summary: string } | Record<string, never> {
-  const lower = html.toLowerCase();
   let out = '';
-  for (let i = 0; ; ) {
-    const lt = html.indexOf('<', i);
+  for (let i = 0, from = 0; ; ) {
+    const lt = html.indexOf('<', from);
     if (lt === -1) {
       out += html.slice(i);
       break;
     }
+    if (!/[a-z/!?]/i.test(html[lt + 1] ?? '')) {
+      // Prose: kept, and the scan goes on past it.
+      from = lt + 1;
+      continue;
+    }
     out += `${html.slice(i, lt)} `;
-    const gt = html.indexOf('>', lt);
-    if (gt === -1) break;
-    const hidden = /^<(script|style)\b/.exec(lower.slice(lt, lt + 7))?.[1];
-    const close = hidden ? lower.indexOf(`</${hidden}`, gt) : gt;
-    const end = close === -1 ? -1 : html.indexOf('>', close);
+    let end: number;
+    if (isAt(html, lt, '<!--')) {
+      const close = html.indexOf('-->', lt + 4);
+      end = close === -1 ? -1 : close + 2;
+    } else {
+      const gt = html.indexOf('>', lt);
+      const hidden =
+        gt === -1 ? undefined : ['script', 'style'].find((name) => isAt(html, lt + 1, name) && !/[a-z0-9]/i.test(html[lt + 1 + name.length] ?? ''));
+      const close = hidden ? closeOf(html, hidden, gt) : gt;
+      end = close === -1 ? -1 : html.indexOf('>', close);
+    }
     if (end === -1) break;
-    i = end + 1;
+    i = from = end + 1;
   }
-  const text = unescapeHtml(out.replace(/&([a-z]+);/gi, (ref, name: string) => NAMED_TEXT[name.toLowerCase()] ?? ref))
+  const text = unescapeHtml(out.replace(/&([a-z][a-z0-9]*);/gi, (ref, name: string) => NAMED_TEXT[name] ?? ref))
+    .replace(UNSHOWN, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!text || text.toLowerCase() === title.toLowerCase()) return {};
   if (text.length <= NEWS_SUMMARY_MAX) return { summary: text };
-  const cut = text.lastIndexOf(' ', NEWS_SUMMARY_MAX - 1);
-  return { summary: `${text.slice(0, cut > 0 ? cut : NEWS_SUMMARY_MAX - 1).replace(/[\s,;:.–—-]+$/, '')}…` };
+  const space = text.lastIndexOf(' ', NEWS_SUMMARY_MAX - 1);
+  // With no space to cut on, never between the two halves of a surrogate pair.
+  const at = space > 0 ? space : NEWS_SUMMARY_MAX - 1 - (/[\ud800-\udbff]/.test(text[NEWS_SUMMARY_MAX - 2] ?? '') ? 1 : 0);
+  return { summary: `${text.slice(0, at).replace(/[\s,;:.–—-]+$/, '')}…` };
 }
 
 /** Gravatar avatars, WordPress emoji and feedburner's pixels, by host and path. */

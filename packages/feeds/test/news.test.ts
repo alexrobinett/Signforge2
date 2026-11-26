@@ -102,6 +102,34 @@ describe('summaries (#202)', () => {
     expect(parseNews(atomFeed('<content type="html">&lt;p&gt;Long one&lt;/p&gt;</content>')).items[0]!.summary).toBe('Long one');
   });
 
+  // Each case named in #477, the description and the summary it gives.
+  it.each([
+    ['a Latin-1 named reference', 'Caf&eacute; prices up &pound;2 &copy; 2026', 'Café prices up £2 © 2026'],
+    ['a named reference beyond Latin-1', 'Fares &euro;3 &ndash; trains&trade; &bull; buses', 'Fares €3 – trains™ • buses'],
+    ['names, case-sensitive as in HTML', '&Eacute;t&eacute; &EACUTE;', 'Été &EACUTE;'],
+    ['a name not in the table, as written', 'Odd &zzz; and &amp; done', 'Odd &zzz; and & done'],
+    ['a soft hyphen, dropped', 'Thanks&shy;giving', 'Thanksgiving'],
+    ['a < in prose, kept', 'Rates stay < 5% and growth > 2%', 'Rates stay < 5% and growth > 2%'],
+    ['a < before a digit or a space, kept', 'a<5 and b <= 7', 'a<5 and b <= 7'],
+    ['a < before a letter, /, ! or ?, a tag', 'x<b>y</b><!doctype z><?php q ?>w', 'x y w'],
+    ['a comment holding >, dropped whole', 'Before <!-- a > b --> after', 'Before after'],
+    ['an unclosed comment, the rest dropped', 'Before <!-- a > b', 'Before'],
+    ['a script after İ, dropped whole', 'İstanbul <script>track("x")</script>opens', 'İstanbul opens'],
+    ['a <scripts> tag, not a script', 'A <scripts>b</scripts> c', 'A b c'],
+    ['NUL from a numeric reference, dropped', 'a&#0;b&#x0;c', 'abc'],
+    ['bidi controls, written or referenced, dropped', 'a&#x202E;b&#8238;c\u2066d', 'abcd'],
+  ])('%s', (_case, description, summary) => {
+    expect(summaries([description])).toEqual([summary]);
+  });
+
+  it(`cuts a long description with no space at ${NEWS_SUMMARY_MAX}, never between a surrogate pair's halves`, () => {
+    for (const lead of ['', 'x']) {
+      const [cut] = summaries([`${lead}${'😀'.repeat(NEWS_SUMMARY_MAX)}`]);
+      expect(cut!.length).toBeLessThanOrEqual(NEWS_SUMMARY_MAX);
+      expect(cut).toMatch(/^x?(\u{1F600})+…$/u);
+    }
+  });
+
   it('reads a description of unclosed scripts and tags in linear time', () => {
     for (const body of ['<script '.repeat(100_000), '<script>'.repeat(100_000), '<p '.repeat(150_000)])
       expect(inLinearTime(() => parseNews(rss(`<item><title>x</title><description><![CDATA[${body}]]></description></item>`)))).toBe(true);
