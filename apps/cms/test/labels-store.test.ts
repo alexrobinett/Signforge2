@@ -74,6 +74,32 @@ describe("a screen's label editor", () => {
   });
 });
 
+describe('rows that cannot be saved as they are (review of #597)', () => {
+  it('sends nothing for two rows of one key, keeps the editor open and says why, then saves once one goes', async () => {
+    const s = store();
+    s.getState().editScreenLabels(screen);
+    const target = { screenId: screen.id };
+    s.getState().typeLabel(target, 2, { key: 'Region', value: 'south' });
+    await s.getState().saveScreenLabels(ORG, screen);
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.editor).toMatchObject({ screenId: screen.id, pending: false, error: 'Fix the labels marked above first.' });
+    s.getState().removeLabelRow(target, 0);
+    await s.getState().saveScreenLabels(ORG, screen);
+    expect(calls).toEqual([{ name: 'update_screen_labels', input: { screenIds: [screen.id], set: { region: 'south' }, remove: [] } }]);
+  });
+
+  it('pairs no screen while a label has a key and no value, and says why', async () => {
+    const s = store();
+    s.getState().addLabelRow('pairing');
+    s.getState().typeLabel('pairing', 0, { key: 'store', value: '' });
+    s.getState().enterPairingCode('ABC123');
+    s.getState().nameNewScreen('Till 3');
+    await s.getState().pairScreen({ timezone: 'UTC', locale: null, hours: null });
+    expect(calls).toEqual([]);
+    expect(s.getState().screens.pairing).toMatchObject({ pending: false, error: 'Fix the labels marked above first.' });
+  });
+});
+
 describe("the pairing form's labels", () => {
   it('copies another screen’s labels and claims the screen with them, then empties them', async () => {
     const s = store();

@@ -1,6 +1,6 @@
 // The label editor's rules (#185): rows to labels, the change update_screen_labels takes, and the typo guard.
 import { describe, expect, it } from 'vitest';
-import { labelChange, labelRows, labelsOf, lonelyValue, type LabelKey } from '../src/lib/labels';
+import { labelChange, labelProblems, labelRows, labelsOf, labelsReady, lonelyValue, type LabelKey } from '../src/lib/labels';
 
 const keys: LabelKey[] = [
   {
@@ -63,5 +63,32 @@ describe('the typo guard', () => {
     expect(lonelyValue(keys, { key: 'floor', value: '2' })).toBeUndefined();
     expect(lonelyValue(keys, { key: 'orientation', value: 'sideways' })).toBeUndefined();
     expect(lonelyValue(keys, { key: 'region', value: '' })).toBeUndefined();
+  });
+});
+
+describe('rows that cannot be saved as they are (review of #597)', () => {
+  it('flags a key another row has once lowercased, on the later row', () => {
+    const rows = [
+      { key: 'floor', value: '1' },
+      { key: 'Floor', value: '2' },
+    ];
+    expect(labelProblems(rows)).toEqual([undefined, 'floor: another row has this key. Keep one.']);
+    expect(labelsReady(rows)).toBe(false);
+  });
+
+  it('flags a key with no value and a value with no key, and leaves an empty row alone', () => {
+    expect(
+      labelProblems([
+        { key: 'store', value: ' ' },
+        { key: '', value: 'north' },
+        { key: '', value: '' },
+      ]),
+    ).toEqual(['store: give it a value, or remove the row.', 'Give it a key, or remove the row.', undefined]);
+    expect(
+      labelsReady([
+        { key: 'region', value: 'north' },
+        { key: '', value: '' },
+      ]),
+    ).toBe(true);
   });
 });

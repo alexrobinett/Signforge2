@@ -35,6 +35,27 @@ export function labelsOf(rows: readonly LabelRow[]): Record<string, string> {
   return out;
 }
 
+/**
+ * Why each row cannot be saved as it is, by row (undefined for one that can): a key another row has too, once
+ * lowercased, as every key is; a key with no value; a value with no key. An empty row is one not typed in yet. Until
+ * none has one, the editor saves nothing, so no row is lost without a word (review of #597).
+ */
+export function labelProblems(rows: readonly LabelRow[]): (string | undefined)[] {
+  const keys = rows.map((r) => r.key.trim().toLowerCase());
+  return rows.map((r, i) => {
+    const key = keys[i]!;
+    const value = r.value.trim();
+    if (!key && !value) return undefined;
+    if (!key) return 'Give it a key, or remove the row.';
+    if (!value) return `${key}: give it a value, or remove the row.`;
+    if (keys.indexOf(key) !== i) return `${key}: another row has this key. Keep one.`;
+    return undefined;
+  });
+}
+
+/** Whether every row can be saved as it is. */
+export const labelsReady = (rows: readonly LabelRow[]) => labelProblems(rows).every((p) => p === undefined);
+
 /** What turns `before` into what `rows` hold, as `update_screen_labels` takes it; null when nothing changes. */
 export function labelChange(before: Readonly<Record<string, string>>, rows: readonly LabelRow[]): { set: Record<string, string>; remove: string[] } | null {
   const after = labelsOf(rows);

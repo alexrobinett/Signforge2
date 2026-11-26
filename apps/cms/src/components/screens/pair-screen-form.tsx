@@ -17,6 +17,7 @@ import { useOrgId } from '~/lib/live';
 import { byName } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
 import { LabelEditor } from './labels';
+import { labelRowsOf } from '~/state/labels';
 import { useAppStore } from '~/state/provider';
 import { hoursProblems } from '~/lib/screen-types';
 import { DisplayHoursEditor } from './display-hours-editor';
@@ -61,10 +62,14 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
   const setNewScreenHours = useAppStore((s) => s.setNewScreenHours);
   const pairScreen = useAppStore((s) => s.pairScreen);
   const copyLabelsForPairing = useAppStore((s) => s.copyLabelsForPairing);
+  const chooseLabelSource = useAppStore((s) => s.chooseLabelSource);
+  const copyFrom = useAppStore((s) => s.labels.copyFrom);
+  const typed = useAppStore((s) => labelRowsOf(s.labels, 'pairing').some((r) => r.key.trim() || r.value.trim()));
   // The screens with labels to copy, as the Screens page has them: a new store's screens labelled as they are paired.
   const labelled = (useQuery(screensQuery(useOrgId())).data?.screens ?? [])
     .filter((s) => s.status !== 'revoked' && Object.keys(s.labels).length)
     .toSorted(byName);
+  const source = labelled.find((s) => s.id === copyFrom);
   const defaults = { timezone: orgDefaults?.timezone ?? browser, locale: orgDefaults?.locale ?? null, hours: orgDefaults?.displayHours ?? null };
   const timezone = chosenZone ?? defaults.timezone;
   const hours = chosenHours === undefined ? defaults.hours : chosenHours;
@@ -138,23 +143,22 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
             )}
           </div>
           {labelled.length > 0 && (
-            <div className="grid gap-1.5 sm:max-w-xs">
-              <Label htmlFor={`${id}-copy`}>Copy labels from…</Label>
-              <NativeSelect
-                id={`${id}-copy`}
-                value=""
-                onChange={(e) => {
-                  const from = labelled.find((s) => s.id === e.target.value);
-                  if (from) copyLabelsForPairing(from.labels);
-                }}
-              >
-                <option value="">Another screen</option>
-                {labelled.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </NativeSelect>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grid gap-1.5 sm:max-w-xs">
+                <Label htmlFor={`${id}-copy`}>Copy labels from…</Label>
+                <NativeSelect id={`${id}-copy`} value={copyFrom} onChange={(e) => chooseLabelSource(e.target.value)}>
+                  <option value="">Another screen</option>
+                  {labelled.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              {/* Only this button copies, so choosing in the list (arrow keys change it) never replaces what is typed. */}
+              <Button type="button" variant="outline" disabled={!source} onClick={() => source && copyLabelsForPairing(source.labels)}>
+                {typed ? 'Replace with its labels' : 'Copy its labels'}
+              </Button>
             </div>
           )}
           <LabelEditor target="pairing" />

@@ -7,7 +7,7 @@
  */
 import type { ToolName } from '@signforge/tools/outputs';
 import { toast } from 'sonner';
-import { labelsOf } from '~/lib/labels';
+import { labelsOf, labelsReady } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
@@ -249,7 +249,10 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       pairing((p) => ({ ...p, key, pending: true, error: null }));
       const d = get().screens.pairing;
       const hours = d.hours === undefined ? defaults.hours : d.hours;
-      const labels = labelsOf(labelRowsOf(get().labels, 'pairing'));
+      const rows = labelRowsOf(get().labels, 'pairing');
+      // As the label editor saves: no row lost without a word (review of #597).
+      if (!labelsReady(rows)) return pairing((p) => ({ ...p, pending: false, error: 'Fix the labels marked above first.' }));
+      const labels = labelsOf(rows);
       try {
         const screenId = (
           await callTool('claim_screen', {

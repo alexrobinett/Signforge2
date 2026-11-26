@@ -50,13 +50,23 @@ test('label a screen on its page, see a lonely value flagged, and pair a new scr
   await dialog.getByLabel('Label 1 key').fill('region');
   await dialog.getByLabel('Label 1 value').fill('nrth');
   await expect(dialog.getByText('nrth: no other screen has this value')).toBeVisible();
+  // The warning's colour on the dialog, checked while it shows (review of #597).
+  await axe(page);
   await dialog.getByLabel('Label 1 value').fill(' North ');
   await expect(dialog.getByText(/no other screen has this value/)).toBeHidden();
   await dialog.getByRole('button', { name: 'Add a label' }).click();
   await dialog.getByLabel('Label 2 key').fill('Type');
   await dialog.getByLabel('Label 2 value').fill('drive-thru');
+  // A key another row has, once lowercased, is flagged, and nothing is saved until one goes (review of #597).
+  await dialog.getByRole('button', { name: 'Add a label' }).click();
+  await dialog.getByLabel('Label 3 key').fill('REGION');
+  await dialog.getByLabel('Label 3 value').fill('south');
+  await expect(dialog.getByText('region: another row has this key. Keep one.')).toBeVisible();
   await shotsBoth(page, '185-labels-dialog');
   await axe(page);
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog.getByText('Fix the labels marked above first.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Remove label 3' }).click();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toBeHidden();
   // Trimmed, and the key lowercased, as every key is.
@@ -69,6 +79,9 @@ test('label a screen on its page, see a lonely value flagged, and pair a new scr
   await hydrated(page);
   const pair = page.getByRole('dialog', { name: 'Pair a screen' });
   await pair.getByLabel('Copy labels from…').selectOption({ label: 'Lobby' });
+  // Choosing copies nothing: only the button does, so arrowing through the list never replaces typed labels.
+  await expect(pair.getByLabel('Label 1 key')).toHaveCount(0);
+  await pair.getByRole('button', { name: 'Copy its labels' }).click();
   await expect(pair.getByLabel('Label 1 key')).toHaveValue('region');
   await expect(pair.getByLabel('Label 2 value')).toHaveValue('0142');
   await pair

@@ -9,7 +9,7 @@ import { useId } from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { lonelyValue, type LabelKey } from '~/lib/labels';
+import { labelProblems, lonelyValue, type LabelKey } from '~/lib/labels';
 import { useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { labelKeysQuery } from '~/queries/screens';
@@ -22,8 +22,11 @@ export function LabelChips({
   system = {},
   max,
   className,
+  name = 'Labels',
 }: {
   labels: Readonly<Record<string, string>>;
+  /** The list's accessible name: another list of labels on the page needs its own. */
+  name?: string;
   system?: Readonly<Record<string, string>>;
   max?: number;
   className?: string;
@@ -32,10 +35,10 @@ export function LabelChips({
   const shown = max === undefined ? own : own.slice(0, max);
   const more = own.length - shown.length;
   return (
-    <ul aria-label="Labels" className={cn('flex flex-wrap gap-1.5', className)}>
+    <ul aria-label={name} className={cn('flex flex-wrap gap-1.5', className)}>
       {shown.map(([key, value]) => (
         <li key={key}>
-          <Badge className="max-w-48 truncate text-foreground">
+          <Badge title={`${key}: ${value}`} className="max-w-48 truncate text-foreground">
             <span className="text-muted-foreground">{key}:</span> {value}
           </Badge>
         </li>
@@ -54,8 +57,9 @@ export function LabelChips({
       )}
       {Object.entries(system).map(([key, value]) => (
         <li key={key}>
-          <Badge title="From the screen's settings" className="max-w-48 truncate border-dashed">
+          <Badge title={`${key}: ${value}, set by the screen's settings`} className="max-w-48 truncate border-dashed">
             {key}: {value}
+            <span className="sr-only">, set by the screen</span>
           </Badge>
         </li>
       ))}
@@ -89,6 +93,7 @@ export function LabelEditor({
   const typeLabel = useAppStore((s) => s.typeLabel);
   const addLabelRow = useAppStore((s) => s.addLabelRow);
   const removeLabelRow = useAppStore((s) => s.removeLabelRow);
+  const problems = labelProblems(rows);
   const ownKeys = keys.filter((k) => !k.system);
   return (
     <fieldset className="grid gap-2">
@@ -103,7 +108,9 @@ export function LabelEditor({
       </datalist>
       {rows.map((row, i) => {
         const values = ownKeys.find((k) => k.key === row.key.trim().toLowerCase())?.values ?? [];
-        const warning = lonelyValue(keys, row, own);
+        // A row that cannot be saved says so first; a value only this screen would have is a warning, not a refusal.
+        const problem = problems[i];
+        const warning = problem ?? lonelyValue(keys, row, own);
         return (
           // Rows have no id of their own: one is its place in the list until it is saved.
           // biome-ignore lint/suspicious/noArrayIndexKey: a row is its place until saved.
@@ -116,7 +123,8 @@ export function LabelEditor({
               placeholder="key"
               maxLength={63}
               autoComplete="off"
-              aria-describedby={`${id}-help`}
+              aria-describedby={problem ? `${id}-warn-${i}` : `${id}-help`}
+              aria-invalid={problem ? true : undefined}
             />
             <div className="grid gap-1">
               <Input
@@ -128,6 +136,7 @@ export function LabelEditor({
                 maxLength={63}
                 autoComplete="off"
                 aria-describedby={warning ? `${id}-warn-${i}` : undefined}
+                aria-invalid={problem ? true : undefined}
               />
               <datalist id={`${id}-values-${i}`}>
                 {values.map((v) => (
@@ -135,7 +144,7 @@ export function LabelEditor({
                 ))}
               </datalist>
               {warning && (
-                <p id={`${id}-warn-${i}`} className="text-xs text-status-needs-you-foreground">
+                <p id={`${id}-warn-${i}`} className={cn('text-xs', problem ? 'font-medium text-destructive' : 'text-status-needs-you-foreground')}>
                   {warning}
                 </p>
               )}

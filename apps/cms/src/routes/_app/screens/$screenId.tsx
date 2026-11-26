@@ -716,7 +716,7 @@ function LabelsDialog({ orgId, screen }: { orgId: string; screen: ScreenView }) 
           <LabelEditor target={{ screenId: screen.id }} own={screen.labels} titled={false} />
           <div className="grid gap-1.5">
             <p className="text-sm font-medium">From its settings</p>
-            <LabelChips labels={{}} system={screen.systemLabels} />
+            <LabelChips labels={{}} system={screen.systemLabels} name="From its settings" />
           </div>
           <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
             {editor?.error}

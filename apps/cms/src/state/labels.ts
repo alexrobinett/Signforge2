@@ -4,7 +4,7 @@
  * people labelling one screen never refuse each other. Suggestions come from `list_label_keys` (`labelKeysQuery`).
  */
 import { toast } from 'sonner';
-import { labelChange, labelRows, type LabelRow } from '~/lib/labels';
+import { labelChange, labelRows, labelsReady, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
@@ -21,6 +21,8 @@ interface LabelsState {
   rows: Record<string, LabelRow[]>;
   /** The screen whose labels are open in its page's editor, with its save's progress. */
   editor: { screenId: string; pending: boolean; error: string | null } | null;
+  /** The screen the pairing form would copy labels from, chosen but not copied until asked (review of #597). */
+  copyFrom: string;
 }
 
 export interface LabelsSlice {
@@ -32,7 +34,9 @@ export interface LabelsSlice {
   typeLabel: (target: LabelTarget, index: number, row: LabelRow) => void;
   addLabelRow: (target: LabelTarget) => void;
   removeLabelRow: (target: LabelTarget, index: number) => void;
-  /** Fills the pairing form's labels with another screen's: a new store's screens labelled as they are paired. */
+  /** Chooses the screen the pairing form would copy labels from. */
+  chooseLabelSource: (screenId: string) => void;
+  /** Fills the pairing form's labels with another screen's, in place of any typed: a new store's screens labelled as they are paired. */
   copyLabelsForPairing: (labels: Readonly<Record<string, string>>) => void;
   /** Empties the pairing form's labels, once its screen is paired. */
   clearPairingLabels: () => void;
@@ -51,9 +55,10 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
-    labels: { rows: {}, editor: null },
+    labels: { rows: {}, editor: null, copyFrom: '' },
     editScreenLabels: (screen) =>
       labels((l) => ({
+        ...l,
         rows: { ...l.rows, [keyOf({ screenId: screen.id })]: [...labelRows(screen.labels), { key: '', value: '' }] },
         editor: { screenId: screen.id, pending: false, error: null },
       })),
@@ -61,12 +66,22 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
     typeLabel: (target, index, row) => rows(target, (r) => r.map((x, i) => (i === index ? row : x))),
     addLabelRow: (target) => rows(target, (r) => [...r, { key: '', value: '' }]),
     removeLabelRow: (target, index) => rows(target, (r) => r.filter((_, i) => i !== index)),
-    copyLabelsForPairing: (from) => rows('pairing', () => [...labelRows(from), { key: '', value: '' }]),
-    clearPairingLabels: () => rows('pairing', () => []),
+    chooseLabelSource: (copyFrom) => labels((l) => ({ ...l, copyFrom })),
+    copyLabelsForPairing: (from) => {
+      rows('pairing', () => [...labelRows(from), { key: '', value: '' }]);
+      labels((l) => ({ ...l, copyFrom: '' }));
+    },
+    clearPairingLabels: () => {
+      rows('pairing', () => []);
+      labels((l) => ({ ...l, copyFrom: '' }));
+    },
 
     async saveScreenLabels(orgId, screen) {
       const target = { screenId: screen.id };
-      const change = labelChange(screen.labels, labelRowsOf(get().labels, target));
+      const typed = labelRowsOf(get().labels, target);
+      // A row that cannot be saved as it is (a repeated key, a key with no value) is said on it; nothing is sent until it is fixed.
+      if (!labelsReady(typed)) return editor((e) => ({ ...e, error: 'Fix the labels marked above first.' }));
+      const change = labelChange(screen.labels, typed);
       if (!change) return get().closeLabelEditor();
       editor((e) => ({ ...e, pending: true, error: null }));
       try {
