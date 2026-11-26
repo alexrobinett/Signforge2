@@ -15,6 +15,7 @@ import { getAssets } from '../src/server/assets.functions';
 import { getBrandKits, getSpots, getTemplates } from '../src/server/spots.functions';
 import { initialOrgs, type OrgsState } from '../src/state/orgs';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
+import { scheduleEntry } from './schedule-entry';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/lib/tools', async (original) => ({ ...(await original<typeof import('../src/lib/tools')>()), callTool: vi.fn() }));
@@ -42,30 +43,8 @@ function publishingStore(deps: { router?: object; queryClient?: object }) {
     ...createPublishingSlice(set as never, get as never, { ...deps, router } as never),
   }));
 }
-const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
-  id,
-  playlistId: 'pls_main',
-  target: 'org',
-  groupId: null,
-  screenId: null,
-  priority: takeover ? 100 : 0,
-  startDate: null,
-  endDate: null,
-  days: null,
-  from: null,
-  to: null,
-  startsAt: takeover ? '2026-11-20T12:00:00.000Z' : null,
-  endsAt: takeover ? '2026-11-20T13:00:00.000Z' : null,
-  takeover,
-  deleted: false,
-  live: null,
-  version: 1,
-  published: false,
-  draftChanged: true,
-  publishedAt: null,
-  createdAt: 0,
-  updatedAt: 0,
-});
+const entry = (id: string, takeover: boolean) =>
+  scheduleEntry(id, takeover ? { priority: 100, startsAt: '2026-11-20T12:00:00.000Z', endsAt: '2026-11-20T13:00:00.000Z', takeover } : {});
 
 /** What `publish` and `takeover` answer: publish v`revision` to one screen, after the one before. */
 const published = (revision: number) => ({

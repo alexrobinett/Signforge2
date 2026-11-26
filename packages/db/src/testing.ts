@@ -162,6 +162,34 @@ export interface SeededOrg {
   publishRequest: string;
 }
 
+/**
+ * A seeded org's row for each kind of id a tool input can name (`screenId` → `screen`), and Better Auth's rows as
+ * `seedTeam` names them. Not the files (`manifest`, `bundle`, `sources`): each test that maps ids names those its way.
+ */
+export const ORG_ROW_IDS: Record<string, (o: SeededOrg) => string> = {
+  screen: (o) => o.screen,
+  group: (o) => o.group,
+  credential: (o) => o.credential,
+  template: (o) => o.template,
+  templateVersion: (o) => o.templateVersion,
+  spot: (o) => o.templateSpot,
+  playlist: (o) => o.playlist,
+  scheduleEntry: (o) => o.scheduleEntry,
+  asset: (o) => o.asset,
+  brandKit: (o) => o.brandKit,
+  logoOnDarkAsset: (o) => o.asset,
+  logoOnLightAsset: (o) => o.asset,
+  dataSource: (o) => o.dataSource,
+  alertDelivery: (o) => o.alertDelivery,
+  connection: (o) => o.connection,
+  publish: (o) => o.publish,
+  // An agent grant (M4-07's tools): `grantId`.
+  grant: (o) => o.agentGrant,
+  publishRequest: (o) => o.publishRequest,
+  member: (o) => `${o.orgId}-member`,
+  invitation: (o) => `${o.orgId}-invitation`,
+};
+
 export interface Seeded {
   a: SeededOrg;
   b: SeededOrg;

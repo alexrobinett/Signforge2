@@ -29,22 +29,7 @@ function watched() {
       return typeof v === 'function' ? v.bind(target) : v;
     },
   });
-  const grants = new Proxy(env.AGENT_GRANTS, {
-    get(target, key) {
-      if (key !== 'get') {
-        const value = Reflect.get(target, key);
-        return typeof value === 'function' ? value.bind(target) : value;
-      }
-      return (id: DurableObjectId) =>
-        new Proxy(target.get(id), {
-          get(stub, method) {
-            const real = Reflect.get(stub, method);
-            if (typeof method !== 'string' || typeof real !== 'function') return real;
-            return (...args: unknown[]) => (objectCalls.push(method), Reflect.apply(real, stub, args));
-          },
-        });
-    },
-  });
+  const grants = grantsThrough((method, call) => (objectCalls.push(method), call()));
   const bindings: Env = { ...env, DB: db, AGENT_GRANTS: grants, AGENT_CALLS: { writeDataPoint: (p) => p && points.push(p) } };
   const writes = () => sql.filter((q) => /^\s*(insert|update|delete|replace)\b/i.test(q));
   const reset = () => {
@@ -62,6 +47,26 @@ interface Usage {
   grants: { grantId: string; calls: number; changes: number; drafts: number; refusals: number }[];
   recent: { tool: string; result: string; change: boolean; needs: string | null; target: { kind: string; id: string } | null }[];
   lastRefusal: { tool: string; result: string; needs: string | null } | null;
+}
+
+/** The agent grants' namespace, with each call to a grant's object through `through`: `call` makes the real one. */
+function grantsThrough(through: (method: string, call: () => unknown) => unknown): typeof env.AGENT_GRANTS {
+  return new Proxy(env.AGENT_GRANTS, {
+    get(target, key) {
+      if (key !== 'get') {
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (id: DurableObjectId) =>
+        new Proxy(target.get(id), {
+          get(stub, method) {
+            const real = Reflect.get(stub, method);
+            if (typeof method !== 'string' || typeof real !== 'function') return real;
+            return (...args: unknown[]) => through(method, () => Reflect.apply(real, stub, args));
+          },
+        });
+    },
+  });
 }
 
 describe('a data point per call', () => {
@@ -325,24 +330,9 @@ describe("the refusals' cost and the org's cap", () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
     const asked: string[] = [];
-    const grants = new Proxy(env.AGENT_GRANTS, {
-      get(target, key) {
-        if (key !== 'get') {
-          const value = Reflect.get(target, key);
-          return typeof value === 'function' ? value.bind(target) : value;
-        }
-        return (id: DurableObjectId) =>
-          new Proxy(target.get(id), {
-            get(stub, method) {
-              const real = Reflect.get(stub, method);
-              if (typeof method !== 'string' || typeof real !== 'function') return real;
-              return (...args: unknown[]) => {
-                asked.push(method);
-                return method === 'orgAlertDue' ? Promise.reject(new Error('org object unavailable')) : Reflect.apply(real, stub, args);
-              };
-            },
-          });
-      },
+    const grants = grantsThrough((method, call) => {
+      asked.push(method);
+      return method === 'orgAlertDue' ? Promise.reject(new Error('org object unavailable')) : call();
     });
     const bindings: Env = { ...env, AGENT_GRANTS: grants };
     const failed = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -366,25 +356,10 @@ describe("the refusals' cost and the org's cap", () => {
     if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev sends to its outbox');
     // The org's object fails its first answer, as an unavailable one would.
     let failing = true;
-    const grants = new Proxy(env.AGENT_GRANTS, {
-      get(target, key) {
-        if (key !== 'get') {
-          const value = Reflect.get(target, key);
-          return typeof value === 'function' ? value.bind(target) : value;
-        }
-        return (id: DurableObjectId) =>
-          new Proxy(target.get(id), {
-            get(stub, method) {
-              const real = Reflect.get(stub, method);
-              if (method === 'orgAlertDue' && failing)
-                return () => {
-                  failing = false;
-                  return Promise.reject(new Error('org object unavailable'));
-                };
-              return typeof real === 'function' ? (...args: unknown[]) => Reflect.apply(real, stub, args) : real;
-            },
-          });
-      },
+    const grants = grantsThrough((method, call) => {
+      if (method !== 'orgAlertDue' || !failing) return call();
+      failing = false;
+      return Promise.reject(new Error('org object unavailable'));
     });
     const bindings: Env = { ...env, AGENT_GRANTS: grants };
     const failed = vi.spyOn(console, 'error').mockImplementation(() => {});

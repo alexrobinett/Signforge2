@@ -507,3 +507,30 @@ export async function testScreenToPair(browser: Browser): Promise<{ screen: Page
   await expect.poll(pairing, { timeout: 20_000 }).not.toBe('');
   return { screen, code: await pairing() };
 }
+
+/**
+ * The page's ⋯ menu, opened by keyboard, and its delete question closed by Escape and by Cancel: each time, focus is
+ * back on ⋯ at once, in the key's own event (#378). Radix gave it back only once the question's closing had played,
+ * the page's body focused until then.
+ */
+export async function deleteQuestionGivesFocusBack(page: Page) {
+  const more = page.getByRole('button', { name: 'More actions: delete' });
+  const question = page.getByRole('alertdialog');
+  for (const close of ['Escape', 'Cancel'] as const) {
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question).toBeVisible();
+    // Read, as a person would: the menu has gone by then, and its Delete… item with it.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    if (close === 'Cancel') {
+      await question.getByRole('button', { name: 'Cancel' }).focus();
+      await page.keyboard.press('Enter');
+    } else await page.keyboard.press('Escape');
+    // At once, in the key's own event: not after the question's closing has played, with the body focused meanwhile.
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), close).toBe('More actions: delete');
+    await expect(question).toBeHidden();
+    await expect(more, close).toBeFocused();
+  }
+}
