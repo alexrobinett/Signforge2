@@ -9,7 +9,8 @@ ssh "$PI" 'mkdir -p ~/signforge/www/content'
 rsync -az --delete dist/content/ "$PI:signforge/www/content/"
 [ "$1" = "--content-only" ] && { echo "content deployed"; exit 0; }
 rsync -az --delete --exclude content dist/player/ "$PI:signforge/www/"
-rsync -az device/pi/kiosk.sh device/pi/tune.sh device/pi/bench.sh device/pi/*.py "$PI:signforge/"
+# The supervisor's tests stay here: they run on a development machine against a faked wlr-randr.
+rsync -az --exclude 'test_*.py' device/pi/kiosk.sh device/pi/tune.sh device/pi/bench.sh device/pi/*.py "$PI:signforge/"
 rsync -az device/pi/*.service device/pi/*.rules "$PI:signforge/"
 ssh "$PI" 'touch ~/signforge/kiosk.env
   # datad, the feed stand-in, retired with the API poller (M3-23).
