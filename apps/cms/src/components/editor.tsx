@@ -82,7 +82,9 @@ export function EditorHeader({
 export function SaveAlert({ error, stale, onReload, onRetry }: { error: string | null; stale: boolean; onReload: () => void; onRetry: () => void }) {
   if (!stale && !error) return null;
   return (
-    <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+    // Announced as it appears (#479), and kept in view under a phone's top bar while the form below it scrolls: a failure
+    // there was off screen while the field that failed was being edited.
+    <Alert variant="destructive" role="alert" className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 lg:top-0">
       <AlertDescription className="flex flex-wrap items-center gap-3">
         {error}
         {stale ? (

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { accountMenu, axe, createOrg, fromAddress, orgSwitcher, screenshot, shots, signIn } from './helpers';
+import { accountMenu, axe, createOrg, fromAddress, hydrated, orgSwitcher, screenshot, shots, signIn, signInAs, tool } from './helpers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.124';
@@ -40,4 +40,27 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
   await drawer.getByRole('link', { name: 'Playlists' }).click();
   await expect(drawer).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Playlists', level: 1 })).toBeVisible();
+});
+
+test('a save that fails says so in view at phone width, under the top bar, while the field below is edited (#479)', async ({ page }) => {
+  await signInAs(page, `e2e-phone-save-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Quayside Ices', ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
+  const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
+  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  // The last field of the form, well below the editor's header on a phone.
+  const duration = page.getByLabel('Duration');
+  await duration.scrollIntoViewIfNeeded();
+  await duration.fill('12');
+  const alert = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(alert).toBeVisible();
+  // Back at the field (the alert's arrival moved it down): the alert is in view with it.
+  await duration.scrollIntoViewIfNeeded();
+  await expect(duration).toBeInViewport();
+  await expect(alert).toBeInViewport();
+  await page.unroute('**/api/tools/update_spot');
 });
