@@ -19,7 +19,7 @@ export interface DeviceScreen {
   /** The last manifest that played a spot, as the screen's last sync reported it (`manifest.lastGood`). */
   lastGoodManifestId: string | null;
   /** The feed photos the screen's last sync lacked, and what its reply asked for (`ScreenHeartbeat.photos`). */
-  lastPhotos: { missing: number; retried: boolean; ask: string[] } | null;
+  lastPhotos: { missing: number; retried: boolean; ask: string[]; sent?: string } | null;
   /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
   displayOverrideJson: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
@@ -45,6 +45,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       photosMissing: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.missing')`,
       photosRetried: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.retried')`,
       photosAsk: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.ask')`,
+      photosSent: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.sent')`,
       displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
@@ -68,7 +69,12 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       first.photosMissing === null || first.photosAsk === null
         ? null
         : // json_extract gives an array as its JSON text; the API's sync route wrote it.
-          { missing: first.photosMissing, retried: first.photosRetried === 1, ask: JSON.parse(first.photosAsk) },
+          {
+            missing: first.photosMissing,
+            retried: first.photosRetried === 1,
+            ask: JSON.parse(first.photosAsk),
+            ...(first.photosSent !== null && { sent: first.photosSent }),
+          },
     displayOverrideJson: first.displayOverrideJson,
     credentials:
       first.status === 'active'

@@ -17,9 +17,10 @@ export interface ScreenHeartbeat {
    * The feed photos the screen held (`SyncRequest.blobs`) and lacked, the end of each hash the reply asked it to
    * fetch (`ask`, the next reply's starting after its last), and whether its one retry is spent: the next sync comes
    * soon only while asked photos arrive or a reply's snapshots bring more than it asks for, with one retry (sync.ts,
-   * `MORE_PHOTOS_SYNC_S`). Absent before the fast sync.
+   * `MORE_PHOTOS_SYNC_S`). `sent` fingerprints the snapshots the reply sent, so the same ones sent again bring no new
+   * photos first. Absent before the fast sync.
    */
-  photos?: { held: number; missing: number; retried: boolean; ask: string[] };
+  photos?: { held: number; missing: number; retried: boolean; ask: string[]; sent?: string };
 }
 
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {

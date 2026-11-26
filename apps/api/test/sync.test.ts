@@ -561,15 +561,12 @@ describe('snapshot feed blobs (#196)', () => {
       templates,
       spots: { n: spot('n', shared), x: spot('x', broken) },
     });
-    const r = await sync(
-      s,
-      body({ manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000, [broken]: 6000 } }),
-    );
+    const r = await sync(s, body({ manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000 } }));
     expect(new Set(r.blobs)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => hash(100 + i + 1))));
     expect(r.nextSyncS).toBe(15);
 
     // The screen stores those: the broken one's 30 are asked for next, soon, as photos came in.
-    const fallingBack = { manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000, [broken]: 6000 } };
+    const fallingBack = { manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000 } };
     const r2 = await sync(s, body({ ...fallingBack, blobs: r.blobs }));
     expect(new Set(r2.blobs)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => hash(200 + i + 1))));
     expect(r2.nextSyncS).toBe(15);
@@ -577,6 +574,97 @@ describe('snapshot feed blobs (#196)', () => {
     // long as it falls back.
     expect((await sync(s, body({ ...fallingBack, blobs: r.blobs }))).nextSyncS).toBe(15);
     for (let i = 0; i < 2; i++) expect((await sync(s, body({ ...fallingBack, blobs: r.blobs }))).nextSyncS).toBe(300);
+  });
+
+  // Review of #514, round 3: as the player reports it while falling back, only the playing manifest's sources and the
+  // photos its snapshots name; the broken one's feeds unreported, so their snapshots come with every reply.
+  describe('falling back, as the player reports it', () => {
+    /** The playing feed's 20 photos missing, and a feed only the broken manifest binds with `broken` photos. */
+    async function fallingBack(name: string, broken: number) {
+      const s = await setUp(name);
+      const spot = (id: string, source: string) => ({
+        id,
+        kind: 'template',
+        template: 'base/news@2.0.0',
+        data: { items: [] },
+        bindings: { items: { source, path: 'items' } },
+      });
+      const templates = { 'base/news@2.0.0': newsTemplate(true) };
+      const playing = s.seed.dataSource;
+      const only = (await s.seed.scope.dataSources.insert({ name: 'Broken only', format: 'rss', urlEncrypted: 'enc:x', refreshS: 300 })).id;
+      const items = (offset: number, photos: number) =>
+        Array.from({ length: photos / 2 }, (_, i) => ({
+          title: `Story ${i}`,
+          published: '',
+          source: '',
+          image: { file: hash(offset + 2 * i + 1), thumb: hash(offset + 2 * i + 2) },
+        }));
+      await publish(s, OLD, {
+        schema: MANIFEST_SCHEMA,
+        dataSources: { [playing]: { id: playing, refreshS: 300 } },
+        templates,
+        spots: { n: spot('n', playing) },
+      });
+      await sync(s, body({ manifest: { active: OLD, filesMissing: 0, lastGood: OLD }, snapshots: { [playing]: 6000 } }));
+      await s.seed.scope.dataSources.putSnapshot(playing, {
+        version: 'v1',
+        fetchedAt: 6000,
+        checkedAt: 6000,
+        dataJson: JSON.stringify({ items: items(100, 20) }),
+      });
+      await s.seed.scope.dataSources.putSnapshot(only, {
+        version: 'v1',
+        fetchedAt: 6000,
+        checkedAt: 6000,
+        dataJson: JSON.stringify({ items: items(200, broken) }),
+      });
+      await publish(s, NEW, {
+        schema: MANIFEST_SCHEMA,
+        dataSources: { [playing]: { id: playing, refreshS: 300 }, [only]: { id: only, refreshS: 300 } },
+        templates,
+        spots: { n: spot('n', playing), x: spot('x', only) },
+      });
+      const plays = new Set(Array.from({ length: 20 }, (_, i) => hash(100 + i + 1)));
+      const held: string[] = [];
+      const replies = [];
+      for (let i = 0; i < 8; i++) {
+        const r = await sync(
+          s,
+          body({
+            manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD },
+            snapshots: { [playing]: 6000 },
+            ...(held.length && { blobs: [...held] }),
+          }),
+        );
+        replies.push(r);
+        // It keeps only the photos its held snapshots name.
+        for (const sha of r.blobs ?? []) if (plays.has(sha) && !held.includes(sha)) held.push(sha);
+      }
+      return { first: replies[0]!, paces: replies.map((r) => r.nextSyncS), plays };
+    }
+
+    for (const [broken, paces] of [
+      [30, [15, 15, 15, 300, 300, 300, 300, 300]],
+      [20, [15, 300, 300, 300, 300, 300, 300, 300]],
+      [8, [15, 300, 300, 300, 300, 300, 300, 300]],
+    ] as const)
+      it(`asks for the playing feed's photos first and settles, with ${broken} photos only the broken manifest binds`, async () => {
+        const r = await fallingBack(`sync-fallback-${broken}`, broken);
+        expect(new Set(r.first.blobs)).toEqual(r.plays);
+        expect(r.paces).toEqual(paces);
+      });
+  });
+
+  // Review of #514, round 3: a screen that cannot fetch its new manifest does not report its new feeds either, so
+  // their snapshots come again with every reply; only the first brings their photos first and a sync soon.
+  it('settles when a manifest that cannot be fetched adds feeds with more than 20 photos', async () => {
+    const s = await setUp('sync-unfetched-manifest');
+    const old = await newsSources(s, OLD, 0, 1);
+    expect((await sync(s, body({ snapshots: old.snapshots, blobs: photosOf(0) }))).blobs).toBeUndefined();
+    await newsSources(s, NEW, 1, 2, 10, old.ids);
+    const paces = [];
+    for (let i = 0; i < 6; i++) paces.push((await sync(s, body({ snapshots: old.snapshots, blobs: photosOf(0) }))).nextSyncS);
+    expect(paces).toEqual([15, 15, 300, 300, 300, 300]);
   });
 
   it('syncs at the full interval while the photos it was asked for never arrive, and soon again once they do', async () => {
