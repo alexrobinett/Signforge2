@@ -105,6 +105,10 @@ export class FixtureServer {
   loseCountReplies = 0;
   /** What the supervisor answers GET /display with, as device/pi/supervisor.py does; a test may give it an `output` (#511). */
   supervisorDisplay: Record<string, unknown> = { on: true, signal: 'ok', cec: 'not acknowledged' };
+  /** What `/alive` answers, as device/pi/supervisor.py does: a release it rolled back, or nothing (#628). */
+  supervisorAlive: Record<string, unknown> = {};
+  /** The version each beat said, oldest first. */
+  readonly beatVersions: unknown[] = [];
   /** What the supervisor holds; undefined is a freshly flashed screen. */
   supervisorCredential: string | undefined = FIXTURE_CREDENTIAL;
   /** The device API base the supervisor's credential is bound to: `deviceApi` once started. */
@@ -406,7 +410,11 @@ export class FixtureServer {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
     if (rest === 'alive' && req.method === 'POST') {
-      return req.headers['x-sf-token'] === SUPERVISOR_TOKEN ? json(200, {}) : json(403, { error: 'forbidden' });
+      if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
+      return void readBody(req).then((body) => {
+        this.beatVersions.push((JSON.parse(body || '{}') as { version?: unknown }).version);
+        json(200, this.supervisorAlive);
+      });
     }
     // As device/pi/supervisor.py answers a switch: its state, and how each method went.
     if ((rest === 'display/on' || rest === 'display/off') && req.method === 'POST') {

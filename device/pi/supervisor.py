@@ -11,7 +11,7 @@ the supervisor only does *how*, over a local HTTP API:
   GET  /credential    the screen's API credential and the API it is for, for the player's own origin (see below)
   POST /credential    {"credential": "sfd_...", "api": "https://<api>/v1/device"}: store what pairing gave the player
   DELETE /credential  forget it: the server revoked it
-  POST /alive         the player's beat, every 5 s (see below)
+  POST /alive         the player's beat, every 5 s, with its version and release (see below); answers with a release rolled back (updater.py)
 
 Two methods, because panels differ:
   CEC     TVs and commercial displays. Ignored by most monitors.
@@ -59,8 +59,10 @@ plugged back in is set at its next check. A check that fails unexpectedly is log
 reading dropped, so none looks current. Not read while the panel is off: the signal is off by design
 then, and setting a mode would turn it on.
 """
-import hmac, ipaddress, json, os, re, secrets, subprocess, threading, time
+import hmac, ipaddress, json, os, random, re, secrets, subprocess, threading, time
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8091
@@ -329,8 +331,108 @@ def watch_player():
         # A failure is logged and the watch goes on: a thread that ends leaves no watchdog (#558).
         try:
             check_player(time.monotonic())
+            # A poll holding the lock may be downloading: the gate waits for the next check, the watchdog does not.
+            if updates and update_lock.acquire(blocking=False):
+                try:
+                    updates.check_gate()
+                finally:
+                    update_lock.release()
         except Exception as e:
             print(f"player check failed: {e!r}", flush=True)
+
+
+# --------------------------------------------------------------------------------------------- player updates (#628)
+
+RELEASE_KEY_FILE = os.path.expanduser("~/signforge/player-release.pub")
+# The most an offer's reply may be: a manifest of a MiB, every character of it escaped in JSON, and the rest.
+OFFER_READ_BYTES = 6 * 1_048_576 + 4096
+# The longest a tarball's download may take, past each read's own timeout: a trickle cannot hold the update lock for long.
+DOWNLOAD_DEADLINE_S = 900
+
+
+class NoRedirect(HTTPRedirectHandler):
+    """Refuse every redirect: the credential goes to the API it is bound to and nowhere else."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+api_opener = build_opener(NoRedirect)
+
+
+def api_request(path):
+    """A GET under the API base the credential is bound to, with the credential, and nowhere else."""
+    held = load_credential()
+    if not held or not held[1]:
+        raise OSError("no credential bound to an API")
+    return Request(held[1] + path, headers={"authorization": f"Bearer {held[0]}"})
+
+
+def api_get(path):
+    try:
+        with api_opener.open(api_request(path), timeout=30) as r:
+            return r.status, r.read(OFFER_READ_BYTES)
+    except HTTPError as e:
+        e.close()
+        return e.code, b""
+
+
+def api_download(path, dest, limit):
+    """Write the GET's body to `dest`, refusing past `limit` bytes: no more than the signed size is written."""
+    deadline = time.monotonic() + DOWNLOAD_DEADLINE_S
+    with api_opener.open(api_request(path), timeout=60) as r, open(dest, "wb") as f:
+        got = 0
+        for chunk in iter(lambda: r.read(1 << 16), b""):
+            got += len(chunk)
+            if got > limit:
+                raise updater.Refused("the tarball is larger than the one signed")
+            if time.monotonic() > deadline:
+                raise updater.Refused(f"the download took more than {DOWNLOAD_DEADLINE_S} s")
+            f.write(chunk)
+
+
+def kiosk_restart():
+    global last_beat
+    # Disarmed until the restarted player beats: its start is not a hang. The update's gate watches it meanwhile.
+    last_beat = None
+    rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
+    if rc != 0:
+        print(f"kiosk restart for a player update failed: {out.strip()[:120]}", flush=True)
+
+
+def load_updater():
+    """The update channel, or None without the release key, the library that checks it, or anything else it needs: then
+    the player is updated by hand, and display power and the watchdog run as before."""
+    global updater
+    try:
+        with open(RELEASE_KEY_FILE, "rb") as f:
+            key = f.read()
+        import updater
+
+        return updater.Updater(
+            os.path.expanduser("~/signforge"), key, api_get, api_download, kiosk_restart, lambda: state["on"], time.time, time.monotonic, random.random
+        )
+    except Exception as e:
+        print(f"player updates off: {e!r}", flush=True)
+        return None
+
+
+updates = None
+# Held through a poll, which may be a download: the display's lock stays free for /display, and a beat that finds it
+# held skips the gate, which is never open while a release downloads.
+update_lock = threading.Lock()
+
+
+def watch_updates():
+    while True:
+        # About every POLL_S, with jitter, so a fleet's screens do not ask at once.
+        time.sleep(updater.POLL_S * (0.8 + 0.4 * random.random()))
+        try:
+            with update_lock:
+                done = updates.poll()
+            print(f"player update: {done}", flush=True)
+        except Exception as e:
+            print(f"player update failed: {e!r}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -389,7 +491,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/alive":
             last_beat = time.monotonic()
             restarts.update(failed=0, retry_at=None)
-            self.reply(200, {})
+            # A player before #628, or a build not made by the release workflow, sends no release: its beat still counts
+            # for the watchdog, and for no release's gate.
+            try:
+                length = int(self.headers.get("content-length") or 0)
+                release = json.loads(self.rfile.read(min(length, 1024)) or b"{}").get("release")
+            except (ValueError, AttributeError):
+                release = None
+            if not updates:
+                return self.reply(200, {})
+            # The beat waits for no poll: one that finds the lock held is not counted, and the gate is never open
+            # while a release downloads. The report is read without it.
+            if update_lock.acquire(blocking=False):
+                try:
+                    updates.beat(release if isinstance(release, int) and not isinstance(release, bool) and release >= 1 else None)
+                finally:
+                    update_lock.release()
+            self.reply(200, updates.alive_reply())
         elif self.path in ("/display/on", "/display/off"):
             self.reply(200, set_display(self.path.endswith("/on")))
         elif self.path == "/credential":
@@ -421,6 +539,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    updates = load_updater()
     threading.Thread(target=watch_player, daemon=True).start()
     threading.Thread(target=watch_mode, daemon=True).start()
+    if updates:
+        threading.Thread(target=watch_updates, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
