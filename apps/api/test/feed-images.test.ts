@@ -1714,6 +1714,65 @@ describe("a CDN's copy at the size the screen needs", () => {
   });
 });
 
+// #524: a snapshot names only photos stored when its poll saved it, so the last of a poll's new photos to be
+// delivered makes the source due at the poller's next run, once, rather than at its next hourly poll.
+describe('photos stored after their poll', () => {
+  /** A source of three stories, polled at NOW and its photos queued; the photo URLs and their jobs. */
+  async function polled() {
+    const feedUrl = `https://after-${++n}.test/rss`;
+    const id = await news(feedUrl);
+    const urls = [0, 1, 2].map((i) => `https://after-${n}.test/${i}.jpg`);
+    const feed = web({ [feedUrl]: { body: feedOf(3, (i) => urls[i]) } });
+    await poll({ now: NOW, guards: feed.guards });
+    const jobs = take();
+    expect(jobs.map((j) => j.url).sort()).toEqual([...urls].sort());
+    const nextPollAt = async () => (await o.scope.dataSources.get(id))!.nextPollAt;
+    return { id, feed, jobs, urls, nextPollAt };
+  }
+  const answers = (urls: string[]) => Object.fromEntries(urls.map((u, i) => [u, { body: jpeg(640, 360, `p${i}-${n}`) }]));
+  const of = (jobs: FeedImageJob[], url: string) => jobs.filter((j) => j.url === url);
+
+  it('re-polls once the last is stored, and its snapshot names them all', async () => {
+    const { id, feed, jobs, urls, nextPollAt } = await polled();
+    const hourly = await nextPollAt();
+    const photos = web(answers(urls));
+    const { images } = imagesStub();
+    // Two of three stored: the third still waits, so the source is not due yet.
+    await consume([...of(jobs, urls[0]!), ...of(jobs, urls[1]!)], { guards: photos.guards, images }, NOW + MIN);
+    expect(await nextPollAt()).toBe(hourly);
+    await consume(of(jobs, urls[2]!), { guards: photos.guards, images }, NOW + 2 * MIN);
+    expect(await nextPollAt()).toBe(NOW + 2 * MIN);
+    // The poller's next run reads the feed afresh, and the snapshot names every photo.
+    await poll({ now: NOW + 3 * MIN, guards: feed.guards });
+    expect((await snapshot(id)).items.map((i) => i.image !== undefined)).toEqual([true, true, true]);
+    expect(await nextPollAt()).toBeGreaterThan(NOW + 3 * MIN);
+    // Rechecks that change nothing make it due no more.
+    const later = await nextPollAt();
+    await consume(jobs, { guards: photos.guards, images }, NOW + 4 * MIN);
+    expect(await nextPollAt()).toBe(later);
+  });
+
+  it('re-polls once the last is delivered, though it failed', async () => {
+    const { jobs, urls, nextPollAt } = await polled();
+    const hourly = await nextPollAt();
+    const photos = web(answers(urls.slice(0, 2)));
+    const { images } = imagesStub();
+    await consume([...of(jobs, urls[0]!), ...of(jobs, urls[1]!)], { guards: photos.guards, images }, NOW + MIN);
+    expect(await nextPollAt()).toBe(hourly);
+    // The third answers 404.
+    await consume(of(jobs, urls[2]!), { guards: photos.guards, images }, NOW + 2 * MIN);
+    expect(await row(urls[2]!)).toMatchObject({ lastError: 'http-status' });
+    expect(await nextPollAt()).toBe(NOW + 2 * MIN);
+  });
+
+  it('does not re-poll when none of them could be stored', async () => {
+    const { jobs, nextPollAt } = await polled();
+    const hourly = await nextPollAt();
+    await consume(jobs, { guards: web({}).guards, images: imagesStub().images }, NOW + MIN);
+    expect(await nextPollAt()).toBe(hourly);
+  });
+});
+
 describe('photos switched off', () => {
   const setPhotos = (dataSourceId: string, photos: boolean) =>
     dispatch(
