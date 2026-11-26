@@ -118,6 +118,19 @@ describe('summaries (#202)', () => {
     ['a <scripts> tag, not a script', 'A <scripts>b</scripts> c', 'A b c'],
     ['NUL from a numeric reference, dropped', 'a&#0;b&#x0;c', 'abc'],
     ['bidi controls, written or referenced, dropped', 'a&#x202E;b&#8238;c\u2066d', 'abcd'],
+    [
+      "an object's own property name, no reference",
+      'a &toString; &valueOf; &hasOwnProperty; &constructor; b',
+      'a &toString; &valueOf; &hasOwnProperty; &constructor; b',
+    ],
+    ['a reference to a lone surrogate, the replacement character', 'a&#55296;b&#xDC00;c', 'a\ufffdb\ufffdc'],
+    ['C0 and C1 controls, referenced, dropped', 'a&#7;b&#x1b;c&#x85;d&#x9f;e&#127;f', 'abcdef'],
+    ['tab, line feed and carriage return, a space', 'a&#9;b&#10;c&#13;d', 'a b c d'],
+    ['an empty comment, <!-->', 'a<!-->b', 'a b'],
+    ['an empty comment, <!--->', 'a<!--->b', 'a b'],
+    ['a comment ended by --!>', 'a<!-- c --!>b', 'a b'],
+    ['a > in a quoted attribute, inside the tag', 'a<img alt="1 > 0" src=x>b<img alt=\'2 > 1\'>c', 'a b c'],
+    ['an apostrophe in prose after a tag, not a quote', "<p>It's here</p> > fine", "It's here > fine"],
   ])('%s', (_case, description, summary) => {
     expect(summaries([description])).toEqual([summary]);
   });

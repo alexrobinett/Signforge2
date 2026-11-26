@@ -287,7 +287,9 @@ function unescapeHtml(v: string): string {
   return v.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|amp|lt|gt|quot|apos);/gi, (ref, name: string) => {
     if (name[0] !== '#') return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[name.toLowerCase()] ?? ref;
     const code = name[1] === 'x' || name[1] === 'X' ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
-    return code <= 0x10ffff ? String.fromCodePoint(code) : ref;
+    if (code > 0x10ffff) return ref;
+    // A lone surrogate is no character: as HTML reads one, the replacement character (review of #627).
+    return code >= 0xd800 && code <= 0xdfff ? '\ufffd' : String.fromCodePoint(code);
   });
 }
 
@@ -352,13 +354,28 @@ const NAMED_TEXT: Record<string, string> = {
 };
 
 /**
- * Characters a summary never carries (#477): NUL, and the bidirectional controls that would turn a screen's text
- * around (U+202A to U+202E, U+2066 to U+2069), whether written or read from a numeric reference.
+ * Characters a summary never carries (#477): the C0 and C1 controls but tab, line feed and carriage return (which
+ * collapse to a space), and the bidirectional controls that would turn a screen's text around (U+202A to U+202E,
+ * U+2066 to U+2069), whether written or read from a numeric reference. Written as escapes: GitHub flags raw ones.
  */
-const UNSHOWN = /[\0‪-‮⁦-⁩]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is what it is for.
+const UNSHOWN = /[\0-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g;
 
 /** Whether `html` at `at` is `word`, any case, read without lower-casing the whole text: `İ` lower-cases to two characters. */
 const isAt = (html: string, at: number, word: string) => html.slice(at, at + word.length).toLowerCase() === word;
+
+/**
+ * Where a comment that opened before `from` ends, its last `>`; -1 when unclosed. As HTML reads one, `<!-->` and
+ * `<!--->` are empty comments, and `--!>` ends one as `-->` does (review of #627).
+ */
+function commentEnd(html: string, from: number): number {
+  if (html[from] === '>') return from;
+  if (html.startsWith('->', from)) return from + 1;
+  const close = /--!?>/g;
+  close.lastIndex = from;
+  const m = close.exec(html);
+  return m ? m.index + m[0].length - 1 : -1;
+}
 
 /** The end of a script or style's body, `</name` in any case, from `from`; -1 when unclosed. */
 function closeOf(html: string, name: string, from: number): number {
@@ -390,11 +407,10 @@ function summaryOf(html: string, title: string): { summary: string } | Record<st
     }
     out += `${html.slice(i, lt)} `;
     let end: number;
-    if (isAt(html, lt, '<!--')) {
-      const close = html.indexOf('-->', lt + 4);
-      end = close === -1 ? -1 : close + 2;
-    } else {
-      const gt = html.indexOf('>', lt);
+    if (isAt(html, lt, '<!--')) end = commentEnd(html, lt + 4);
+    else {
+      // Its quoted values skipped, as the feed's own tags are: `<img alt="1 > 0">` is one tag (review of #627).
+      const gt = tagEnd(html, lt + 1, '>');
       const hidden =
         gt === -1 ? undefined : ['script', 'style'].find((name) => isAt(html, lt + 1, name) && !/[a-z0-9]/i.test(html[lt + 1 + name.length] ?? ''));
       const close = hidden ? closeOf(html, hidden, gt) : gt;
@@ -403,7 +419,8 @@ function summaryOf(html: string, title: string): { summary: string } | Record<st
     if (end === -1) break;
     i = from = end + 1;
   }
-  const text = unescapeHtml(out.replace(/&([a-z][a-z0-9]*);/gi, (ref, name: string) => NAMED_TEXT[name] ?? ref))
+  // Own keys only: `&constructor;` is no reference, though every object has one (review of #627).
+  const text = unescapeHtml(out.replace(/&([a-z][a-z0-9]*);/gi, (ref, name: string) => (Object.hasOwn(NAMED_TEXT, name) ? NAMED_TEXT[name]! : ref)))
     .replace(UNSHOWN, '')
     .replace(/\s+/g, ' ')
     .trim();
