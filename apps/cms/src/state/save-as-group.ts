@@ -30,6 +30,8 @@ export interface SaveAsGroupSlice {
   openSaveAsGroup: (orgId: string, terms: LabelTerm[], then: 'done' | 'schedule') => void;
   nameGroupFromFilters: (name: string) => void;
   closeSaveAsGroup: () => void;
+  /** Cancel, Escape or a click outside: ignored while the save runs, so it is all or nothing, as the group dialogs do. */
+  cancelSaveAsGroup: () => void;
   /** Saves the chips as a smart group, then does what the dialog was opened for. */
   saveFiltersAsGroup: () => Promise<void>;
 }
@@ -56,6 +58,7 @@ export const createSaveAsGroupSlice: SliceCreator<SaveAsGroupSlice> = (set, get,
     nameGroupFromFilters: (name) =>
       set((s) => ({ saveAsGroup: s.saveAsGroup && !s.saveAsGroup.pending ? { ...s.saveAsGroup, name, error: null } : s.saveAsGroup })),
     closeSaveAsGroup: () => set({ saveAsGroup: null }),
+    cancelSaveAsGroup: () => set((s) => ({ saveAsGroup: s.saveAsGroup?.pending ? s.saveAsGroup : null })),
     async saveFiltersAsGroup() {
       const d = get().saveAsGroup;
       if (!d || d.pending) return;

@@ -218,3 +218,47 @@ test('#185 done when: label 3 selected screens in bulk, filter by a chip and kee
   await expect(page.getByRole('rowheader', { name: 'store: 0142 · 3 screens' })).toBeVisible();
   await expect(page.getByRole('rowheader', { name: 'store: 0009 · 1 screen' })).toBeVisible();
 });
+
+test('#188: download the labels as CSV, edit the file, see what the import changes, and save it all at once', async ({ page, request }) => {
+  await signInAs(page, `e2e-label-csv-${Date.now()}@example.com`, '192.0.2.190');
+  await createOrg(page, 'Harbor CSV', '192.0.2.190');
+  const claim = async (name: string, labels: Record<string, string>) =>
+    tool(page, 'claim_screen', { code: await pairingCode(request, '192.0.2.191'), name, timezone: 'Europe/London', orientation: 'landscape', labels });
+  await claim('Drive 1', { region: 'north', store: '0142' });
+  await claim('Drive 2', { region: 'south' });
+
+  await page.goto('/screens?view=table');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Labels as a file' }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'Download labels (CSV)' }).click();
+  const csv = await (await (await downloading).createReadStream()).toArray().then((parts) => Buffer.concat(parts).toString('utf8'));
+  const [header, ...lines] = csv.trimEnd().split('\r\n');
+  expect(header).toBe('screen_id,name,region,store');
+  expect(lines).toHaveLength(2);
+
+  // Edited as a spreadsheet would: a value changed, a new column whose value has a comma and quotes, and a row for no screen.
+  const edited = [
+    `${header},note`,
+    ...lines.map((l) => (l.includes('Drive 2') ? `${l.replace(',south,', ',South,')},"Back door, ""staff"""` : `${l},`)),
+    'scr_nope,Gone,north,1,',
+  ].join('\r\n');
+  await page.getByRole('button', { name: 'Labels as a file' }).click();
+  await page.getByRole('menuitem', { name: 'Import labels…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Import labels' });
+  await dialog.getByLabel('File').setInputFiles({ name: 'labels.csv', mimeType: 'text/csv', buffer: Buffer.from(`﻿${edited}`) });
+  const changes = dialog.getByRole('region', { name: 'What it changes' });
+  // Read out in one line as it comes (review of #612); shown as the heading of its list.
+  await expect(changes.getByRole('status')).toHaveText('Changes 1 screen. 1 row skipped.');
+  await expect(changes.getByText('Changes 1 screen', { exact: true })).toBeVisible();
+  await expect(changes.getByText('+ note: Back door, "staff" · region: south → South')).toBeVisible();
+  await expect(changes.getByText('1 row skipped', { exact: true })).toBeVisible();
+  await shotsBoth(page, '188-import-preview');
+  await axe(page);
+  await dialog.getByRole('button', { name: 'Save on 1 screen' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Labels imported on 1 screen')).toBeVisible();
+  const row = page.getByRole('row').filter({ has: page.getByRole('rowheader', { name: 'Drive 2' }) });
+  await expect(row.getByText('region: South')).toBeVisible();
+  await expect(row.getByText('note: Back door, "staff"')).toBeVisible();
+});

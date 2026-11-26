@@ -82,4 +82,21 @@ describe('"Save as group…"', () => {
     expect(s.getState().saveAsGroup).toMatchObject({ pending: false, error: 'a group is named North' });
     expect(openNewEntry).not.toHaveBeenCalled();
   });
+
+  it('waits while the save runs: Cancel and Escape close it only once it is done (review of #615)', async () => {
+    const { s } = store();
+    s.getState().openSaveAsGroup(ORG, NORTH, 'done');
+    s.getState().nameGroupFromFilters('North');
+    let answer: (out: unknown) => void = () => {};
+    callTool.mockReturnValueOnce(new Promise((r) => (answer = r)));
+    const saving = s.getState().saveFiltersAsGroup();
+    s.getState().cancelSaveAsGroup();
+    expect(s.getState().saveAsGroup).toMatchObject({ pending: true });
+    answer({ group: { id: 'grp_n', name: 'North' } });
+    await saving;
+    expect(s.getState().saveAsGroup).toBeNull();
+    s.getState().openSaveAsGroup(ORG, NORTH, 'done');
+    s.getState().cancelSaveAsGroup();
+    expect(s.getState().saveAsGroup).toBeNull();
+  });
 });

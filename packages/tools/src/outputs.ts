@@ -915,6 +915,9 @@ export const outputs = {
   update_screen_labels: z.object({
     screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the change') })),
   }),
+  import_screen_labels: z.object({
+    screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the import') })),
+  }),
   list_label_keys: z.object({
     keys: z.array(
       z.object({
