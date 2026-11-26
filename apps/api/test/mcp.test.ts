@@ -228,7 +228,7 @@ describe('who may call', () => {
 });
 
 describe('tools', () => {
-  it("lists only the grant's tools, without the member tools that need a session, with hints", async () => {
+  it("lists only the grant's tools, with hints, and no tool that changes a member", async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'org:manage']);
     const { tools } = (await rpc<{ tools: { name: string; annotations: object }[] }>(access_token, 'tools/list')).result!;

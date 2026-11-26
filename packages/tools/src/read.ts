@@ -15,6 +15,9 @@ import { type AnyTool, defineTool, ToolError, type ToolContext, type ToolService
 
 type Row = Record<string, unknown>;
 
+/** The H.264 profiles `VIDEO_SPEC.profileIdcs` names, by profile_idc, as describe says them. */
+const PROFILE_NAMES: Readonly<Record<number, string>> = { 66: 'Baseline', 77: 'Main', 100: 'High' };
+
 /** How a type is read: its list tool and the key its rows are under, its get tool by id, or one tool that answers whole. */
 interface TypeDef {
   about: string;
@@ -103,7 +106,7 @@ export const READ_TYPES = {
   },
   asset: {
     about: 'images and videos',
-    rules: `An image is uploaded as a landscape and a portrait rendition, each the smallest that covers its screen box (1920x1080, 1080x1920). A video ships as it is exported, with no transcoding: H.264 MP4, Baseline, Main or High profile up to level 4.2, 8-bit 4:2:0, progressive, at most 1920x1080 either way round, ${VIDEO_SPEC.maxFps} fps, ${VIDEO_SPEC.maxBitrate / 1e6} Mbit/s and ${VIDEO_SPEC.maxBytes / 1e6} MB (@signforge/media-check checks it). An asset is usable once its status is verified.`,
+    rules: `An image is uploaded as a landscape and a portrait rendition, each the smallest that covers its screen box (1920x1080, 1080x1920). A video ships as it is exported, with no transcoding: H.264 MP4, profile ${VIDEO_SPEC.profileIdcs.map((p) => PROFILE_NAMES[p] ?? p).join(', ')} up to level ${VIDEO_SPEC.maxLevel / 10}, ${VIDEO_SPEC.bitDepth}-bit 4:2:0, progressive, at most ${VIDEO_SPEC.maxWidth}x${VIDEO_SPEC.maxHeight} either way round, ${VIDEO_SPEC.maxFps} fps, ${VIDEO_SPEC.maxBitrate / 1e6} Mbit/s and ${VIDEO_SPEC.maxBytes / 1e6} MB (@signforge/media-check checks it). An asset is usable once its status is verified.`,
     list: { tool: 'list_assets', items: 'assets' },
     get: { tool: 'get_asset', id: 'assetId', item: 'asset', maxIds: 12 },
     summary: ['id', 'name', 'kind', 'status', 'width', 'height', 'durationMs', 'usageCount'],

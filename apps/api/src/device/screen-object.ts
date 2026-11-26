@@ -40,20 +40,28 @@ const PONG = 'pong';
 const CLOSE_REVOKED = 4001;
 
 /**
- * How long one `applied` report may wait on D1 before the socket's next message is let through.
- * A report is one indexed read and one single-row write, milliseconds when D1 is well, but D1 gives
- * up on a query only after 30 seconds and the object cannot cancel one, so a hung call would hold
- * every later report behind it. A report given up on here is not missed for long: the screen's next
- * sync (at most 5 minutes) writes the same column.
+ * How long one `applied` report, or the credentials read before a send, may wait on D1. A report
+ * is one indexed read and one single-row write, milliseconds when D1 is well, but D1 gives up on a
+ * query only after 30 seconds and the object cannot cancel one, so a hung call would hold the next
+ * report behind it. A report given up on here is not missed for long: the screen's next sync (at
+ * most 5 minutes) writes the same column. So a credentials read that takes 10 to 30 s and then
+ * succeeds drops its report even when no later one came; the CMS reads "updating" until that sync.
+ * That is intended: a write that late could land over a later report. A send given up on is not
+ * sent (its credentials were never checked): a nudge, not the content, which the screen syncs anyway.
  */
-export const MESSAGE_D1_LIMIT_MS = 10_000;
+export const D1_LIMIT_MS = 10_000;
 
 export class ScreenObject extends DurableObject<Env> {
   /**
-   * The socket messages taken so far, handled one at a time. The runtime delivers a message while an
-   * earlier one awaits D1, so without this two reports without a time could land in either order (gh-177).
+   * The `applied` reports taken so far, written one at a time. The runtime delivers a message while
+   * an earlier one awaits D1, so without this two reports without a time could land in either order (gh-177).
    */
   private handling: Promise<void> = Promise.resolve();
+  /**
+   * The report waiting for the one being written, the latest taken: a report that arrives while one
+   * waits replaces it, so a screen sending reports faster than D1 writes them holds one, not a queue.
+   */
+  private waiting?: { ws: WebSocket; report: DeviceSocketMessage };
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -92,18 +100,16 @@ export class ScreenObject extends DurableObject<Env> {
     // Parsed as it arrives, so a message that is not an `applied` report is dropped without waiting behind one that is.
     const report = parseReport(message);
     if (!report) return Promise.resolve();
+    const replaced = this.waiting !== undefined;
+    this.waiting = { ws, report };
+    // Its place in the queue is taken already: the handling below writes this report instead.
+    if (replaced) return Promise.resolve();
     const handled = this.handling.then(() => {
-      let late = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const limit = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          late = true;
-          reject(new Error(`applied report waited on D1 for ${MESSAGE_D1_LIMIT_MS} ms`));
-        }, MESSAGE_D1_LIMIT_MS);
-      });
-      return Promise.race([this.writeApplied(ws, report, () => late), limit]).finally(() => clearTimeout(timer));
+      const next = this.waiting!;
+      this.waiting = undefined;
+      return withinLimit('applied report', (late) => this.writeApplied(next.ws, next.report, late));
     });
-    // A message that failed still lets the next one through; the runtime sees its error.
+    // A report that failed still lets the next one through; the runtime sees its error.
     this.handling = handled.catch(() => {});
     return handled;
   }
@@ -135,7 +141,8 @@ export class ScreenObject extends DurableObject<Env> {
   private async send(msg: ServerSocketMessage): Promise<void> {
     const sockets = this.ctx.getWebSockets();
     if (!sockets.length) return;
-    const live = await liveCredentials(this.env.DB, (sockets[0]!.deserializeAttachment() as SocketHolder).screenId);
+    const screenId = (sockets[0]!.deserializeAttachment() as SocketHolder).screenId;
+    const live = await withinLimit('send', () => liveCredentials(this.env.DB, screenId));
     const text = JSON.stringify(msg);
     for (const ws of sockets) {
       if (!live.has((ws.deserializeAttachment() as SocketHolder).credentialId)) {
@@ -152,6 +159,22 @@ export class ScreenObject extends DurableObject<Env> {
 }
 
 const revokedKey = (credentialId: string) => `revoked:${credentialId}`;
+
+/**
+ * `work` on D1, rejected after `D1_LIMIT_MS`. A D1 call cannot be cancelled, so `late` tells work
+ * that goes on to write whether its limit has passed. A late rejection of the call is still handled.
+ */
+function withinLimit<T>(what: string, work: (late: () => boolean) => Promise<T>): Promise<T> {
+  let late = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      late = true;
+      reject(new Error(`${what} waited on D1 for ${D1_LIMIT_MS} ms`));
+    }, D1_LIMIT_MS);
+  });
+  return Promise.race([work(() => late), limit]).finally(() => clearTimeout(timer));
+}
 
 /** The screen's `applied` report, or undefined for anything else it sends (binary, not JSON, not a valid message). */
 function parseReport(message: string | ArrayBuffer): DeviceSocketMessage | undefined {

@@ -367,11 +367,15 @@ function publisher<T extends DraftTable>(db: Db, orgId: string, table: T) {
  * observed earlier, so a sync built before a socket's `applied` cannot undo it when it arrives
  * after; of two at one time the first stays. A time after the report arrived counts as its
  * arrival, so a clock ahead cannot hold the column. Without a time (a player before gh-44, or an
- * untrusted clock) a report is ordered by arrival, as before: it replaces, and counts as observed then.
+ * untrusted clock) a report is ordered by arrival, as before: it counts as observed then, and
+ * replaces one stored at that time or before. So a write that started before a later report's and
+ * landed after it (a socket report whose D1 write hung past its limit, #519) does not replace it.
  */
 function manifestReport(observedAt: number | undefined, arrivedAt: number) {
   const at = Math.min(observedAt ?? arrivedAt, arrivedAt);
-  return { at, takes: '(? OR reported_manifest_at IS NULL OR ? > reported_manifest_at)', takesArgs: [observedAt === undefined ? 1 : 0, at] };
+  // One fixed operator or the other, never input: by arrival, a report at the same time replaces.
+  const op = observedAt === undefined ? '>=' : '>';
+  return { at, takes: `(reported_manifest_at IS NULL OR ? ${op} reported_manifest_at)`, takesArgs: [at] };
 }
 
 /** What one screen sync writes (`screens.sync`). Hours are UTC hour starts in ms. */

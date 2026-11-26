@@ -24,8 +24,8 @@ export function authSecret(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>): strin
 
 /**
  * The D1 binding Better Auth runs on, with D1's refusal of a change that would leave an org with no
- * owner (#292, migration 0036) turned into Better Auth's own 400, so the CMS and the member tools
- * say why. Better Auth checks the owner count itself first, but in separate statements: this is the
+ * owner (#292, migration 0036) turned into Better Auth's own 400, so the CMS says
+ * why. Better Auth checks the owner count itself first, but in separate statements: this is the
  * refusal a request gets when another owner's change landed in between. Better Auth runs every
  * query as `prepare(sql).bind(...).all()`.
  */

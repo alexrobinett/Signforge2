@@ -9,7 +9,7 @@ import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mintCredential } from '../src/device/credential';
-import { HOLDER_HEADER, MESSAGE_D1_LIMIT_MS, ScreenObject, type SocketHolder } from '../src/device/screen-object';
+import { HOLDER_HEADER, D1_LIMIT_MS, ScreenObject, type SocketHolder } from '../src/device/screen-object';
 import { screenNotifier, screenObject } from '../src/device/screens';
 import { issueTicket, verifyTicket } from '../src/device/ticket';
 import { manifestKey } from '../src/r2';
@@ -488,7 +488,7 @@ describe('the order of reports (gh-44)', () => {
   }
 
   /** The handling of the next `n` messages the screen's object takes from a socket, once it has taken them all. */
-  async function nextTaken(n: number) {
+  function nextTaken(n: number) {
     const from = taken.length;
     return async () => {
       while (taken.length < from + n) await new Promise<void>((r) => takenWake.push(r));
@@ -501,7 +501,7 @@ describe('the order of reports (gh-44)', () => {
     const s = await connect(await ticketFor(c));
     // The first message's read is held until the object has taken the second message.
     const hold = holdCredentialRead();
-    const calls = await nextTaken(2);
+    const calls = nextTaken(2);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
     await runInDurableObject(screenObject(env, c.seed.screen), async () => {
@@ -518,7 +518,7 @@ describe('the order of reports (gh-44)', () => {
     const c = await setUp('ws-m');
     const s = await connect(await ticketFor(c));
     const hold = holdCredentialRead();
-    const calls = await nextTaken(5);
+    const calls = nextTaken(5);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
     s.ws.send('not json');
     s.ws.send(JSON.stringify({ type: 'applied', manifest: 'not-a-manifest-id' }));
@@ -536,20 +536,20 @@ describe('the order of reports (gh-44)', () => {
     s.ws.close(1000);
   });
 
-  it('lets the next report through once one has waited on D1 for MESSAGE_D1_LIMIT_MS, and never writes the late one (#338)', async () => {
+  it('lets the next report through once one has waited on D1 for D1_LIMIT_MS, and never writes the late one (#338)', async () => {
     const c = await setUp('ws-n');
     const s = await connect(await ticketFor(c));
     const hold = holdCredentialRead();
     // Only the object's limit runs on these: D1 and the sockets keep real time.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const calls = await nextTaken(2);
+    const calls = nextTaken(2);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
     await runInDurableObject(screenObject(env, c.seed.screen), async () => {
       const [hung, next] = await calls();
       // The first report's read never answers until released below.
-      vi.advanceTimersByTime(MESSAGE_D1_LIMIT_MS);
-      await expect(hung!.done).rejects.toThrow(`waited on D1 for ${MESSAGE_D1_LIMIT_MS} ms`);
+      vi.advanceTimersByTime(D1_LIMIT_MS);
+      await expect(hung!.done).rejects.toThrow(`waited on D1 for ${D1_LIMIT_MS} ms`);
       await next!.done;
     });
     expect(await reported(c)).toBe(M2);
@@ -562,6 +562,47 @@ describe('the order of reports (gh-44)', () => {
       await new Promise<void>((r) => setTimeout(r, 0));
     });
     expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('holds one report behind the one being written, the latest, however many arrive (#519)', async () => {
+    const c = await setUp('ws-o');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    const calls = nextTaken(4);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const done = (await calls()).map((t) => t.done);
+      hold.release();
+      await Promise.all(done);
+    });
+    // The first, then only the last of the three that waited behind it: two reads, not four.
+    expect(hold.log).toEqual(['read', 'read']);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('gives up on a send whose credentials read waits D1_LIMIT_MS, and sends nothing for it (#519)', async () => {
+    const c = await setUp('ws-p');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await runInDurableObject(screenObject(env, c.seed.screen), async (object: ScreenObject) => {
+      const sent = object.manifest(M1);
+      vi.advanceTimersByTime(D1_LIMIT_MS);
+      await expect(sent).rejects.toThrow(`send waited on D1 for ${D1_LIMIT_MS} ms`);
+    });
+    vi.useRealTimers();
+    hold.release();
+    await runInDurableObject(screenObject(env, c.seed.screen), async (object: ScreenObject) => {
+      await hold.finished;
+      // A send after it arrives after anything the given-up one could still send.
+      await object.manifest(M2);
+    });
+    expect(await s.received(1)).toEqual([{ type: 'manifest', id: M2 }]);
     s.ws.close(1000);
   });
 });
