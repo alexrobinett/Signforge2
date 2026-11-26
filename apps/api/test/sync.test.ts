@@ -155,7 +155,7 @@ describe('the heartbeat', () => {
       body({
         player: { version: '2.1.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
         manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
-        display: { on: false, methods: { cec: 'ok' } },
+        display: { on: false, methods: { cec: 'ok' }, output: { mode: '3840x2160@60', resets: 3 } },
         deviceTime,
         clock: { offsetMs: 3_600_000, trusted: true },
         dataRejected: { weather: 4 },
@@ -167,7 +167,7 @@ describe('the heartbeat', () => {
     const beat = parseHeartbeat(row!.heartbeatJson);
     expect(beat).toMatchObject({
       manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
-      display: { on: false, methods: { cec: 'ok' } },
+      display: { on: false, methods: { cec: 'ok' }, output: { mode: '3840x2160@60', resets: 3 } },
       clock: { offsetMs: 3_600_000, trusted: true },
       dataRejected: { weather: 4 },
       player: { manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },

@@ -958,6 +958,19 @@ export interface DisplayStatus {
   /** What the supervisor reported for each power method, e.g. `{ signal: 'ok', cec: 'not acknowledged' }`. */
   methods?: Record<string, string>;
   override?: DisplayOverride;
+  /** The video output as the device supervisor last read it, on a screen that has one (#511). */
+  output?: DisplayOutput;
+}
+
+/**
+ * The panel's video mode, which the supervisor reads every minute while the panel is on and sets
+ * back to 1920x1080 at 60 Hz when it is not (a Pi 4 cannot animate at 4K; a hotplug can bring it back).
+ */
+export interface DisplayOutput {
+  /** `<width>x<height>@<Hz>`, the Hz rounded: `1920x1080@60` when right. */
+  mode: string;
+  /** How often the supervisor has set it back since it started. */
+  resets: number;
 }
 
 /**

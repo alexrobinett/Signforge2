@@ -444,6 +444,20 @@ describe('the heartbeat', () => {
     expect(p.server.syncs.at(-1)!.epoch).toBe(last.epoch);
   });
 
+  it("reports the output's mode as the supervisor read it, and leaves out a reading the server would refuse (#511)", async () => {
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(h.content([{ id: 'a', durationMs: 500 }]));
+      s.supervisorDisplay = { on: true, signal: 'ok', output: { mode: '1920x1080@60', resets: 2 } };
+    }, api);
+    await expect.poll(() => p.server.syncs.at(-1)?.display.output, { timeout: 10_000 }).toEqual({ mode: '1920x1080@60', resets: 2 });
+    // A supervisor that wrote something else: the sync goes, without it.
+    p.server.supervisorDisplay = { on: true, output: { mode: '4K', resets: 2 } };
+    const before = p.server.syncs.length;
+    await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(before + 1);
+    expect(p.server.syncs.at(-1)!.display.output).toBeUndefined();
+  });
+
   it('reports only the sources of the manifests it holds, once a source is gone from them', async () => {
     const news = h.content([{ id: 'news', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }]);
     const p = await h.openPlayer((s) => {

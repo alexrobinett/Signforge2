@@ -101,6 +101,8 @@ export class FixtureServer {
   displayOverride: DisplayOverride | null | undefined;
   /** Syncs carrying play counts to process and then drop without an answer, as a lost response would be. */
   loseCountReplies = 0;
+  /** What the supervisor answers GET /display with, as device/pi/supervisor.py does; a test may give it an `output` (#511). */
+  supervisorDisplay: Record<string, unknown> = { on: true, signal: 'ok', cec: 'not acknowledged' };
   /** What the supervisor holds; undefined is a freshly flashed screen. */
   supervisorCredential: string | undefined = FIXTURE_CREDENTIAL;
   /** The device API base the supervisor's credential is bound to: `deviceApi` once started. */
@@ -390,7 +392,7 @@ export class FixtureServer {
     }
   }
 
-  /** The supervisor's credential, token, liveness and display power routes; everything else it has nothing for. */
+  /** The supervisor's credential, token, liveness and display routes; everything else it has nothing for. */
   private supervisor(req: IncomingMessage, rest: string, send: (status: number, body?: string, type?: string) => void): void {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
@@ -401,6 +403,9 @@ export class FixtureServer {
     if ((rest === 'display/on' || rest === 'display/off') && req.method === 'POST') {
       if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
       return json(200, { on: rest === 'display/on', signal: 'ok', cec: 'not acknowledged' });
+    }
+    if (rest === 'display' && req.method === 'GET') {
+      return req.headers['x-sf-token'] === SUPERVISOR_TOKEN ? json(200, this.supervisorDisplay) : json(403, { error: 'forbidden' });
     }
     if (rest !== 'credential') return send(404, '');
     if (req.method === 'GET') {
