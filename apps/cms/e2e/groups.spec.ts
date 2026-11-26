@@ -337,4 +337,5 @@ test('a smart group made from a rule, the screens it matches seen before it is s
   await expect(picker.getByRole('option', { name: /^North Rule/ })).toContainText('Rule');
   await picker.getByRole('option', { name: /^North Rule/ }).click();
   await expect(takeover.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('Reaches this screen now: South door');
+  await shotsBoth(page, '186-takeover-reach');
 });
