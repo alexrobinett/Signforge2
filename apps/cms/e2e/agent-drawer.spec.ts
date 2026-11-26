@@ -117,9 +117,17 @@ test("nothing is asked while the org changes: a question then would be the last 
   page.on('request', (r) => void (r.url().endsWith('/api/agent/chat') && asked++));
   try {
     await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
-    await drawer.getByLabel('Ask about your screens and content').fill('Tell me about these screens');
+    // Each way to ask is off while the org changes, and says so (#479): the box takes nothing, Ask and the questions to
+    // start with are off, and so is ⌘K's.
+    const box = drawer.getByLabel('Ask about your screens and content');
+    await expect(box).toHaveAttribute('readonly', '');
     await expect(drawer.getByRole('button', { name: 'Ask', exact: true })).toBeDisabled();
-    await drawer.getByLabel('Ask about your screens and content').press('Enter');
+    for (const question of await drawer.getByRole('list', { name: 'Questions to start with' }).getByRole('button').all()) await expect(question).toBeDisabled();
+    await box.press('Enter');
+    await page.keyboard.press('ControlOrMeta+k');
+    const menu = page.getByRole('dialog', { name: 'Command menu' });
+    await expect(menu.getByRole('option', { name: 'Ask the agent…' })).toHaveAttribute('aria-disabled', 'true');
+    await page.keyboard.press('Escape');
   } finally {
     release();
   }

@@ -40,7 +40,7 @@ const useWide = () =>
   );
 
 /** "Why are N screens behind?" on Screens, when N are: the question the drawer starts with there. */
-function Suggestions({ path, onAsk }: { path: string; onAsk: (q: string) => void }) {
+function Suggestions({ path, onAsk, disabled }: { path: string; onAsk: (q: string) => void; disabled: boolean }) {
   const orgId = useOrgId();
   const status = useQuery({ ...screenStatusQuery(orgId), enabled: path === '/screens' && orgId !== '' });
   const behind = (status.data?.screens ?? []).filter((s) => s.state.kind === 'needs_you' && s.state.reason === 'behind').length;
@@ -53,7 +53,13 @@ function Suggestions({ path, onAsk }: { path: string; onAsk: (q: string) => void
     <ul aria-label="Questions to start with" className="flex flex-col gap-2">
       {questions.map((q) => (
         <li key={q}>
-          <Button type="button" variant="outline" className="h-auto w-full justify-start py-2 text-left whitespace-normal" onClick={() => onAsk(q)}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto w-full justify-start py-2 text-left whitespace-normal"
+            disabled={disabled}
+            onClick={() => onAsk(q)}
+          >
             {q}
           </Button>
         </li>
@@ -403,7 +409,7 @@ export function AgentDrawer() {
             </DialogPrimitive.Close>
           </header>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-            {d.messages.length === 0 && !d.asking && <Suggestions path={path} onAsk={(q) => void ask(q)} />}
+            {d.messages.length === 0 && !d.asking && <Suggestions path={path} onAsk={(q) => void ask(q)} disabled={switching} />}
             <ol aria-label="Conversation" className="flex flex-col gap-3 empty:hidden">
               {d.messages.map((m, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: a conversation only grows; a message's place is who it is.
@@ -465,6 +471,8 @@ export function AgentDrawer() {
               id="agent-question"
               rows={2}
               value={d.question}
+              // Read only while the org changes (#479): what is typed then would be asked of the next org.
+              readOnly={switching}
               maxLength={4000}
               onChange={(e) => edit(e.target.value)}
               onKeyDown={(e) => {

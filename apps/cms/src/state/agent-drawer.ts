@@ -438,6 +438,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         });
         // Every page reads again what changed: the editor shows the spot as saved, and its stage plays it.
         await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
+        // Forgotten meanwhile (the org changed): the editor open now is the next org's (#479).
+        if (!kept(at.card)) return;
         for (const [i, r] of answer.results.entries()) {
           const spot = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (r.tool === 'save_spot' && spot) await get().reloadSpot(orgId, String(at.card.drafts[i]?.target?.id ?? spot.id));
