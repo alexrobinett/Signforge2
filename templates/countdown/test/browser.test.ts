@@ -382,8 +382,9 @@ describe('countdown (#198)', () => {
         );
       }
     }
-    // Pop: the tile, two stickers and a dot; Night: the ping, two halves and the arm; Corporate: the marker.
-    expect(moving).toEqual({ landscape: [4, 0, 4, 1], portrait: [0, 0, 0, 0] });
+    // Night: the ping, two halves and the arm. Pop's wobbling tile and stickers, its pulsing dot and Corporate's breathing
+    // marker are retired with D's motion (long holds, nothing bouncing on text).
+    expect(moving).toEqual({ landscape: [0, 0, 4, 0], portrait: [0, 0, 0, 0] });
   });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {

@@ -89,7 +89,8 @@ describe('info frame (#201)', () => {
       const intros = document
         .getAnimations()
         .map((a) => a.effect!.getComputedTiming())
-        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)));
+        // An entrance, as layoutFaults reads one: not an exit near the play's end, a push-in or a loop.
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < 2000 && Number(t.duration) < 2000);
       const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
       for (const a of document.getAnimations()) a.currentTime = rest;
       const rgba = (c: string): [number, number, number, number] => {

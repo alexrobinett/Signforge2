@@ -1,6 +1,6 @@
 {
   "id": "news",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "name": "News",
   "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
   "fields": {

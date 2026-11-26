@@ -57,7 +57,9 @@ export async function push(opts: PushOptions): Promise<PushResult> {
       try {
         const j = JSON.parse(text) as { error?: string; problems?: string[] };
         detail = [j.error, ...(j.problems ?? []).map((p) => `  - ${p}`)].filter(Boolean).join('\n');
-      } catch { /* not JSON */ }
+      } catch {
+        /* not JSON */
+      }
       throw new PushError(`${method} ${path}: ${res.status}${detail ? `\n${detail}` : ''}`);
     }
     return JSON.parse(text) as T;
@@ -81,6 +83,10 @@ export async function push(opts: PushOptions): Promise<PushResult> {
   await Promise.all(Array.from({ length: Math.max(1, opts.concurrency ?? 4) }, worker));
 
   const set = await call<{ manifestId: string; changed: boolean }>('PUT', `/admin/screens/${screen}/manifest`, opts.manifestText, 'application/json');
-  log(set.changed ? `manifest ${set.manifestId.slice(0, 16)} is now the desired manifest of ${opts.screen}` : `${opts.screen} was already on manifest ${set.manifestId.slice(0, 16)}; nothing changed`);
+  log(
+    set.changed
+      ? `manifest ${set.manifestId.slice(0, 16)} is now the desired manifest of ${opts.screen}`
+      : `${opts.screen} was already on manifest ${set.manifestId.slice(0, 16)}; nothing changed`,
+  );
   return { manifestId: set.manifestId, files, uploaded: missing.length, uploadedBytes, changed: set.changed };
 }

@@ -142,7 +142,8 @@ describe('the look kit (#190)', () => {
       const k = await kitFrame(orientation);
       const durationMs = 11_000;
       const found: string[] = [];
-      for (const look of looks) for (const line of await motionContract(await k.play({ look }, undefined, durationMs), durationMs)) found.push(`${look}: ${line}`);
+      for (const look of looks)
+        for (const line of await motionContract(await k.play({ look }, undefined, durationMs), durationMs)) found.push(`${look}: ${line}`);
       expect(found).toEqual([]);
     });
 

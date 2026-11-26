@@ -652,11 +652,12 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
 export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
   f.evaluate(
     ({ also, crosses, inside }) => {
-      // At rest: where the longest intro ends. An outro runs in reverse, and ambient motion never ends.
+      // At rest: where the longest entrance ends. An entrance starts and ends within the first seconds; an exit starts
+      // near the play's end (or, before D's motion, ran in reverse), a push-in lasts the play, and a loop never ends.
       const intros = document
         .getAnimations()
         .map((a) => a.effect!.getComputedTiming())
-        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)));
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < 2000 && Number(t.duration) < 2000);
       const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
       for (const a of document.getAnimations()) a.currentTime = rest;
       type Box = { l: number; t: number; r: number; b: number };
@@ -792,7 +793,8 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
   f.evaluate(
     ({ durationMs, loops, m }) => {
       const found: string[] = [];
-      const name = (el: Element) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
+      const name = (el: Element) =>
+        `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
       const vmin = Math.min(innerWidth, innerHeight) / 100;
       const beziers = (easing: string) => [...easing.matchAll(/cubic-bezier\(([^)]*)\)/g)].map((b) => b[1]!.split(',').map(Number));
       const animations = document.getAnimations().filter((a): a is CSSAnimation => a instanceof CSSAnimation);
@@ -803,7 +805,8 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
         const frames = effect.getKeyframes();
         const timing = effect.getComputedTiming();
         for (const k of frames) {
-          for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform'].includes(p)) found.push(`${who} moves ${p}`);
+          for (const p of Object.keys(k))
+            if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform'].includes(p)) found.push(`${who} moves ${p}`);
           for (const [, y1, , y2] of beziers(String(k.easing))) if (y1! < 0 || y1! > 1 || y2! < 0 || y2! > 1) found.push(`${who} overshoots on ${k.easing}`);
         }
         if (timing.iterations === Number.POSITIVE_INFINITY) {

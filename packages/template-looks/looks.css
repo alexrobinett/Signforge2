@@ -171,6 +171,9 @@
   --lk-in-fade: 0.5s;
   --lk-in-badge: 0.4s;
   --lk-in-photo: 0.6s;
+  /* News's own animation still reads one entrance time and reverses it, until its rebuild (the News builder's): it
+     goes then. */
+  --lk-in: var(--lk-in-text);
   --lk-out: 0.3s;
   --lk-stagger: 0.11s;
   --lk-rise: 1.5vmin;
