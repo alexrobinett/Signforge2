@@ -71,7 +71,7 @@ export function searchFinds(s: ScreenView, q: string, groupNames: readonly strin
  * The spelling a value is shown in: the one most screens have, then the first in code-unit order, as `list_label_keys`
  * names it, so a section's heading and the "+ Filter" list say one value the same way (review of #601).
  */
-const shownAs = (spellings: Map<string, number>) => [...spellings].toSorted(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
+export const shownAs = (spellings: Map<string, number>) => [...spellings].toSorted(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
 
 /** One section of the page grouped by a key: the screens with one value of it, or (`value` null) without the key. */
 export interface LabelSection<S> {

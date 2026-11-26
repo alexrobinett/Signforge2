@@ -19,8 +19,8 @@ async function shotsBoth(page: Page, name: string, at?: Locator) {
 }
 
 /** A code a screen shows, as the player asks for one. */
-async function pairingCode(request: APIRequestContext) {
-  const start = await request.post(`${DEVICE}/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.186' } });
+async function pairingCode(request: APIRequestContext, address = '192.0.2.186') {
+  const start = await request.post(`${DEVICE}/pair/start`, { headers: { 'cf-connecting-ip': address } });
   expect(start.status()).toBe(200);
   return ((await start.json()) as { code: string }).code;
 }
@@ -169,4 +169,52 @@ test('find screens by label: a typed chip kept in the URL across a reload, "+ Fi
   await expect(page.getByRole('heading', { name: 'store: 0142 · 2 screens' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'No store · 1 screen' })).toBeVisible();
   await shotsBoth(page, '185-tiles-grouped');
+});
+
+test('#185 done when: label 3 selected screens in bulk, filter by a chip and keep it across a reload, group by store', async ({ page, request }) => {
+  await signInAs(page, `e2e-bulk-labels-${Date.now()}@example.com`, '192.0.2.188');
+  await createOrg(page, 'Harbor Stores', '192.0.2.188');
+  // Its own screens' address: the pairing limit counts per address, and the tests above pair seven.
+  const claim = async (name: string, labels: Record<string, string>) =>
+    tool(page, 'claim_screen', { code: await pairingCode(request, '192.0.2.189'), name, timezone: 'Europe/London', orientation: 'landscape', labels });
+  await claim('Till 1', { region: 'north' });
+  await claim('Till 2', { region: 'North' });
+  await claim('Till 3', { region: 'south' });
+  await claim('Lobby', { region: 'north', store: '0009' });
+
+  await page.goto('/screens?view=table');
+  await hydrated(page);
+  for (const name of ['Till 1', 'Till 2', 'Till 3']) await page.getByLabel(`Select ${name}`).check();
+  const bar = page.getByRole('region', { name: 'Selected screens' });
+  await bar.getByRole('button', { name: 'Labels…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Labels on 3 screens' });
+  // What the selection has now, by key, with the case exactly as shown: "north" and "North" are counted as one value.
+  await expect(dialog.getByText('North (2), south (1)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Takes effect at the next publish.')).toBeVisible();
+  await dialog.getByLabel('Label', { exact: true }).fill('store');
+  await dialog.getByLabel('Value').fill('0142');
+  await expect(dialog.getByText('0142: no screen has this value yet')).toBeVisible();
+  await shotsBoth(page, '185-bulk-labels');
+  await axe(page);
+  await dialog.getByRole('button', { name: 'Set on 3 screens' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Set store: 0142 on 3 screens')).toBeVisible();
+  const row = (name: string) => page.getByRole('row').filter({ has: page.getByRole('rowheader', { name }) });
+  for (const name of ['Till 1', 'Till 2', 'Till 3']) await expect(row(name).getByText('store: 0142')).toBeVisible();
+
+  // Filter by a chip, and the URL keeps it across a reload.
+  await page.getByLabel('Search screens').fill('store=0142');
+  await page.getByLabel('Search screens').press('Enter');
+  const rows = page.getByRole('row').filter({ has: page.getByRole('rowheader') });
+  await expect(rows).toHaveCount(3);
+  await page.reload();
+  await hydrated(page);
+  await expect(page.getByRole('list', { name: 'Label filters' }).getByText('store: 0142')).toBeVisible();
+  await expect(rows).toHaveCount(3);
+
+  // Group by store: the three in 0142, Lobby in 0009.
+  await page.getByRole('button', { name: 'Remove filter store' }).click();
+  await page.getByLabel('Group by').selectOption('store');
+  await expect(page.getByRole('rowheader', { name: 'store: 0142 · 3 screens' })).toBeVisible();
+  await expect(page.getByRole('rowheader', { name: 'store: 0009 · 1 screen' })).toBeVisible();
 });

@@ -64,6 +64,8 @@ function stressOrg(change: { timezone?: string | null; status?: AssetView['statu
   return {
     screens: [],
     groupsOf: new Map(),
+    rules: [],
+    labels: [],
     templateVersions,
     assets,
     dataSources: Object.values(golden.dataSources),

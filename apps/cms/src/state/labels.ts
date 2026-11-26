@@ -5,12 +5,12 @@
  */
 import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
-import { labelChange, labelRows, labelsReady, type LabelRow } from '~/lib/labels';
+import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
-import { labelKeysQuery } from '~/queries/screens';
-import type { SliceCreator } from './store';
+import { labelKeysQuery, screensQuery } from '~/queries/screens';
+import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 /** Which editor rows belong to: a screen's page, by its id, or the pairing form. */
 export type LabelTarget = { screenId: string } | 'pairing';
@@ -26,6 +26,20 @@ interface LabelsState {
   copyFrom: string;
   /** The Screens page's "+ Filter" dialog, while open: the key chosen and the values ticked. Applying it puts a chip in the URL. */
   filter: { key: string; values: string[] } | null;
+  /** The bulk "Labels…" dialog on the table's selection, while open: one key set to one value, or removed, on every screen. */
+  bulk: BulkLabels | null;
+}
+
+interface BulkLabels {
+  /** Which opening this is: a save's reply acts only on the dialog it was sent from, not one opened since (#605). */
+  opened: number;
+  orgId: string;
+  screenIds: string[];
+  key: string;
+  mode: 'set' | 'remove';
+  value: string;
+  pending: boolean;
+  error: string | null;
 }
 
 export interface LabelsSlice {
@@ -48,22 +62,76 @@ export interface LabelsSlice {
   chooseFilterKey: (key: string) => void;
   tickFilterValue: (value: string, ticked: boolean) => void;
   closeLabelFilter: () => void;
+  /** Opens the bulk "Labels…" dialog on these screens, the table's selection. */
+  openBulkLabels: (orgId: string, screenIds: string[]) => void;
+  chooseBulkKey: (key: string) => void;
+  chooseBulkMode: (mode: 'set' | 'remove') => void;
+  typeBulkValue: (value: string) => void;
+  closeBulkLabels: () => void;
+  /** Sets the key to the value on every screen of the selection, or removes it from each, in one `update_screen_labels`. */
+  applyBulkLabels: () => Promise<void>;
   /** Saves the editor's rows as one merge into the screen's labels, and closes it. */
   saveScreenLabels: (orgId: string, screen: ScreenView) => Promise<void>;
 }
 
 const NONE: LabelRow[] = [];
+
+/**
+ * When a label change reaches screens, said once for every label edit (#185): the next publish resolves labels and
+ * selectors, so nothing changes on screen until then. #187's preview will say how many screens would change.
+ */
+export const NEXT_PUBLISH = 'Takes effect at the next publish.';
 /** The rows an editor holds: none until one is opened or typed in. */
 export const labelRowsOf = (s: LabelsState, target: LabelTarget) => s.rows[keyOf(target)] ?? NONE;
+
+/** A bulk Labels draft belongs to the visit it was opened on: back on the page with the same rows ticked, none opens (#605). */
+export function connectLabels(store: AppStore, { router }: StoreDeps) {
+  router.subscribe('onBeforeNavigate', ({ pathChanged }) => {
+    if (pathChanged && store.getState().labels.bulk) store.getState().closeBulkLabels();
+  });
+}
 
 export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router, queryClient }) => {
   const labels = (change: (l: LabelsState) => LabelsState) => set((s) => ({ labels: change(s.labels) }));
   const rows = (target: LabelTarget, change: (r: LabelRow[]) => LabelRow[]) =>
     labels((l) => ({ ...l, rows: { ...l.rows, [keyOf(target)]: change(labelRowsOf(l, target)) } }));
+  const bulk = (change: (b: BulkLabels) => BulkLabels) => labels((l) => ({ ...l, bulk: l.bulk && change(l.bulk) }));
+  let openings = 0;
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
-    labels: { rows: {}, editor: null, copyFrom: '', filter: null },
+    labels: { rows: {}, editor: null, copyFrom: '', filter: null, bulk: null },
+    openBulkLabels: (orgId, screenIds) =>
+      labels((l) => ({ ...l, bulk: { opened: ++openings, orgId, screenIds, key: '', mode: 'set', value: '', pending: false, error: null } })),
+    chooseBulkKey: (key) => bulk((b) => ({ ...b, key, error: null })),
+    chooseBulkMode: (mode) => bulk((b) => ({ ...b, mode, error: null })),
+    typeBulkValue: (value) => bulk((b) => ({ ...b, value, error: null })),
+    closeBulkLabels: () => labels((l) => ({ ...l, bulk: null })),
+
+    async applyBulkLabels() {
+      const b = get().labels.bulk;
+      // Over the limit the dialog says so and offers no submit: nothing is sent.
+      if (!b || b.pending || b.screenIds.length > MAX_BULK_SCREENS) return;
+      const key = b.key.trim().toLowerCase();
+      const value = b.value.trim();
+      if (!key || (b.mode === 'set' && !value)) return bulk((x) => ({ ...x, error: b.mode === 'set' ? 'Choose a label and a value.' : 'Choose a label.' }));
+      bulk((x) => ({ ...x, pending: true, error: null }));
+      // Cancel does not stop the call; what it answers belongs to this dialog only, which may have closed, or another opened.
+      const mine = (change: (x: BulkLabels) => BulkLabels | null) => labels((l) => ({ ...l, bulk: l.bulk?.opened === b.opened ? change(l.bulk) : l.bulk }));
+      const n = `${b.screenIds.length} ${b.screenIds.length === 1 ? 'screen' : 'screens'}`;
+      try {
+        await callTool('update_screen_labels', { screenIds: b.screenIds, ...(b.mode === 'set' ? { set: { [key]: value } } : { remove: [key] }) });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: screensQuery(b.orgId).queryKey }),
+          queryClient.invalidateQueries({ queryKey: labelKeysQuery(b.orgId).queryKey }),
+        ]);
+        mine(() => null);
+        if (orgOnScreen(router) === b.orgId)
+          toast.success(b.mode === 'set' ? `Set ${key}: ${value} on ${n}` : `Removed ${key} from ${n}`, { description: NEXT_PUBLISH });
+      } catch (err) {
+        mine((x) => ({ ...x, pending: false, error: toolMessage(err) }));
+      }
+    },
     openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
     chooseFilterKey: (key) => labels((l) => ({ ...l, filter: { key, values: [] } })),
     // Values compare as selectors fold them: a chip's `North` is the list's `north`, ticked and unticked as one (review of #601).
@@ -106,7 +174,7 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
         await callTool('update_screen_labels', { screenIds: [screen.id], ...change });
         await Promise.all([router.invalidate(), queryClient.invalidateQueries({ queryKey: labelKeysQuery(orgId).queryKey })]);
         if (get().labels.editor?.screenId === screen.id) get().closeLabelEditor();
-        if (orgOnScreen(router) === orgId) toast.success('Labels saved', { description: 'They take effect at the next publish.' });
+        if (orgOnScreen(router) === orgId) toast.success('Labels saved', { description: NEXT_PUBLISH });
       } catch (err) {
         editor((e) => (e.screenId === screen.id ? { ...e, pending: false, error: toolMessage(err) } : e));
       }
