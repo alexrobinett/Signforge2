@@ -10,6 +10,13 @@ import { shownAs } from './label-filter';
 /** One key and its values across the org's screens, as `list_label_keys` counts them. */
 export type LabelKey = ToolOutput<'list_label_keys'>['keys'][number];
 
+/**
+ * The most screens one `update_screen_labels` changes, as the tool's input takes them (packages/tools/src/labels.ts).
+ * A bulk change to more is refused whole, so the dialog says so before sending rather than in parts (#605): split
+ * parts would lose the change's all-or-nothing write.
+ */
+export const MAX_BULK_SCREENS = 1000;
+
 /** One label as an editor holds it: what is typed, untrimmed, until it is saved. */
 export interface LabelRow {
   key: string;

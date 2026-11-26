@@ -5,12 +5,12 @@
  */
 import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
-import { labelChange, labelRows, labelsReady, type LabelRow } from '~/lib/labels';
+import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
 import { labelKeysQuery, screensQuery } from '~/queries/screens';
-import type { SliceCreator } from './store';
+import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 /** Which editor rows belong to: a screen's page, by its id, or the pairing form. */
 export type LabelTarget = { screenId: string } | 'pairing';
@@ -31,6 +31,8 @@ interface LabelsState {
 }
 
 interface BulkLabels {
+  /** Which opening this is: a save's reply acts only on the dialog it was sent from, not one opened since (#605). */
+  opened: number;
   orgId: string;
   screenIds: string[];
   key: string;
@@ -82,16 +84,25 @@ export const NEXT_PUBLISH = 'Takes effect at the next publish.';
 /** The rows an editor holds: none until one is opened or typed in. */
 export const labelRowsOf = (s: LabelsState, target: LabelTarget) => s.rows[keyOf(target)] ?? NONE;
 
+/** A bulk Labels draft belongs to the visit it was opened on: back on the page with the same rows ticked, none opens (#605). */
+export function connectLabels(store: AppStore, { router }: StoreDeps) {
+  router.subscribe('onBeforeNavigate', ({ pathChanged }) => {
+    if (pathChanged && store.getState().labels.bulk) store.getState().closeBulkLabels();
+  });
+}
+
 export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router, queryClient }) => {
   const labels = (change: (l: LabelsState) => LabelsState) => set((s) => ({ labels: change(s.labels) }));
   const rows = (target: LabelTarget, change: (r: LabelRow[]) => LabelRow[]) =>
     labels((l) => ({ ...l, rows: { ...l.rows, [keyOf(target)]: change(labelRowsOf(l, target)) } }));
   const bulk = (change: (b: BulkLabels) => BulkLabels) => labels((l) => ({ ...l, bulk: l.bulk && change(l.bulk) }));
+  let openings = 0;
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
     labels: { rows: {}, editor: null, copyFrom: '', filter: null, bulk: null },
-    openBulkLabels: (orgId, screenIds) => labels((l) => ({ ...l, bulk: { orgId, screenIds, key: '', mode: 'set', value: '', pending: false, error: null } })),
+    openBulkLabels: (orgId, screenIds) =>
+      labels((l) => ({ ...l, bulk: { opened: ++openings, orgId, screenIds, key: '', mode: 'set', value: '', pending: false, error: null } })),
     chooseBulkKey: (key) => bulk((b) => ({ ...b, key, error: null })),
     chooseBulkMode: (mode) => bulk((b) => ({ ...b, mode, error: null })),
     typeBulkValue: (value) => bulk((b) => ({ ...b, value, error: null })),
@@ -99,11 +110,14 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
 
     async applyBulkLabels() {
       const b = get().labels.bulk;
-      if (!b || b.pending) return;
+      // Over the limit the dialog says so and offers no submit: nothing is sent.
+      if (!b || b.pending || b.screenIds.length > MAX_BULK_SCREENS) return;
       const key = b.key.trim().toLowerCase();
       const value = b.value.trim();
       if (!key || (b.mode === 'set' && !value)) return bulk((x) => ({ ...x, error: b.mode === 'set' ? 'Choose a label and a value.' : 'Choose a label.' }));
       bulk((x) => ({ ...x, pending: true, error: null }));
+      // Cancel does not stop the call; what it answers belongs to this dialog only, which may have closed, or another opened.
+      const mine = (change: (x: BulkLabels) => BulkLabels | null) => labels((l) => ({ ...l, bulk: l.bulk?.opened === b.opened ? change(l.bulk) : l.bulk }));
       const n = `${b.screenIds.length} ${b.screenIds.length === 1 ? 'screen' : 'screens'}`;
       try {
         await callTool('update_screen_labels', { screenIds: b.screenIds, ...(b.mode === 'set' ? { set: { [key]: value } } : { remove: [key] }) });
@@ -111,11 +125,11 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
           queryClient.invalidateQueries({ queryKey: screensQuery(b.orgId).queryKey }),
           queryClient.invalidateQueries({ queryKey: labelKeysQuery(b.orgId).queryKey }),
         ]);
-        labels((l) => ({ ...l, bulk: null }));
+        mine(() => null);
         if (orgOnScreen(router) === b.orgId)
           toast.success(b.mode === 'set' ? `Set ${key}: ${value} on ${n}` : `Removed ${key} from ${n}`, { description: NEXT_PUBLISH });
       } catch (err) {
-        bulk((x) => ({ ...x, pending: false, error: toolMessage(err) }));
+        mine((x) => ({ ...x, pending: false, error: toolMessage(err) }));
       }
     },
     openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
