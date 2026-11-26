@@ -1,7 +1,7 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
-import { LIGHT_KIT, noDemoAndLight, paintedContrast, screenFrame, useTemplate, type Data } from '@signforge/template-test';
+import { LIGHT_KIT, motionContract, noDemoAndLight, paintedContrast, screenFrame, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { look: 'pop', showFacts: false },
@@ -220,6 +220,8 @@ describe('announcement (#197)', () => {
     const durationMs = 11_000;
     for (const look of looks) {
       const f = await k.play({ look, ...everything }, demo, durationMs, logo);
+      // D's motion, read by seeking.
+      expect(await motionContract(f, durationMs), look).toEqual([]);
       const m = await f.evaluate((durationMs) => {
         const props = new Set<string>();
         for (const a of document.getAnimations())

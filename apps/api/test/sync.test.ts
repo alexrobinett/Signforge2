@@ -561,20 +561,110 @@ describe('snapshot feed blobs (#196)', () => {
       templates,
       spots: { n: spot('n', shared), x: spot('x', broken) },
     });
-    const r = await sync(
-      s,
-      body({ manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000, [broken]: 6000 } }),
-    );
+    const r = await sync(s, body({ manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000 } }));
     expect(new Set(r.blobs)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => hash(100 + i + 1))));
     expect(r.nextSyncS).toBe(15);
 
     // The screen stores those: the broken one's 30 are asked for next, soon, as photos came in.
-    const fallingBack = { manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000, [broken]: 6000 } };
+    const fallingBack = { manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000 } };
     const r2 = await sync(s, body({ ...fallingBack, blobs: r.blobs }));
     expect(new Set(r2.blobs)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => hash(200 + i + 1))));
     expect(r2.nextSyncS).toBe(15);
-    // It keeps only the photos of what it plays, so it holds no more: the full interval, as long as it falls back.
+    // It keeps only the photos of what it plays, so it lacks as many as before: one retry, then the full interval, as
+    // long as it falls back.
+    expect((await sync(s, body({ ...fallingBack, blobs: r.blobs }))).nextSyncS).toBe(15);
     for (let i = 0; i < 2; i++) expect((await sync(s, body({ ...fallingBack, blobs: r.blobs }))).nextSyncS).toBe(300);
+  });
+
+  // Review of #514, round 3: as the player reports it while falling back, only the playing manifest's sources and the
+  // photos its snapshots name; the broken one's feeds unreported, so their snapshots come with every reply.
+  describe('falling back, as the player reports it', () => {
+    /** The playing feed's 20 photos missing, and a feed only the broken manifest binds with `broken` photos. */
+    async function fallingBack(name: string, broken: number) {
+      const s = await setUp(name);
+      const spot = (id: string, source: string) => ({
+        id,
+        kind: 'template',
+        template: 'base/news@2.0.0',
+        data: { items: [] },
+        bindings: { items: { source, path: 'items' } },
+      });
+      const templates = { 'base/news@2.0.0': newsTemplate(true) };
+      const playing = s.seed.dataSource;
+      const only = (await s.seed.scope.dataSources.insert({ name: 'Broken only', format: 'rss', urlEncrypted: 'enc:x', refreshS: 300 })).id;
+      const items = (offset: number, photos: number) =>
+        Array.from({ length: photos / 2 }, (_, i) => ({
+          title: `Story ${i}`,
+          published: '',
+          source: '',
+          image: { file: hash(offset + 2 * i + 1), thumb: hash(offset + 2 * i + 2) },
+        }));
+      await publish(s, OLD, {
+        schema: MANIFEST_SCHEMA,
+        dataSources: { [playing]: { id: playing, refreshS: 300 } },
+        templates,
+        spots: { n: spot('n', playing) },
+      });
+      await sync(s, body({ manifest: { active: OLD, filesMissing: 0, lastGood: OLD }, snapshots: { [playing]: 6000 } }));
+      await s.seed.scope.dataSources.putSnapshot(playing, {
+        version: 'v1',
+        fetchedAt: 6000,
+        checkedAt: 6000,
+        dataJson: JSON.stringify({ items: items(100, 20) }),
+      });
+      await s.seed.scope.dataSources.putSnapshot(only, {
+        version: 'v1',
+        fetchedAt: 6000,
+        checkedAt: 6000,
+        dataJson: JSON.stringify({ items: items(200, broken) }),
+      });
+      await publish(s, NEW, {
+        schema: MANIFEST_SCHEMA,
+        dataSources: { [playing]: { id: playing, refreshS: 300 }, [only]: { id: only, refreshS: 300 } },
+        templates,
+        spots: { n: spot('n', playing), x: spot('x', only) },
+      });
+      const plays = new Set(Array.from({ length: 20 }, (_, i) => hash(100 + i + 1)));
+      const held: string[] = [];
+      const replies = [];
+      for (let i = 0; i < 8; i++) {
+        const r = await sync(
+          s,
+          body({
+            manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD },
+            snapshots: { [playing]: 6000 },
+            ...(held.length && { blobs: [...held] }),
+          }),
+        );
+        replies.push(r);
+        // It keeps only the photos its held snapshots name.
+        for (const sha of r.blobs ?? []) if (plays.has(sha) && !held.includes(sha)) held.push(sha);
+      }
+      return { first: replies[0]!, paces: replies.map((r) => r.nextSyncS), plays };
+    }
+
+    for (const [broken, paces] of [
+      [30, [15, 15, 15, 300, 300, 300, 300, 300]],
+      [20, [15, 300, 300, 300, 300, 300, 300, 300]],
+      [8, [15, 300, 300, 300, 300, 300, 300, 300]],
+    ] as const)
+      it(`asks for the playing feed's photos first and settles, with ${broken} photos only the broken manifest binds`, async () => {
+        const r = await fallingBack(`sync-fallback-${broken}`, broken);
+        expect(new Set(r.first.blobs)).toEqual(r.plays);
+        expect(r.paces).toEqual(paces);
+      });
+  });
+
+  // Review of #514, round 3: a screen that cannot fetch its new manifest does not report its new feeds either, so
+  // their snapshots come again with every reply; only the first brings their photos first and a sync soon.
+  it('settles when a manifest that cannot be fetched adds feeds with more than 20 photos', async () => {
+    const s = await setUp('sync-unfetched-manifest');
+    const old = await newsSources(s, OLD, 0, 1);
+    expect((await sync(s, body({ snapshots: old.snapshots, blobs: photosOf(0) }))).blobs).toBeUndefined();
+    await newsSources(s, NEW, 1, 2, 10, old.ids);
+    const paces = [];
+    for (let i = 0; i < 6; i++) paces.push((await sync(s, body({ snapshots: old.snapshots, blobs: photosOf(0) }))).nextSyncS);
+    expect(paces).toEqual([15, 15, 300, 300, 300, 300]);
   });
 
   it('syncs at the full interval while the photos it was asked for never arrive, and soon again once they do', async () => {
@@ -610,21 +700,190 @@ describe('snapshot feed blobs (#196)', () => {
           })),
         }),
       });
-    const sourceOf = (sha: string) => [0, 1, 2].find((n) => photos(n).includes(sha))!;
     const held = { snapshots: Object.fromEntries(ids.map((id) => [id, 6000])) };
 
     const r1 = await sync(s, body(held));
     expect(r1.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
     expect(r1.nextSyncS).toBe(15);
-    // The screen fetches none of them (a store that fails, or photos it may not keep).
+    // The screen fetches none of them (a store that fails, photos it may not keep, or a reply lost on the way): one
+    // retry soon, then the full interval.
     const r2 = await sync(s, body(held));
-    expect(r2.nextSyncS).toBe(300);
-    // The turn starts after the feed the last reply ended on, so a feed whose photos never come cannot hold the front.
-    const order = r1.blobs!.slice(0, 3).map(sourceOf);
-    expect(sourceOf(r2.blobs![0]!)).toBe(order[(order.indexOf(sourceOf(r1.blobs!.at(-1)!)) + 1) % 3]);
-    expect((await sync(s, body(held))).nextSyncS).toBe(300);
-    // Once they come in, soon again.
-    expect((await sync(s, body({ ...held, blobs: r2.blobs }))).nextSyncS).toBe(15);
+    expect(r2.nextSyncS).toBe(15);
+    const r3 = await sync(s, body(held));
+    expect(r3.nextSyncS).toBe(300);
+    // Each ask starts after the photo the last one ended on, so photos that never come cannot hold the front.
+    expect(new Set([...r1.blobs!, ...r2.blobs!, ...r3.blobs!])).toEqual(new Set([0, 1, 2].flatMap(photos)));
+    const r4 = await sync(s, body(held));
+    expect(r4.nextSyncS).toBe(300);
+    // Once those it was last asked for come in, soon again.
+    expect((await sync(s, body({ ...held, blobs: r4.blobs }))).nextSyncS).toBe(15);
+  });
+
+  /** Source `n`'s photos, in story order: hashes 1000(n+1)+1 on. */
+  const photosOf = (n: number, stories = 10) => Array.from({ length: 2 * stories }, (_, i) => hash(1000 * (n + 1) + i + 1));
+
+  /**
+   * News sources `from` to `from + count - 1` of `stories` stories (`photosOf`), bound with the sources `keep` to a
+   * manifest the screen is to play.
+   */
+  async function newsSources(s: Screen, manifest: string, from: number, count: number, stories = 10, keep: string[] = []) {
+    const fresh: string[] = [];
+    for (let n = from; n < from + count; n++) {
+      const id = (await s.seed.scope.dataSources.insert({ name: `News ${n}`, format: 'rss', urlEncrypted: `enc:${n}`, refreshS: 300 })).id;
+      fresh.push(id);
+      const photos = photosOf(n, stories);
+      await s.seed.scope.dataSources.putSnapshot(id, {
+        version: 'v1',
+        fetchedAt: 6000,
+        checkedAt: 6000,
+        dataJson: JSON.stringify({
+          items: Array.from({ length: stories }, (_, i) => ({
+            title: `Story ${i}`,
+            published: '',
+            source: '',
+            image: { file: photos[2 * i], thumb: photos[2 * i + 1] },
+          })),
+        }),
+      });
+    }
+    const ids = [...keep, ...fresh];
+    await publish(s, manifest, {
+      schema: MANIFEST_SCHEMA,
+      dataSources: Object.fromEntries(ids.map((id) => [id, { id, refreshS: 300 }])),
+      templates: { 'base/news@2.0.0': newsTemplate(true) },
+      spots: Object.fromEntries(
+        ids.map((id, n) => [
+          `n${n}`,
+          { id: `n${n}`, kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: id, path: 'items' } } },
+        ]),
+      ),
+    });
+    return { ids, snapshots: Object.fromEntries(ids.map((id) => [id, 6000])) };
+  }
+
+  // #496: the player reports only the photos of what it plays, so the count it holds falls when a publish swaps feeds.
+  it('keeps asking soon while the count still missing falls, though the count held does not rise', async () => {
+    const s = await setUp('sync-feed-blobs-swap');
+    // One feed's 20 photos, all held.
+    const before = await newsSources(s, OLD, 0, 1);
+    expect((await sync(s, body({ snapshots: before.snapshots, blobs: photosOf(0) }))).blobs).toBeUndefined();
+    // Swapped for three feeds; until it adopts them it still reports the old feed's 20.
+    const after = await newsSources(s, NEW, 1, 3);
+    const r1 = await sync(s, body({ snapshots: before.snapshots, blobs: photosOf(0) }));
+    expect(r1.nextSyncS).toBe(15);
+    // It plays the new manifest and holds the 20 it was sent: as many as before, but 20 fewer missing.
+    const r2 = await sync(s, body({ snapshots: after.snapshots, blobs: r1.blobs }));
+    expect(r2.nextSyncS).toBe(15);
+    const r3 = await sync(s, body({ snapshots: after.snapshots, blobs: [...r1.blobs!, ...r2.blobs!] }));
+    expect(r3.blobs).toHaveLength(20);
+    expect(r3.nextSyncS).toBe(300);
+  });
+
+  // #496: a photo that never downloads leaves an ask standing; a publish that adds many must not wait an interval.
+  it('asks soon after a publish adds photos, though a photo asked for before never came', async () => {
+    const s = await setUp('sync-feed-blobs-standing');
+    const one = await newsSources(s, OLD, 0, 1);
+    const stuck = photosOf(0).slice(0, -1);
+    for (let i = 0; i < 3; i++)
+      expect(await sync(s, body({ snapshots: one.snapshots, blobs: stuck }))).toMatchObject({ blobs: [photosOf(0).at(-1)], nextSyncS: 300 });
+    await newsSources(s, NEW, 1, 2, 10, one.ids);
+    // The reply that sends the new feeds' snapshots asks for their photos first, and soon for the rest.
+    const r = await sync(s, body({ snapshots: one.snapshots, blobs: stuck }));
+    expect(r.blobs).toEqual(expect.arrayContaining([photosOf(1)[0], photosOf(2)[0]]));
+    expect(r.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
+    expect(r.nextSyncS).toBe(15);
+  });
+
+  // #496: a screen reports at most MAX_SYNC_BLOBS photos, so those it holds past that look missing; the ask moves on
+  // past them rather than asking for the same ones each time.
+  it('reaches the deepest photos of a screen holding more than it can report', async () => {
+    const s = await setUp('sync-feed-blobs-deep');
+    const feeds = await newsSources(s, OLD, 0, 8, 20);
+    const all = Array.from({ length: 8 }, (_, n) => photosOf(n, 20)).flat();
+    expect(all).toHaveLength(320);
+    // It lacks only the last story of the last two feeds, and reports the first MAX_SYNC_BLOBS it holds.
+    const lacking = [...photosOf(6, 20).slice(-2), ...photosOf(7, 20).slice(-2)];
+    const report = { snapshots: feeds.snapshots, blobs: all.filter((sha) => !lacking.includes(sha)).slice(0, MAX_SYNC_BLOBS) };
+    const asked = new Set<string>();
+    // 64 look missing, 20 an ask: every one is asked for within four replies.
+    for (let i = 0; i < 4; i++) for (const sha of (await sync(s, body(report))).blobs ?? []) asked.add(sha);
+    expect(asked).toEqual(new Set(all.filter((sha) => !report.blobs.includes(sha))));
+  });
+
+  // Review of #514: a screen holding more than it can report spends its retry once, and a feed's turnover costs it at
+  // most one sync soon, once it fetches the new story's photos.
+  describe('a feed turning over on a screen holding more than it can report', () => {
+    /** 8 feeds of 20 stories, the screen holding all 320 photos and reporting the first MAX_SYNC_BLOBS. */
+    async function overCap(name: string) {
+      const s = await setUp(name);
+      const feeds = await newsSources(s, OLD, 0, 8, 20);
+      const all = Array.from({ length: 8 }, (_, n) => photosOf(n, 20)).flat();
+      const paces: number[] = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }))).nextSyncS);
+      return { s, feeds, all, paces };
+    }
+
+    /** Feed `n`'s lead story replaced, at version 7000: its two new photos. */
+    async function turnOver(s: Screen, feeds: { ids: string[] }, n: number) {
+      const fresh = [hash(90_000 + 2 * n + 1), hash(90_000 + 2 * n + 2)];
+      const old = photosOf(n, 20);
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        title: `Story ${i}`,
+        published: '',
+        source: '',
+        image: i === 0 ? { file: fresh[0], thumb: fresh[1] } : { file: old[2 * i], thumb: old[2 * i + 1] },
+      }));
+      await s.seed.scope.dataSources.putSnapshot(feeds.ids[n]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
+      return { fresh, gone: old.slice(0, 2) };
+    }
+
+    it('costs one sync soon when the screen fetches the new photos', async () => {
+      const { s, feeds, all, paces: before } = await overCap('sync-turnover-fetches');
+      // Its first ask, its one retry, then the full interval: nothing it is asked for shows as held.
+      expect(before).toEqual([15, 15, 300]);
+      const { fresh, gone } = await turnOver(s, feeds, 0);
+      // The reply that sends the snapshot asks for the new story's photos first.
+      const r1 = await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }));
+      expect(r1.blobs!.slice(0, 2)).toEqual(fresh);
+      expect(r1.nextSyncS).toBe(300);
+      // It adopts the snapshot and stores them, reporting in manifest order: the new two in place of the old.
+      const held = all.flatMap((sha) => (sha === gone[0] ? [fresh[0]!] : sha === gone[1] ? [fresh[1]!] : [sha])).slice(0, MAX_SYNC_BLOBS);
+      const after = { snapshots: { ...feeds.snapshots, [feeds.ids[0]!]: 7000 }, blobs: held };
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body(after))).nextSyncS);
+      expect(paces).toEqual([15, 300, 300]);
+    });
+
+    it('costs none when it does not', async () => {
+      const { s, feeds, all } = await overCap('sync-turnover-stuck');
+      await turnOver(s, feeds, 0);
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }))).nextSyncS);
+      expect(paces).toEqual([300, 300, 300]);
+    });
+
+    it('costs one sync soon on a screen with photos it never fetches, under the cap too', async () => {
+      const s = await setUp('sync-turnover-under-cap');
+      const feeds = await newsSources(s, OLD, 0, 3, 20);
+      const stuck = { snapshots: feeds.snapshots };
+      const before = [];
+      for (let i = 0; i < 3; i++) before.push((await sync(s, body(stuck))).nextSyncS);
+      expect(before).toEqual([15, 15, 300]);
+      const { fresh } = await turnOver(s, feeds, 0);
+      expect((await sync(s, body(stuck))).blobs!.slice(0, 2)).toEqual(fresh);
+      // It stores the new story's two, and nothing else.
+      const after = { snapshots: { ...feeds.snapshots, [feeds.ids[0]!]: 7000 }, blobs: fresh };
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body(after))).nextSyncS);
+      expect(paces).toEqual([15, 300, 300]);
+    });
+
+    it("asks for a new story's photos with its snapshot in a feed past the photos reported", async () => {
+      const { s, feeds, all } = await overCap('sync-turnover-deep');
+      const { fresh } = await turnOver(s, feeds, 7);
+      const r = await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }));
+      expect(r.blobs!.slice(0, 2)).toEqual(fresh);
+    });
   });
 
   it('sends no feed blobs for a text-only template (news 1.4.1) or an outdated player, and refuses over-limit SyncRequest.blobs', async () => {

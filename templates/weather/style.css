@@ -121,7 +121,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 8s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 8s) - 0.3s);
   /* The sun's and moon's arc (.arc, below), also where the dawn and dusk glow sits. */
   --rise-x: 44vw;
   --set-x: 92vw;
@@ -239,8 +241,8 @@ body {
   height: 48vmin;
   will-change: transform, opacity;
   animation:
-    orb-in 1.2s cubic-bezier(0.2, 1.2, 0.3, 1) both,
-    fade-out 0.5s ease-in forwards;
+    orb-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.1s, var(--out);
 }
 .orb .disc {
@@ -259,8 +261,6 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  will-change: transform;
-  animation: spin 40s linear infinite;
   background: repeating-conic-gradient(color-mix(in srgb, var(--sf-accent, #ffdc78) 55%, transparent) 0 6deg, transparent 6deg 30deg);
   /* A mask reads only alpha: --opaque is any opaque colour. */
   --opaque: var(--sf-text, #000);
@@ -455,8 +455,8 @@ body {
 .fog .cloud.hero {
   opacity: 1;
   animation:
-    fade-in 1s ease both,
-    fade-out 0.5s ease-in forwards;
+    fade-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.1s, var(--out);
 }
 
@@ -498,8 +498,8 @@ body {
   box-shadow: 0 1.5vmin 5vmin color-mix(in srgb, var(--sf-bg, #000) 35%, transparent);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0s, var(--out);
 }
 /* On a light kit a shadow of its background reads as a pale halo. */
@@ -509,15 +509,15 @@ body {
 .info > * {
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
 .city {
   font-size: calc(var(--u) * 5);
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  animation-delay: 0.2s, var(--out);
+  animation-delay: 0.11s, var(--out);
 }
 .temp {
   display: flex;
@@ -527,7 +527,7 @@ body {
   font-weight: 900;
   line-height: 0.9;
   letter-spacing: -0.05em;
-  animation-delay: 0.35s, var(--out);
+  animation-delay: 0.22s, var(--out);
 }
 .temp .unit {
   font-size: 0.3em;
@@ -541,7 +541,7 @@ body {
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
   font-size: calc(var(--u) * 6.4);
   font-weight: 800;
-  animation-delay: 0.5s, var(--out);
+  animation-delay: 0.33s, var(--out);
 }
 .range,
 .extra {
@@ -552,10 +552,10 @@ body {
   margin-top: calc(var(--u) * 1.6);
 }
 .range {
-  animation-delay: 0.65s, var(--out);
+  animation-delay: 0.44s, var(--out);
 }
 .extra {
-  animation-delay: 0.8s, var(--out);
+  animation-delay: 0.55s, var(--out);
   color: var(--sf-muted, color-mix(in srgb, var(--sf-text, #fff) 90%, transparent));
 }
 .range b,
@@ -612,14 +612,14 @@ body {
 
 @keyframes orb-in {
   from {
-    transform: translateY(20vh) scale(0.5);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes rise-in {
   from {
-    transform: translateY(6vh);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes fade-in {
@@ -630,11 +630,7 @@ body {
 @keyframes fade-out {
   to {
     opacity: 0;
-  }
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes drift {

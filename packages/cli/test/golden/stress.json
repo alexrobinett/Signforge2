@@ -7,6 +7,10 @@
     "orientation": "landscape"
   },
   "files": {
+    "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e": {
+      "size": 79560,
+      "type": "text/html"
+    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg",
@@ -16,49 +20,37 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b": {
-      "size": 400892,
+    "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8": {
+      "size": 90089,
       "type": "text/html"
     },
-    "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357": {
-      "size": 81112,
+    "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
+      "size": 81141,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
     },
+    "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33": {
+      "size": 78184,
+      "type": "text/html"
+    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
-    },
-    "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2": {
-      "size": 81079,
-      "type": "text/html"
     },
     "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f": {
       "size": 44306,
       "type": "image/png"
     },
-    "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd": {
-      "size": 393916,
-      "type": "text/html"
-    },
-    "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215": {
-      "size": 79453,
+    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
+      "size": 400856,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
-      "size": 125360,
-      "type": "text/html"
-    },
-    "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953": {
-      "size": 395766,
-      "type": "text/html"
     },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
@@ -68,32 +60,20 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637": {
-      "size": 399570,
-      "type": "text/html"
-    },
-    "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
-      "size": 82306,
-      "type": "text/html"
-    },
     "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
+      "size": 399570,
+      "type": "text/html"
     },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff": {
-      "size": 90095,
-      "type": "text/html"
-    },
-    "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119": {
-      "size": 383289,
-      "type": "text/html"
-    },
-    "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
-      "size": 78257,
+    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
+      "size": 395766,
       "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
@@ -101,9 +81,17 @@
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
     },
+    "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b": {
+      "size": 81204,
+      "type": "text/html"
+    },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
       "size": 43425,
       "type": "image/png"
+    },
+    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
+      "size": 393916,
+      "type": "text/html"
     },
     "de29f63a8d1386d966af4f67750a68a3498ec14b44d005facc2144f63162c937": {
       "size": 46747,
@@ -113,13 +101,25 @@
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
+    },
+    "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f": {
+      "size": 125324,
+      "type": "text/html"
+    },
+    "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080": {
+      "size": 81821,
+      "type": "text/html"
+    },
+    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
+      "size": 383288,
+      "type": "text/html"
     }
   },
   "templates": {
-    "base/alert@1.1.0": {
+    "base/alert@1.2.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -204,12 +204,12 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
+      "html": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f"
     },
-    "base/announcement@1.1.0": {
+    "base/announcement@1.1.1": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -331,12 +331,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953"
+      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
     },
-    "base/clock@1.2.4": {
+    "base/clock@1.3.0": {
       "manifest": {
         "id": "clock",
-        "version": "1.2.4",
+        "version": "1.3.0",
         "name": "Clock",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
         "fields": {
@@ -381,12 +381,12 @@
         "background": "#05070d",
         "protocol": 2
       },
-      "html": "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a"
+      "html": "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33"
     },
-    "base/countdown@1.1.0": {
+    "base/countdown@1.1.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -509,12 +509,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd"
+      "html": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9"
     },
-    "base/cstore-promo@1.2.5": {
+    "base/cstore-promo@1.3.0": {
       "manifest": {
         "id": "cstore-promo",
-        "version": "1.2.5",
+        "version": "1.3.0",
         "name": "C-Store Promo",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
         "fields": {
@@ -586,12 +586,12 @@
         "background": "#06122b",
         "protocol": 2
       },
-      "html": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f"
+      "html": "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080"
     },
-    "base/agenda@1.3.2": {
+    "base/agenda@1.4.0": {
       "manifest": {
         "id": "agenda",
-        "version": "1.3.2",
+        "version": "1.4.0",
         "name": "Agenda",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
         "fields": {
@@ -677,12 +677,12 @@
         },
         "protocol": 2
       },
-      "html": "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357"
+      "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
-    "base/info-frame@1.1.0": {
+    "base/info-frame@1.2.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -967,12 +967,12 @@
         },
         "protocol": 2
       },
-      "html": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b"
+      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/menu-board@1.3.1": {
+    "base/menu-board@1.4.0": {
       "manifest": {
         "id": "menu-board",
-        "version": "1.3.1",
+        "version": "1.4.0",
         "name": "Menu Board",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
         "fields": {
@@ -1064,12 +1064,12 @@
         },
         "protocol": 2
       },
-      "html": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215"
+      "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
     },
-    "base/news@2.1.1": {
+    "base/news@2.1.2": {
       "manifest": {
         "id": "news",
-        "version": "2.1.1",
+        "version": "2.1.2",
         "name": "News",
         "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1183,12 +1183,12 @@
         },
         "protocol": 2
       },
-      "html": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119"
+      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
-    "base/photo-promo@1.4.2": {
+    "base/photo-promo@1.5.0": {
       "manifest": {
         "id": "photo-promo",
-        "version": "1.4.2",
+        "version": "1.5.0",
         "name": "Photo Promo",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
         "fields": {
@@ -1234,12 +1234,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2"
+      "html": "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46"
     },
-    "base/room-status@1.1.0": {
+    "base/room-status@1.1.1": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1360,12 +1360,12 @@
         },
         "protocol": 2
       },
-      "html": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637"
+      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.5.1": {
+    "base/weather@1.6.0": {
       "manifest": {
         "id": "weather",
-        "version": "1.5.1",
+        "version": "1.6.0",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1473,7 +1473,7 @@
         },
         "protocol": 2
       },
-      "html": "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff"
+      "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
     }
   },
   "spots": {
@@ -1481,7 +1481,7 @@
       "id": "alert",
       "name": "Evacuation alert",
       "kind": "template",
-      "template": "base/alert@1.1.0",
+      "template": "base/alert@1.2.0",
       "data": {
         "severity": "emergency",
         "headline": "Evacuate the building now",
@@ -1501,7 +1501,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.1.0",
+      "template": "base/announcement@1.1.1",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -1528,7 +1528,7 @@
       "id": "clock",
       "name": "Clock",
       "kind": "template",
-      "template": "base/clock@1.2.4",
+      "template": "base/clock@1.3.0",
       "data": {
         "greeting": "",
         "message": "Welcome to SignForge",
@@ -1543,7 +1543,7 @@
       "id": "countdown",
       "name": "Countdown (minutes ticking)",
       "kind": "template",
-      "template": "base/countdown@1.1.0",
+      "template": "base/countdown@1.1.1",
       "data": {
         "look": "night",
         "mode": "up",
@@ -1571,7 +1571,7 @@
       "id": "energy",
       "name": "Energy drinks 3 for $7",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.5",
+      "template": "base/cstore-promo@1.3.0",
       "data": {
         "quantity": "3",
         "price": "7",
@@ -1592,7 +1592,7 @@
       "id": "holidays",
       "name": "US holidays (Google Calendar)",
       "kind": "template",
-      "template": "base/agenda@1.3.2",
+      "template": "base/agenda@1.4.0",
       "data": {
         "title": "Holidays",
         "subtitle": "United States",
@@ -1614,7 +1614,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.1.0",
+      "template": "base/info-frame@1.2.0",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -1739,7 +1739,7 @@
       "id": "meeting-room",
       "name": "Meeting room (fixed data)",
       "kind": "template",
-      "template": "base/agenda@1.3.2",
+      "template": "base/agenda@1.4.0",
       "data": {
         "title": "Room 4B",
         "subtitle": "This week's bookings",
@@ -1791,7 +1791,7 @@
       "id": "menu",
       "name": "Coffee menu",
       "kind": "template",
-      "template": "base/menu-board@1.3.1",
+      "template": "base/menu-board@1.4.0",
       "data": {
         "title": "Coffee bar",
         "subtitle": "Made to order, all day",
@@ -1856,7 +1856,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.1.1",
+      "template": "base/news@2.1.2",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -1886,7 +1886,7 @@
       "id": "photo-berries",
       "name": "Photo promo, 1080p photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.2",
+      "template": "base/photo-promo@1.5.0",
       "data": {
         "eyebrow": "This week",
         "headline": "Fresh picked",
@@ -1902,7 +1902,7 @@
       "id": "photo-kitchen",
       "name": "Photo promo, 4K photo 2",
       "kind": "template",
-      "template": "base/photo-promo@1.4.2",
+      "template": "base/photo-promo@1.5.0",
       "data": {
         "eyebrow": "Made here",
         "headline": "Hot and ready",
@@ -1918,7 +1918,7 @@
       "id": "photo-river",
       "name": "Photo promo, 4K photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.2",
+      "template": "base/photo-promo@1.5.0",
       "data": {
         "eyebrow": "Weekend escape",
         "headline": "Go further",
@@ -1934,7 +1934,7 @@
       "id": "room-status",
       "name": "Room status (live calendar)",
       "kind": "template",
-      "template": "base/room-status@1.1.0",
+      "template": "base/room-status@1.1.1",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1962,7 +1962,7 @@
       "id": "sport-drinks",
       "name": "Sport drinks 2 for $4",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.5",
+      "template": "base/cstore-promo@1.3.0",
       "data": {
         "quantity": "2",
         "price": "4",
@@ -2007,7 +2007,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.5.1",
+      "template": "base/weather@1.6.0",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2067,7 +2067,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.5.1",
+      "template": "base/weather@1.6.0",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2089,7 +2089,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.5.1",
+      "template": "base/weather@1.6.0",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2199,5 +2199,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "3349cc06166fd7603ccb868e52063a00e2e2159438d90126db97dcbe1e251438"
+  "id": "b5bb07ba8de9fe0116c91673bf43f76f47c101abd861cba3c4cc3cfd1d87a057"
 }

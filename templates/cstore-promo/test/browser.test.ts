@@ -1,4 +1,5 @@
-import { brandColourTests, useTemplate } from '@signforge/template-test';
+import { expect, it } from 'vitest';
+import { brandColourTests, motionContract, screenFrame, useTemplate } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { promo: 'Buy any 3', product: 'Energy', price: '6' },
@@ -16,3 +17,12 @@ brandColourTests(t, {
   ],
   onBackdrop: ['.l1'],
 });
+
+// D's motion (docs/template-spec.md, Motion), read by seeking: the copy, three products and the badge.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`moves as D does, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, { imageLeft: '#f00', imageCenter: '#0f0', imageRight: '#00f' });
+    const durationMs = 11_000;
+    const f = await k.play({ disclaimer: 'While stocks last' }, undefined, durationMs);
+    expect(await motionContract(f, durationMs)).toEqual([]);
+  });

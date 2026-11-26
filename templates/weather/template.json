@@ -1,6 +1,6 @@
 {
   "id": "weather",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "name": "Weather Now",
   "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
   "fields": {

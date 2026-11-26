@@ -14,11 +14,13 @@ export interface ScreenHeartbeat {
   driftMs: number;
   dataRejected: Record<string, number>;
   /**
-   * The feed photos the screen held (`SyncRequest.blobs`), and whether the reply asked it to fetch more: the next sync
-   * comes soon only while those asks bring photos in (sync.ts, `MORE_PHOTOS_SYNC_S`); `after` is the source the asked
-   * photos ended on, which the next reply's turn starts after. Absent before the fast sync.
+   * The feed photos the screen held (`SyncRequest.blobs`) and lacked, the end of each hash the reply asked it to
+   * fetch (`ask`, the next reply's starting after its last), and whether its one retry is spent: the next sync comes
+   * soon only while asked photos arrive or a reply's snapshots bring more than it asks for, with one retry (sync.ts,
+   * `MORE_PHOTOS_SYNC_S`). `sent` fingerprints the snapshots the reply sent, so the same ones sent again bring no new
+   * photos first. Absent before the fast sync.
    */
-  photos?: { held: number; asked: boolean; after?: string };
+  photos?: { held: number; missing: number; retried: boolean; ask: string[]; sent?: string };
 }
 
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {

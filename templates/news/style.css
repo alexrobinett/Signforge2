@@ -67,7 +67,7 @@ ol {
   font-family: var(--lk-font-body);
   overflow: hidden;
   /* The spot's end: everything fades out together. */
-  animation: nw-dip 400ms var(--nw-acc) calc(var(--sf-duration, 8s) - 400ms) forwards;
+  animation: nw-dip 300ms var(--nw-acc) calc(var(--sf-duration, 8s) - 300ms) forwards;
 }
 
 /* The header: one line, the title and the time, fading in once. */
@@ -274,7 +274,8 @@ ol {
 }
 
 /* ---------------------------------------------------------------- A story's change */
-/* Leaving, on Acc, ending at `--until`: the summary first, then the source and age with the headline, lifting away;
+/* Leaving, on Acc, in 300 ms, gone 50 ms before `--until`: the summary first, then the source and age with the
+   headline, lifting away;
    the photo fades to the ground (a dip: two photos never cross-fade). Arriving, on Dec, from `--at`: the photo, then
    the source and age, the headline and the summary, each rising into place. */
 .story :is(.photo, .meta, .headline, .summary) {
@@ -290,21 +291,21 @@ ol {
   --nw-to: -0.6vmin;
   animation:
     nw-in 400ms var(--nw-dec) calc(var(--at) + 100ms) both,
-    nw-out 250ms var(--nw-acc) calc(var(--until) - 300ms) forwards;
+    nw-out 300ms var(--nw-acc) calc(var(--until) - 350ms) forwards;
 }
 .story .headline {
   --nw-from: 1.5vmin;
-  --nw-to: -1vmin;
+  --nw-to: -0.6vmin;
   animation:
     nw-in 650ms var(--nw-dec) calc(var(--at) + 150ms) both,
-    nw-out 250ms var(--nw-acc) calc(var(--until) - 300ms) forwards;
+    nw-out 300ms var(--nw-acc) calc(var(--until) - 350ms) forwards;
 }
 .story .summary {
   --nw-from: 1vmin;
   --nw-to: -0.6vmin;
   animation:
     nw-in 500ms var(--nw-dec) calc(var(--at) + 300ms) both,
-    nw-out 250ms var(--nw-acc) calc(var(--until) - 350ms) forwards;
+    nw-out 300ms var(--nw-acc) calc(var(--until) - 400ms) forwards;
 }
 
 @keyframes nw-on {

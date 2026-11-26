@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrandColors } from '@signforge/contract';
-import { host, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
+import { host, motionContract, noDemoAndLight, NOW, paintedContrast, screenFrame, spotData, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { code: 61, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 },
@@ -150,3 +150,21 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     expect(day.y).toBeCloseTo(0.5, 2);
   });
 });
+
+// D's motion (docs/template-spec.md, Motion), read by seeking: a clear day with the sun, rain by day and snow by night.
+// Drifting clouds and falling rain or snow are the weather's own loops.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`moves as D does, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const durationMs = 11_000;
+    const found: string[] = [];
+    const skies: Data[] = [
+      { code: 1, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 },
+      { code: 61, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 },
+      { code: 71, isDay: 0, temp: 30, sunrise: NOW / 1000 - 11 * 3600, sunset: NOW / 1000 - 3600 },
+    ];
+    for (const sky of skies)
+      for (const line of await motionContract(await k.play(sky, undefined, durationMs), durationMs, { loops: '.cloud, .fall' }))
+        found.push(`${sky.code}: ${line}`);
+    expect(found).toEqual([]);
+  });

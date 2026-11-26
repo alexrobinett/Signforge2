@@ -1,6 +1,6 @@
 import { IMAGE_SAMPLE_CELL, type FrameTheme, type Orientation } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { brandColourTests, DEMO_KIT, host, spotData, useTemplate, type BrandSpot } from '@signforge/template-test';
+import { brandColourTests, DEMO_KIT, host, motionContract, screenFrame, spotData, useTemplate, type BrandSpot } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { body: 'Picked this morning' },
@@ -143,3 +143,12 @@ describe('photo-promo (#308)', () => {
     }
   });
 });
+
+// D's motion (docs/template-spec.md, Motion), read by seeking: the photo's push-in, the copy and the price tag.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`moves as D does, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, { photo: '#963' });
+    const durationMs = 11_000;
+    const f = await k.play({ body: 'Picked this morning' }, undefined, durationMs);
+    expect(await motionContract(f, durationMs)).toEqual([]);
+  });

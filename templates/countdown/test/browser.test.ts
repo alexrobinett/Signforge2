@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { FrameTheme, Orientation } from '@signforge/contract';
-import { host, layoutFaults, LIGHT_KIT, motion, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
+import {
+  host,
+  layoutFaults,
+  LIGHT_KIT,
+  motion,
+  motionContract,
+  noDemoAndLight,
+  NOW,
+  paintedContrast,
+  spotData,
+  useTemplate,
+  type Data,
+} from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { look: 'pop', target: '2026-11-29T18:00' },
@@ -365,6 +377,8 @@ describe('countdown (#198)', () => {
         const f = await s.show({ look, ...data }, NOW, undefined, durationMs);
         // Every element with a kit class has its intro and outro here.
         expect(await motion(f, durationMs, true), look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
+        // D's motion, read by seeking; Night's ring turns as the days run out, as progress.
+        expect(await motionContract(f, durationMs, { progress: ":root[data-look='night'] :is(.fill, .seam, .arm)" }), look).toEqual([]);
       }
   });
 
