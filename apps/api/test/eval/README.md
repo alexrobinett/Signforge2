@@ -53,13 +53,13 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 ## The catalogue budget
 
-`catalogue.test.ts` pins the catalogue's size per role. The budget is the `tools` array in the model's first request in each arm, counted as `{ tools }` JSON in o200k tokens, the tool audit's method. /mcp's `tools/list`, what a client receives before it builds the model's tools, is pinned apart as discovery. A PR that grows either fails there. A PR that shrinks one updates the pin in the same diff. Beside them it pins the words each first request carries with the tools: /mcp's server instructions with the eval's own lines (329 tokens for every role), and the drawer's system prompt with its first message's context around the question and its answer's schema, `output_config` (846 / 876 / 940), so text moved out of a tool's description is still counted.
+`catalogue.test.ts` pins the catalogue's size per role. The budget is the `tools` array in the model's first request in each arm, counted as `{ tools }` JSON in o200k tokens, the tool audit's method. /mcp's `tools/list`, what a client receives before it builds the model's tools, is pinned apart as discovery. A PR that grows either fails there. A PR that shrinks one updates the pin in the same diff. The editor's measured `tools/list` must also stay within 12,500 tokens (`EDITOR_BUDGET`), whatever its pin says. Beside them it pins the words each first request carries with the tools: /mcp's server instructions with the eval's own lines (329 tokens for every role), and the drawer's system prompt with its first message's context around the question and its answer's schema, `output_config` (846 / 876 / 940), so text moved out of a tool's description is still counted.
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 30 tools · 13,206 tokens | 27 · 11,786 | 6 · 1,708 |
-| Drawer request | 18 · 6,274 | 16 · 5,972 | 10 · 3,496 |
-| /mcp `tools/list` (discovery) | 30 · 13,996 | 27 · 12,495 | 6 · 1,864 |
+| /mcp request | 30 tools · 12,793 tokens | 27 · 11,373 | 6 · 1,708 |
+| Drawer request | 18 · 5,996 | 16 · 5,694 | 10 · 3,409 |
+| /mcp `tools/list` (discovery) | 30 · 13,583 | 27 · 12,082 | 6 · 1,864 |
 
 The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Since PR 4, one `save_*` tool per content type creates or changes it (spot, playlist, schedule entry, brand kit, data source), and the drawer drafts a spot's name, length and fields alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882; after PR 3, /mcp 16,886 / 15,450 / 1,726, drawer 7,992 / 7,690 / 4,334, and discovery 18,079 / 16,562 / 1,882.
 

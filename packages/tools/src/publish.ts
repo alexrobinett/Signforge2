@@ -308,7 +308,7 @@ export const sampleAcks = z
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, each at the version given (a conflict, details { id, version }, if one changed since); with drafts: [], none, but every screen compiled again, as a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why. Set a default playlist first, or its screens get nothing. describe(publish) has the rules: the default playlist, what is removed, and a spot still holding sample text, which refuses it. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
+    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, at the versions given; with drafts: [], none, but every screen compiled again. describe(publish) has the rules: versions and held drafts, the default playlist, what is removed, sample text (which refuses it) and the if* guards. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -318,35 +318,21 @@ const publish = defineTool({
     ifDefault: id('playlist')
       .nullable()
       .optional()
-      .describe(
-        "Publish only while this playlist is the organization's default (null: while it has none): for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
-      ),
+      .describe('Publish only while this playlist is the default (null: while there is none); else a conflict { defaultPlaylistId }'),
     ifBrand: z
       .string()
       .max(200_000)
       .optional()
-      .describe(
-        "Publish only while the brand kits and their assignments are as they were shown: their state as the agent drawer's publish card read it. Refused with a conflict, details { brand: true }, otherwise, checked again as it commits",
-      ),
-    ifScreens: z
-      .array(id('screen'))
-      .max(5000)
-      .optional()
-      .describe(
-        'Publish only if it switches exactly these screens, as they were shown. Refused with a conflict, details { screens }, the ones it would switch now, otherwise; a screen added or deleted before it commits makes it read again',
-      ),
+      .describe('Publish only while the brand kits are as the publish card read them; else a conflict { brand: true }'),
+    ifScreens: z.array(id('screen')).max(5000).optional().describe('Publish only if it switches exactly these screens; else a conflict { screens }'),
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
       .max(500)
       .optional()
-      .describe(
-        'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
-      ),
+      .describe('Each at the version you chose it at; omit for every changed draft, [] for none'),
     allowSample: sampleAcks
       .optional()
-      .describe(
-        'People only: the spots a sample_text refusal named, { spotId, version, fields } as it named them, once a person has seen them and chose to publish them anyway. It covers that version of each and those fields only: any other refuses again. Refused to an agent',
-      ),
+      .describe('People only: the spots a sample_text refusal named, as it named them, once a person chose to publish them anyway'),
   }),
   output: outputs.publish,
   example: {},
