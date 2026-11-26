@@ -141,8 +141,6 @@ async function before(caller: Caller, name: string, input: Row): Promise<{ targe
 function draftRefusal(name: string, input: Row, target: Row | null): string | undefined {
   if (name === 'save_spot' && target?.kind === 'url') return "a web page spot's address is not the agent's to change: change it in the spot's editor";
   const t = DRAFTS[name];
-  // A change must change something: its tool refuses one that does not when it runs, not when it is drafted.
-  if (t && input[t.id] !== undefined && Object.keys(input).every((k) => k === t.id || k === 'ifVersion')) return `nothing to change in the ${t.kind}`;
   if (t?.fields)
     for (const key of Object.keys(input))
       if (![t.id, 'ifVersion', ...t.fields].includes(key))
@@ -160,6 +158,10 @@ function draftRefusal(name: string, input: Row, target: Row | null): string | un
 export async function propose(caller: Caller, name: string, raw: unknown): Promise<{ call: ProposedCall } | { problem: string }> {
   const tool = registry.get(name);
   if (!tool || !Object.hasOwn(DRAFTS, name)) return { problem: `${name} is not a tool you may draft with` };
+  // A change must change something. Said before the tool's own check, whose refusal lists what the drawer may not draft (#503).
+  const t = DRAFTS[name];
+  if (t && isRow(raw) && raw[t.id] !== undefined && Object.keys(raw).every((k) => k === t.id || k === 'ifVersion'))
+    return { problem: `nothing to change in the ${t.kind}` };
   const parsed = tool.input.safeParse(raw);
   if (!parsed.success || !isRow(raw)) return { problem: parsed.success ? 'the input is not an object' : z.prettifyError(parsed.error) };
   const read = await before(caller, name, raw);
@@ -168,7 +170,6 @@ export async function propose(caller: Caller, name: string, raw: unknown): Promi
   if (refused) return { problem: refused };
   const { ifVersion: _theirs, ...input } = raw;
   const version = read.target?.version;
-  const t = DRAFTS[name];
   return {
     call: {
       tool: name,

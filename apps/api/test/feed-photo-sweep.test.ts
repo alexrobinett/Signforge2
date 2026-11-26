@@ -1,4 +1,4 @@
-// The daily feed-photo sweep keeps up with orgs at their photo cap (#481, review of #490): each day it forgets what
+// The hourly feed-photo sweep keeps up with orgs at their photo cap (#481, review of #490): each day it forgets what
 // expired and deletes those blobs, so neither the rows nor the blobs pile up, at today's cap and at the demo's lifted
 // one (wrangler.jsonc `env.demo`). Run on the test's own clock.
 import { DEFAULT_PHOTO_BUDGET, FEED_IMAGE_TTL_MS, type PhotoBudget, RECHECK_MS } from '@signforge/db';

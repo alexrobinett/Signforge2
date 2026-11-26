@@ -13,7 +13,7 @@
  * after, once nothing names them, and a manifest in `o/<org>/m/` 90 days after it was stored, once
  * no screen keeps it; a lifecycle rule on `up/` can expire uploads sooner.
  *
- * Feed photos live under `o/<org>/f/` rather than `o/<org>/b/` so daily feed-photo cleanup can
+ * Feed photos live under `o/<org>/f/` rather than `o/<org>/b/` so the hourly feed-photo cleanup can
  * never delete an uploaded asset, template bundle or `/admin`-published manifest file that happens
  * to share the same content hash.
  */

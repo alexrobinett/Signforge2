@@ -60,6 +60,7 @@ const saveGroup = defineTool({
       ifVersion,
       idempotencyKey,
     })
+    // A key on a change is refused: it replays its first answer, so a keyed add repeated after a remove would change nothing (#503).
     .superRefine((v, ctx) => {
       const problem =
         v.membership !== undefined && v.screenIds === undefined
@@ -72,13 +73,15 @@ const saveGroup = defineTool({
                 : v.ifVersion !== undefined
                   ? 'a new group has no version yet: ifVersion is for a change'
                   : undefined
-            : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
-              ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
-              : v.screenIds !== undefined && v.membership === undefined
-                ? 'give membership with screenIds: add, remove or set'
-                : v.name === undefined && v.screenIds === undefined
-                  ? 'give a name or screenIds to change'
-                  : undefined;
+            : v.idempotencyKey !== undefined
+              ? 'idempotencyKey is for a new group: a change is safe to repeat, and ifVersion guards a rename or set'
+              : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
+                ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
+                : v.screenIds !== undefined && v.membership === undefined
+                  ? 'give membership with screenIds: add, remove or set'
+                  : v.name === undefined && v.screenIds === undefined
+                    ? 'give a name or screenIds to change'
+                    : undefined;
       if (problem) ctx.addIssue({ code: 'custom', message: problem });
     }),
   output: outputs.save_group,

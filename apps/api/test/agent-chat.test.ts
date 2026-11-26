@@ -1629,6 +1629,17 @@ describe('the drawer drafting changes (#268)', () => {
     expect(content).toMatch(/name alone, not its timezone/);
   });
 
+  it("refuses a draft that changes nothing in the drawer's words, not the tool's list of settings (#503)", async () => {
+    const d = await drafting({ script: () => [] });
+    const [screen] = await d.scope.screens.list();
+    d.steps.push({ calls: [{ name: 'update_screen', input: { screenId: screen!.id } }] }, ANSWER);
+    await events(await d.ask());
+    const [[refused, content]] = d.model.asked[1].messages.at(-1).content.map((r: { is_error: boolean; content: string }) => [r.is_error, r.content]);
+    expect(refused).toBe(true);
+    expect(content).toMatch(/nothing to change in the screen/);
+    expect(content).not.toMatch(/timezone/);
+  });
+
   it("drafts a screen's name alone: offered no setting, and refused one at save (#345)", async () => {
     const offered = draftTools(await grantOf({ org: { orgId: 'org_x' } as never, role: 'editor', scopes: undefined })).find((t) => t.name === 'update_screen');
     expect(Object.keys(z.toJSONSchema(offered!.input).properties ?? {})).toEqual(['screenId', 'name']);
