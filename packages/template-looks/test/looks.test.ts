@@ -144,7 +144,7 @@ describe('the look kit (#190)', () => {
       expect(found).toEqual([]);
     });
 
-  it('motionContract: a centred element, a monotone multi-step entrance and a move on the standard curve pass; a clip, mask, overshoot, rotation, transition or early exit is named', async () => {
+  it('motionContract: a centred element, a monotone multi-step entrance, a move on the standard curve and linear progress pass; the rest is named', async () => {
     const k = await kitFrame();
     const durationMs = 11_000;
     const f = await k.play({ look: 'corporate' }, undefined, durationMs);
@@ -165,10 +165,23 @@ describe('the look kit (#190)', () => {
         .t-over { animation: t-over .5s linear(0, 2.2, 1) both; }
         @keyframes t-early { to { opacity: 0; } }
         .t-early { animation: t-early .3s cubic-bezier(0.3, 0, 0.8, 0.15) 10.699s forwards; }
-        .t-slide { transition: transform 2s linear; }`;
+        .t-slide { transition: transform 2s linear; }
+        @keyframes t-wobble { from { transform: rotate(-2deg); } to { transform: rotate(2deg); } }
+        .t-wobble { animation: t-wobble 1s ${dec} 3s 3 alternate both; }
+        @keyframes t-far { from { transform: translateX(40vmin); } }
+        .t-far { animation: t-far .5s ${std} both; }
+        @keyframes t-faint { from { opacity: 0.02; transform: translateX(20vmin); } }
+        .t-faint { animation: t-faint .5s ${dec} both; }
+        @keyframes t-linear-first { from { opacity: 0; transform: translateY(1.5vmin); animation-timing-function: linear; } 50% { opacity: .5; transform: translateY(.75vmin); } }
+        .t-linear-first { animation: t-linear-first .5s ${dec} both; }
+        .t-pseudo::before { content: ''; animation: t-nowhere .5s ${dec} both; }`;
       document.head.append(style);
       const add = (name: string) => document.body.appendChild(Object.assign(document.createElement('div'), { className: `t ${name}` }));
-      for (const name of ['t-centred', 't-steps', 't-clip', 't-mask', 't-over', 't-early']) add(name);
+      for (const name of ['t-centred', 't-steps', 't-clip', 't-mask', 't-over', 't-early', 't-wobble', 't-far', 't-faint', 't-linear-first', 't-pseudo'])
+        add(name);
+      // Progress: a bar across most of the screen and a ring's half turn, linear over the play.
+      add('t-bar').animate([{ transform: 'none' }, { transform: 'translateX(80vmin)' }], { duration: 11_000, fill: 'both' });
+      add('t-ring').animate([{ transform: 'none' }, { transform: 'rotate(180deg)' }], { duration: 8000, fill: 'both' });
       // A list marker's move, row to row through a middle keyframe; then one that passes its row and comes back.
       const move = { duration: 600, delay: 5000, easing: std, fill: 'both' } as const;
       add('t-marker').animate([{ transform: 'none' }, { transform: 'translateY(4vmin)' }, { transform: 'translateY(8vmin)' }], move);
@@ -183,23 +196,54 @@ describe('the look kit (#190)', () => {
       const slide = add('t-slide');
       getComputedStyle(slide).transform;
       slide.style.transform = 'translateX(2vmin)';
+      // Held, so the transition is still there however long the next call takes to come.
+      for (const a of slide.getAnimations()) a.pause();
+      // A kit element with no exit: the shorthand must not turn `none` into an animation named after its fill mode.
+      add('t-stays lk-text').style.setProperty('--lk-leave', 'none');
     });
-    const found = await motionContract(f, durationMs);
+    const found = await motionContract(f, durationMs, { progress: '.t-bar, .t-ring' });
     const of = (c: string) => found.filter((l) => l.startsWith(`div.t.${c} `)).map((l) => l.slice(`div.t.${c} `.length));
     expect(
-      Object.fromEntries(['t-centred', 't-steps', 't-marker', 't-clip', 't-mask', 't-over', 't-bounce', 't-spin', 't-slide', 't-early'].map((c) => [c, of(c)])),
+      Object.fromEntries(
+        [
+          't-centred',
+          't-steps',
+          't-marker',
+          't-bar',
+          't-ring',
+          't-clip',
+          't-mask',
+          't-over',
+          't-bounce',
+          't-spin',
+          't-slide',
+          't-early',
+          't-wobble',
+          't-far',
+          't-faint',
+          't-linear-first',
+        ].map((c) => [c, of(c)]),
+      ),
     ).toEqual({
       't-centred': [],
       't-steps': [],
       't-marker': [],
+      't-bar': [],
+      't-ring': [],
       't-clip': expect.arrayContaining(['t-clip moves clipPath']),
       't-mask': expect.arrayContaining([expect.stringMatching(/^t-mask moves (webkitM|m)askPosition/)]),
       't-over': expect.arrayContaining(['t-over overshoots in sx', 't-over scales to 1.07']),
       't-bounce': ['script animation overshoots in y'],
       't-spin': ['script animation rotates'],
-      't-slide': ['transition of transform moves mid-play on linear'],
+      't-slide': ['transition of transform arrives in 2000 ms', 'transition of transform arrives on linear', 'transition of transform travels 2.0vmin'],
       't-early': ['t-early leaves at 10999 ms, not as the spot ends at 11000'],
+      't-wobble': expect.arrayContaining(['t-wobble runs 3 times', 't-wobble rotates']),
+      't-far': expect.arrayContaining(['t-far travels 40.0vmin']),
+      't-faint': ['t-faint travels 20.0vmin'],
+      't-linear-first': [expect.stringMatching(/^t-linear-first arrives on linear then cubic-bezier/)],
     });
+    expect(found).toContain('t t-pseudo::before t-nowhere: no such keyframes');
+    expect(found.filter((l) => l.startsWith('t t-stays'))).toEqual([]);
   });
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames

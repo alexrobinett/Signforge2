@@ -133,8 +133,9 @@ body {
   /* Its caption's box, three lines at full size, and the code's whole region: the tile and the caption under it. */
   --cap: 10.2vmin;
   --qr-h: calc(var(--qr) + 1.48vmin + var(--cap));
-  --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
-  --out: 0.5s;
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: 0.3s;
 }
 :root[data-qr='off'] {
   --scale: 1.12;
@@ -310,9 +311,9 @@ body {
   /* biome-ignore-end lint/complexity/noImportantStyles: measuring */
 }
 
-/* Motion. Emergency and warning arrive hard: the band drops in and the copy rises after it.
-   Advisory and notice fade in. Each element's outro is its intro reversed, ending as the play does
-   (`--sf-duration`). Only transform and opacity move. */
+/* Motion (D's, docs/template-spec.md): emergency and warning arrive hard and quick, the band dropping in and the
+   copy rising after it; advisory and notice fade in. Each element leaves on its own 300 ms lift, ending as the play
+   does (`--sf-duration`). Travel is at most 1.5vmin, with no overshoot; only transform and opacity move. */
 .band,
 .icon,
 .label,
@@ -322,22 +323,22 @@ body {
 .qr {
   will-change: transform, opacity;
   animation:
-    var(--m) var(--len) var(--ease) var(--d) both,
-    var(--m) var(--out) var(--ease) calc(var(--sf-duration, 60s) - var(--out)) reverse forwards;
+    var(--len) var(--d-in) var(--d) both var(--m),
+    var(--out) var(--d-out) calc(var(--sf-duration, 60s) - var(--out)) forwards alert-leave;
 }
 .band {
   --m: alert-drop;
-  --len: 0.45s;
+  --len: 0.4s;
   --d: 0s;
 }
 .icon {
   --m: alert-pop;
-  --len: 0.5s;
+  --len: 0.4s;
   --d: 0.3s;
 }
 .label {
   --m: alert-slide;
-  --len: 0.5s;
+  --len: 0.45s;
   --d: 0.35s;
 }
 .headline {
@@ -353,35 +354,32 @@ body {
 .meta,
 .qr {
   --m: alert-fade;
-  --len: 0.6s;
+  --len: 0.5s;
   --d: 0.8s;
-}
-:root:is([data-severity='advisory'], [data-severity='notice']) {
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .band {
   --m: alert-fade;
-  --len: 0.9s;
+  --len: 0.65s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .icon,
 :root:is([data-severity='advisory'], [data-severity='notice']) .label {
   --m: alert-fade;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.2s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .headline {
   --m: alert-soft;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.35s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .instructions {
   --m: alert-soft;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.5s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .meta,
 :root:is([data-severity='advisory'], [data-severity='notice']) .qr {
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.7s;
 }
 /* Portrait: the band taller, the copy full width, and who issued it and when it ends beside the
@@ -446,33 +444,26 @@ body {
 }
 @keyframes alert-drop {
   from {
-    transform: translateY(-100%);
+    opacity: 0;
+    transform: translateY(-1.5vmin);
   }
 }
 @keyframes alert-pop {
-  0% {
+  from {
     opacity: 0;
-    transform: scale(0);
-  }
-  70% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
+    transform: scale(0.94);
   }
 }
 @keyframes alert-slide {
   from {
     opacity: 0;
-    transform: translateX(-3.7vmin);
+    transform: translateX(-1.5vmin);
   }
 }
 @keyframes alert-rise {
   from {
     opacity: 0;
-    transform: translateY(3.7vmin);
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes alert-soft {
@@ -484,6 +475,12 @@ body {
 @keyframes alert-fade {
   from {
     opacity: 0;
+  }
+}
+@keyframes alert-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes alert-glow {

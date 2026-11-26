@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brandColourTests, host, spotData, useTemplate } from '@signforge/template-test';
+import { brandColourTests, host, motionContract, screenFrame, spotData, useTemplate } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), { a: { greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, b: { hour24: true } });
 
@@ -19,3 +19,13 @@ describe('template time', () => {
 });
 
 brandColourTests(t, { spots: (accent) => [[{ accent }]], onBackdrop: ['.greeting'] });
+
+// D's motion (docs/template-spec.md, Motion), read by seeking: greeting, time with seconds, date and message. The
+// block's slow drift is the clock's one loop: no pixel holds still for the hour a clock is left up.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`moves as D does, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const durationMs = 11_000;
+    const f = await k.play({ greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, undefined, durationMs);
+    expect(await motionContract(f, durationMs, { loops: '.content' })).toEqual([]);
+  });

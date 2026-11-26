@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Frame, Page } from 'playwright';
 import type { BrandColors, FrameTheme, Orientation } from '@signforge/contract';
 import { validateSpotData } from '@signforge/contract';
-import { DEMO_KIT, host, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
+import { DEMO_KIT, host, motionContract, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { severity: 'warning', qrUrl: 'https://example.com/a', showIssuedBy: false },
@@ -460,19 +460,31 @@ describe('alert (#200)', () => {
     }
     const hard = (ambient: string[]) => ({
       props: ['opacity', 'transform'],
-      band: ['alert-drop intro', 'alert-drop outro'],
-      outros: ['alert-drop outro', 'alert-pop outro', 'alert-slide outro', 'alert-rise outro', 'alert-rise outro', 'alert-fade outro', 'alert-fade outro'],
+      band: ['alert-drop intro', 'alert-leave outro'],
+      outros: Array(7).fill('alert-leave outro'),
       ambient,
     });
     const calm = {
       props: ['opacity', 'transform'],
-      band: ['alert-fade intro', 'alert-fade outro'],
-      outros: ['alert-fade outro', 'alert-fade outro', 'alert-fade outro', 'alert-soft outro', 'alert-soft outro', 'alert-fade outro', 'alert-fade outro'],
+      band: ['alert-fade intro', 'alert-leave outro'],
+      outros: Array(7).fill('alert-leave outro'),
       ambient: [],
     };
     // 2000 ms a cycle is 0.5 Hz: one flash every 2 s, under WCAG 2.3.1's 3 a second.
     expect(seen).toEqual({ emergency: hard(['beat every 2000 ms', 'glow every 2000 ms']), warning: hard([]), advisory: calm, notice: calm });
   });
+
+  // D's motion (docs/template-spec.md, Motion), read by seeking; the emergency pulse is the one loop allowed.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`moves as D does in every severity, ${orientation}`, async () => {
+      const k = await alertFrame(orientation);
+      const durationMs = 20_000;
+      const found: string[] = [];
+      for (const severity of severities)
+        for (const line of await motionContract(await k.play({ severity }, undefined, durationMs), durationMs, { loops: '.glow, .beat' }))
+          found.push(`${severity}: ${line}`);
+      expect(found).toEqual([]);
+    });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const k = await alertFrame();

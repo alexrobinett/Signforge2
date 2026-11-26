@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { at, brandColourTests, host, spotData, useTemplate, type Update } from '@signforge/template-test';
+import { at, brandColourTests, host, motionContract, screenFrame, spotData, useTemplate, type Update } from '@signforge/template-test';
 
 const update: Update = {
   a: {
@@ -32,3 +32,12 @@ brandColourTests(t, {
   spots: (accent) => [[{ accent, events: [...(update.b.events as unknown[]), ...(update.a.events as unknown[])] }]],
   onBackdrop: ['.today', '.now .mon', '.event:not(.now) .mon'],
 });
+
+// D's motion (docs/template-spec.md, Motion), read by seeking: every row of a full day.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`moves as D does, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const durationMs = 11_000;
+    const events = [...(update.b.events as unknown[]), ...(update.a.events as unknown[])];
+    expect(await motionContract(await k.play({ subtitle: 'Main hall', events }, undefined, durationMs), durationMs)).toEqual([]);
+  });

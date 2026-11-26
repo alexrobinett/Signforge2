@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { FrameTheme, Orientation } from '@signforge/contract';
-import { at, host, layoutFaults, LIGHT_KIT, motion, noDemoAndLight, NOW, paintedContrast, spotData, useTemplate, type Data } from '@signforge/template-test';
+import {
+  at,
+  host,
+  layoutFaults,
+  LIGHT_KIT,
+  motion,
+  motionContract,
+  noDemoAndLight,
+  NOW,
+  paintedContrast,
+  spotData,
+  useTemplate,
+  type Data,
+} from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { look: 'corporate', events: [{ title: 'Design review', start: at(-0.5), end: at(0.5), allDay: false, organizer: 'Priya Shah' }] },
@@ -319,12 +332,15 @@ describe('room status (#199)', () => {
     for (const look of looks) {
       await r.hst.init('fresh', spotData(t().manifest, { look, ...full }), {}, NOW, undefined, false, durationMs);
       await r.hst.waitFor('fresh', 'ready', looks.indexOf(look) + 1);
-      expect(await motion(r.hst.page.mainFrame().childFrames()[0]!, durationMs), look).toEqual({
+      const f = r.hst.page.mainFrame().childFrames()[0]!;
+      expect(await motion(f, durationMs), look).toEqual({
         props: ['opacity', 'transform'],
         withinCap: true,
         unended: [],
         unknown: [],
       });
+      // D's motion, read by seeking; the clock's colon and Night's glow are the room's own loops.
+      expect(await motionContract(f, durationMs, { loops: '.lk-crawl, .lk-ping, .colon, .glow' }), look).toEqual([]);
     }
   });
 

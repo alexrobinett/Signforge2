@@ -131,7 +131,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 10s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 10s) - 0.3s);
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -150,8 +152,8 @@ header {
   border-bottom: 0.3vmin solid color-mix(in srgb, var(--accent) 60%, transparent);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0s, var(--out);
 }
 h1 {
@@ -196,9 +198,9 @@ h1 {
   background: color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.045)) 90%, var(--sf-text, transparent));
   will-change: transform, opacity;
   animation:
-    slide-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
-  animation-delay: calc(0.25s + var(--i) * 0.12s), var(--out);
+    slide-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
+  animation-delay: calc(0.25s + var(--i) * 0.11s), var(--out);
 }
 .event.now {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -265,8 +267,8 @@ h1 {
   color: var(--muted);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.25s, var(--out);
 }
 .empty[hidden] {
@@ -304,18 +306,19 @@ h1 {
 }
 @keyframes rise-in {
   from {
-    transform: translateY(4vh);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes slide-in {
   from {
-    transform: translateX(-6vw);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes fade-out {
   to {
     opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }

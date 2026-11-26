@@ -1044,40 +1044,34 @@ h1 {
 }
 
 @keyframes if-pop-in {
-  0% {
+  from {
     opacity: 0;
-    transform: scale(0.9);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1.015);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
+    transform: scale(0.96);
   }
 }
 /* The rail slides in from its own side of the screen. */
 @keyframes if-slide {
   from {
     opacity: 0;
-    transform: translateX(var(--if-from, 13vmin));
+    transform: translateX(var(--if-from, 1.5vmin));
   }
 }
 :root:where([data-rail='left']) .rail {
-  --if-from: -13vmin;
+  --if-from: -1.5vmin;
 }
 :root:where([data-orientation='portrait']) .rail {
   --if-from: 0;
 }
 @keyframes if-slide-left {
   from {
-    transform: translateX(-110%);
+    opacity: 0;
+    transform: translateX(-1.5vmin);
   }
 }
 @keyframes if-drop {
   from {
-    transform: translateY(-110%);
+    opacity: 0;
+    transform: translateY(-1.5vmin);
   }
 }
 @keyframes if-bob {

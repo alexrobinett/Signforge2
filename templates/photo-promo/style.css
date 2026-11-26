@@ -127,7 +127,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 8s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 8s) - 0.3s);
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -171,8 +173,8 @@ body {
 .copy > * {
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
 .eyebrow {
   font-size: calc(var(--u) * 3.4);
@@ -197,13 +199,13 @@ body {
   font-weight: 900;
   line-height: 0.95;
   letter-spacing: -0.03em;
-  animation-delay: 0.45s, var(--out);
+  animation-delay: 0.41s, var(--out);
 }
 .body {
   font-size: calc(var(--u) * 3.6);
   font-weight: 500;
   margin-top: calc(var(--u) * 2);
-  animation-delay: 0.6s, var(--out);
+  animation-delay: 0.52s, var(--out);
 }
 .tag {
   position: absolute;
@@ -222,9 +224,9 @@ body {
   box-shadow: 0 2vmin 6vmin color-mix(in srgb, var(--bg) 50%, transparent);
   will-change: transform, opacity;
   animation:
-    tag-in 0.9s cubic-bezier(0.2, 1.5, 0.3, 1) both,
-    shrink-out 0.5s ease-in forwards;
-  animation-delay: 0.9s, var(--out);
+    tag-in 0.65s var(--d-in) both,
+    shrink-out 0.3s var(--d-out) forwards;
+  animation-delay: 0.63s, var(--out);
 }
 [data-orientation='portrait'] .shade {
   --shade-0: 85%;
@@ -246,24 +248,24 @@ body {
 }
 @keyframes rise-in {
   from {
-    transform: translateY(6vh);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes tag-in {
   from {
-    transform: scale(0) rotate(-30deg);
     opacity: 0;
+    transform: scale(0.96);
   }
 }
 @keyframes fade-out {
   to {
     opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes shrink-out {
   to {
-    transform: scale(0.85);
     opacity: 0;
   }
 }

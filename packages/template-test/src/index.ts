@@ -782,10 +782,12 @@ export const motion = (f: Frame, durationMs: number, every = false) =>
       };
       for (const sheet of document.styleSheets) read(sheet.cssRules);
       const unknown = [...document.querySelectorAll('*')].flatMap((el) =>
-        getComputedStyle(el)
-          .animationName.split(', ')
-          .filter((n) => n !== 'none' && !defined.has(n))
-          .map((n) => `${el.className} ${n}`),
+        ['', '::before', '::after'].flatMap((pseudo) =>
+          getComputedStyle(el, pseudo || null)
+            .animationName.split(', ')
+            .filter((n) => n !== 'none' && !defined.has(n))
+            .map((n) => `${el.className}${pseudo} ${n}`),
+        ),
       );
       return { props: [...props].sort(), withinCap: moving.size <= 50, unended, unknown: [...new Set(unknown)] };
     },
@@ -802,62 +804,104 @@ export const MOTION = {
   inVmin: 1.5,
   outVmin: 0.6,
   scale: [0.94, 1.04],
+  /** A full-bleed photo's push-in over the whole play may go further: photo-promo's, on the approved board. */
+  pushScale: 1.12,
 } as const;
 
 /**
  * Where a play of `durationMs` breaks D's motion, one line each: none when it keeps it. Every animation (CSS, a
- * transition or a script's) is played alone, seeked through 25 points and read against its element at rest, so it
- * takes no wall clock. What it does there sorts it:
- * - an entrance, from unseen to rest: the decelerating curve, 400 to 650 ms, at most 1.5vmin from rest;
- * - an exit, from rest to unseen: the accelerating curve, 300 ms, ending as the spot does, at most 0.6vmin, and not
- *   an entrance played backwards;
- * - ambient motion, over half the play or more, or looping where `loops` allows: any curve, at most 1.5vmin;
- * - anything else is a move mid-play, from on screen to on screen: the standard curve, staying on screen.
- * Each moves only transform and opacity, goes one way from where it starts to where it ends (no overshoot, though
- * it may pass through several keyframes), never rotates, and scales within 0.94 to 1.04 (a reveal along one axis
- * may start from nothing).
+ * transition or a script's) is played alone, seeked through its whole active time and read against its element at
+ * rest, so it takes no wall clock. What it does there sorts it:
+ * - an entrance, to rest from unseen, or from anywhere in the first `INTRO_WINDOW_MS`: the decelerating curve, 400 to
+ *   650 ms, at most 1.5vmin from rest;
+ * - an exit, from rest to unseen: the accelerating curve, 300 ms, at most 0.6vmin, and not an entrance played
+ *   backwards. It ends as the spot does, or, with `exits`, by when its element hides (a story that leaves mid-play);
+ * - progress, on an element `progress` selects (a bar or ring that shows time passing, or a marker that moves to the
+ *   current item): linear or the standard curve, one way each time it runs, any reach, as often as it needs;
+ * - a loop, where `loops` allows one;
+ * - ambient motion, over half the play or more: any curve, at most 1.5vmin;
+ * - anything else is a move mid-play: the standard curve.
+ * Each moves only transform and opacity, runs once, goes one way from where it starts to where it ends (no overshoot,
+ * through any number of keyframes, on one curve throughout), never rotates but as progress, scales within 0.94 to
+ * 1.04 (a reveal along one axis may start from nothing; a push-in over the play to 1.12), and, but for that push-in,
+ * never takes an element that rests on screen off it.
+ * Keyframe names that no stylesheet defines (`motion`'s `unknown`) are named too.
  */
-export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl, .lk-ping') =>
-  f.evaluate(
-    ({ durationMs, loops, m }) => {
+export async function motionContract(
+  f: Frame,
+  durationMs: number,
+  { loops = '.lk-crawl, .lk-ping', progress = '', exits = '' }: { loops?: string; progress?: string; exits?: string } = {},
+): Promise<string[]> {
+  const { unknown } = await motion(f, durationMs);
+  const found = await f.evaluate(
+    ({ durationMs, loops, progress, exits, window, m }) => {
       const found: string[] = [];
       const name = (el: Element) =>
         `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
       const vmin = Math.min(innerWidth, innerHeight) / 100;
-      const matrix = (transform: string) => new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
+      // `translate`, `rotate` and `scale` apply before `transform`, in that order (CSS Transforms 2).
+      const matrix = (st: CSSStyleDeclaration) => {
+        let m = new DOMMatrix();
+        if (st.translate !== 'none') {
+          const [x = '0', y = '0'] = st.translate.split(' ');
+          m = m.translate(Number.parseFloat(x), Number.parseFloat(y));
+        }
+        if (st.rotate !== 'none') m = m.rotate(Number.parseFloat(st.rotate));
+        if (st.scale !== 'none') {
+          const [x = '1', y = x] = st.scale.split(' ');
+          m = m.scale(Number(x), Number(y));
+        }
+        return m.multiply(new DOMMatrixReadOnly(st.transform === 'none' ? undefined : st.transform));
+      };
+      // Past an edge by no more than an entrance's travel: a bar flush with the bottom may rise into place.
+      const edge = m.inVmin * vmin + 1;
+      const onScreen = (box: DOMRect) => box.left > -edge && box.top > -edge && box.right < innerWidth + edge && box.bottom < innerHeight + edge;
       for (const a of document.getAnimations()) {
         const effect = a.effect as KeyframeEffect;
         const el = effect.target!;
+        // An animation on `::before` or `::after` is read there; its box is its element's.
+        const pseudo = effect.pseudoElement;
         const kind = a instanceof CSSAnimation ? a.animationName : a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : 'script animation';
-        const who = `${name(el)} ${kind}`;
+        const who = `${name(el)}${pseudo ?? ''} ${kind}`;
         const frames = effect.getKeyframes();
         for (const k of frames)
           for (const p of Object.keys(k))
-            if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform'].includes(p)) found.push(`${who} moves ${p}`);
+            if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform', 'translate', 'scale', 'rotate'].includes(p))
+              found.push(`${who} moves ${p}`);
         const timing = effect.getComputedTiming();
         if (timing.iterations === Number.POSITIVE_INFINITY) {
           if (!el.matches(loops)) found.push(`${who} loops`);
           continue;
         }
+        const isProgress = progress !== '' && el.matches(progress);
+        if (Number(timing.iterations) !== 1 && !isProgress) found.push(`${who} runs ${timing.iterations} times`);
         const start = Number(timing.delay ?? 0);
-        const dur = Number(timing.duration);
+        const dur = Number(timing.activeDuration);
+        // A cut: a change of state in a millisecond or none (a story shown, a seam lit), not motion.
+        if (dur <= 1) continue;
         const end = Math.round(Number(timing.endTime));
-        const curve = [...new Set([String(timing.easing), ...frames.map((k) => String(k.easing))].filter((e) => e !== 'linear'))].join(' then ') || 'linear';
+        // The curve of each step between keyframes. A script's curve is its timing's, over linear steps. Chrome lists a
+        // CSS rule of one keyframe as that keyframe alone, or as a linear step before one that carries the curve.
+        const steps = (frames.length === 1 ? frames : frames.slice(0, -1)).map((k) => String(k.easing));
+        const lone = frames.length === 2 && steps[0] === 'linear' ? [String(frames[1]!.easing)] : steps;
+        const curves = timing.easing !== 'linear' ? [String(timing.easing), ...steps.filter((s) => s !== 'linear')] : lone;
+        const curve = [...new Set(curves)].join(' then ');
 
         // Alone: every other animation of the element taken off, and this one too for its rest.
-        const others = el.getAnimations().map((x) => ({ x, effect: x.effect, time: x.currentTime }));
-        for (const { x } of others) x.effect = null;
-        const still = getComputedStyle(el);
-        const rest = { m: matrix(still.transform), o: Number(still.opacity) };
+        const others = el.getAnimations({ subtree: true }).map((x) => ({ x, effect: x.effect, time: x.currentTime }));
+        for (const { x } of others) if ((x.effect as KeyframeEffect).target === el) x.effect = null;
+        const still = getComputedStyle(el, pseudo);
+        const rest = { m: matrix(still), o: Number(still.opacity), onScreen: onScreen(el.getBoundingClientRect()) };
         const undo = rest.m.inverse();
         a.effect = effect;
+        // Progress that runs again (a fill each story) is read over one run.
+        const span = isProgress ? Number(timing.duration) : dur;
         const samples = Array.from({ length: 25 }, (_, i) => {
-          a.currentTime = start + ((dur - 0.01) * i) / 24;
-          const now = getComputedStyle(el);
-          const x = matrix(now.transform);
+          a.currentTime = start + ((span - 0.01) * i) / 24;
+          const now = getComputedStyle(el, pseudo);
+          const x = matrix(now);
           // Against its rest: a resting translate(-50%, -50%) is where it stands, not how far it moves.
           const r = Number.isNaN(undo.m11) ? x : undo.multiply(x);
-          const box = el.getBoundingClientRect();
           return {
             x: x.m41 - rest.m.m41,
             y: x.m42 - rest.m.m42,
@@ -865,7 +909,7 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
             sy: Math.hypot(r.m21, r.m22),
             turn: (Math.atan2(r.m12, r.m11) * 180) / Math.PI,
             o: Number(now.opacity),
-            onScreen: box.left > -1 && box.top > -1 && box.right < innerWidth + 1 && box.bottom < innerHeight + 1,
+            onScreen: onScreen(el.getBoundingClientRect()),
           };
         });
         for (const { x, effect, time } of others) {
@@ -875,40 +919,45 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
 
         const first = samples[0]!;
         const last = samples.at(-1)!;
-        const unseen = (s: typeof first) => s.o < 0.01 || s.sx < 0.01 || s.sy < 0.01;
+        const unseen = (s: typeof first) => s.o < 0.05 || s.sx < 0.01 || s.sy < 0.01;
         const atRest = (s: typeof first) =>
           Math.hypot(s.x, s.y) < 0.05 && Math.abs(s.sx - 1) < 0.001 && Math.abs(s.sy - 1) < 0.001 && Math.abs(s.turn) < 0.01 && Math.abs(s.o - rest.o) < 0.001;
         const travel = Math.max(...samples.map((s) => Math.hypot(s.x, s.y))) / vmin;
-        const ambient = dur >= durationMs / 2;
-        if (!ambient && unseen(first) && atRest(last)) {
+        if (isProgress) {
+          if (curves.some((c) => c !== 'linear' && c !== m.easeMove)) found.push(`${who} shows progress on ${curve}`);
+        } else if (atRest(last) && !atRest(first) && (unseen(first) || start < window)) {
           if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
           if (curve !== m.easeIn) found.push(`${who} arrives on ${curve}`);
           if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
-        } else if (!ambient && atRest(first) && unseen(last)) {
+        } else if (atRest(first) && unseen(last) && dur < durationMs / 2) {
           if (Math.round(dur) !== m.outroMs) found.push(`${who} leaves in ${Math.round(dur)} ms`);
           if (curve !== m.easeOut) found.push(`${who} leaves on ${curve}`);
-          if (end !== durationMs) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
+          if (end !== durationMs && !(exits !== '' && el.closest(exits))) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
           if (travel > m.outVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
           if (String(timing.direction).includes('reverse')) found.push(`${who} leaves by reversing its entrance`);
-        } else if (ambient) {
+        } else if (dur >= durationMs / 2) {
           if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
-        } else {
-          if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
-          if (samples.some((s) => !s.onScreen)) found.push(`${who} moves off the screen`);
-        }
-        for (const k of ['x', 'y', 'sx', 'sy', 'o'] as const) {
+        } else if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
+        // A full-bleed photo's push-in over the play passes the edges by design, and a turning ring's box can; nothing
+        // else may.
+        if (!isProgress && rest.onScreen && dur < durationMs / 2 && samples.some((s) => !s.onScreen && !unseen(s))) found.push(`${who} goes off the screen`);
+        for (const k of ['x', 'y', 'sx', 'sy', 'o', 'turn'] as const) {
           const steps = samples.slice(1).map((s, i) => s[k] - samples[i]![k]);
-          const eps = k === 'x' || k === 'y' ? 0.05 : 0.0005;
+          const eps = k === 'x' || k === 'y' ? 0.05 : k === 'turn' ? 0.01 : 0.0005;
           if (steps.some((d) => d > eps) && steps.some((d) => d < -eps)) found.push(`${who} overshoots in ${k}`);
         }
+        if (isProgress) continue;
         if (samples.some((s) => Math.abs(s.turn) > 0.01)) found.push(`${who} rotates`);
+        const top = dur >= durationMs / 2 ? m.pushScale : m.scale[1];
         for (const s of samples) {
           const uniform = Math.abs(s.sx - s.sy) < 0.001;
-          if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > m.scale[1] + 0.001)
+          if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > top + 0.001)
             found.push(`${who} scales to ${(uniform && s.sx < 1 ? s.sx : Math.max(s.sx, s.sy)).toFixed(2)}`);
         }
       }
       return [...new Set(found)];
     },
-    { durationMs, loops, m: MOTION },
+    { durationMs, loops, progress, exits, window: INTRO_WINDOW_MS, m: MOTION },
   );
+  return [...found, ...unknown.map((u) => `${u}: no such keyframes`)];
+}
