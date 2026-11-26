@@ -7,7 +7,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { listOutOfDate, rosterOutOfDate } from '~/lib/fleet-status';
 import type { GroupView } from '~/lib/screen-types';
-import { getScreenStatus, getScreens } from '~/server/screens.functions';
+import { getLabelKeys, getScreenStatus, getScreens } from '~/server/screens.functions';
 import { retryUnlessRedirect } from './retry';
 
 /**
@@ -18,6 +18,9 @@ import { retryUnlessRedirect } from './retry';
 const POLL_MS = 15_000;
 
 export const screensQuery = (orgId: string) => queryOptions({ queryKey: ['org', orgId, 'screens'], queryFn: () => getScreens() });
+
+/** The org's label keys and their values (`list_label_keys`): what the label editors suggest, and warn by (#185). */
+export const labelKeysQuery = (orgId: string) => queryOptions({ queryKey: ['org', orgId, 'label-keys'], queryFn: () => getLabelKeys() });
 
 /** A group as a tool answered with it, or its deletion, into the list the Screens pages read. */
 export function putGroup(client: QueryClient, orgId: string, change: GroupView | { deleted: string }) {
