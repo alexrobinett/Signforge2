@@ -157,11 +157,10 @@ const isAlert = (s: Spot | undefined) =>
  * not yet surely ended. An alert published to start at once was started before the sync that
  * brought it, so it plays; one scheduled for later waits until it has surely started.
  */
-function withinBounds(manifest: ScreenManifest, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
+function withinBounds(view: ScheduleView, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
   if (e.startsAt === undefined && e.endsAt === undefined) return true;
   if (trust.clockTrusted === false) {
-    const items = manifest.playlists[e.playlist]?.items ?? [];
-    const alert = items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+    const alert = view.alertsOnly(e.playlist);
     const started = e.startsAt === undefined || Date.parse(e.startsAt) <= trust.notBefore;
     return alert && started && e.endsAt !== undefined && trust.notBefore < Date.parse(e.endsAt);
   }
@@ -177,11 +176,11 @@ const startOf = (e: ScheduleEntry) => (e.startsAt === undefined ? Number.NEGATIV
  * target, then the later `startsAt`, then the later in `schedule` (publish order), so of two
  * takeovers the newest wins. Undefined: the default playlist.
  */
-function winningEntry(manifest: ScreenManifest, now: Date, trust: ClockTrust): ScheduleEntry | undefined {
-  const t = localTime(now, manifest.screen.timezone);
+function winningEntry(view: ScheduleView, now: Date, trust: ClockTrust): ScheduleEntry | undefined {
+  const t = localTime(now, view.timezone);
   let best: { e: ScheduleEntry; at: number } | undefined;
-  for (const e of manifest.schedule) {
-    if (!withinBounds(manifest, e, now, trust) || !entryApplies(e, t) || !manifest.playlists[e.playlist]) continue;
+  for (const e of view.schedule) {
+    if (!withinBounds(view, e, now, trust) || !entryApplies(e, t) || !view.has(e.playlist)) continue;
     const at = startOf(e);
     // At least as good: an entry later in the list wins a full tie.
     if (
@@ -194,9 +193,45 @@ function winningEntry(manifest: ScreenManifest, now: Date, trust: ClockTrust): S
   return best?.e;
 }
 
+/**
+ * What the screen's rule reads of its schedule (#330): a manifest's (`scheduleOf`), or a schedule the CMS's week view
+ * reads as drafted, which has no manifest.
+ */
+export interface ScheduleView {
+  timezone: string;
+  schedule: readonly ScheduleEntry[];
+  defaultPlaylist: string;
+  /** Whether the screen has the playlist: an entry naming one it lacks never wins. */
+  has: (playlistId: string) => boolean;
+  /** Whether the playlist plays only alerts: a takeover of alerts alone plays on a clock the screen does not trust. */
+  alertsOnly: (playlistId: string) => boolean;
+}
+
+/** A manifest's schedule, as the screen's rule reads it. */
+export const scheduleOf = (manifest: ScreenManifest): ScheduleView => ({
+  timezone: manifest.screen.timezone,
+  schedule: manifest.schedule,
+  defaultPlaylist: manifest.defaultPlaylist,
+  has: (id) => !!manifest.playlists[id],
+  alertsOnly: (id) => {
+    const items = manifest.playlists[id]?.items ?? [];
+    return items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+  },
+});
+
+/**
+ * What plays at `now`: the winning entry's playlist, else the default; and the takeover, when the winner has an
+ * `endsAt`. Highest priority wins; on a tie the more specific target, then the later `startsAt`, then the later in the
+ * schedule.
+ */
+export function playing(view: ScheduleView, now: Date, trust: ClockTrust = {}): { playlist: string; takeover?: string } {
+  const e = winningEntry(view, now, trust);
+  return { playlist: e?.playlist ?? view.defaultPlaylist, ...(e?.endsAt !== undefined ? { takeover: e.id } : {}) };
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
 export function resolvePlaylist(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): Playlist {
-  const id = winningEntry(manifest, now, trust)?.playlist ?? manifest.defaultPlaylist;
+  const id = playing(scheduleOf(manifest), now, trust).playlist;
   const playlist = manifest.playlists[id];
   if (!playlist) throw new Error(`manifest ${manifest.id} has no playlist "${id}"`);
   return playlist;
@@ -207,8 +242,7 @@ export function resolvePlaylist(manifest: ScreenManifest, now: Date, trust: Cloc
  * changes, the player ends the spot on screen at once instead of at its end (M3-19).
  */
 export function activeTakeover(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): string | undefined {
-  const e = winningEntry(manifest, now, trust);
-  return e?.endsAt !== undefined ? e.id : undefined;
+  return playing(scheduleOf(manifest), now, trust).takeover;
 }
 
 /** The next instant after `now` at which a takeover starts or ends: when the player checks `activeTakeover` again, offline too. */

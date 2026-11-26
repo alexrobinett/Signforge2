@@ -18,6 +18,7 @@
  * same however many members there are. The same pins asked again while the first waits get the
  * first request; an asker has at most `MAX_PENDING` waiting.
  */
+import { reaches, targetIdOf } from '@signforge/compiler/schedule';
 import { brandStateOf, contentJson, type OrgScope, published, type PublishRequestRow } from '@signforge/db';
 import { z } from 'zod';
 import { grantClient } from './agent-grants';
@@ -470,14 +471,7 @@ function screensPlaying(graph: OrgGraph, spotId: string, now: number): number {
   });
   const defaultPlays = graph.defaultPlaylist !== null && playing.has(graph.defaultPlaylist);
   return graph.screens.filter(
-    (s) =>
-      defaultPlays ||
-      entries.some(
-        (e) =>
-          e.target === 'org' ||
-          (e.target === 'screen' && e.screenId === s.id) ||
-          (e.target === 'group' && (graph.groupsOf.get(s.id) ?? []).includes(e.groupId ?? '')),
-      ),
+    (s) => defaultPlays || entries.some((e) => reaches({ target: e.target, targetId: targetIdOf(e) }, { id: s.id, groups: graph.groupsOf.get(s.id) ?? [] })),
   ).length;
 }
 

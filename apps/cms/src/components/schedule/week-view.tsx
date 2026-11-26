@@ -1,6 +1,6 @@
 /**
  * The week view (M3-19): what one screen plays through this week, in its time zone, as drafted
- * (`weekOf`, which asks player-core's `resolvePlaylist`, as the screen does). Hours run down, days
+ * (`weekOf`, which asks player-core's `playing`, as the screen does). Hours run down, days
  * across; within an hour each playlist fills the minutes it plays. A playlist's name shows where it
  * starts, with the time when that is not on the hour, and is read for every hour.
  */

@@ -16,7 +16,7 @@
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
 import type { SampleFields } from '@signforge/contract';
-import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { brandFont, compileScreen, targetIdOf, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
 import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
   templateKey,
@@ -234,13 +234,14 @@ const toPlaylist = (p: PublishedPlaylist): Playlist => ({
 /** A row as the Screen schedule takes it: sorted by when it was published. */
 function toEntry(e: ScheduleEntryRow): TargetedEntry {
   const days = json<number[] | null>(e.daysJson, null);
+  const targetId = targetIdOf(e);
   return {
     id: e.id,
     order: e.publishedAt ?? 0,
     playlist: e.playlistId,
     priority: e.priority,
     target: e.target,
-    ...(e.target === 'group' ? { targetId: e.groupId ?? undefined } : e.target === 'screen' ? { targetId: e.screenId ?? undefined } : {}),
+    ...(targetId === undefined ? {} : { targetId }),
     ...(e.startDate ? { startDate: e.startDate } : {}),
     ...(e.endDate ? { endDate: e.endDate } : {}),
     ...(days ? { days } : {}),
