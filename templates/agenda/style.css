@@ -121,7 +121,6 @@ body {
 :root {
   --accent: var(--sf-accent, #ffb547);
   --bg: var(--sf-bg, #0d1117);
-  --surface: var(--sf-surface, #161c27);
   --text: var(--sf-text, #fff);
   --muted: var(--sf-muted, color-mix(in srgb, var(--text) 60%, transparent));
 }
@@ -140,16 +139,16 @@ body {
   padding: calc(var(--u) * 7) calc(var(--u) * 8);
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, var(--surface) 0%, var(--bg) 55%);
+  background: var(--bg);
 }
 header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: baseline;
   gap: 4vmin;
-  margin-bottom: calc(var(--u) * 4);
+  margin-bottom: calc(var(--u) * 1);
   padding-bottom: calc(var(--u) * 2.4);
-  border-bottom: 0.3vmin solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-bottom: max(1px, 0.1vmin) solid color-mix(in srgb, var(--text) 18%, transparent);
   will-change: transform, opacity;
   animation:
     rise-in 0.65s var(--d-in) both,
@@ -163,25 +162,25 @@ h1 {
   letter-spacing: -0.02em;
   line-height: 1;
 }
-.subtitle {
-  font-size: calc(var(--u) * 3);
+.subtitle,
+.today {
+  font-size: calc(var(--u) * 3.4);
+  font-weight: 500;
   color: var(--muted);
+}
+.subtitle {
   margin-top: calc(var(--u) * 1.2);
 }
 .subtitle:empty {
   display: none;
 }
 .today {
-  font-size: calc(var(--u) * 3.2);
-  font-weight: 600;
-  color: var(--accent-text);
   white-space: nowrap;
 }
 .events {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 2.2);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -189,22 +188,19 @@ h1 {
 .event {
   flex: none;
 }
+/* Ruled rows on a flat ground. */
 .event {
+  position: relative;
   display: flex;
   align-items: center;
   gap: calc(var(--u) * 3.4);
-  padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4);
-  border-radius: var(--sf-radius, calc(var(--u) * 2)); /* The kit's surface, tinted with its text colour so a card stands out on a light kit too. */
-  background: color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.045)) 90%, var(--sf-text, transparent));
+  padding: calc(var(--u) * 1.6) 0 calc(var(--u) * 1.6) calc(var(--u) * 2.4);
+  border-bottom: max(1px, 0.1vmin) solid color-mix(in srgb, var(--text) 12%, transparent);
   will-change: transform, opacity;
   animation:
-    slide-in 0.65s var(--d-in) both,
+    rise-in 0.65s var(--d-in) both,
     fade-out 0.3s var(--d-out) forwards;
   animation-delay: calc(0.25s + var(--i) * 0.11s), var(--out);
-}
-.event.now {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: inset 0.5vmin 0 0 var(--accent);
 }
 .day {
   flex: none;
@@ -215,11 +211,9 @@ h1 {
 .dow,
 .mon {
   display: block;
-  font-size: calc(var(--u) * 2.2);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--day-text);
+  font-size: calc(var(--u) * 2.8);
+  font-weight: 600;
+  color: var(--muted);
 }
 .num {
   display: block;
@@ -231,13 +225,13 @@ h1 {
   min-width: 0;
 }
 .when {
-  font-size: calc(var(--u) * 2.6);
-  font-weight: 600;
-  color: color-mix(in srgb, var(--text) 65%, transparent);
+  font-size: calc(var(--u) * 3);
+  font-weight: 500;
+  color: var(--muted);
 }
 /* Up to two lines, then an ellipsis. */
 .name {
-  font-size: calc(var(--u) * 4.4);
+  font-size: calc(var(--u) * 4.6);
   font-weight: 700;
   line-height: 1.15;
   display: -webkit-box;
@@ -247,7 +241,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 .where {
-  font-size: calc(var(--u) * 2.6);
+  font-size: calc(var(--u) * 3);
   color: var(--muted);
 }
 .where:empty {
@@ -279,11 +273,11 @@ h1 {
   align-items: flex-start;
 }
 /* Portrait has twice the height: taller rows and larger type rather than a list in the top third. */
-[data-orientation='portrait'] .events {
-  gap: calc(var(--u) * 3.4);
+[data-orientation='portrait'] h1 {
+  font-size: calc(var(--u) * 8);
 }
 [data-orientation='portrait'] .event {
-  padding: calc(var(--u) * 3.4) calc(var(--u) * 3.4);
+  padding: calc(var(--u) * 3.4) 0 calc(var(--u) * 3.4) calc(var(--u) * 3.4);
   gap: calc(var(--u) * 4);
 }
 [data-orientation='portrait'] .day {
@@ -304,13 +298,24 @@ h1 {
   font-size: calc(var(--u) * 5.4);
   margin: calc(var(--u) * 0.6) 0;
 }
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(1.5vmin);
-  }
+/* The accent marks only what is on now: a bar at its edge and its time. */
+.event.now::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: calc(var(--u) * 2.4);
+  bottom: calc(var(--u) * 2.4);
+  width: 0.6vmin;
+  background: var(--accent);
 }
-@keyframes slide-in {
+.event.now .when {
+  color: var(--accent-text);
+}
+/* A second event on a day already shown keeps the day's column, blank: one heading a day. */
+.event.same-day .day {
+  visibility: hidden;
+}
+@keyframes rise-in {
   from {
     opacity: 0;
     transform: translateY(1.5vmin);
