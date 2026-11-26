@@ -4,104 +4,32 @@
   "name": "News",
   "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
   "fields": {
-    "title": {
-      "type": "text",
-      "label": "Title",
-      "default": "Latest news",
-      "maxLength": 32
-    },
-    "source": {
-      "type": "text",
-      "label": "Source credit",
-      "default": "",
-      "maxLength": 40
-    },
+    "title": { "type": "text", "label": "Title", "default": "Latest news", "maxLength": 32 },
+    "source": { "type": "text", "label": "Source credit", "default": "", "maxLength": 40 },
     "items": {
       "type": "list",
       "label": "Headlines",
       "maxItems": 30,
       "default": [],
       "item": {
-        "title": {
-          "type": "text",
-          "label": "Headline",
-          "maxLength": 200
-        },
-        "published": {
-          "type": "text",
-          "label": "Published (ISO time)",
-          "default": ""
-        },
-        "source": {
-          "type": "text",
-          "label": "Source",
-          "default": ""
-        },
-        "summary": {
-          "type": "text",
-          "label": "Summary",
-          "default": "",
-          "maxLength": 240
-        },
-        "image": {
-          "type": "image",
-          "label": "Photo"
-        }
+        "title": { "type": "text", "label": "Headline", "maxLength": 200 },
+        "published": { "type": "text", "label": "Published (ISO time)", "default": "" },
+        "source": { "type": "text", "label": "Source", "default": "" },
+        "summary": { "type": "text", "label": "Summary", "default": "", "maxLength": 240 },
+        "image": { "type": "image", "label": "Photo" }
       }
     },
-    "language": {
-      "type": "text",
-      "label": "Feed language (BCP 47, e.g. fr-FR)",
-      "default": "",
-      "maxLength": 35
-    },
-    "rotationSeconds": {
-      "type": "number",
-      "label": "Seconds per lead story",
-      "default": 8,
-      "min": 4,
-      "max": 30
-    },
-    "look": {
-      "type": "select",
-      "label": "Look",
-      "options": ["pop", "poster", "night", "corporate"],
-      "default": "pop"
-    },
-    "showImages": {
-      "type": "boolean",
-      "label": "Show photos",
-      "default": true
-    },
-    "showSummary": {
-      "type": "boolean",
-      "label": "Show the summary",
-      "default": true
-    },
-    "showList": {
-      "type": "boolean",
-      "label": "Show the story strip",
-      "default": true
-    },
-    "showMeta": {
-      "type": "boolean",
-      "label": "Show the source and age",
-      "default": true
-    }
+    "language": { "type": "text", "label": "Feed language (BCP 47, e.g. fr-FR)", "default": "", "maxLength": 35 },
+    "rotationSeconds": { "type": "number", "label": "Seconds per lead story", "default": 8, "min": 4, "max": 30 },
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "showImages": { "type": "boolean", "label": "Show photos", "default": true },
+    "showSummary": { "type": "boolean", "label": "Show the summary", "default": true },
+    "showList": { "type": "boolean", "label": "Show the story strip", "default": true },
+    "showMeta": { "type": "boolean", "label": "Show the source and age", "default": true }
   },
-  "duration": {
-    "defaultMs": 32000,
-    "minMs": 6000,
-    "maxMs": 300000
-  },
+  "duration": { "defaultMs": 32000, "minMs": 6000, "maxMs": 300000 },
   "orientations": ["landscape", "portrait"],
   "uses": [],
   "background": "#000000",
-  "live": {
-    "source": "rss",
-    "fields": {
-      "items": "items",
-      "language": "language"
-    }
-  }
+  "live": { "source": "rss", "fields": { "items": "items", "language": "language" } }
 }
