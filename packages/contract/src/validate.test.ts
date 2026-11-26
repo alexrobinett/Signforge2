@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   bundleScripts,
+  manifestShape,
   readCss,
   STYLE_ADDRESS,
   withoutComments,
@@ -511,6 +512,8 @@ const parsers: [string, (v: unknown) => { ok: true; value: unknown } | { ok: fal
 
 /** Read by a declared shape (#156): the value is the input's declared fields, not the input itself. */
 const READ = new Set<unknown>([
+  parseManifest,
+  parseDataSnapshot,
   parsePairStartRequest,
   parsePairStartResponse,
   parsePairPollResponse,
@@ -1139,6 +1142,35 @@ describe('validateManifest', () => {
       'screen.orientation must be landscape or portrait',
       'spot "web": kind must be template, image, video or url',
     ]);
+  });
+});
+
+describe("a manifest's shape (#156)", () => {
+  it('parseManifest leaves out keys the contract does not declare, and keeps a template manifest, spot data and brand as they are', () => {
+    const m = validManifest();
+    const c = structuredClone(m);
+    const sent = {
+      ...c,
+      extra: { deep: {} },
+      screen: { ...c.screen, extra: 'x' },
+      spots: { ...c.spots, menu: { ...c.spots.menu!, extra: 1 } },
+      playlists: { all: { ...c.playlists.all!, extra: true } },
+    };
+    const parsed = parseManifest(sent);
+    expect(parsed).toEqual({ ok: true, value: m });
+    expect(parsed.ok && parsed.value.templates['base/menu@1.0.0']!.manifest).toBe(sent.templates['base/menu@1.0.0']!.manifest);
+  });
+
+  it('reads a manifest the rules refuse when it is the shape: a stored one this player is kept on', () => {
+    const old = { ...validManifest(), schema: 6 };
+    expect(validateManifest(old)).toEqual(['manifest schema 6 is not one this player can play (7, 8)']);
+    expect(manifestShape.read(old)).toEqual({ ok: true, value: old });
+  });
+
+  it('refuses a playlist with no name, which no check before the shape held it to', () => {
+    const m = validManifest() as unknown as { playlists: Record<string, Record<string, unknown>> };
+    delete m.playlists.all!.name;
+    expect(validateManifest(m)).toEqual(['playlist "all": name must be text']);
   });
 });
 

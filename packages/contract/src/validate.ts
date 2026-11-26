@@ -52,6 +52,11 @@ import {
   type DeviceCommand,
   type DataSnapshot,
   type FieldDef,
+  type Orientation,
+  type Playlist,
+  type ScheduleEntry,
+  type Spot,
+  type TargetLevel,
   type NewsImage,
   type ScalarFieldDef,
   type ScreenManifest,
@@ -61,7 +66,24 @@ import {
   type TemplateManifest,
 } from './shapes.ts';
 import { playsProtocol, playsSchema, THIS_PLAYER } from './playable.ts';
-import { accepted, assertSame, custom, type Infer, is, listOf, object, optional, refused, said, type Same, type Shape, within } from './shape.ts';
+import {
+  accepted,
+  assertSame,
+  custom,
+  type Infer,
+  is,
+  listOf,
+  literal,
+  object,
+  optional,
+  record,
+  refused,
+  said,
+  type Same,
+  type Shape,
+  variant,
+  within,
+} from './shape.ts';
 import { bundleScripts } from './scripts.ts';
 
 // ------------------------------------------------------------------ helpers
@@ -78,6 +100,10 @@ const isIdValue = (v: unknown): v is string => typeof v === 'string' && ID_PATTE
 /** A lowercase hex SHA-256 hash: manifest ids, file hashes and feed image hashes. */
 const isSha256 = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const isManifestId = isSha256;
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+// Array.from reads a hole as undefined, which `every` would skip: JSON has none, but a value passed in by hand may.
+const wholeNumbers = (v: unknown): v is number[] => Array.isArray(v) && Array.from(v).every((n) => Number.isSafeInteger(n));
+const versions: (v: unknown) => v is readonly number[] = wholeNumbers;
 /** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
 export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
@@ -824,8 +850,8 @@ export function requiredFiles(manifest: ScreenManifest): Set<string> {
   return out;
 }
 
-/** Check a screen manifest. Returns problems; empty means a player can play it. */
-export function validateManifest(m: unknown): string[] {
+/** The rules a manifest a player plays must meet, beyond its shape: in the order and words they always had. */
+function manifestRules(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
   if (!playsSchema(THIS_PLAYER, m.schema))
@@ -976,6 +1002,144 @@ export function validateManifest(m: unknown): string[] {
   return errors;
 }
 
+const text = (what: string) => is(isStr, `${what} must be text`);
+const number = (what: string) => is(isNum, `${what} must be a number`);
+const textMap = (what: string) => record(text('it'), (k) => `${what} "${k}"`, `${what}s must map names to text`);
+
+/** Its own check until #156's last step, which declares it: here, the value as it is. */
+const asItIs = <T>(problem: string) => custom<T>((v) => (isObj(v) ? accepted(v as T) : refused([problem])));
+
+const timeWindowShape = object({ from: text('from'), to: text('to') }, 'a window must be an object');
+const displayHoursShape = object(
+  {
+    weekly: listOf('weekly window', object({ from: text('from'), to: text('to'), days: is(wholeNumbers, 'days must be 0-6') }, 'a window must be an object')),
+    exceptions: optional(listOf('exception', object({ date: text('date'), on: listOf('window', timeWindowShape) }, 'an exception must be an object'))),
+  },
+  'display hours must be an object',
+);
+assertSame<Same<Infer<typeof displayHoursShape>, DisplayHours>>();
+
+const spotBase = { id: text('id'), name: text('name'), durationMs: number('durationMs') };
+const fit = is((v): v is 'cover' | 'contain' => v === 'cover' || v === 'contain', 'fit must be cover or contain');
+const bindingShape = object(
+  {
+    source: text('source'),
+    path: text('path'),
+    table: optional(
+      object(
+        {
+          columns: textMap('column'),
+          filter: optional(object({ column: text('column'), equals: text('equals') }, 'filter must be an object')),
+          sort: optional(object({ column: text('column'), descending: optional(is(isBool, 'descending must be true or false')) }, 'sort must be an object')),
+        },
+        'table must be an object',
+      ),
+    ),
+  },
+  'a binding must be an object',
+);
+const spotShape = variant(
+  'kind',
+  {
+    template: object(
+      {
+        ...spotBase,
+        kind: literal('template', ''),
+        template: text('template'),
+        data: is(isObj, 'data must be an object'),
+        assets: textMap('asset'),
+        bindings: optional(record(bindingShape, (k) => `binding "${k}"`, 'bindings must be an object')),
+      },
+      '',
+    ),
+    image: object({ ...spotBase, kind: literal('image', ''), file: text('file'), fit }, ''),
+    video: object({ ...spotBase, kind: literal('video', ''), file: text('file'), fit }, ''),
+    url: object({ ...spotBase, kind: literal('url', ''), url: text('url') }, ''),
+  },
+  'kind must be template, image, video or url',
+);
+assertSame<Same<Infer<typeof spotShape>, Spot>>();
+
+const ms = <T extends 'fade' | 'crossfade'>(type: T) => object({ type: literal(type, ''), ms: number('ms') }, '');
+const playlistShape = object(
+  {
+    id: text('id'),
+    name: text('name'),
+    transition: variant('type', { cut: object({ type: literal('cut', '') }, ''), fade: ms('fade'), crossfade: ms('crossfade') }, 'transition must be cut, fade or crossfade'),
+    items: listOf('item', object({ spot: text('spot') }, 'is not an object')),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof playlistShape>, Playlist>>();
+
+const scheduleEntryShape = object(
+  {
+    id: text('id'),
+    playlist: text('playlist'),
+    priority: number('priority'),
+    target: is((v): v is TargetLevel => v === 'org' || v === 'group' || v === 'screen', 'target must be org, group or screen'),
+    startDate: optional(text('startDate')),
+    endDate: optional(text('endDate')),
+    days: optional(is(wholeNumbers, 'days must be 0-6')),
+    from: optional(text('from')),
+    to: optional(text('to')),
+    startsAt: optional(text('startsAt')),
+    endsAt: optional(text('endsAt')),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof scheduleEntryShape>, ScheduleEntry>>();
+
+/**
+ * A manifest as its type declares it, without the rules `validateManifest` adds (#156): a stored manifest is played when
+ * it reads, although this release's rules may refuse it (a schema it no longer plays, a tightened rule).
+ */
+export const manifestShape = object(
+  {
+    schema: number('schema'),
+    id: text('id'),
+    generatedAt: text('generatedAt'),
+    screen: object(
+      {
+        id: text('id'),
+        name: text('name'),
+        timezone: text('timezone'),
+        locale: optional(text('locale')),
+        orientation: is((v): v is Orientation => v === 'landscape' || v === 'portrait', 'orientation must be landscape or portrait'),
+        displayHours: optional(displayHoursShape),
+      },
+      'screen is missing',
+    ),
+    files: record(
+      object({ size: is(isCount, 'size must be a whole number'), type: text('type'), sample: optional(text('sample')) }, 'is not an object'),
+      (k) => `file ${k.slice(0, 12)}`,
+      'files must be an object',
+    ),
+    templates: record(
+      object({ manifest: asItIs<TemplateManifest>('has no manifest'), html: text('html') }, 'is not an object'),
+      (k) => `template "${k}"`,
+      'templates must be an object',
+    ),
+    spots: record(spotShape, (k) => `spot "${k}"`, 'spots must be an object'),
+    playlists: record(playlistShape, (k) => `playlist "${k}"`, 'playlists must be an object'),
+    dataSources: record(object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'), (k) => `data source "${k}"`, 'dataSources must be an object'),
+    schedule: listOf('schedule entry', scheduleEntryShape),
+    defaultPlaylist: text('defaultPlaylist'),
+    brand: optional(asItIs<BrandKit>('brand must be an object')),
+  },
+  'manifest is not an object',
+);
+assertSame<Same<Infer<typeof manifestShape>, ScreenManifest>>();
+
+/** A manifest a player can play: every rule, and then its shape, which leaves out any key the contract does not declare. */
+export const validManifestShape = custom<ScreenManifest>((m) => {
+  const problems = manifestRules(m);
+  return problems.length ? refused(problems) : manifestShape.read(m);
+});
+
+/** Check a screen manifest. Returns problems; empty means a player can play it. */
+export const validateManifest = (m: unknown): string[] => problemsOf(validManifestShape, m);
+
 // ------------------------------------------------------------------ live data
 
 /** The size `MAX_SNAPSHOT_BYTES` caps: `data` as JSON, in UTF-8. Undefined (not JSON) counts as 0. */
@@ -983,27 +1147,27 @@ export function snapshotBytes(data: unknown): number {
   return new TextEncoder().encode(JSON.stringify(data) ?? '').length;
 }
 
-/** Check a data snapshot, as `data/<id>.json` and a sync response carry it. */
-export function validateDataSnapshot(s: unknown): string[] {
-  if (!isObj(s)) return ['snapshot is not an object'];
-  const errors: string[] = [];
-  if (!isIdValue(s.id)) errors.push(`snapshot id "${show(s.id)}" is not a valid id`);
-  if (!isCount(s.version)) errors.push('snapshot version must be a whole number, 0 or more');
-  if (!isInstant(s.fetchedAt)) errors.push('snapshot fetchedAt must be an ISO 8601 time');
-  if (!isInstant(s.checkedAt)) errors.push('snapshot checkedAt must be an ISO 8601 time');
-  if (!Object.hasOwn(s, 'data')) errors.push('snapshot has no data');
-  else if (snapshotBytes(s.data) > MAX_SNAPSHOT_BYTES) errors.push(`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`);
-  return errors;
-}
+/** A data snapshot, as `data/<id>.json` and a sync response carry it. */
+export const dataSnapshotShape = object(
+  {
+    id: is(isIdValue, (v) => `snapshot id "${show(v)}" is not a valid id`),
+    version: is(isCount, 'snapshot version must be a whole number, 0 or more'),
+    fetchedAt: is(isInstant, 'snapshot fetchedAt must be an ISO 8601 time'),
+    checkedAt: is(isInstant, 'snapshot checkedAt must be an ISO 8601 time'),
+    data: custom((v) =>
+      v === undefined ? refused(['snapshot has no data']) : snapshotBytes(v) > MAX_SNAPSHOT_BYTES ? refused([`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`]) : accepted(v),
+    ),
+  },
+  'snapshot is not an object',
+);
+assertSame<Same<Infer<typeof dataSnapshotShape>, DataSnapshot>>();
+export const validateDataSnapshot = (s: unknown) => problemsOf(dataSnapshotShape, s);
 
 // ------------------------------------------------------------------ device API
 
 // Each message declared once (./shape.ts, #156): read in its fields' order, in the words these checks always used, it
 // gives back exactly the shape. `assertSame` holds each to its interface in shapes.ts at compile time.
 
-const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
-// Array.from reads a hole as undefined, which `every` would skip: JSON has none, but a value passed in by hand may.
-const versions = (v: unknown): v is readonly number[] => Array.isArray(v) && Array.from(v).every((n) => Number.isSafeInteger(n));
 
 /** `POST /v1/device/pair/start`, as the server receives it. */
 export const pairStartRequestShape = object(
@@ -1161,12 +1325,6 @@ export const syncRequestShape = object(
 );
 assertSame<Same<Infer<typeof syncRequestShape>, SyncRequest>>();
 export const validateSyncRequest = (r: unknown) => problemsOf(syncRequestShape, r);
-
-/** A data snapshot, as a sync response carries it: its own check (`validateDataSnapshot`), the value as it is until #156's next step. */
-const dataSnapshotShape = custom<DataSnapshot>((s) => {
-  const problems = validateDataSnapshot(s);
-  return problems.length ? refused(problems) : accepted(s as DataSnapshot);
-});
 
 const checkedShape = custom<Record<string, { version: number; checkedAt: string }>>((c) => {
   if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);

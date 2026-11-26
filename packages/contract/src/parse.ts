@@ -1,11 +1,12 @@
 /**
  * Each validator in `validate.ts` as a parser: the same check, but a value that passes comes back
- * typed, so a caller never casts what it has just checked. The device messages are read by their declared shapes
+ * typed, so a caller never casts what it has just checked. The device messages, the manifest and the data snapshot are read by their declared shapes
  * (`shape.ts`, #156) and come back as exactly the shape, any key they do not declare left out; the rest still pass
  * the input itself through this file's cast until #156's next steps.
  */
-import type { BrandKit, DataSnapshot, DisplayHours, PreviewHostMessage, ScreenManifest, TemplateManifest, TemplateRuntimeReport } from './shapes.ts';
+import type { BrandKit, DisplayHours, PreviewHostMessage, TemplateManifest, TemplateRuntimeReport } from './shapes.ts';
 import {
+  dataSnapshotShape,
   deviceCommandShape,
   deviceSocketMessageShape,
   displayHoursProblems,
@@ -16,11 +17,10 @@ import {
   syncRequestShape,
   syncResponseShape,
   validateBrandKit,
-  validateDataSnapshot,
-  validateManifest,
   validatePreviewHostMessage,
   validateTemplateManifest,
   validateTemplateRuntimeReport,
+  validManifestShape,
 } from './validate.ts';
 
 /** The input itself, typed, when it passes; otherwise the validator's problems. */
@@ -36,8 +36,8 @@ const parser =
 export const parseTemplateManifest = parser<TemplateManifest>(validateTemplateManifest);
 export const parseBrandKit = parser<BrandKit>(validateBrandKit);
 export const parseDisplayHours = parser<DisplayHours>(displayHoursProblems);
-export const parseManifest = parser<ScreenManifest>(validateManifest);
-export const parseDataSnapshot = parser<DataSnapshot>(validateDataSnapshot);
+export const parseManifest = validManifestShape.read;
+export const parseDataSnapshot = dataSnapshotShape.read;
 export const parsePairStartRequest = pairStartRequestShape.read;
 export const parsePairStartResponse = pairStartResponseShape.read;
 export const parsePairPollResponse = pairPollResponseShape.read;

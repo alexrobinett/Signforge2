@@ -21,8 +21,11 @@ export interface Optional<T> {
 /** The type a shape reads. */
 export type Infer<S> = S extends Shape<infer T> ? T : never;
 
+/** `T` with every intersection flattened, at any depth, so two ways of writing one type compare equal. */
+type Deep<T> = T extends readonly (infer U)[] ? (T extends unknown[] ? Deep<U>[] : readonly Deep<U>[]) : T extends object ? { [K in keyof T]: Deep<T[K]> } : T;
+
 /** True when `A` and `B` are the same type, for a compile-time check that a shape reads its interface exactly. */
-export type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+export type Same<A, B> = (<T>() => T extends Deep<A> ? 1 : 2) extends <T>() => T extends Deep<B> ? 1 : 2 ? true : false;
 
 /** Holds at compile time only when its argument is `true`: `assertSame<Same<Infer<typeof s>, SyncRequest>>()`. */
 export const assertSame = <_ extends true>() => undefined;
@@ -32,10 +35,13 @@ const fail = <T>(problems: string[]): Read<T> => ({ ok: false, problems });
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** A value `test` accepts, as it is (a string, a number, a list of numbers): else `problem`. */
-export const is = <T>(test: (v: unknown) => v is T, problem: string): Shape<T> => ({
-  read: (v) => (test(v) ? ok(v) : fail([problem])),
+/** A value `test` accepts, as it is (a string, a number, a list of numbers): else `problem`, which may name the value. */
+export const is = <T>(test: (v: unknown) => v is T, problem: string | ((v: unknown) => string)): Shape<T> => ({
+  read: (v) => (test(v) ? ok(v) : fail([typeof problem === 'string' ? problem : problem(v)])),
 });
+
+/** Exactly `l`: a variant's tag. */
+export const literal = <const L extends string>(l: L, problem: string): Shape<L> => is((v): v is L => v === l, problem);
 
 /** A field that may be left out. */
 export const optional = <T>(shape: Shape<T>): Optional<T> => ({ optional: shape });
@@ -104,6 +110,36 @@ export function listOf<T>(where: string, item: Shape<T>, bound?: { max: number; 
         else problems.push(...r.problems.map((p) => `${where} ${i + 1}: ${p}`));
       }
       return problems.length ? fail(problems) : ok(value);
+    },
+  };
+}
+
+/** A map of `value`, read entry by entry, each entry's problems prefixed `where(key): `. Not an object: `notObject`. */
+export function record<T>(value: Shape<T>, where: (key: string) => string, notObject: string): Shape<Record<string, T>> {
+  return {
+    read(v) {
+      if (!isObj(v)) return fail([notObject]);
+      const problems: string[] = [];
+      const entries: [string, T][] = [];
+      for (const [key, x] of Object.entries(v)) {
+        const r = value.read(x);
+        if (r.ok) entries.push([key, r.value]);
+        else problems.push(...r.problems.map((p) => `${where(key)}: ${p}`));
+      }
+      // fromEntries makes each key the map's own, so a `__proto__` key can never set its prototype.
+      return problems.length ? fail(problems) : ok(Object.fromEntries(entries));
+    },
+  };
+}
+
+/** One of `cases`, picked by the value's `tag` field; a value with no case of its own: `noCase`. */
+export function variant<C extends Record<string, Shape<unknown>>>(tag: string, cases: C, noCase: string): Shape<Infer<C[keyof C]>> {
+  return {
+    read(v) {
+      const kind = isObj(v) ? v[tag] : undefined;
+      if (typeof kind !== 'string' || !Object.hasOwn(cases, kind)) return fail([noCase]);
+      // The case named by the tag reads the value: what it gives back is one of the cases' types.
+      return cases[kind]!.read(v) as Read<Infer<C[keyof C]>>;
     },
   };
 }
