@@ -17,6 +17,7 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   LayoutGridIcon,
+  LoaderCircleIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -44,7 +45,7 @@ import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { needingAttention } from '~/lib/groups';
 import { matchesTerms, searchFinds, sectionsBy, termsOf, termsParam, typedTerm, withTerm, type LabelSection, type LabelTerm } from '~/lib/label-filter';
-import { acrossWords, labelsAcross, lonelyValue, type LabelKey } from '~/lib/labels';
+import { acrossWords, labelsAcross, lonelyValue, MAX_BULK_SCREENS, type LabelKey } from '~/lib/labels';
 import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
@@ -621,7 +622,13 @@ function SelectionBar({ orgId, selected, groups, screens }: { orgId: string; sel
             ),
         )}
       </div>
-      <Button variant="outline" size="sm" onClick={() => openBulkLabels(orgId, selected)}>
+      <Button
+        variant="outline"
+        size="sm"
+        aria-disabled={busy || undefined}
+        className={cn(busy && 'opacity-60')}
+        onClick={() => !busy && openBulkLabels(orgId, selected)}
+      >
         Labels…
       </Button>
       <BulkLabelsDialog screens={screens} />
@@ -653,6 +660,7 @@ function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
   // The typo guard, worded for a selection: a new store's value is often new to every screen.
   const warning = bulk.mode === 'set' && lonelyValue(keys, { key, value: bulk.value }) ? `${bulk.value.trim()}: no screen has this value yet` : undefined;
   const n = `${bulk.screenIds.length} ${bulk.screenIds.length === 1 ? 'screen' : 'screens'}`;
+  const tooMany = bulk.screenIds.length > MAX_BULK_SCREENS;
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
@@ -667,6 +675,18 @@ function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
             void apply();
           }}
         >
+          {tooMany && (
+            <p
+              role="alert"
+              className="flex gap-2 rounded-lg border border-status-needs-you/50 bg-status-needs-you-muted px-3 py-2 text-sm text-status-needs-you-foreground"
+            >
+              <TriangleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
+              <span>
+                One change labels at most {MAX_BULK_SCREENS.toLocaleString('en-US')} screens, and this selection has{' '}
+                {bulk.screenIds.length.toLocaleString('en-US')}. Select fewer, by a filter for example, and label them in parts.
+              </span>
+            </p>
+          )}
           {across.length > 0 ? (
             <dl aria-label="Their labels now" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
               {across.map((k) => (
@@ -754,7 +774,8 @@ function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
-            <Button type="submit" disabled={bulk.pending}>
+            <Button type="submit" disabled={bulk.pending || tooMany}>
+              {bulk.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
               {bulk.mode === 'set' ? `Set on ${n}` : `Remove from ${n}`}
             </Button>
           </DialogFooter>

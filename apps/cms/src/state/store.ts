@@ -20,7 +20,7 @@ import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
 import { createConnectSlice, type ConnectSlice } from './connect';
 import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
-import { createLabelsSlice, type LabelsSlice } from './labels';
+import { connectLabels, createLabelsSlice, type LabelsSlice } from './labels';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createProposalsSlice, type ProposalsSlice } from './proposals';
@@ -97,6 +97,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
     connectCommandMenu(store, deps);
+    connectLabels(store, deps);
     // An edit still to be saved would go with the tab: its save goes now, and the browser asks before the tab closes.
     window.addEventListener('beforeunload', (e) => {
       if (!savesWaiting()) return;
