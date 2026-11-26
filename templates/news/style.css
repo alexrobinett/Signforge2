@@ -376,11 +376,11 @@ ol {
 
 /* ---------------------------------------------------------------- Each look's headline */
 [data-look='pop'] {
-  --nw-headline: 7vmin;
+  --nw-headline: 7.2vmin;
 }
 /* Instrument Serif sets small on its body: a size up holds the same reading distance. */
 [data-look='poster'] {
-  --nw-headline: 8.4vmin;
+  --nw-headline: 9vmin;
 }
 /* Unbounded sets wide: a size down holds the same characters to a line. */
 [data-look='night'] {
@@ -388,4 +388,71 @@ ol {
 }
 [data-look='corporate'] {
   --nw-headline: 7vmin;
+}
+
+/* ---------------------------------------------------------------- Pop and Poster's marks */
+/* Pop, bold and bright: Bricolage Grotesque, heavy and tight, for every word that is not the summary, and one accent,
+   the look's tomato, only as a fill (it does not read as text on the ground): the strip's bar and the progress line,
+   over heavy ink rules. The age is muted, not a second colour. */
+[data-look='pop'] .headline {
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+[data-look='pop'] .top {
+  font-weight: 800;
+}
+[data-look='pop'] .meta {
+  font-weight: 700;
+}
+[data-look='pop'] :is(.src, .number) {
+  color: var(--lk-text);
+}
+[data-look='pop'] .age {
+  color: var(--lk-muted);
+}
+[data-look='pop'] .number {
+  font-weight: 800;
+}
+[data-look='pop'] .row {
+  border-top: var(--lk-rule) solid var(--lk-text);
+}
+[data-look='pop'] :is(.bar, .progress) {
+  background: var(--lk-primary);
+  opacity: 1;
+}
+[data-look='pop'] .bar {
+  height: 1.1vmin;
+}
+
+/* Poster, graphic and editorial: Instrument Serif set large and solid as a front page's headline, a heavy ink rule
+   under the masthead, italic serif figures in the strip, and the look's red only for the age and the bar. */
+[data-look='poster'] .headline {
+  line-height: 0.94;
+  letter-spacing: -0.012em;
+}
+[data-look='poster'] .top {
+  padding-bottom: 1.8vmin;
+  border-bottom: 0.55vmin solid var(--lk-text);
+}
+[data-look='poster'] .meta {
+  font-family: var(--lk-font-body);
+  font-weight: 600;
+}
+[data-look='poster'] :is(.src, .number) {
+  color: var(--lk-text);
+}
+[data-look='poster'] .number {
+  font-size: calc(var(--nw-number) * 1.5);
+  font-style: italic;
+  line-height: 0.8;
+}
+[data-look='poster'] .row {
+  border-top: var(--lk-rule) solid var(--lk-text);
+}
+[data-look='poster'] :is(.bar, .progress) {
+  background: var(--lk-primary);
+  opacity: 1;
+}
+[data-look='poster'] .bar {
+  height: 1.1vmin;
 }
