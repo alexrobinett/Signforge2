@@ -682,7 +682,12 @@ describe('snapshot feed blobs (#196)', () => {
     // snapshot, and that costs one sync soon: the stuck feeds' snapshots, sent with every reply, count for nothing.
     const photos = photosOf(0);
     const lead = [hash(95_001), hash(95_002)];
-    const items = Array.from({ length: 10 }, (_, i) => ({ title: `Story ${i}`, published: '', source: '', image: i === 0 ? { file: lead[0], thumb: lead[1] } : { file: photos[2 * i], thumb: photos[2 * i + 1] } }));
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      title: `Story ${i}`,
+      published: '',
+      source: '',
+      image: i === 0 ? { file: lead[0], thumb: lead[1] } : { file: photos[2 * i], thumb: photos[2 * i + 1] },
+    }));
     await s.seed.scope.dataSources.putSnapshot(old.ids[0]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
     const r = await sync(s, body({ snapshots: old.snapshots, blobs: photos }));
     expect(r.blobs!.slice(0, 2)).toEqual(lead);

@@ -46,8 +46,12 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       photosRetried: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.retried')`,
       photosAsk: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.ask')`,
       // Lists only: #514's heartbeats kept one fingerprint of all the snapshots sent there, a string.
-      photosSent: sql<string | null>`CASE WHEN json_type(${sc.heartbeatJson}, '$.photos.sent') = 'array' THEN json_extract(${sc.heartbeatJson}, '$.photos.sent') END`,
-      photosRepeat: sql<string | null>`CASE WHEN json_type(${sc.heartbeatJson}, '$.photos.repeat') = 'array' THEN json_extract(${sc.heartbeatJson}, '$.photos.repeat') END`,
+      photosSent: sql<
+        string | null
+      >`CASE WHEN json_type(${sc.heartbeatJson}, '$.photos.sent') = 'array' THEN json_extract(${sc.heartbeatJson}, '$.photos.sent') END`,
+      photosRepeat: sql<
+        string | null
+      >`CASE WHEN json_type(${sc.heartbeatJson}, '$.photos.repeat') = 'array' THEN json_extract(${sc.heartbeatJson}, '$.photos.repeat') END`,
       displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
