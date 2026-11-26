@@ -1,4 +1,5 @@
-"""The supervisor's output mode watch (#511, #558), against a faked wlr-randr: no Pi, no clock.
+"""The supervisor's output mode watch (#511, #558) and its player watch, against a faked wlr-randr and systemctl and
+the monotonic time passed in: no Pi, no clock.
 
 Run from the repo root: python3 -m unittest discover -s device/pi -p 'test_*.py'
 """
@@ -21,6 +22,8 @@ class Panel:
 
     def run(self, *cmd, timeout=10):
         if cmd == ("wlr-randr",):
+            if self.mode is None:
+                return 0, 'HDMI-A-1 "Panel"\n  Enabled: yes\n  Modes:\n'
             w, rest = self.mode.split("x")
             h, hz = rest.split("@")
             return 0, f'HDMI-A-1 "Panel"\n  Enabled: yes\n  Modes:\n    {w}x{h} px, {hz}.000000 Hz (preferred, current)\n'
@@ -43,7 +46,8 @@ class ModeWatch(unittest.TestCase):
         self.patches = [
             mock.patch.dict(supervisor.env, {"XDG_RUNTIME_DIR": runtime}),
             mock.patch.dict(supervisor.state, {"on": True}),
-            mock.patch.dict(supervisor.mode_watch, {"resets": 0, "failed": 0, "next_try": 0.0}),
+            mock.patch.dict(supervisor.mode_watch, {"resets": 0, "failed": 0, "next_try": 0.0, "stuck_at": None}),
+            mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None}),
             mock.patch.dict(supervisor.mode_errors, {"count": 0, "next_log": 0.0}),
         ]
         for p in self.patches:
@@ -80,6 +84,36 @@ class ModeWatch(unittest.TestCase):
         self.assertEqual(self.check(panel, last + supervisor.MODE_RETRY_S), {"mode": "1920x1080@60", "resets": 1})
         self.assertEqual(panel.sets, supervisor.MODE_TRIES + 1)
         self.assertEqual(supervisor.mode_watch["failed"], 0)
+
+    def stuck(self, panel):
+        """`panel` refused the mode MODE_TRIES times, a minute apart: the watch waits an hour. The last check's time."""
+        for minute in range(supervisor.MODE_TRIES):
+            self.check(panel, minute * 60)
+        self.assertEqual(supervisor.mode_watch["stuck_at"], panel.mode)
+        return (supervisor.MODE_TRIES - 1) * 60
+
+    def test_a_panel_back_at_another_mode_is_set_at_once_not_after_the_hour(self):
+        panel = Panel("3840x2160@30", takes=False)
+        last = self.stuck(panel)
+        # A hotplug brings it back at 4K 60 Hz, and now it takes the mode: set at the next check (review of #560).
+        panel.mode, panel.takes = "3840x2160@60", True
+        self.assertEqual(self.check(panel, last + 60), {"mode": "1920x1080@60", "resets": 1})
+        self.assertEqual(panel.sets, supervisor.MODE_TRIES + 1)
+
+    def test_a_panel_unplugged_and_plugged_back_at_its_own_mode_is_set_at_once(self):
+        panel = Panel("3840x2160@30", takes=False)
+        last = self.stuck(panel)
+        panel.mode = None
+        self.check(panel, last + 60)
+        self.assertEqual(panel.sets, supervisor.MODE_TRIES)
+        panel.mode, panel.takes = "3840x2160@30", True
+        self.assertEqual(self.check(panel, last + 120), {"mode": "1920x1080@60", "resets": 1})
+
+    def test_the_same_mode_still_waits_out_the_hour(self):
+        panel = Panel("3840x2160@30", takes=False)
+        last = self.stuck(panel)
+        self.check(panel, last + 60)
+        self.assertEqual(panel.sets, supervisor.MODE_TRIES)
 
     def test_drops_the_reading_goes_on_and_logs_a_lasting_failure_once_an_hour(self):
         supervisor.state["output"] = {"mode": "1920x1080@60", "resets": 0}
@@ -141,6 +175,48 @@ class ModeWatch(unittest.TestCase):
                 supervisor.watch_player()
         self.assertEqual(self.log.getvalue().count("player check failed: RuntimeError('systemctl went away')"), 1)
 
+
+class PlayerWatch(unittest.TestCase):
+    """A kiosk restart that fails, tried again a bounded number of times (review of #560), at times passed in."""
+
+    def setUp(self):
+        self.patches = [mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None}), mock.patch.object(supervisor, "last_beat", 0.0)]
+        for p in self.patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in self.patches])
+        self.log = io.StringIO()
+
+    def check(self, answers, now):
+        """One check at `now`, systemctl answering the next of `answers`: the restarts it asked for."""
+        asked = []
+
+        def run(*cmd, timeout=10):
+            asked.append(cmd)
+            return answers.pop(0)
+
+        with mock.patch.object(supervisor, "run", run), contextlib.redirect_stdout(self.log):
+            supervisor.check_player(now)
+        return len(asked)
+
+    def test_retries_a_failed_restart_before_the_next_beat_until_it_takes(self):
+        stale = supervisor.STALE_S + 1
+        answers = [(1, "Failed to restart: busy"), (0, "")]
+        self.assertEqual(self.check(answers, stale), 1)
+        self.assertEqual(self.check(answers, stale + supervisor.RESTART_RETRY_S - 1), 0)
+        self.assertEqual(self.check(answers, stale + supervisor.RESTART_RETRY_S), 1)
+        self.assertEqual(self.check(answers, stale + 10 * supervisor.RESTART_RETRY_S), 0)
+        self.assertIn(f"kiosk restart failed (1 of {supervisor.RESTART_TRIES}): Failed to restart: busy; next try in", self.log.getvalue())
+        self.assertIn("kiosk restart queued", self.log.getvalue())
+
+    def test_stops_after_restart_tries_until_the_player_beats(self):
+        answers = [(1, "denied")] * (supervisor.RESTART_TRIES + 1)
+        at = supervisor.STALE_S + 1
+        tries = 0
+        for _ in range(supervisor.RESTART_TRIES + 2):
+            tries += self.check(answers, at)
+            at += supervisor.RESTART_RETRY_S
+        self.assertEqual(tries, supervisor.RESTART_TRIES)
+        self.assertIn("no more tries until the player beats", self.log.getvalue())
 
 if __name__ == "__main__":
     unittest.main()
