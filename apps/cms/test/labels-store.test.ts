@@ -35,13 +35,41 @@ beforeEach(() => {
   calls = [];
   replies = [];
   vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+    // The toast's count after a change (#187): answered here, apart from the calls a test answers in turn.
+    if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
     const reply = replies.shift() ?? { status: 200, body: {} };
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
 });
 
+/** What `preview_publish` answers: two screens would change. */
+const PREVIEW = {
+  screens: [
+    { screenId: 'scr_1', name: 'Lobby', reasons: ['joined North'] },
+    { screenId: 'scr_2', name: 'Till', reasons: ['joined North'] },
+  ],
+  unchanged: 0,
+  failed: [],
+  groups: [],
+  samples: [],
+};
+
 describe("a screen's label editor", () => {
+  it('says, once saved, how many screens the next publish would change, read with preview_publish (#187)', async () => {
+    const { toast } = await import('sonner');
+    const s = store();
+    s.getState().editScreenLabels(screen);
+    s.getState().typeLabel({ screenId: screen.id }, 0, { key: 'region', value: 'south' });
+    await s.getState().saveScreenLabels(ORG, screen);
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenLastCalledWith(
+        'Labels saved',
+        expect.objectContaining({ description: 'Takes effect at the next publish: 2 screens would change.' }),
+      ),
+    );
+  });
+
   it('saves one merge: the keys changed or added, the keys taken out, and closes', async () => {
     const s = store();
     s.getState().editScreenLabels(screen);
@@ -194,6 +222,7 @@ describe('bulk "Labels…" on a selection', () => {
       let answer: () => void = () => {};
       const answered = new Promise<void>((r) => (answer = r));
       vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
         calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
         await answered;
         return new Response(JSON.stringify(reply.body), { status: reply.status });
@@ -223,5 +252,96 @@ describe('bulk "Labels…" on a selection', () => {
     expect(s.getState().labels.bulk).toMatchObject({ key: 'store' });
     navigated({ pathChanged: true });
     expect(s.getState().labels.bulk).toBeNull();
+  });
+});
+
+describe('"Import labels…" (#188)', () => {
+  const lobby = { id: 'scr_1', name: 'Lobby', labels: { region: 'north' }, systemLabels: {} } as unknown as ScreenView;
+  const till = { id: 'scr_2', name: 'Till', labels: {}, systemLabels: {} } as unknown as ScreenView;
+  const file = (text: string) => new File([text], 'labels.csv', { type: 'text/csv' });
+
+  it('leaves an import opened since alone when a cancelled one answers, as a refusal or as done (review of #612)', async () => {
+    for (const reply of [
+      { status: 409, body: { error: 'conflict', message: 'a screen has at most 32 labels' } },
+      { status: 200, body: {} },
+    ]) {
+      const s = store();
+      let answer: () => void = () => {};
+      const answered = new Promise<void>((r) => (answer = r));
+      vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
+        calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+        await answered;
+        return new Response(JSON.stringify(reply.body), { status: reply.status });
+      });
+      s.getState().openLabelImport(ORG);
+      await s.getState().readLabelFile(file('screen_id,store\nscr_1,0142\n'));
+      const saving = s.getState().applyLabelImport([lobby, till]);
+      // Cancelled while it saves, and another import opened, with its own file, before the reply comes.
+      s.getState().closeLabelImport();
+      s.getState().openLabelImport(ORG);
+      await s.getState().readLabelFile(file('screen_id,region\nscr_2,south\n'));
+      answer();
+      await saving;
+      expect(s.getState().labels.import).toMatchObject({ file: { columns: ['screen_id', 'region'] }, pending: false, error: null });
+    }
+  });
+
+  it('closes when the page is left, so coming back shows no old file (review of #612)', async () => {
+    const s = store();
+    let navigated: (e: { pathChanged: boolean }) => void = () => {};
+    connectLabels(s as never, { router: { subscribe: (_: string, fn: typeof navigated) => (navigated = fn) } } as never);
+    s.getState().openLabelImport(ORG);
+    await s.getState().readLabelFile(file('screen_id,store\nscr_1,0142\n'));
+    navigated({ pathChanged: false });
+    expect(s.getState().labels.import?.file).not.toBeNull();
+    navigated({ pathChanged: true });
+    expect(s.getState().labels.import).toBeNull();
+  });
+
+  it('reads the file once, and sends each screen its own change in one import_screen_labels', async () => {
+    const s = store();
+    s.getState().openLabelImport(ORG);
+    await s.getState().readLabelFile(file('﻿screen_id,name,region,store\r\nscr_1,,south,0142\r\n,Till,,9\r\n'));
+    expect(s.getState().labels.import?.file?.columns).toEqual(['screen_id', 'name', 'region', 'store']);
+    await s.getState().applyLabelImport([lobby, till]);
+    expect(calls).toEqual([
+      {
+        name: 'import_screen_labels',
+        input: {
+          screens: [
+            { screenId: 'scr_1', set: { region: 'south', store: '0142' }, remove: [] },
+            { screenId: 'scr_2', set: { store: '9' }, remove: [] },
+          ],
+        },
+      },
+    ]);
+    expect(s.getState().labels.import).toBeNull();
+  });
+
+  it('sends nothing for a file that cannot be read, or has a refused column, and keeps a refusal on the dialog', async () => {
+    const s = store();
+    s.getState().openLabelImport(ORG);
+    await s.getState().readLabelFile(file('screen_id,region\nscr_1,"north\n'));
+    expect(s.getState().labels.import).toMatchObject({ file: null, error: expect.stringMatching(/cannot be read/) });
+    await s.getState().readLabelFile(file('screen_id,orientation\nscr_1,portrait\n'));
+    await s.getState().applyLabelImport([lobby]);
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.import?.error).toMatch(/Fix the file/);
+
+    await s.getState().readLabelFile(file('screen_id,store\nscr_1,1\n'));
+    replies.push({ status: 409, body: { error: 'conflict', message: 'a screen has at most 32 labels' } });
+    await s.getState().applyLabelImport([lobby]);
+    expect(s.getState().labels.import).toMatchObject({ pending: false, error: expect.stringMatching(/32 labels/) });
+  });
+
+  it('refuses before sending a file that changes more than 1000 screens', async () => {
+    const s = store();
+    const many = Array.from({ length: 1001 }, (_, i) => ({ id: `scr_m${i}`, name: `M${i}`, labels: {}, systemLabels: {} }) as unknown as ScreenView);
+    s.getState().openLabelImport(ORG);
+    await s.getState().readLabelFile(file(`screen_id,store\n${many.map((m) => `${m.id},1`).join('\n')}\n`));
+    await s.getState().applyLabelImport(many);
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.import?.error).toMatch(/at most 1000 screens; this file changes 1001/);
   });
 });

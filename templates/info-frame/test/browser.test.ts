@@ -438,7 +438,7 @@ describe('info frame (#201)', () => {
       days: ['WedClear75° / 60°', 'ThuRain70° / 57°', 'FriSnow73° / 58°'],
     });
     expect(await read(await r.show({ look: 'night', code: 95, ...week }))).toEqual({
-      line: 'Thunderstorm · h78 l61',
+      line: 'Thunderstorm · H78 L61',
       cond: null,
       glyph: true,
       days: ['Wed75°', 'Thu70°', 'Fri73°'],
@@ -475,7 +475,7 @@ describe('info frame (#201)', () => {
   });
 
   for (const orientation of ['landscape', 'portrait'] as const)
-    it(`every element has an intro and an outro timed from --sf-duration, moving only transform and opacity, within the cap; in ${orientation}, ${orientation === 'portrait' ? 'only the crawl loops' : 'the ambient motion loops'}`, async () => {
+    it(`every element has an intro and an outro timed from --sf-duration, moving only transform and opacity, within the cap; in ${orientation}, only the crawl loops`, async () => {
       const r = await frame(orientation);
       const durationMs = 13_000;
       for (const [i, look] of looks.entries()) {
@@ -484,8 +484,8 @@ describe('info frame (#201)', () => {
         const f = r.hst.frame('fresh');
         const seen = await motion(f, durationMs);
         expect(seen, look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
-        // D's motion, read by seeking; the colon's blink and Night's minute bar are the clock's own loops.
-        expect(await motionContract(f, durationMs, { loops: '.lk-crawl, .lk-ping, .colon, .tick-bar' }), look).toEqual([]);
+        // D's motion, read by seeking: the crawl is the one loop.
+        expect(await motionContract(f, durationMs, { loops: '.lk-crawl' }), look).toEqual([]);
         const looping = await f.evaluate(() =>
           [
             ...new Set(
@@ -496,9 +496,40 @@ describe('info frame (#201)', () => {
             ),
           ].sort(),
         );
-        if (orientation === 'portrait') expect(looping, look).toEqual(['lk-crawl']);
-        else expect(looping.length, look).toBeGreaterThan(1);
+        expect(looping, look).toEqual(['lk-crawl']);
       }
+    });
+
+  // The board's info frame (#news-design), shown in Pop: no cards, the caption under the photo on the ground, the
+  // forecast as rows at the body size; and in every look, no figures lower-cased ("l44" reads as "144").
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`sets Pop as type on the ground with the caption under the photo, and no figure lower-cased, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks) {
+        const seen = await (await r.show({ look, ...longest })).evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 3000;
+          const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+          const vmin = Math.min(innerWidth, innerHeight) / 100;
+          const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+          return {
+            fills: ['.rail', '.weather', '.caption'].filter((sel) => document.querySelector(sel) && style(sel).backgroundColor !== 'rgba(0, 0, 0, 0)'),
+            under: box('.caption').top >= box('.photo-drift').bottom - 1,
+            days: [...document.querySelectorAll('.day')].map((d) => Number.parseFloat(getComputedStyle(d).fontSize) / vmin),
+            // As drawn: a lower-case letter before a figure, written so or lower-cased by the look.
+            lower: ['.wline', '.date'].filter((sel) => {
+              const el = document.querySelector(sel);
+              return !!el && (style(sel).textTransform === 'lowercase' ? /[A-Za-z]\d/ : /[a-z]\d/).test(el.textContent!);
+            }),
+          };
+        });
+        if (seen.lower.length) found.push(`${look}: lower-cased ${seen.lower.join(', ')}`);
+        if (look !== 'pop') continue;
+        if (seen.fills.length) found.push(`pop: cards on ${seen.fills.join(', ')}`);
+        if (!seen.under) found.push('pop: the caption is on the photo');
+        if (seen.days.some((v) => v < 3)) found.push(`pop: forecast rows at ${seen.days.map((v) => v.toFixed(1)).join(', ')}vmin`);
+      }
+      expect(found).toEqual([]);
     });
 
   it('with reduced motion, shows the final frame with nothing animating, the crawl one line', async () => {

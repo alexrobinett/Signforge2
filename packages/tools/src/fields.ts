@@ -1,5 +1,5 @@
 /** Input fields shared by several tools. */
-import { MAX_TERMS, SELECTOR_OPS, SYSTEM_KEYS } from '@signforge/compiler/selector';
+import { LABEL_KEY, LABEL_VALUE, LABEL_WORDS, MAX_LABEL_VALUE, MAX_TERMS, REFUSED_LABEL_KEYS, SELECTOR_OPS, SYSTEM_KEYS } from '@signforge/compiler/selector';
 import { displayHoursProblems, ID_PATTERN, validTimezone } from '@signforge/contract';
 import { z } from 'zod';
 
@@ -75,14 +75,11 @@ export const displayHours = z
     for (const message of displayHoursProblems(hours)) ctx.addIssue({ code: 'custom', message });
   });
 
-const LABEL_KEY = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
-/** A screen's name, id and live status are not labels, so no label or selector names them; `sf.` keys are SignForge's. */
-const REFUSED_KEYS = new Set(['name', 'id', 'status']);
 const anyKey = z
   .string()
-  .regex(LABEL_KEY, 'a label key is 1 to 63 lowercase letters, digits, - _ or ., starting and ending with a letter or digit')
-  .refine((k) => !REFUSED_KEYS.has(k), 'name, id and status are not labels')
-  .refine((k) => !k.startsWith('sf.'), 'keys starting sf. are reserved');
+  .regex(LABEL_KEY, LABEL_WORDS.key)
+  .refine((k) => !REFUSED_LABEL_KEYS.includes(k), LABEL_WORDS.refused)
+  .refine((k) => !k.startsWith('sf.'), LABEL_WORDS.reserved);
 const SYSTEM = new Set<string>(SYSTEM_KEYS);
 
 /** A key a label may have: not a system label's, which the screen's settings give. */
@@ -94,10 +91,9 @@ export const labelKey = anyKey
 const labelValue = z
   .string()
   .trim()
-  .min(1, 'a label value cannot be empty')
-  .max(63, 'a label value is at most 63 characters')
-  // \p{Cs} rejects lone surrogates, which D1 reads back as U+FFFD.
-  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Cs}]*$/u, 'a label value is printable characters, spaces allowed')
+  .min(1, LABEL_WORDS.empty)
+  .max(MAX_LABEL_VALUE, LABEL_WORDS.long)
+  .regex(LABEL_VALUE, LABEL_WORDS.printable)
   .describe('Up to 63 characters, spaces allowed; matched case-insensitively');
 
 /** Labels to set, by key, as `claim_screen` and `update_screen_labels` take them; the tools check the limits. */

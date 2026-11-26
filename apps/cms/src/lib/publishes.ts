@@ -51,6 +51,8 @@ export function changeParts(changes: NonNullable<PublishView['changes']>): Chang
     const plural = g.count === 1 ? '' : 's';
     if (g.kind === 'spot') return { lead: `spot${plural}`, names, more, tail: '' };
     if (g.kind === 'playlist') return { lead: `playlist${plural}`, names, more, tail: '' };
+    // Smart groups it moved screens in or out of (#187): a publish with no draft says which.
+    if (g.kind === 'group') return { lead: 'screens moved in or out of', names, more, tail: '' };
     return g.removed ? { lead: 'took', names, more, tail: 'off the schedule' } : { lead: 'the schedule for', names, more, tail: '' };
   });
 }

@@ -379,7 +379,7 @@ describe('alert (#200)', () => {
           };
           const checks: [string, () => boolean][] = [
             ['--fit', () => fits(document.querySelector('.copy')!, 'bottom') && fits(document.querySelector('.meta')!, 'top')],
-            ['--cap-fit', () => fits(document.querySelector('.qr figcaption')!, 'bottom')],
+            ['--cap-fit', () => fits(document.querySelector('.qr figcaption')!, 'top')],
           ];
           root.dataset.measuring = '';
           const out: string[] = [];
@@ -503,10 +503,37 @@ describe('alert (#200)', () => {
     }
   });
 
+  // The board's alert (#news-design): the QR code's caption sits on the meta line, at its size, in every severity.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`puts the QR code's caption on the meta line, at its size, ${orientation}`, async () => {
+      const k = await alertFrame(orientation);
+      const found: string[] = [];
+      for (const severity of severities) {
+        const line = await (await k.play({ severity })).evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 5000;
+          // The bottom of the last line of text, from the text itself (a block's own box would add its line's leading).
+          const last = (sel: string) => {
+            const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
+            const range = document.createRange();
+            let bottom = 0;
+            for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+              range.selectNodeContents(n);
+              for (const r of range.getClientRects()) bottom = Math.max(bottom, r.bottom);
+            }
+            return Math.round(bottom);
+          };
+          const size = (sel: string) => getComputedStyle(document.querySelector(sel)!).fontSize;
+          return { meta: last('.meta p'), caption: last('.qr figcaption span'), sizes: [size('.meta'), size('.qr figcaption')] };
+        });
+        if (Math.abs(line.meta - line.caption) > 1) found.push(`${severity}: the caption's last line ends at ${line.caption}, the meta line at ${line.meta}`);
+        if (line.sizes[0] !== line.sizes[1]) found.push(`${severity}: the caption is ${line.sizes[1]}, the meta line ${line.sizes[0]}`);
+      }
+      expect(found).toEqual([]);
+    });
+
   // The SDK restores the document and inits again on new data, while the old prepare may still be
   // waiting for the faces. Here the first prepare is held there until the new data has played its
-  // own prepare: resuming must not step the new copy's type (#308). The new copy is long, so its own
-  // step is not the first, which the old prepare, measuring its detached copy, would set.
+  // own prepare: resuming must stop there, changing nothing in the new document (#308).
   it('a prepare that new data replaced, resuming after the faces load, leaves the new document as a fresh load', async () => {
     const hst = await host('portrait', true);
     const a = spotData(t().manifest, { severity: 'notice' });
@@ -541,11 +568,20 @@ describe('alert (#200)', () => {
       // With a reset between, as the editor sends new data; and with none, which the SDK takes the same way.
       await (name === 'reset' ? hst.init : hst.initAgain)(name, b, {}, NOW);
       await hst.waitFor(name, 'ready', 1);
-      // Let the first prepare go, then wait a task: what it does next runs in microtasks before it.
-      await f.evaluate(async () => {
+      // Let the first prepare go, then wait a task: what it does next runs in microtasks before it. Whatever it would do
+      // there reads the new document, so it would leave the same DOM; what shows that it stopped is that it changes
+      // nothing at all (no style set, no mark made, while it measures).
+      const changes = await f.evaluate(async () => {
+        const seen: MutationRecord[] = [];
+        const watch = new MutationObserver((records) => seen.push(...records));
+        watch.observe(document, { subtree: true, attributes: true, childList: true, characterData: true });
         (window as unknown as { release: () => void }).release();
         await new Promise((r) => setTimeout(r));
+        seen.push(...watch.takeRecords());
+        watch.disconnect();
+        return seen.map((m) => `${m.type} ${(m.target as Element).nodeName ?? ''} ${m.attributeName ?? ''}`);
       });
+      expect(changes, name).toEqual([]);
       expect(await hst.dom(name), name).toBe(fresh);
     }
   });

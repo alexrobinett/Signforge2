@@ -1,14 +1,13 @@
 {
-  "base/agenda@1.4.0": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b",
-  "base/alert@1.2.0": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f",
-  "base/announcement@1.1.2": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27",
+  "base/agenda@1.5.0": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62",
+  "base/alert@1.3.0": "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e",
+  "base/announcement@1.2.0": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1",
   "base/clock@1.4.0": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3",
-  "base/countdown@1.2.0": "528cedb9acf5da986fcc062f4cf48e7ce4f0bf5e6d65964ec292d7c0806e2200",
-  "base/cstore-promo@1.3.1": "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080",
-  "base/info-frame@1.2.0": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2",
-  "base/menu-board@1.4.0": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e",
+  "base/cstore-promo@1.4.0": "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79",
+  "base/info-frame@1.3.0": "a643ed05e2f25b7c22480e9b081a5a7f0ac6b8d7804a2eb254d7726362bd2388",
+  "base/menu-board@1.5.0": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c",
   "base/news@2.1.2": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5",
-  "base/photo-promo@1.5.0": "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46",
-  "base/room-status@1.1.1": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973",
-  "base/weather@1.6.0": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
+  "base/photo-promo@1.6.0": "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660",
+  "base/room-status@1.2.0": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1",
+  "base/weather@1.7.0": "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08"
 }

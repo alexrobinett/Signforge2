@@ -178,12 +178,15 @@ interface Hosted {
   spot?: { now: number } & Record<string, unknown>;
 }
 
-/** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size. */
-export async function host(orientation: Orientation = 'landscape', full = false): Promise<Host> {
+/**
+ * A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size.
+ * `full` may instead be a size of its own, for a screen of another shape: its long side is the one `orientation` says.
+ */
+export async function host(orientation: Orientation = 'landscape', full: boolean | { long: number; short: number } = false): Promise<Host> {
   const context = await browser.newContext({ viewport: { width: 960, height: 540 } });
   contexts.push(context);
   const page = await context.newPage();
-  const [long, short] = full ? [1920, 1080] : [960, 540];
+  const { long, short } = typeof full === 'object' ? full : full ? { long: 1920, short: 1080 } : { long: 960, short: 540 };
   const size = orientation === 'landscape' ? { width: long, height: short } : { width: short, height: long };
   await page.setViewportSize(size);
   await page.addScriptTag({ content: sampler });
@@ -434,7 +437,8 @@ export async function host(orientation: Orientation = 'landscape', full = false)
  * with its text and again with the text hidden, at rest. Each
  * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
  * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
- * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+ * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1; text a clipping box
+ * hides (a crawl's copy past its window) is not read.
  */
 export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Promise<string[]> {
   const { card, texts } = await f.evaluate((scope) => {
@@ -447,7 +451,15 @@ export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Pr
       const range = document.createRange();
       range.selectNode(own[0]!);
       range.setEndAfter(own.at(-1)!);
+      // Only what its clipping boxes show: a crawl's second copy can sit past its window, where it paints nothing.
       const r = range.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (getComputedStyle(p).overflow === 'visible') continue;
+        const c = p.getBoundingClientRect();
+        const [x, y] = [Math.max(r.x, c.x), Math.max(r.y, c.y)];
+        [r.width, r.height] = [Math.max(0, Math.min(r.right, c.right) - x), Math.max(0, Math.min(r.bottom, c.bottom) - y)];
+        [r.x, r.y] = [x, y];
+      }
       const s = getComputedStyle(el);
       const size = Number.parseFloat(s.fontSize);
       texts.push({
@@ -560,7 +572,8 @@ export type BrandSpot = [data: Data, photo?: string, sampled?: boolean | 'broken
  * kit with poor on-colours, a light kit, a borderline accent, mid-tone accents, an accent just over
  * 3:1 and a mid-tone background. `spots(accent, orientation)` are the template's spots, given the
  * accent `$brand.accent` resolves to. `onFill` is text on a fill (text, fill, the ratio it needs);
- * `onBackdrop` is accent-coloured text, measured on whatever is behind it. With `sameWithSample`,
+ * `onBackdrop` is accent-coloured text, measured on whatever is behind it; `textColourOnBackdrop` is text in the kit's text
+ * colour, measured the same way and kept in that colour wherever it reads. With `sameWithSample`,
  * that text's colour, and whether it is on its scrim, is the same with the photo's sample as
  * without one and with one that does not decode.
  */
@@ -570,24 +583,25 @@ export function brandColourTests(
     spots: (accent: string, orientation: Orientation) => BrandSpot[] | Promise<BrandSpot[]>;
     onFill?: [text: string, fill: string, min: number][];
     onBackdrop: string[];
+    textColourOnBackdrop?: string[];
     sameWithSample?: string;
   },
 ) {
-  const { spots, onFill = [], onBackdrop, sameWithSample } = opts;
+  const { spots, onFill = [], onBackdrop, textColourOnBackdrop = [], sameWithSample } = opts;
   const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
   const light = LIGHT_KIT;
   // An accent that just reaches 4.5:1 on the demo kit's background (4.69:1) and so passed when
   // measured there, where the text sits on something lighter: menu-board's card (2.94:1), the
-  // tint of agenda's row happening now, cstore-promo's copy panel.
+  // tint of agenda's row happening now, cstore-promo's promo line over its glow.
   const borderline: BrandColors = { ...demo, accent: '#d9531e' };
   // Mid-tone accents, which reach 3:1 but not 4.5:1 on the page: green on white (3.30:1) and blue
   // on the demo kit's dark background (3.66:1).
   const green: BrandColors = { ...light, accent: '#16a34a', surface: '#f8fafc' };
   const blue: BrandColors = { ...demo, accent: '#2563eb', onAccent: '#ffffff' };
-  // An accent just over 3:1 on its background (3.05:1), which clock's glow, the accent itself,
-  // pulls under 3:1 behind the greeting.
+  // An accent just over 3:1 on its background (3.05:1): anything that tints the ground with the
+  // accent pulls text drawn in it under 3:1.
   const teal: BrandColors = { ...demo, accent: '#0f685b', onAccent: '#ffffff', background: '#0e020c' };
   // A mid-tone background, on which black and white both just reach 4.5:1: over a photo with light
   // and dark under the text, a shade of it leaves neither reading (#124).
@@ -686,10 +700,10 @@ export function brandColourTests(
           expect(found).toEqual([]);
         });
 
-      // A kit's accent is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black or white where it does not. With no kit, cstore-promo's and
-      // photo-promo's text is their own. 0.1 to spare: a template measures the ends of a gradient,
-      // this test the pixels in the box.
-      it(`accent text reads on its backdrop under ${label}, ${orientation}, in the accent where that reads`, async () => {
+      // A kit's accent, or its text colour, is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black
+      // or white where it does not. With no kit, cstore-promo's and photo-promo's text is their own. 0.1 to spare: a
+      // template measures the ends of a gradient, this test the pixels in the box.
+      it(`accent and text-coloured text reads on its backdrop under ${label}, ${orientation}, in its colour where that reads`, async () => {
         const found: string[] = [];
         /** `sameWithSample` over each photo, with the photo's sample and without. */
         const seenWith = new Map<string, string[]>();
@@ -702,14 +716,18 @@ export function brandColourTests(
             const photo = name.replace(/, (sampled|broken sample)/, '');
             seenWith.set(photo, [...(seenWith.get(photo) ?? []), seen]);
           }
-          for (const text of onBackdrop) {
+          const inks = [
+            ...onBackdrop.map((sel) => [sel, 'accent', accent] as const),
+            ...textColourOnBackdrop.map((sel) => [sel, 'text colour', theme?.colors.text] as const),
+          ];
+          for (const [text, role, ink] of inks) {
             const { color, pixels, large } = await textOnBackdrop(f, page, text);
             const min = large ? 3 : 4.5;
             const ratio = worst(color, pixels);
             if (ratio < min) found.push(`${name} ${text}: ${color} is ${ratio.toFixed(2)}:1 on its backdrop, below ${min}:1`);
-            const reads = worst(rgb(accent), pixels);
-            if (theme && color !== rgb(accent) && reads >= min + 0.1)
-              found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
+            if (!theme || !ink) continue;
+            const reads = worst(rgb(ink), pixels);
+            if (color !== rgb(ink) && reads >= min + 0.1) found.push(`${name} ${text}: ${color}, not the ${role}, which reads at ${reads.toFixed(2)}:1`);
           }
         });
         // The sample stands in for the photo, and a broken one leaves the photo: the same text every way.
@@ -930,8 +948,8 @@ export const MOTION = {
   scale: [0.94, 1.04],
   /** A full-bleed photo's push-in over the whole play may go further: photo-promo's, on the approved board. */
   pushScale: 1.12,
-  /** The shortest cycle of a loop that changes opacity: at most 3 a second (WCAG 2.3.1's flash threshold). */
-  loopMs: 334,
+  /** Flashes in any one second (WCAG 2.3.1): a flash is a pair of opposing changes in what shows of 0.1 or more. */
+  flashes: 3,
   /** How far a loop may swing opacity in a cycle: a dimmed blink, never a full flash. */
   loopSwing: 0.75,
 } as const;
@@ -947,10 +965,13 @@ export const MOTION = {
  * - progress, on an element `progress` selects (a bar or ring that shows time passing, or a marker that moves to the
  *   current item): linear or the standard curve, along one axis only (across, down, a turn, or a fill no larger than
  *   full size), one way each time it runs, any reach, as often as it needs, never back and forth;
- * - a loop, where `loops` allows one: one that changes opacity has a cycle of at least 334 ms (3 a second at most)
- *   and swings it by 0.75 at most, so nothing flashes;
+ * - a loop, where `loops` allows one: it swings opacity by 0.75 at most;
  * - ambient motion, over half the play or more: any curve, at most 1.5vmin;
- * - anything else is a move mid-play: the standard curve, at most 1.5vmin.
+ * - anything else is a move mid-play: the standard curve, at most 1.5vmin, and 1.5vmin for all of an element's moves.
+ * Nothing flashes more than 3 times in any second (WCAG 2.3.1), loops and progress included: what shows (opacity, and
+ * scale towards nothing) is read every 10 ms, and a flash is a pair of opposing changes of 0.1 or more. Progress on an
+ * element runs one way, over all its animations. An animation that has already run and kept no fill is named, since
+ * it can no longer be read.
  * Each moves only transform and opacity, runs once, goes one way from where it starts to where it ends (no overshoot,
  * through any number of keyframes, on one curve throughout), never rotates but as progress, scales within 0.94 to
  * 1.04 (a reveal along one axis may start from nothing; a push-in over the play of an element covering the screen, to
@@ -987,19 +1008,43 @@ export async function motionContract(
       // Past an edge by no more than an entrance's travel: a bar flush with the bottom may rise into place.
       const edge = m.inVmin * vmin + 1;
       const onScreen = (box: DOMRect) => box.left > -edge && box.top > -edge && box.right < innerWidth + edge && box.bottom < innerHeight + edge;
-      for (const a of document.getAnimations()) {
+      // Every keyframe list and timing read before any animation is taken off its element: Chrome lists a CSS
+      // animation's keyframes, implicit ones filled in, only as it runs as written.
+      const all = document.getAnimations().map((a) => {
         const effect = a.effect as KeyframeEffect;
+        return { a, effect, frames: effect.getKeyframes(), timing: effect.getComputedTiming() };
+      });
+      const midPlay = new Map<Element, number[]>();
+      const ways = new Map<Element, Map<string, number>>();
+      // An element's CSS animations that ran, kept no fill, and so are gone from `getAnimations`.
+      const running = new Map<Element, Set<string>>();
+      for (const { a, effect } of all)
+        if (a instanceof CSSAnimation && !effect.pseudoElement) {
+          const names = running.get(effect.target!) ?? new Set<string>();
+          names.add(a.animationName);
+          running.set(effect.target!, names);
+        }
+      const defined = new Set<string>();
+      const read = (rules: CSSRuleList) => {
+        for (const r of rules)
+          if (r instanceof CSSKeyframesRule) defined.add(r.name);
+          else if (r instanceof CSSGroupingRule) read(r.cssRules);
+      };
+      for (const sheet of document.styleSheets) read(sheet.cssRules);
+      for (const el of document.querySelectorAll('*'))
+        if (el.getClientRects().length)
+          for (const n of getComputedStyle(el).animationName.split(', '))
+            if (defined.has(n) && !running.get(el)?.has(n)) found.push(`${name(el)} ${n} ran and kept no fill, so it was not read`);
+      for (const { a, effect, frames, timing } of all) {
         const el = effect.target!;
         // An animation on `::before` or `::after` is read there; its box is its element's.
         const pseudo = effect.pseudoElement;
         const kind = a instanceof CSSAnimation ? a.animationName : a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : 'script animation';
         const who = `${name(el)}${pseudo ?? ''} ${kind}`;
-        const frames = effect.getKeyframes();
         for (const k of frames)
           for (const p of Object.keys(k))
             if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform', 'translate', 'scale', 'rotate'].includes(p))
               found.push(`${who} moves ${p}`);
-        const timing = effect.getComputedTiming();
         const isLoop = timing.iterations === Number.POSITIVE_INFINITY;
         if (isLoop && !el.matches(loops)) {
           found.push(`${who} loops`);
@@ -1010,13 +1055,13 @@ export async function motionContract(
         if (isProgress && String(timing.direction).includes('alternate')) found.push(`${who} runs back and forth`);
         const start = Number(timing.delay ?? 0);
         const dur = Number(timing.activeDuration);
-        // A cut: a change of state in a millisecond or none (a story shown, a seam lit), not motion. Nor is what would
-        // start only after the play has ended (the last story's exit).
-        if (dur <= 1 || start >= durationMs) continue;
+        const holder = exits === '' ? null : el.closest(exits);
+        // A cut: a change of state in a millisecond or none (a story shown, a seam lit), not motion. Nor is a story's
+        // exit set for after the play has ended (the last story's): anything else is read wherever its delay puts it.
+        if (dur <= 1 || (holder && start >= durationMs)) continue;
         const end = Math.round(Number(timing.endTime));
-        // The curve of each step between keyframes. A script's curve is its timing's, over linear steps. Chrome lists a
-        // CSS rule of one keyframe as that keyframe alone.
-        const steps = (frames.length === 1 ? frames : frames.slice(0, -1)).map((k) => String(k.easing));
+        // The curve of each step between keyframes; a script's curve is its timing's, over linear steps.
+        const steps = frames.slice(0, -1).map((k) => String(k.easing));
         const curves = timing.easing !== 'linear' ? [String(timing.easing), ...steps.filter((s) => s !== 'linear')] : steps;
         const curve = [...new Set(curves)].join(' then ');
 
@@ -1056,10 +1101,35 @@ export async function motionContract(
             onScreen: onScreen(el.getBoundingClientRect()),
           };
         });
+        // What shows, every 10 ms through a second at least (a loop or a repeat over all its runs up to 5 s): the
+        // opacity, and the scale towards nothing, which reads as a flash too.
+        const shows: number[] = [];
+        const fine = Math.min(Math.max(isLoop ? Number(timing.duration) : dur, isLoop ? 1000 : 0), 5000);
+        for (let t = 0; t <= fine; t += 10) {
+          a.currentTime = from + Math.min(t, fine - 0.01);
+          const now = getComputedStyle(el, pseudo);
+          const x = matrix(now);
+          shows.push(Number(now.opacity) * Math.min(1, Math.hypot(x.m11, x.m12), Math.hypot(x.m21, x.m22)));
+        }
         for (const { x, effect, time } of others) {
           x.effect = effect;
           x.currentTime = time;
         }
+        // Opposing changes of 0.1 or more, then the most in any one second: two make a flash.
+        const changes: number[] = [];
+        let [dir, lo, hi] = [0, shows[0]!, shows[0]!];
+        shows.forEach((v, i) => {
+          [lo, hi] = [Math.min(lo, v), Math.max(hi, v)];
+          if (dir >= 0 && hi - v >= 0.1) {
+            changes.push(i * 10);
+            [dir, lo] = [-1, v];
+          } else if (dir <= 0 && v - lo >= 0.1) {
+            changes.push(i * 10);
+            [dir, hi] = [1, v];
+          }
+        });
+        const worst = Math.max(0, ...changes.map((t) => changes.filter((u) => u >= t && u < t + 1000).length));
+        if (worst > 2 * m.flashes) found.push(`${who} flashes ${Math.floor(worst / 2)} times in a second`);
         // A turn read as an angle wraps at 180 degrees: unwrapped, a full turn is one way.
         for (let i = 1; i < samples.length; i++) {
           const s = samples[i]!;
@@ -1067,11 +1137,9 @@ export async function motionContract(
           while (s.turn - samples[i - 1]!.turn < -180) s.turn += 360;
         }
         if (isLoop) {
-          // What flashes is a change of light: a loop that changes opacity, not falling rain that only slides.
           const o = samples.map((s) => s.o);
-          const swing = Math.max(...o) - Math.min(...o);
-          if (swing > 0.001 && span < m.loopMs) found.push(`${who} loops ${(1000 / span).toFixed(1)} times a second`);
-          if (swing > m.loopSwing + 0.001) found.push(`${who} flashes from ${Math.min(...o).toFixed(2)} to ${Math.max(...o).toFixed(2)} opacity`);
+          if (Math.max(...o) - Math.min(...o) > m.loopSwing + 0.001)
+            found.push(`${who} flashes from ${Math.min(...o).toFixed(2)} to ${Math.max(...o).toFixed(2)} opacity`);
           continue;
         }
 
@@ -1088,6 +1156,14 @@ export async function motionContract(
             return Math.max(...v) - Math.min(...v) > (k === 'x' || k === 'y' ? 0.05 : 0.001);
           });
           if (changes.length > 1) found.push(`${who} shows progress along ${changes.join(' and ')}`);
+          // One way over all of the element's progress, not only within each animation.
+          const way = ways.get(el) ?? new Map<string, number>();
+          for (const k of changes) {
+            const sign = Math.sign(last[k] - first[k]);
+            if (way.has(k) && way.get(k) !== sign) found.push(`${name(el)} shows progress both ways along ${k}`);
+            way.set(k, sign);
+          }
+          ways.set(el, way);
           if (samples.some((s) => Math.max(s.sx, s.sy) > 1.001)) found.push(`${who} shows progress past full size`);
         } else if (atRest(last) && !atRest(first) && (unseen(first) || start < window)) {
           if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
@@ -1096,14 +1172,11 @@ export async function motionContract(
         } else if (atRest(first) && unseen(last) && dur < durationMs / 2) {
           if (Math.round(dur) !== m.outroMs) found.push(`${who} leaves in ${Math.round(dur)} ms`);
           if (curve !== m.easeOut) found.push(`${who} leaves on ${curve}`);
-          const holder = exits === '' ? null : el.closest(exits);
-          if (holder) {
-            // By when its holder hides: the last of the holder's own animations to end, or the spot's end.
-            const ends = holder
-              .getAnimations()
-              .map((x) => Number(x.effect!.getComputedTiming().endTime))
-              .filter(Number.isFinite);
-            const hides = Math.round(Math.min(durationMs, Math.max(0, ...ends)) || durationMs);
+          // By when its holder hides, the last of the holder's own animations to end; a holder that never hides holds
+          // its parts to the spot's end.
+          const ends = (holder?.getAnimations() ?? []).map((x) => Number(x.effect!.getComputedTiming().endTime)).filter(Number.isFinite);
+          if (holder && ends.length) {
+            const hides = Math.round(Math.min(durationMs, Math.max(...ends)));
             if (end > hides) found.push(`${who} leaves at ${end} ms, after ${name(holder)} hides at ${hides}`);
           } else if (end !== durationMs) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
           if (travel > m.outVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
@@ -1113,6 +1186,7 @@ export async function motionContract(
         } else {
           if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
           if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+          midPlay.set(el, [...(midPlay.get(el) ?? []), travel]);
         }
         // A full-bleed photo's push-in over the play passes the edges by design, and a turning ring's box can; nothing
         // else may.
@@ -1130,6 +1204,11 @@ export async function motionContract(
           if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > top + 0.001)
             found.push(`${who} scales to ${(uniform && s.sx < 1 ? s.sx : Math.max(s.sx, s.sy)).toFixed(2)}`);
         }
+      }
+      // Moves add up: two or more on one element are held to one move's travel between them.
+      for (const [el, moves] of midPlay) {
+        const total = moves.reduce((n, t) => n + t, 0);
+        if (moves.length > 1 && total > m.inVmin + 0.01) found.push(`${name(el)} moves ${total.toFixed(1)}vmin mid-play in all`);
       }
       return [...new Set(found)];
     },

@@ -12,11 +12,14 @@ import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, rolloutComplete, standing, versionName, type PublishDetail, type PublishView } from '~/lib/publishes';
 import { PublishChanges } from '~/components/publishes/changes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
-import { publishesQuery, publishQuery } from '~/queries/publishes';
+import { publishesQuery, publishQuery, publishTargetsQuery } from '~/queries/publishes';
+import { screensQuery } from '~/queries/screens';
+import { Badge } from '~/components/ui/badge';
+import { byName } from '~/lib/targets';
 import { useAppStore } from '~/state/provider';
 
 const publishesSearch = (s: Record<string, unknown>): { id?: string } => (typeof s.id === 'string' && s.id ? { id: s.id } : {});
@@ -29,7 +32,13 @@ export const Route = createFileRoute('/_app/publishes')({
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
     const { id } = publishesSearch(location.search);
-    await Promise.all([queryClient.query(publishQuery(orgId, id ?? null)), queryClient.query(publishesQuery(orgId))]);
+    await Promise.all([
+      queryClient.query(publishQuery(orgId, id ?? null)),
+      queryClient.query(publishesQuery(orgId)),
+      // Whom its groups reached, by the screens' names: read once, not with the rollout it polls (#187).
+      queryClient.query(publishTargetsQuery(orgId, id ?? null)),
+      queryClient.query(screensQuery(orgId)),
+    ]);
   },
   head: () => ({ meta: [{ title: 'Publishes · SignForge' }] }),
   component: PublishesPage,
@@ -51,6 +60,7 @@ function PublishesPage() {
   const search = useDeferredValue(Route.useSearch());
   const current = useSuspenseQuery(publishQuery(orgId, search.id ?? null));
   const { publish, screens } = current.data;
+  const { data: targets } = useSuspenseQuery(publishTargetsQuery(orgId, search.id ?? null));
   const { publishes } = useSuspenseQuery(publishesQuery(orgId)).data;
   const canPublish = useCanPublish();
   const pending = useAppStore((s) => s.publishing.pending);
@@ -102,6 +112,8 @@ function PublishesPage() {
           <p className="text-muted-foreground">It switched no screen: what it published plays nowhere yet.</p>
         )}
       </section>
+
+      {targets && targets.length > 0 && <GroupsReached orgId={orgId} targets={targets} />}
 
       <section aria-labelledby="history-title" className="flex flex-col gap-3">
         <h2 id="history-title" className="text-lg font-semibold">
@@ -175,5 +187,53 @@ function PublishesPage() {
         </ol>
       </section>
     </div>
+  );
+}
+
+const NAMED = 8;
+
+/**
+ * Whom each group reached at this publish (#187), as it resolved them: a smart group's screens are the ones its rule
+ * matched then, so this answers why a screen played what it did after its labels moved. Screens by their names now; one
+ * deleted since is counted as removed, never shown by its id (review of #621).
+ */
+function GroupsReached({ orgId, targets }: { orgId: string; targets: NonNullable<PublishDetail['targets']> }) {
+  const names = new Map(useSuspenseQuery(screensQuery(orgId)).data.screens.map((s) => [s.id, s.name]));
+  return (
+    <section aria-labelledby="groups-reached-title" className="flex flex-col gap-3">
+      <h2 id="groups-reached-title" className="text-lg font-semibold">
+        Whom each group reached
+      </h2>
+      <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+        {targets.map((g) => {
+          const reached = g.screenIds.flatMap((id) => {
+            const name = names.get(id);
+            return name === undefined ? [] : [{ id, name }];
+          });
+          const removed = g.screenIds.length - reached.length;
+          const shown = reached.toSorted(byName).slice(0, NAMED);
+          const more = reached.length - shown.length;
+          const words = [
+            ...shown.map((r) => r.name),
+            ...(more ? [`${more} more`] : []),
+            ...(removed ? [`${removed} removed ${removed === 1 ? 'screen' : 'screens'}`] : []),
+          ];
+          return (
+            <li key={g.groupId} className="flex flex-col gap-1 px-4 py-3 text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{g.name}</span>
+                {g.rule && <Badge>Rule</Badge>}
+                <span className="text-muted-foreground tabular-nums">
+                  {g.screenIds.length} {g.screenIds.length === 1 ? 'screen' : 'screens'}
+                </span>
+              </span>
+              {g.screenIds.length > 0 && (
+                <span className="text-muted-foreground">{words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

@@ -1083,6 +1083,12 @@ export const publishes = sqliteTable(
      * and for a publish made before this was kept.
      */
     changesJson: text('changes_json'),
+    /**
+     * Whom each group reached at this publish (#187): every group's members as resolved then, lists and smart groups
+     * alike, as JSON `{ screens: string[], groups: [{ id, name, rule, members: number[] }] }`, each member an index into
+     * `screens` so a large fleet's record stays small. Null for a roll back, and for a publish made before this was kept.
+     */
+    targetsJson: text('targets_json'),
   },
   (t) => [
     uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),

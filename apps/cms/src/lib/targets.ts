@@ -16,6 +16,8 @@ interface ScreenLike extends Named {
 }
 interface GroupLike extends Named {
   screenIds: string[];
+  /** A smart group's rule (#186): its `screenIds` are the screens it matched when the list was read. */
+  selector?: object | null;
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -47,16 +49,22 @@ export function findTargets<S extends ScreenLike, G extends GroupLike>(query: st
 
 const NAMED = 3;
 
-/** "3 screens: 0142 Drive-thru L, 0157 Drive-thru R, 0157 Lobby promo": whom picking a group reaches. */
-export function groupReach(group: GroupLike, screens: readonly Named[]): string {
+/**
+ * "3 screens: 0142 Drive-thru L, 0157 Drive-thru R, 0157 Lobby promo": whom picking a group reaches. A smart group's
+ * screens are the ones its rule matches now (#186); a takeover (`sentNow`) reaches those when sent, and keeps them.
+ */
+export function groupReach(group: GroupLike, screens: readonly Named[], sentNow = false): string {
   const members = screens.filter((s) => group.screenIds.includes(s.id)).sort(byName);
-  if (!members.length) return 'No screens in it yet';
+  const rule = Boolean(group.selector);
+  if (!members.length) return rule ? 'Its rule matches no screen now' : 'No screens in it yet';
   const named = members
     .slice(0, NAMED)
     .map((s) => s.name)
     .join(', ');
   const more = members.length > NAMED ? ` and ${members.length - NAMED} more` : '';
-  return `${members.length} ${members.length === 1 ? 'screen' : 'screens'}: ${named}${more}`;
+  const n = `${members.length} ${members.length === 1 ? 'screen' : 'screens'}`;
+  const lead = !rule ? n : sentNow ? `Reaches ${members.length === 1 ? 'this screen' : `these ${n}`} now` : `Its rule matches ${n} now`;
+  return `${lead}: ${named}${more}`;
 }
 
 /** The names of the screens with these ids, by name, as a list of them reads; an id no screen has is named by itself. */

@@ -172,6 +172,7 @@ defineTemplate({
     render(ctx);
     inkCards();
     fitWord(el('.word')!);
+    fitRows();
   },
   play(ctx) {
     // Wake on each second boundary; text only changes when the minute does.
@@ -322,6 +323,37 @@ function inkCards(): void {
     card.style.setProperty('--card-text', text!);
     card.style.setProperty('--card-muted', muted!);
     card.style.setProperty('--card-accent', accent!);
+  }
+}
+
+/**
+ * Where the rows need more height than the screen has (a two-line room's name with "Booked by" on), a box would cut
+ * through a line: the room's name gives up its second line, then the meeting line its second, then the notes under it
+ * go, until every text has its lines. By layout, not painted boxes, so the intros' transforms do not count.
+ */
+function fitRows(): void {
+  const squeezed = () =>
+    [...document.querySelectorAll<HTMLElement>('.room, .line, .line .title, .org, .next, .allday')].some((el) => {
+      const s = getComputedStyle(el);
+      // Poster's line is a column holding the clamped title, which its own clamp property does not reach.
+      const clamp = s.display === 'flex' ? 0 : Number(s.webkitLineClamp);
+      const pad = Number.parseFloat(s.paddingTop) + Number.parseFloat(s.paddingBottom);
+      const needs = clamp ? Math.min(el.scrollHeight, clamp * Number.parseFloat(s.lineHeight) + pad) : el.scrollHeight;
+      return el.clientHeight + 1 < needs;
+    });
+  const clamp = (sel: string) => {
+    for (const e of document.querySelectorAll<HTMLElement>(sel)) e.style.setProperty('-webkit-line-clamp', '1');
+  };
+  const steps = [
+    () => clamp('.room'),
+    () => clamp('.line, .line .title'),
+    () => document.querySelector('.next')?.remove(),
+    () => document.querySelector('.allday')?.remove(),
+    () => document.querySelector('.org')?.remove(),
+  ];
+  for (const step of steps) {
+    if (!squeezed()) return;
+    step();
   }
 }
 

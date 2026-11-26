@@ -403,13 +403,7 @@ async function team(t: ReturnType<typeof testApp>, role: Role) {
   if (role === 'owner') return { owner, member: owner, world };
   const member = new Client(t);
   await member.signIn(email(`eval-${role}`));
-  const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
-    email: (await member.session()).body.user.email,
-    role,
-    organizationId: world.orgId,
-  });
-  await member.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
-  await member.setActive(world.orgId);
+  await member.join(owner, world.orgId, role);
   return { owner, member, world };
 }
 

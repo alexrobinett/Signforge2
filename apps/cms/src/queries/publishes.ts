@@ -4,7 +4,7 @@
  * page polls; the store's publish actions invalidate both after a publish.
  */
 import { queryOptions } from '@tanstack/react-query';
-import { getPublish, getPublishes } from '~/server/publishes.functions';
+import { getPublish, getPublishes, getPublishTargets } from '~/server/publishes.functions';
 
 const POLL_MS = 15_000;
 
@@ -19,3 +19,11 @@ export const publishesQuery = (orgId: string) =>
 
 export const publishQuery = (orgId: string, publishId: string | null) =>
   queryOptions({ queryKey: publishKeys.one(orgId, publishId), queryFn: () => getPublish({ data: publishId }), refetchInterval: POLL_MS });
+
+/** Whom each group reached at a publish (#187): read once, not polled, as it is large and never changes. */
+export const publishTargetsQuery = (orgId: string, publishId: string | null) =>
+  queryOptions({
+    queryKey: [...publishKeys.one(orgId, publishId), 'targets'],
+    queryFn: () => getPublishTargets({ data: publishId }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });

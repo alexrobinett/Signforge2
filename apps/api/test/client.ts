@@ -118,6 +118,17 @@ export class Client {
   setActive(organizationId: string) {
     return this.post('/api/auth/organization/set-active', { organizationId });
   }
+
+  /** Join `organizationId` as `role`, invited by `owner`, and make it this client's active org. Signed in first. */
+  async join(owner: Client, organizationId: string, role: string) {
+    const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
+      email: (await this.session()).body.user.email,
+      role,
+      organizationId,
+    });
+    await this.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
+    await this.setActive(organizationId);
+  }
 }
 
 let n = 0;

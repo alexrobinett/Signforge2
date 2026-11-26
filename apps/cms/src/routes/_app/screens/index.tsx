@@ -56,6 +56,8 @@ import { labelKeysQuery, screensQuery, screenStatusQuery } from '~/queries/scree
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 import { NEXT_PUBLISH } from '~/state/labels';
+import { ID_COLUMN, importPlan, labelsCsv, NAME_COLUMN } from '~/lib/label-csv';
+import { tooManyFilters } from '~/state/save-as-group';
 import { searchText, selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
@@ -269,10 +271,13 @@ function ScreensPage() {
           <Button variant="outline" className="h-10" onClick={() => openLabelFilter()} disabled={!keys.length}>
             <PlusIcon aria-hidden /> Filter
           </Button>
+          <LabelFileMenu screens={active} canManage={canManage} />
         </EditorFields>
       </div>
+      <LabelImportDialog screens={active} />
 
-      <LabelFilterRow terms={terms} keys={keys} onChange={setTerms} />
+      <LabelFilterRow terms={terms} keys={keys} canManage={canManage} onChange={setTerms} />
+      <SaveAsGroupDialog screens={active} others={Boolean(search.q || search.group || search.status)} />
 
       {shown.length === 0 ? (
         <p className="rounded-xl border bg-card p-8 text-center text-muted-foreground">No screens match. Clear the search or filters to see them all.</p>
@@ -453,7 +458,19 @@ function Section({ by, section, children }: { by: string; section: LabelSection<
  * The label chips in the URL, each removable, and the dialog the toolbar's "+ Filter" opens, which adds one from the
  * keys and values the org's screens have (`list_label_keys`). A chip on a key replaces that key's chip: a screen has one value of a key.
  */
-function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: LabelKey[]; onChange: (terms: LabelTerm[]) => void }) {
+function LabelFilterRow({
+  terms,
+  keys,
+  canManage,
+  onChange,
+}: {
+  terms: LabelTerm[];
+  keys: LabelKey[];
+  canManage: boolean;
+  onChange: (terms: LabelTerm[]) => void;
+}) {
+  const orgId = useOrgId();
+  const openSaveAsGroup = useAppStore((s) => s.openSaveAsGroup);
   const open = useAppStore((s) => s.labels.filter);
   const openLabelFilter = useAppStore((s) => s.openLabelFilter);
   const chooseFilterKey = useAppStore((s) => s.chooseFilterKey);
@@ -509,6 +526,16 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
               >
                 Clear filters
               </Button>
+              {canManage && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'done')}>
+                    Save as group…
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'schedule')}>
+                    Schedule a playlist for these…
+                  </Button>
+                </>
+              )}
             </div>
           </EditorFields>
         </div>
@@ -785,6 +812,173 @@ function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
   );
 }
 
+/**
+ * Labels as a CSV file (#188): every screen's labels downloaded, edited anywhere, and read back with a preview first.
+ * In a menu beside "+ Filter", so a phone's toolbar keeps the first screen in view.
+ */
+function LabelFileMenu({ screens, canManage }: { screens: ScreenView[]; canManage: boolean }) {
+  const orgId = useOrgId();
+  const openLabelImport = useAppStore((s) => s.openLabelImport);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([labelsCsv(screens)], { type: 'text/csv;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'screen-labels.csv' });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" className="size-10" aria-label="Labels as a file">
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={download}>Download labels (CSV)</DropdownMenuItem>
+        {canManage && <DropdownMenuItem onSelect={() => openLabelImport(orgId)}>Import labels…</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * "Import labels…" (#188): a CSV file read once and shown as what it would change, screen by screen, before anything
+ * is written; then one `import_screen_labels`, all of it or none. A refused column or value stops it; a row with no
+ * screen, or a name two screens have, is listed and skipped.
+ */
+function LabelImportDialog({ screens }: { screens: ScreenView[] }) {
+  const id = useId();
+  const imp = useAppStore((s) => s.labels.import);
+  const readLabelFile = useAppStore((s) => s.readLabelFile);
+  const chooseImportMode = useAppStore((s) => s.chooseImportMode);
+  const close = useAppStore((s) => s.closeLabelImport);
+  const apply = useAppStore((s) => s.applyLabelImport);
+  if (!imp) return null;
+  const plan = imp.file ? importPlan(imp.file, screens, imp.mode) : null;
+  const n = plan ? `${plan.changes.length} ${plan.changes.length === 1 ? 'screen' : 'screens'}` : '';
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Import labels</DialogTitle>
+          <DialogDescription>
+            A CSV file with a {ID_COLUMN} or {NAME_COLUMN} column and a column per label, as Download labels writes it. You see what it changes before anything
+            is saved. {NEXT_PUBLISH}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void apply(screens);
+          }}
+        >
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-file`}>File</Label>
+            <Input
+              id={`${id}-file`}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Emptied once read, so the same file chosen again after it is fixed is read again (review of #612).
+                e.target.value = '';
+                if (file) void readLabelFile(file);
+              }}
+            />
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">An empty cell</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={imp.mode === 'merge'}
+                onChange={() => chooseImportMode('merge')}
+              />
+              Leaves the label as it is (merge)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={imp.mode === 'replace'}
+                onChange={() => chooseImportMode('replace')}
+              />
+              Removes the label (replace)
+            </label>
+          </fieldset>
+          {plan && (
+            <section aria-label="What it changes" className="grid gap-3">
+              {/* One short line read out as the preview comes or changes; the lists are read when someone moves to them (review of #612). */}
+              <p role="status" className="sr-only">
+                {[
+                  plan.problems.length ? `${plan.problems.length} ${plan.problems.length === 1 ? 'problem' : 'problems'} to fix before saving.` : '',
+                  plan.changes.length ? `Changes ${n}.` : 'Changes no screen.',
+                  plan.skipped.length ? `${plan.skipped.length} ${plan.skipped.length === 1 ? 'row' : 'rows'} skipped.` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              </p>
+              {plan.problems.length > 0 && (
+                <div className="grid gap-1 rounded-lg border border-destructive/40 p-3 text-sm">
+                  <p className="font-medium text-destructive">Nothing can be saved until the file is fixed:</p>
+                  <ul className="list-disc pl-5">
+                    {plan.problems.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-sm font-medium">{plan.changes.length ? `Changes ${n}` : 'Changes no screen.'}</p>
+              {plan.changes.length > 0 && (
+                <ul className="grid max-h-72 gap-2 overflow-y-auto text-sm">
+                  {plan.changes.map((c) => (
+                    <li key={c.screenId} className="rounded-lg border px-3 py-2">
+                      <p className="font-semibold">{c.name}</p>
+                      <p className="wrap-anywhere text-muted-foreground">
+                        {[
+                          ...c.added.map(([k, v]) => `+ ${k}: ${v}`),
+                          ...c.changed.map(([k, from, to]) => `${k}: ${from} → ${to}`),
+                          ...c.removed.map(([k, was]) => `− ${k} (was ${was})`),
+                        ].join(' · ')}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {plan.skipped.length > 0 && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer">
+                    {plan.skipped.length} {plan.skipped.length === 1 ? 'row' : 'rows'} skipped
+                  </summary>
+                  <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                    {plan.skipped.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </section>
+          )}
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {imp.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={imp.pending || !plan || plan.problems.length > 0 || plan.changes.length === 0}>
+              {plan?.changes.length ? `Save on ${n}` : 'Save'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** A column the table sorts by: a link to the sort, the other way when it is the sort already. */
 function SortHeader({
   column,
@@ -1001,5 +1195,76 @@ function ScreenTable({
         </div>
       </div>
     </EditorFields>
+  );
+}
+
+/**
+ * "Save as group…" (#186): the label chips as a smart group's rule, named here, with how many screens it matches now;
+ * the search and the group and status filters are not part of a rule, and it says so when one is on.
+ */
+function SaveAsGroupDialog({ screens, others }: { screens: ScreenView[]; others: boolean }) {
+  const id = useId();
+  const d = useAppStore((s) => s.saveAsGroup);
+  const name = useAppStore((s) => s.nameGroupFromFilters);
+  const close = useAppStore((s) => s.cancelSaveAsGroup);
+  const save = useAppStore((s) => s.saveFiltersAsGroup);
+  if (!d) return null;
+  const tooMany = tooManyFilters(d.terms);
+  const n = screens.filter((s) => matchesTerms(s, d.terms)).length;
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{d.then === 'schedule' ? 'Schedule a playlist for these screens' : 'Save as group'}</DialogTitle>
+          <DialogDescription>
+            A smart group: the screens whose labels match these filters, now and at each publish.
+            {d.then === 'schedule' && ' Saved first, then aimed at by a new schedule entry.'}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <ul aria-label="Its rule" className="flex flex-wrap gap-1.5 text-sm">
+            {d.terms.map((t) => (
+              <li key={t.key} className="rounded-full border px-2.5 py-0.5">
+                <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Matches {n} {n === 1 ? 'screen' : 'screens'} now.
+            {others && <span className="text-muted-foreground"> The search and the group and status filters are not part of it.</span>}
+          </p>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-name`}>Name</Label>
+            <Input
+              id={`${id}-name`}
+              value={d.name}
+              onChange={(e) => name(e.target.value)}
+              maxLength={100}
+              placeholder="North drive-thru"
+              disabled={Boolean(tooMany)}
+            />
+          </div>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {tooMany ?? d.error}
+          </p>
+          <DialogFooter>
+            {/* While the save runs, Cancel waits for it (the store ignores it), and says so. */}
+            <Button type="button" variant="outline" onClick={close} aria-disabled={d.pending || undefined} className={cn(d.pending && 'opacity-60')}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={Boolean(tooMany)} aria-disabled={d.pending || undefined}>
+              {d.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
+              {d.then === 'schedule' ? 'Save and schedule…' : 'Save group'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

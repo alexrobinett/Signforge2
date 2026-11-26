@@ -23,6 +23,7 @@ import { agentDraftTools } from './agent-drafts';
 import { playlistTools } from './playlists';
 import { agentOutputOf, readTools } from './read';
 import { publishRequestTools } from './publish-requests';
+import { previewPublish } from './preview';
 import { publishTools } from './publish';
 import { scheduleTools } from './schedule';
 import { screenTools } from './screens';
@@ -39,6 +40,7 @@ const BASE_TOOLS: readonly AnyTool[] = [
   ...groupTools,
   ...labelTools,
   ...publishTools,
+  previewPublish,
   ...publishRequestTools,
   ...templateTools,
   ...assetTools,

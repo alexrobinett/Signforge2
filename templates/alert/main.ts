@@ -152,7 +152,7 @@ defineTemplate({
       [meta, 'top'],
     ];
     const scales: [string, [Element, Side][][]][] = [['--fit', shared ? [text] : text.map((region) => [region])]];
-    if (caption) scales.push(['--cap-fit', [[[caption, 'bottom']]]]);
+    if (caption) scales.push(['--cap-fit', [[[caption, 'top']]]]);
     fitScales(root, scales);
     delete root.dataset.measuring;
   },
