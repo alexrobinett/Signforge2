@@ -481,15 +481,17 @@ describe('playback', () => {
     });
 
     // A template that dies `afterMs` into each play, whatever its length: its death lands after its play counted.
-    const diesEvery = (afterMs: number, length: number) => {
+    // `others` follow a in the playlist; those in `failing` never become ready. Only a dies.
+    const diesEvery = (afterMs: number, length: number, others: Spot[] = [], failing = others.map((o) => o.id)) => {
       const t = setup();
+      for (const id of failing) t.slots.failing.add(id);
       const show = t.slots.show.bind(t.slots);
       t.slots.show = (slot, prev, transition) => {
         const r = show(slot, prev, transition);
-        t.clock.after(afterMs, () => t.playback.died(slot, 'a: template navigated away'));
+        if (t.slots.held[slot]?.spot.id === 'a') t.clock.after(afterMs, () => t.playback.died(slot, 'a: template navigated away'));
         return r;
       };
-      t.playback.adopt(manifest('m1', [spot('a', length)]));
+      t.playback.adopt(manifest('m1', [spot('a', length), ...others]));
       t.run();
       return t;
     };
@@ -511,6 +513,23 @@ describe('playback', () => {
       // None stands, but the play on screen at the minute, if its death is still to come.
       expect(seen.played.length).toBeLessThanOrEqual(1);
       expect(at.length).toBeLessThan(40);
+    });
+
+    it('gives back the run of failures it ended, so a load failing between its count and its death does not hold off the pause (#542)', async () => {
+      // x fails while a plays, 200 ms in, before a dies at 300 ms: a was alive then, and ended the run.
+      const { clock, seen, shown } = diesEvery(300, 3 * SECOND, [spot('x', 3 * SECOND)]);
+      await clock.until(MINUTE);
+      expect(seen.status).toContain('SignForge\nContent is unavailable. Retrying…');
+      expect(seen.played.length).toBeLessThanOrEqual(1);
+      expect(shown().length).toBeLessThan(40);
+    });
+
+    it('calling for the pause while the next spot waits, has that spot shown first after it (#542)', async () => {
+      // x and y fail while a plays; a dies at 2.7 s, the third failure, while b waits for a's end.
+      const { clock, shown } = diesEvery(2500, 3 * SECOND, [spot('x', 3 * SECOND), spot('y', 3 * SECOND), spot('b', 3 * SECOND)], ['x', 'y']);
+      await clock.until(10 * SECOND);
+      // b, dropped for the pause, is chosen again after it rather than passed over.
+      expect(shown()).toEqual(['a@m1 200', `b@m1 ${2700 + 5 * SECOND + PREPARE_MS}`]);
     });
 
     it('underneath, is never shown, and the spot on screen plays its full length', async () => {
@@ -590,6 +609,24 @@ describe('playback', () => {
         await clock.until(40 * SECOND);
         playback.display(true);
         await clock.until(2 * MINUTE);
+        expect(seen.fellBack).toEqual([]);
+        expect(shown()[1]).toMatch(/^u@m1 /);
+      });
+
+      it('as does nothing being scheduled, so a manifest whose only working spot is a URL does not fall back after it (#542)', async () => {
+        const { clock, slots, seen, playback, run, shown } = setup();
+        slots.failing.add('x');
+        playback.restore(manifest('m0', [spot('g', HOUR)]));
+        // An empty playlist takes over from 30 s to 40 s.
+        const m = manifest('m1', [spot('x', MINUTE), url('u', MINUTE), spot('t', MINUTE)], {
+          items: ['x', 'u'],
+          takeover: { from: 30 * SECOND, to: 40 * SECOND },
+        });
+        m.playlists.takeover!.items = [];
+        playback.adopt(m);
+        run();
+        await clock.until(2 * MINUTE);
+        expect(seen.status).toContain('SignForge\nNothing is scheduled for this screen.');
         expect(seen.fellBack).toEqual([]);
         expect(shown()[1]).toMatch(/^u@m1 /);
       });
