@@ -161,7 +161,7 @@ function rng(seed: number): () => number {
   };
 }
 
-/** Rain's tile is this many times taller than wide: its slant is atan(1 / SLANT), 14 degrees. */
+/** Rain falls this many tiles down for each tile across: its slant is atan(1 / SLANT), 14 degrees. */
 const SLANT = 4;
 
 /**
@@ -173,9 +173,9 @@ const SLANT = 4;
  *
  * Rain falls at a slant drawn into its tile, not by rotating the field (#96): rotated content
  * inside a clip, here the template's own frame, cost an offscreen pass of the whole field every
- * frame, and dropped 1.9% of frames on a Pi 4 in landscape, 5% in portrait. Its tile is four
- * times taller than wide, so one tile across and one down is the slant, and the layer slides
- * along it.
+ * frame, and dropped 1.9% of frames on a Pi 4 in landscape, 5% in portrait. Its layer slides one
+ * tile across and SLANT tiles down a turn, along the slant, which moves the tile's pattern onto
+ * itself: the tile stays square, so the rain repeats no more often than the rotated field did.
  */
 async function precipitation(condition: Condition, viewport: { width: number; height: number }): Promise<void> {
   const kind = condition === 'snow' ? 'snow' : condition === 'rain' || condition === 'storm' ? 'rain' : undefined;
@@ -185,11 +185,8 @@ async function precipitation(condition: Condition, viewport: { width: number; he
   // The size the player gives us, not innerWidth: the frame may not be laid out yet.
   const unit = Math.min(viewport.width, viewport.height) / 100;
   const tile = Math.round(unit * 40);
-  // Rain's tile: four times as tall as wide, so a tile across and a tile down is its slant, and as large as snow's, so
-  // it costs a prepare no more to draw.
-  const [tileW, tileH] = kind === 'rain' ? [Math.round(tile / 2), Math.round(tile / 2) * SLANT] : [tile, tile];
-  // How far a layer slides each turn, in tiles of 40vmin: rain keeps its speed along the slant.
-  const turn = Math.hypot(tileW, tileH) / tile;
+  // How far rain slides a turn, in tiles: as fast along the slant as one tile straight down took before.
+  const turn = Math.hypot(1, SLANT);
   // Rain and snow in the kit's text colour (its background on a light kit), against a sky mixed from the kit.
   const light = document.getElementById('stage')!.classList.contains('light-kit');
   const [cr, cg, cb] = tokenRgb(light ? '--sf-bg' : '--sf-text') ?? [220, 235, 255];
@@ -209,18 +206,17 @@ async function precipitation(condition: Condition, viewport: { width: number; he
   const built = await Promise.all(
     layers.map(async (l, li) => {
       const canvas = document.createElement('canvas');
-      canvas.width = tileW;
-      canvas.height = tileH;
+      canvas.width = canvas.height = tile;
       const g = canvas.getContext('2d')!;
       const rand = rng(1234 + li * 977);
       const u = unit * l.size;
       for (let i = 0; i < l.count; i++) {
-        const x = rand() * tileW;
-        const y = rand() * tileH;
+        const x = rand() * tile;
+        const y = rand() * tile;
         const r = rand();
         // Draw each particle at every wrapped position so the tile repeats without seams.
-        for (const ox of [-tileW, 0, tileW]) {
-          for (const oy of [-tileH, 0, tileH]) {
+        for (const ox of [-tile, 0, tile]) {
+          for (const oy of [-tile, 0, tile]) {
             if (kind === 'snow') {
               const rad = (0.35 + r * 0.6) * u;
               g.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${l.alpha})`;
@@ -228,7 +224,7 @@ async function precipitation(condition: Condition, viewport: { width: number; he
               g.arc(x + ox, y + oy, rad, 0, 6.2832);
               g.fill();
             } else {
-              // Down and to the left, along the slant: a tile down for each tile across.
+              // Down and to the left, along the slant: SLANT down for each one across.
               const len = (2.5 + r * 3) * u;
               const [dx, dy] = [-len / Math.hypot(1, SLANT), (len * SLANT) / Math.hypot(1, SLANT)];
               const grad = g.createLinearGradient(x + ox, y + oy, x + ox + dx, y + oy + dy);
@@ -246,7 +242,7 @@ async function precipitation(condition: Condition, viewport: { width: number; he
         }
       }
       const blob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode a ${tileW}x${tileH}px tile`))), 'image/png'),
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode a ${tile}px tile`))), 'image/png'),
       );
       const url = URL.createObjectURL(blob);
       const img = new Image();
@@ -254,8 +250,8 @@ async function precipitation(condition: Condition, viewport: { width: number; he
       await img.decode();
       const layer = document.createElement('div');
       layer.className = `fall ${kind}`;
-      layer.style.setProperty('--tile', `${tileW}px`);
-      layer.style.setProperty('--tile-h', `${tileH}px`);
+      layer.style.setProperty('--tile', `${tile}px`);
+      if (kind === 'rain') layer.style.setProperty('--drop', `${tile * SLANT}px`);
       layer.style.backgroundImage = `url(${url})`;
       layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
       return layer;
