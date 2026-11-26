@@ -6,7 +6,8 @@
  *
  * Feed URLs, provider resources, and alert channels' URLs and signing secrets (#88) are sealed
  * under DATA_SOURCE_KEY, the channels under a key of their own (their org, kind and field as
- * additional data); connections' credentials under CONNECTION_KEY (../connectors/vault.ts).
+ * additional data), and every list's cursors under another (their org and list, #345);
+ * connections' credentials under CONNECTION_KEY (../connectors/vault.ts).
  */
 import type { AlertSecretSealer, CursorSealer, FeedUrlSealer } from '@signforge/tools';
 
@@ -59,8 +60,9 @@ export async function seal(key: CryptoKey, aad: string, plain: string): Promise<
 
 /** What was sealed under `key` for `aad`, or undefined if it was sealed for something else, under another key, or is not sealed. */
 export async function open(key: CryptoKey, aad: string, sealed: string): Promise<string | undefined> {
-  const [v, iv, data] = sealed.split('.');
-  if (v !== 'v1' || !iv || !data) return undefined;
+  const parts = sealed.split('.');
+  const [v, iv, data] = parts;
+  if (parts.length !== 3 || v !== 'v1' || !iv || !data) return undefined;
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(iv), additionalData: encoder.encode(aad) }, key, fromB64url(data));
     return new TextDecoder().decode(plain);

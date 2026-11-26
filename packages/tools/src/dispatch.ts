@@ -6,7 +6,9 @@
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
- *   3. Validate the input with the tool's zod schema.
+ *   3. Open a list's cursor, sealed for the org, the tool and `read`'s type where the caller has the `cursors` service
+ *      (#345), refusing one longer than a sealed cursor can be, or not sealed for this list; `dispatch` seals the
+ *      page's `next` as it returns. Then validate the input with the tool's zod schema.
  *      A call whose caller lacks a service the tool `needs` (`ToolServices`) is refused with
  *      `forbidden` before its handler runs, the same for every tool.
  *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input. A handler reads
@@ -116,8 +118,9 @@ export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | '
   return { role: caller.role, scopes: caller.scopes, editorsPublish };
 }
 
+/** Keys redacted from an audit row; a list's cursor too, which names rows by their ids once opened (#345). */
 const SECRET_KEY =
-  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|oauth_?state|^code$|^resource$/i;
+  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|oauth_?state|^code$|^resource$|^cursor$/i;
 const REDACTED = '[redacted]';
 
 /**
@@ -156,25 +159,29 @@ export async function dispatch<D extends DataScope>(
   caller: Caller<D>,
 ): Promise<DispatchResult> {
   const audited = { row: false };
-  // A list's cursor as its tool made it, opened here and sealed again below, for this org and tool alone (#345).
-  const sealer = caller.services.cursors;
-  const orgId = 'orgId' in caller.org ? caller.org.orgId : null;
-  const scope = sealer && orgId ? { orgId, tool: name } : undefined;
-  let input = rawInput;
-  if (sealer && scope && isRecord(rawInput) && typeof rawInput.cursor === 'string') {
-    const cursor = await sealer.open(scope, rawInput.cursor);
-    if (cursor === undefined)
-      return fail('invalid_input', 'cursor is not one this list returned; start again without it', [
-        { path: 'cursor', message: 'not a cursor from this list' },
-      ]);
-    input = { ...rawInput, cursor };
-  }
-  const result = await dispatchCall(registry, name, input, caller, audited);
+  const result = await dispatchCall(registry, name, rawInput, caller, audited);
   // A person's press of a card (#269) is recorded however it is refused: by role, scope, a check, a lost race.
   if (caller.confirmed && !result.ok && !audited.row) return refusedPress(registry, name, rawInput, caller, result);
-  if (sealer && scope && result.ok && isRecord(result.output) && typeof result.output.next === 'string')
-    return { ok: true, output: { ...result.output, next: await sealer.seal(scope, result.output.next) } };
+  // The page's next, sealed as the cursor it comes back as is opened (step 3).
+  const scope = cursorScope(caller, name, rawInput);
+  if (scope && result.ok && isRecord(result.output) && typeof result.output.next === 'string')
+    return { ok: true, output: { ...result.output, next: await scope.sealer.seal(scope, result.output.next) } };
   return result;
+}
+
+/** The longest cursor a list takes as it is sent: a sealed one is longer than the key it holds, which `pageInput` bounds. */
+const MAX_CURSOR = 2000;
+
+/**
+ * Whom a list's cursor is sealed for, with the caller's sealer (#345): its org, its tool, and for `read` the type it
+ * reads, so a cursor opens only for the list that made it. None without a sealer, or for a platform call.
+ */
+function cursorScope<D extends DataScope>(caller: Caller<D>, name: string, rawInput: unknown) {
+  const sealer = caller.services.cursors;
+  const orgId = 'orgId' in caller.org ? caller.org.orgId : null;
+  if (!sealer || !orgId) return undefined;
+  const type = name === 'read' && isRecord(rawInput) && typeof rawInput.type === 'string' ? `/${rawInput.type}` : '';
+  return { sealer, orgId, tool: `${name}${type}` };
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -235,6 +242,16 @@ async function dispatchCall<D extends DataScope>(
   };
   const refused = refusedBy(grant);
   if (refused) return refused;
+  // A list's cursor as its tool made it, opened for this org, tool and type alone (#345); sealed again by `dispatch`.
+  const scope = cursorScope(caller, name, rawInput);
+  if (scope && isRecord(rawInput) && typeof rawInput.cursor === 'string') {
+    const notOurs = () =>
+      fail('invalid_input', 'cursor is not one this list returned; start again without it', [{ path: 'cursor', message: 'not a cursor from this list' }]);
+    if (rawInput.cursor.length > MAX_CURSOR) return notOurs();
+    const cursor = await scope.sealer.open(scope, rawInput.cursor);
+    if (cursor === undefined) return notOurs();
+    rawInput = { ...rawInput, cursor };
+  }
   // The role a change was checked for, held to the commit, checked by the batch as it runs: the right to publish (the
   // member still in a role that may, and an editor only while editors publish; without a member to read, the setting
   // alone), and an owner's (review of #414: one demoted between the read and the batch is refused), for whatever the

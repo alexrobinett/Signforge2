@@ -330,6 +330,18 @@ describe('list_audit_log over /api/tools', () => {
     }
   });
 
+  it("gives a sealed cursor that holds no id in the clear, and refuses one given a part more (#345, review of #534)", async () => {
+    const { owner } = await team();
+    const first = await owner.tool('list_audit_log', { limit: 1 });
+    const { next, entries } = (await first.json()) as { next: string; entries: { actor: { id: string } }[] };
+    // Sealed by the API (cipher.ts): v1, an iv and the ciphertext, none of it the plain key's base64 JSON.
+    expect(next).toMatch(/^v1\.[\w-]+\.[\w-]+$/);
+    for (const part of next.split('.')) expect(() => JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')))).toThrow();
+    expect(next).not.toContain(entries[0]!.actor.id);
+    expect((await owner.tool('list_audit_log', { limit: 1, cursor: next })).status).toBe(200);
+    expect((await owner.tool('list_audit_log', { limit: 1, cursor: `${next}.x` })).status).toBe(400);
+  });
+
   it("refuses a cursor from the org the member switched away from, so no page mixes two orgs' rows", async () => {
     const { owner } = await team();
     const first = await owner.tool('list_audit_log', { limit: 1 });
