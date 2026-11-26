@@ -44,6 +44,7 @@ class ModeWatch(unittest.TestCase):
             mock.patch.dict(supervisor.env, {"XDG_RUNTIME_DIR": runtime}),
             mock.patch.dict(supervisor.state, {"on": True}),
             mock.patch.dict(supervisor.mode_watch, {"resets": 0, "failed": 0, "next_try": 0.0}),
+            mock.patch.dict(supervisor.mode_errors, {"count": 0, "next_log": 0.0}),
         ]
         for p in self.patches:
             p.start()
@@ -68,7 +69,7 @@ class ModeWatch(unittest.TestCase):
         for minute in range(supervisor.MODE_TRIES):
             self.assertEqual(self.check(panel, minute * 60), {"mode": "3840x2160@30", "resets": 0})
         self.assertEqual(panel.sets, supervisor.MODE_TRIES)
-        self.assertIn("stuck at 3840x2160@30, tried again in 60 min", self.log.getvalue())
+        self.assertIn("stuck at 3840x2160@30, next try in 60 min", self.log.getvalue())
         # An hour of checks: read and reported, never set.
         last = (supervisor.MODE_TRIES - 1) * 60
         for minute in range(1, 60):
@@ -80,24 +81,44 @@ class ModeWatch(unittest.TestCase):
         self.assertEqual(panel.sets, supervisor.MODE_TRIES + 1)
         self.assertEqual(supervisor.mode_watch["failed"], 0)
 
-    def test_drops_the_reading_and_goes_on_when_a_check_fails(self):
+    def test_drops_the_reading_goes_on_and_logs_a_lasting_failure_once_an_hour(self):
         supervisor.state["output"] = {"mode": "1920x1080@60", "resets": 0}
-        sleeps = iter([None, None, Stop()])
+        panel = Panel("1920x1080@60")
+        # Each check a minute apart on the monotonic clock: 61 that fail, then one that works.
+        minutes = iter(range(0, 63 * 60, 60))
+        checks = iter([*["fail"] * 61, "works", "stop"])
+        broken_now = {"on": True}
 
         def sleep(_):
-            step = next(sleeps)
-            if step:
-                raise step
+            step = next(checks)
+            if step == "stop":
+                raise Stop()
+            broken_now["on"] = step == "fail"
 
-        def broken(*cmd, timeout=10):
-            raise RuntimeError("wlr-randr went away")
+        def run(*cmd, timeout=10):
+            if broken_now["on"]:
+                raise RuntimeError("wlr-randr went away")
+            return panel.run(*cmd, timeout=timeout)
 
-        with mock.patch.object(supervisor, "run", broken), mock.patch.object(supervisor.time, "sleep", sleep), contextlib.redirect_stdout(self.log):
+        with (
+            mock.patch.object(supervisor, "run", run),
+            mock.patch.object(supervisor.time, "sleep", sleep),
+            mock.patch.object(supervisor.time, "monotonic", lambda: next(minutes)),
+            contextlib.redirect_stdout(self.log),
+        ):
             with self.assertRaises(Stop):
                 supervisor.watch_mode()
-        self.assertNotIn("output", supervisor.state)
-        # Two checks failed, each logged: the loop went on after the first.
-        self.assertEqual(self.log.getvalue().count("mode check failed: RuntimeError('wlr-randr went away')"), 2)
+        lines = self.log.getvalue().splitlines()
+        # The first failure, the one an hour later (the 61st), and the check that worked again.
+        self.assertEqual(
+            lines,
+            [
+                "mode check failed (1 in a row): RuntimeError('wlr-randr went away')",
+                "mode check failed (61 in a row): RuntimeError('wlr-randr went away')",
+                "mode check works again, after 61 that failed",
+            ],
+        )
+        self.assertEqual(supervisor.state["output"], {"mode": "1920x1080@60", "resets": 0})
 
     def test_the_player_watch_logs_a_failure_and_goes_on(self):
         sleeps = iter([None, None, Stop()])

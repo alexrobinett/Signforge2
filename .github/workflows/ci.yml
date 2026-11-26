@@ -99,6 +99,10 @@ jobs:
       # on every change rather than only when db is affected (docs/ci.md). About 2 s.
       - name: db import boundary
         run: pnpm --filter @signforge/db exec vitest run --project node
+      # The Pi supervisor's tests (device/pi/test_supervisor.py, #558): stdlib unittest against a faked wlr-randr, no
+      # package to make them affected, so on every change. Well under a second.
+      - name: Pi supervisor tests
+        run: python3 -m unittest discover -s device/pi -p 'test_*.py'
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
       # Playwright dependency, or the template harness, launch it), and whether any needs the stress media (the cli's golden
