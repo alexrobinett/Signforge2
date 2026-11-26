@@ -185,17 +185,19 @@ export async function runPublish(
   const stored = changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id }));
   await manifestsNotSwept(org, stored, since);
   // Deleted entries go in the same batch as the switches; on their own they make no publish.
-  write({ row: undefined, writes: result.removals });
+  const removals = { row: undefined, writes: result.removals };
   // The guards of pins live as they are go only beside a write: an approval's decision, or this publish's own. A plain
   // publish of pins that changes nothing writes nothing, no audit row either (#396).
   const pinGuards = { row: undefined, writes: result.pinGuards };
   if (!result.drafts.promoted.length && !changed.length) {
+    write(removals);
     if (held.exact || result.removals.length || result.keptCleared.length) write(pinGuards);
     return { publish: null, ...report, removedDataSources: [] };
   }
   write({ row: undefined, writes: result.writes });
   // After the revision's guard, which `result.writes` opens with: a batch lost to another publish is told by the first
-  // read of its guards, not after every pin's (#396).
+  // read of its guards, not after every removal's or pin's (#396, #523).
+  write(removals);
   write(pinGuards);
   // What the manifests it stores name, for the storage sweep to keep (#235), and held to the commit: a file of an asset
   // deleted while this compiled refuses the batch, and the publish runs again from a fresh read (review of #429).

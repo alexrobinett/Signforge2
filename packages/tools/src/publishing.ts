@@ -575,7 +575,7 @@ export async function publishOrg(
 ): Promise<{
   writes: Write[];
   removals: Write[];
-  /** A pin's guard that it is still the version pinned, for the ones not promoted: commit them whatever else is, as `removals`. */
+  /** A pin's guard that it is still the version pinned, for the ones not promoted: committed beside a write, never alone (`runPublish`). */
   pinGuards: Write[];
   /**
    * What is kept beside each spot and playlist this publish covers (#116), cleared: every one it pins, or
@@ -630,7 +630,7 @@ export async function publishOrg(
     );
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
   // A pin that needs no promotion (live as it is) or is held is still pinned at its version: an edit
-  // of it that lands before the batch fails it, as one of a promoted pin does, even when nothing else is written.
+  // of it that lands before the batch fails it, as one of a promoted pin does, whenever the batch writes anything.
   const pinGuards: Write[] = [];
   if (pins) {
     const acted = new Set([...drafts.promoted, ...drafts.removed].map((d) => pinKey(d.kind, d.id)));
