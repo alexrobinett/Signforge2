@@ -1,8 +1,8 @@
 // The device tree against local D1 and R2: credentials, the three content routes, and what a
 // screen may not reach.
-import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, parsePlayerReleaseOffer, type ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
-import { seedOrg, seedPlayerRelease, testScope, type SeededOrg } from '@signforge/db/testing';
+import { registerRelease, seedOrg, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -501,21 +501,15 @@ describe('player releases (#628)', () => {
   const STABLE = sha('5');
   const CANARY = sha('7');
   const UNREGISTERED = sha('9');
-  const SIGNED = (version: number, tarball: string) =>
-    JSON.stringify({
-      version,
-      sha256: tarball,
-      size: 4,
-      files: [{ path: 'index.html', sha256: sha('d') }],
-      manifestSchemas: [MANIFEST_SCHEMA],
-      protocols: [1, 2],
-      createdAt: '2026-11-26T12:00:00.000Z',
-    });
   const offerFor = async (credential: string) => {
     const res = await get('/player-release', credential);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    return res.json();
+    const body: unknown = await res.json();
+    // What a supervisor reads: the contract's own parser takes it.
+    const read = parsePlayerReleaseOffer(body);
+    expect(read.ok, JSON.stringify(read)).toBe(true);
+    return body;
   };
 
   it('offers nothing before any release, with the schema the server compiles', async () => {
@@ -523,30 +517,23 @@ describe('player releases (#628)', () => {
   });
 
   it('offers a stable screen the newest promoted release, and a canary screen the newest of all, as CI signed it', async () => {
-    await seedPlayerRelease(env.DB, {
-      version: 5,
-      sha256: STABLE,
-      size: 4,
-      manifest: SIGNED(5, STABLE),
-      signature: 'c2lnLTU=',
-      channel: 'stable',
-      promotedAt: 1,
-    });
-    await seedPlayerRelease(env.DB, { version: 7, sha256: CANARY, size: 4, manifest: SIGNED(7, CANARY), signature: 'c2lnLTc=', channel: 'canary' });
+    const stable = await registerRelease(env.DB, { version: 5, sha256: STABLE }, 'stable');
+    const canary = await registerRelease(env.DB, { version: 7, sha256: CANARY }, 'canary');
     // The release prefix only: a tarball's hash names no other key.
     await env.BLOBS.put(playerReleaseKey(STABLE), 'tar5', { httpMetadata: { contentType: 'application/gzip' } });
     await env.BLOBS.put(playerReleaseKey(CANARY), 'tar7');
     await env.BLOBS.put(playerReleaseKey(UNREGISTERED), 'tar9');
     await testScope(env.DB, b.seed.orgId).screens.update(b.seed.screen, { playerChannel: 'canary' });
+    // The text and signature exactly as CI registered them, byte for byte.
     expect(await offerFor(a.credential)).toEqual({
       manifestSchema: MANIFEST_SCHEMA,
       channel: 'stable',
-      release: { manifest: SIGNED(5, STABLE), signature: 'c2lnLTU=' },
+      release: { manifest: stable.manifest, signature: stable.signature },
     });
     expect(await offerFor(b.credential)).toEqual({
       manifestSchema: MANIFEST_SCHEMA,
       channel: 'canary',
-      release: { manifest: SIGNED(7, CANARY), signature: 'c2lnLTc=' },
+      release: { manifest: canary.manifest, signature: canary.signature },
     });
   });
 

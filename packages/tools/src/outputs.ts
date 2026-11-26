@@ -74,10 +74,9 @@ export const screenOutput = z.object({
       at: z.number(),
       playerVersion: z.string(),
       playerRelease: z.number().nullable().describe('The player release the build is (#628); null for one the release workflow did not make'),
-      failedRelease: z
-        .object({ version: z.number(), reason: z.enum(FAILED_RELEASE_REASONS) })
-        .nullable()
-        .describe('A player release its device supervisor rolled back, which it will not install again (#628)'),
+      failedReleases: z
+        .array(z.object({ version: z.number(), reason: z.enum(FAILED_RELEASE_REASONS) }))
+        .describe('Player releases its device supervisor rolled back, newest first, until it runs a newer one (#628)'),
       activeManifestId: z.string().nullable(),
       filesMissing: z.number(),
       fallbackFrom: z.string().nullable().describe('A newer manifest that played nothing, so the screen went back to its last good one'),

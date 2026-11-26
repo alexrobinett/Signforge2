@@ -647,4 +647,11 @@ test("a screen's page says which player releases its device installs, and one it
   await axe(page);
   await versions.scrollIntoViewIfNeeded();
   await shotsBoth(page, '628-screen-player-channel');
+
+  // A browser screen has no supervisor, so nothing to say about installing releases.
+  await d1(`UPDATE screens SET kind = 'browser' WHERE id = '${screen.id}'`);
+  await page.reload();
+  await hydrated(page);
+  await expect(versions).toContainText('Player0.41.0 · release 41');
+  await expect(versions).not.toContainText('Updates');
 });

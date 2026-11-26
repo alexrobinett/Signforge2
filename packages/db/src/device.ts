@@ -8,7 +8,7 @@
  */
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { isId, type PlayerChannel, type ScreenKind } from '@signforge/contract';
+import { isId, type FailedPlayerRelease, type PlayerChannel, type ScreenKind } from '@signforge/contract';
 import * as s from './schema';
 
 export interface DeviceScreen {
@@ -26,6 +26,12 @@ export interface DeviceScreen {
   playerChannel: PlayerChannel;
   /** A device with a supervisor, or a browser tab with none: only a device reports a player release it rolled back. */
   kind: ScreenKind;
+  /**
+   * From the screen's last heartbeat (#628): the player release it ran (`player.release`), since when it has run it
+   * (`releaseSince`), and the releases its supervisor rolled back that it has run none newer than (`failedReleases`).
+   * The sync carries them on, so they cost no write of their own.
+   */
+  release: { running: number | null; since: number | null; failed: FailedPlayerRelease[] };
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
   credentials: { id: string; secretHash: string /** Whether a request has authenticated with it yet. */; used: boolean }[];
 }
@@ -59,6 +65,11 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       displayOverrideJson: sc.displayOverrideJson,
       playerChannel: sc.playerChannel,
       kind: sc.kind,
+      releaseRunning: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.player.release')`,
+      releaseSince: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.releaseSince')`,
+      releasesFailed: sql<
+        string | null
+      >`CASE WHEN json_type(${sc.heartbeatJson}, '$.failedReleases') = 'array' THEN json_extract(${sc.heartbeatJson}, '$.failedReleases') END`,
       credentialId: cr.id,
       secretHash: cr.secretHash,
       lastUsedAt: cr.lastUsedAt,
@@ -91,6 +102,8 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     displayOverrideJson: first.displayOverrideJson,
     playerChannel: first.playerChannel,
     kind: first.kind,
+    // json_extract gives an array as its JSON text; the API's sync route wrote it.
+    release: { running: first.releaseRunning, since: first.releaseSince, failed: first.releasesFailed === null ? [] : JSON.parse(first.releasesFailed) },
     credentials:
       first.status === 'active'
         ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash, used: r.lastUsedAt !== null }] : []))

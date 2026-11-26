@@ -23,11 +23,16 @@ export interface ScreenHeartbeat {
    */
   photos?: { held: number; missing: number; retried: boolean; ask: string[]; sent?: string[]; repeat?: string[] };
   /**
-   * The player release the device supervisor last rolled back (#628), as the sync carried it: kept with the heartbeat,
-   * which every sync writes anyway, so a report costs no write of its own. The supervisor reports it on every beat
-   * until it installs a newer one.
+   * Since when the screen has run its player release (`player.release`, #628), in ms: set when the release it reports
+   * changes, and carried on while it does not. Absent for a build without a release number.
    */
-  failedRelease?: NonNullable<SyncRequest['failedRelease']>;
+  releaseSince?: number;
+  /**
+   * The player releases the device supervisor rolled back (#628), one a version, newest first: each kept until the
+   * screen runs a newer release, at most `MAX_FAILED_RELEASES` (apps/api's sync route). Carried on in the heartbeat, which every sync writes
+   * anyway, so a report costs no write of its own.
+   */
+  failedReleases?: NonNullable<SyncRequest['failedRelease']>[];
 }
 
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {

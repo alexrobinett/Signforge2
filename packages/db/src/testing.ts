@@ -8,7 +8,9 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { MANIFEST_SCHEMA, PLAYER_RELEASE_FORMAT, type PlayerChannel, type PlayerReleaseManifest } from '@signforge/contract';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
+import { platform } from './platform';
 import { scoped, type NewRow, type RowPatch } from './scoped';
 import * as schema from './schema';
 import { commit, type Staged, type Write } from './writes';
@@ -495,7 +497,39 @@ export async function claimFileForSweep(db: D1Database, orgId: string, sha256: s
     .run();
 }
 
-/** A player release as CI registers it (#628), on `channel`, for the device release endpoints' tests. */
-export async function seedPlayerRelease(db: D1Database, release: typeof schema.playerReleases.$inferInsert) {
-  await drizzle(db).insert(schema.playerReleases).values(release).run();
+/**
+ * The contract's test-only Ed25519 private key, PKCS#8 (packages/contract/test/player-release/test-only.key.pem): it
+ * signs nothing real, and no screen ships its public key.
+ */
+const TEST_RELEASE_KEY = 'MC4CAQAwBQYDK2VwBCIEIFH84Y5Y6uVV8df80vKj+ir8HXCGHrX0vYBKrc+SGfSP';
+
+/** A release manifest's text with `over` on top, signed as CI signs one (#628): Ed25519 over its UTF-8 bytes, base64. */
+export async function signedRelease(over: Partial<PlayerReleaseManifest> = {}): Promise<{ manifest: string; signature: string }> {
+  const manifest = JSON.stringify({
+    format: PLAYER_RELEASE_FORMAT,
+    minSupervisor: 1,
+    version: 1,
+    sha256: 'a'.repeat(64),
+    size: 1024,
+    files: [{ path: 'index.html', sha256: 'b'.repeat(64) }],
+    manifestSchemas: [MANIFEST_SCHEMA],
+    protocols: [1, 2],
+    createdAt: '2026-11-26T12:00:00.000Z',
+    ...over,
+  } satisfies PlayerReleaseManifest);
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    Uint8Array.from(atob(TEST_RELEASE_KEY), (c) => c.charCodeAt(0)),
+    { name: 'Ed25519' },
+    false,
+    ['sign'],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(manifest)));
+  return { manifest, signature: btoa(String.fromCharCode(...signature)) };
+}
+
+/** A release CI registered on `channel`, through `platform(db).playerReleases.register`, as the release workflow will. */
+export async function registerRelease(db: D1Database, over: Partial<PlayerReleaseManifest>, channel: PlayerChannel) {
+  const { manifest, signature } = await signedRelease(over);
+  return platform(db).playerReleases.register(manifest, signature, channel);
 }

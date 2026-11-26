@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { findDeviceScreen, scoped } from '../src/index';
-import { seedOrg, type SeededOrg } from '../src/testing';
+import { findDeviceScreen, platform, scoped } from '../src/index';
+import { seedOrg, signedRelease, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
 beforeAll(async () => {
@@ -21,6 +21,7 @@ describe('findDeviceScreen', () => {
       // Every screen follows the stable player releases until it is made a canary (#628).
       playerChannel: 'stable',
       kind: 'device',
+      release: { running: null, since: null, failed: [] },
       credentials: [{ id: o.credential, secretHash: '0'.repeat(64), used: false }],
     });
   });
@@ -234,5 +235,24 @@ describe('screens.sync', () => {
 
   it('returns nothing for a screen the org does not have', async () => {
     expect(await scoped(env.DB, 'org-device').screens.sync('scr_nope', beat())).toBeUndefined();
+  });
+});
+
+// #628: CI registers a release through `platform(db)`, and the row's version, hash and size come from the signed text.
+describe('platform(db).playerReleases.register', () => {
+  it('takes the version, hash and size from the text CI signed, and keeps the text and signature as they came', async () => {
+    const { manifest, signature } = await signedRelease({ version: 300, sha256: 'e'.repeat(64), size: 2048 });
+    const row = await platform(env.DB).playerReleases.register(manifest, signature);
+    expect(row).toMatchObject({ version: 300, sha256: 'e'.repeat(64), size: 2048, manifest, signature, channel: 'canary', promotedAt: null });
+  });
+
+  it('refuses text that is not a release manifest, and a signature not in Ed25519 form, writing nothing', async () => {
+    const good = await signedRelease({ version: 301, sha256: 'f'.repeat(64) });
+    const register = (manifest: string, signature = good.signature) => platform(env.DB).playerReleases.register(manifest, signature);
+    await expect(register('not json')).rejects.toThrow('not a player release: the manifest text is not JSON');
+    await expect(register(JSON.stringify({ ...JSON.parse(good.manifest), version: 0 }))).rejects.toThrow(/version must be a whole number from 1/);
+    await expect(register(good.manifest, 'c2ln')).rejects.toThrow('the signature is not an Ed25519 signature in base64');
+    await expect(register(`${good.manifest}${' '.repeat(1_048_576)}`)).rejects.toThrow('the manifest text is too long');
+    expect(await platform(env.DB).playerReleases.offered('canary')).not.toMatchObject({ version: 301 });
   });
 });

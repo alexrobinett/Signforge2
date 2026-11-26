@@ -117,7 +117,7 @@ export async function screenView(
           at: hb.at,
           playerVersion: hb.player.version,
           playerRelease: hb.player.release ?? null,
-          failedRelease: hb.failedRelease ?? null,
+          failedReleases: hb.failedReleases ?? [],
           activeManifestId: hb.manifest.active ?? null,
           filesMissing: hb.manifest.filesMissing,
           fallbackFrom: hb.manifest.fallbackFrom ?? null,
