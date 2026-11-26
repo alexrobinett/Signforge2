@@ -7,12 +7,23 @@
 import type { CalendarFeed, NewsFeed, TableFeed } from '@signforge/contract';
 import { parseCalendar, type CalendarOptions } from './ical';
 import { type FeedImage, type NewsOptions, type ParsedNews, parseNews, parseNewsFeed } from './news';
-import { parseCsv, parseJsonTable, type TableOptions } from './table';
+import { parseCsv, parseJsonTable, readCsv, type TableOptions } from './table';
 
 export { FeedError, LIMITS, type FeedErrorCode } from './errors';
 export { rendition } from './renditions';
 export { FEED_URL_PROBLEMS, feedUrlProblem, type FeedUrlProblem } from './url';
-export { parseCalendar, parseCsv, parseJsonTable, parseNews, type CalendarOptions, type FeedImage, type NewsOptions, type ParsedNews, type TableOptions };
+export {
+  parseCalendar,
+  parseCsv,
+  parseJsonTable,
+  parseNews,
+  readCsv,
+  type CalendarOptions,
+  type FeedImage,
+  type NewsOptions,
+  type ParsedNews,
+  type TableOptions,
+};
 
 export type FeedFormat = 'ical' | 'rss' | 'csv' | 'json-table';
 

@@ -94,6 +94,7 @@ describe('the registry', () => {
       'get_spot',
       'get_spot_preview',
       'get_template',
+      'import_screen_labels',
       'keep_playlist_draft',
       'keep_spot_draft',
       'list_agent_grants',
