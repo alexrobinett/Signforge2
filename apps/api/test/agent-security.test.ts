@@ -7,6 +7,7 @@ import { scoped } from '@signforge/db';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { authSecret } from '../src/auth';
 import { mcp } from '../src/mcp';
 import { Client, ORIGIN } from './client';
 import { as, measure } from './counting';
@@ -208,16 +209,35 @@ describe('what a person keeps, over /mcp (review of #419)', () => {
   });
 
   it("gets no member change from Better Auth's endpoints with its /mcp token: no tool makes one, and they take a session alone (#345)", async () => {
-    const { t, owner, org, editorMemberId } = await team();
+    const { t, owner, ownerId, org, editorMemberId } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage']);
     const agent = new Client(t);
+    // A session cookie as Better Auth signs one (better-call's signCookieValue): the token, a dot, and its HMAC-SHA256
+    // under the auth secret, in base64. Its name is the one the owner's sign-in set.
+    const name = [...owner.jar.keys()].find((k) => k.endsWith('sf.session_token'));
+    if (!name) throw new Error('no session cookie');
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(authSecret(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signed = async (token: string) => {
+      const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(token)));
+      return { cookie: `${name}=${encodeURIComponent(`${token}.${btoa(String.fromCharCode(...mac))}`)}` };
+    };
+    // Signed so, the owner's own session token is a session: the cookie reaches Better Auth's lookup.
+    const session = await env.DB.prepare('SELECT token FROM session WHERE userId = ? ORDER BY createdAt DESC').bind(ownerId).first<{ token: string }>();
+    const own = await agent.get('/api/auth/get-session', await signed(session!.token));
+    expect(await own.json()).toMatchObject({ user: { id: ownerId } });
+    // As a bearer token, the agent's is refused before Better Auth reads it; signed as a session, Better Auth finds none.
     const bearer = { authorization: `Bearer ${access_token}` };
+    const cookie = await signed(access_token);
     for (const [path, body] of [
       ['/api/auth/organization/invite-member', { email: 'agent-345@signforge.test', role: 'owner', organizationId: org.id }],
       ['/api/auth/organization/update-member-role', { memberId: editorMemberId, role: 'owner', organizationId: org.id }],
       ['/api/auth/organization/remove-member', { memberIdOrEmail: editorMemberId, organizationId: org.id }],
-    ] as const)
-      expect((await agent.post(path, body, bearer)).status, path).toBeGreaterThanOrEqual(400);
+    ] as const) {
+      const asBearer = await agent.post(path, body, bearer);
+      expect({ status: asBearer.status, body: await asBearer.json() }, path).toEqual({ status: 401, body: { error: 'device_credential_not_accepted' } });
+      const asCookie = await agent.post(path, body, cookie);
+      expect({ status: asCookie.status, body: await asCookie.json() }, path).toEqual({ status: 401, body: { code: 'UNAUTHORIZED', message: 'Unauthorized' } });
+    }
     const members = await scoped(env.DB, org.id).members.list();
     expect(members.map((m) => m.role).sort()).toEqual(['editor', 'owner']);
     expect(await scoped(env.DB, org.id).invitations.pending()).toEqual([]);

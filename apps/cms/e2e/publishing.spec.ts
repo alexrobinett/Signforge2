@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, tool, toolResponse } from './helpers';
+import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, testScreenToPair, tool, toolResponse } from './helpers';
+import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.51';
@@ -33,10 +34,9 @@ test.beforeAll(async ({ browser }) => {
   } = await tool(page, 'save_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
 
   // A test screen, paired by its code as the Screens page pairs one.
-  screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
-  const code = (await playing(screen))!.pairing;
+  const pairing = await testScreenToPair(browser);
+  screen = pairing.screen;
+  const { code } = pairing;
   await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   await expect.poll(async () => (await playing(screen))?.pairing, { timeout: 20_000 }).toBe('');
 });
@@ -231,5 +231,22 @@ test("a name with no break wraps in the history's line at a phone's width (revie
   expect(await line.evaluate((l) => l.scrollWidth <= l.clientWidth)).toBe(true);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+});
+
+test("a screen not heard from since it was paired is unreachable in the publish's rollout, as it is on the Screens page (#345)", async () => {
+  const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.57' } });
+  const { code } = (await start.json()) as { code: string };
+  await tool(page, 'claim_screen', { code, name: 'Back room', timezone: 'UTC', orientation: 'landscape' });
+  await tool(page, 'publish', { drafts: [] });
+  await page.goto('/publishes');
+  await hydrated(page);
+  await expect(page.getByText('unreachable, update when back')).toBeVisible();
+  await expect(page.getByText(/Never heard from, playing what they have from their cache/)).toBeVisible();
+  await axe(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await shots(page, '57-publishes-unreachable');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '57-publishes-unreachable-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
 });

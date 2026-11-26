@@ -64,7 +64,7 @@ import {
   startDataLoop,
 } from './data';
 import { activeOverride, savedOverride, setOverride, wakeable } from './override';
-import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
+import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retractPlay } from './plays';
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
@@ -289,7 +289,8 @@ function renderHud(): void {
 }
 
 // ------------------------------------------------------------------ playback
-const slots = [new Slot(), new Slot()] as const;
+// `playback` is made below; a slot reports a death only once its spot has loaded.
+const slots = [new Slot((why) => playback.died(0, why)), new Slot((why) => playback.died(1, why))] as const;
 let lastProgress = performance.now();
 
 /**
@@ -334,6 +335,9 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): { sta
   });
   return { started, done };
 }
+
+/** The play the ledger last recorded: only the spot on screen's play can be taken back (`unplayed`). */
+let lastRecorded: { at: number; spot: string; ms: number } | undefined;
 
 /** Where the playback loop reports to the CMS, in preview mode. Set in boot. */
 let preview: Preview | undefined;
@@ -398,7 +402,11 @@ const playback = new Playback({
       preview?.played(manifestId, step.spot.id);
       state.played++;
       // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
-      if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
+      lastRecorded = undefined;
+      if (SOURCE === 'device' && clock.trusted) {
+        lastRecorded = { at, spot: step.spot.id, ms: step.spot.durationMs };
+        recordPlay(at, step.spot.id, step.spot.durationMs);
+      }
       state.log.push({
         spot: step.spot.id,
         playlist: step.playlist.id,
@@ -407,6 +415,15 @@ const playback = new Playback({
         durationMs: step.spot.durationMs,
       });
       if (state.log.length > 500) state.log.shift();
+    },
+    unplayed(step, manifestId, at) {
+      state.played--;
+      // Only what `played` recorded: the clock may have become trusted since, or the spot changed length.
+      if (lastRecorded?.at === at && lastRecorded.spot === step.spot.id) retractPlay(at, lastRecorded.spot, lastRecorded.ms);
+      lastRecorded = undefined;
+      const startedAt = new Date(at).toISOString();
+      const i = state.log.findLastIndex((e) => e.spot === step.spot.id && e.manifest === manifestId && e.startedAt === startedAt);
+      if (i >= 0) state.log.splice(i, 1);
     },
     skipped(message) {
       state.skipped++;

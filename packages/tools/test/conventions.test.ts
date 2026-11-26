@@ -24,7 +24,7 @@ let owner: Caller;
 
 beforeAll(async () => {
   owner = as('owner');
-  // Better Auth's rows for the member tools to list.
+  // Better Auth's rows for list_members and list_invitations to list.
   await seedTeam(env.DB, o.orgId);
 });
 

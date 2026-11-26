@@ -54,6 +54,8 @@ interface PlaybackEvents {
   status(text: string): void;
   /** A spot shown at `at` (corrected time) has started and its transition ended: log and count it. */
   played(step: Step, manifestId: string, at: number): void;
+  /** A play `played` counted died before its turn was over (`Playback.died`): take it back. */
+  unplayed(step: Step, manifestId: string, at: number): void;
   /** A spot was skipped: it did not become ready, or did not start. */
   skipped(message: string): void;
   /** Preview: a new version of the spot on screen could not be shown. */
@@ -106,6 +108,23 @@ class Signal {
   }
 }
 
+/** What a failure calls for: a full pass of failures falls back to the last good manifest; a few in a row pause. */
+type AfterFailure = 'fall back' | 'pause';
+
+/**
+ * The spot on screen. `counted`: its play counted (`played`) and has not been taken back.
+ * `settled`: it has ended a run of failures (`settleTurn`), which a play does once.
+ */
+interface OnScreen {
+  step: Step;
+  spot: Spot;
+  manifest: ScreenManifest;
+  startedAt: number;
+  shownAt: number;
+  counted: boolean;
+  settled: boolean;
+}
+
 export class Playback {
   readonly activity: Activity = { phase: 'idle', preparing: '', spotStartedAt: 0, spot: '', playlist: '' };
 
@@ -120,7 +139,11 @@ export class Playback {
   /** The slot on screen, or the one last on screen while `#onScreen` is unset. */
   #front: SlotIndex = 0;
   /** The spot on screen, the manifest its files are named in, and when it started (monotonic). */
-  #onScreen?: { spot: Spot; manifest: ScreenManifest; startedAt: number };
+  #onScreen?: OnScreen;
+  /** What a death on screen, counted as a failure when it came (`died`), calls for: the next pass does it. */
+  #afterDeath?: AfterFailure;
+  /** The slot the next spot loads in, or waits in for its turn, until it is shown. */
+  #back?: SlotIndex;
   #failures = 0;
   /** Spots of `#failingManifest` that failed in a row, never reset by the pause after a few failures. */
   #failedInManifest = 0;
@@ -141,10 +164,15 @@ export class Playback {
   #cancelTakeoverTimer = () => {};
   /** Preview: raised when a draft is adopted, so a play prepared from the older draft is prepared again at once. */
   #drafted = new Signal();
+  /** Slots whose spot died after its load (`died`), until they are loaded again. */
+  #dead = new Set<SlotIndex>();
+  /** Raised when the spot on screen dies, so it gives way as a takeover does: `#cutIn`. */
+  #frontDied = new Signal();
 
   constructor(private readonly o: PlaybackOptions) {
     this.#asleep.reset();
     this.#tookOver.reset();
+    this.#frontDied.reset();
   }
 
   /** The manifest playing, testing overrides applied. */
@@ -194,11 +222,54 @@ export class Playback {
     if (!spot || !this.#manifest) return undefined;
     try {
       await this.o.slots.update(this.#front, spot, this.#manifest);
+      // The draft loaded afresh in a slot whose spot had died: it is not cut short for that death.
+      if (this.#dead.delete(this.#front)) {
+        this.#cutIn = false;
+        this.#afterDeath = undefined;
+      }
       return spot.id;
     } catch (err) {
       this.o.events.updateFailed(`${spot.id}: ${message(err)}`);
       return undefined;
     }
+  }
+
+  /**
+   * The spot loaded in `slot` died and the slot is blank (a refit failed, the template navigated
+   * away). It counts as skipped, and as a failure towards the pause after a few in a row,
+   * whenever it lands. On screen, the next spot cuts in as soon as it is ready, instead of the slot
+   * staying blank for the rest of the spot, and its play, if it counted, is taken back whole: a
+   * spot that dies is never a play. Underneath, it is never shown. The outgoing spot of a
+   * transition has played its turn: its death changes nothing.
+   */
+  died(slot: SlotIndex, why: string): void {
+    const on = this.#onScreen;
+    const onScreen = slot === this.#front && on !== undefined;
+    if (!onScreen && slot !== this.#back) return;
+    this.#dead.add(slot);
+    this.o.events.skipped(why);
+    if (!onScreen) return;
+    this.#cutIn = true;
+    this.#frontDied.raise();
+    if (!on.counted) return;
+    on.counted = false;
+    this.o.events.unplayed(on.step, on.manifest.id, on.shownAt);
+    // Counted now, while it is the spot on screen and dead: by the next pass another play may be.
+    this.#afterDeath = this.countFailure(on.step, on.manifest);
+  }
+
+  /**
+   * A run of failures ends with a spot still alive on screen, its play counted, when the next
+   * swap, failure or sleep comes: by then it has played as long as its turn allowed. A template
+   * cannot reach that while it dies, whenever in its play it dies, so a template that dies on
+   * every play reaches the pause. Once a play: failures after it, while it plays on, are a run.
+   */
+  private settleTurn(): void {
+    const on = this.#onScreen;
+    if (!on?.counted || on.settled || this.#dead.has(this.#front)) return;
+    on.settled = true;
+    this.#failures = 0;
+    this.#failedInManifest = 0;
   }
 
   /** The display loop's decision. Off, the spot on screen gives way at once and nothing is drawn until it is on again. */
@@ -219,6 +290,7 @@ export class Playback {
     if (!this.#manifest || !this.#sequencer) return this.wait(500);
     if (!this.#displayOn) {
       // Outside display hours: draw nothing at all, then start fresh when the panel wakes.
+      this.settleTurn();
       this.blank('');
       this.activity.spot = '';
       this.activity.phase = 'sleep';
@@ -230,6 +302,8 @@ export class Playback {
     // Start loading the next spot shortly before the current one ends, or at once when a takeover cuts in.
     if (this.#onScreen && !this.#cutIn) await this.hold(this.#onScreen.startedAt + this.#onScreen.spot.durationMs - PREPARE_LEAD_MS - clock.mono());
     if (!this.#displayOn) return;
+    // A template that dies on every play must reach the pause, not loop at the speed of a prepare.
+    if (this.#afterDeath) return this.afterDeath();
 
     const m = this.#manifest;
     const chosenAt = new Date(clock.now());
@@ -238,6 +312,7 @@ export class Playback {
     const step = this.#sequencer.next(chosenAt, clock.trust());
     this.#chosenTakeover = activeTakeover(m, chosenAt, clock.trust());
     this.#tookOver.reset();
+    this.#frontDied.reset();
     this.watchTakeover();
     if (!step) {
       this.blank('SignForge\nNothing is scheduled for this screen.');
@@ -282,36 +357,61 @@ export class Playback {
       this.#cutIn = true;
       return;
     }
+    // The spot on screen died while this one loaded, and its death calls for the pause or the
+    // fallback: that comes first, and this play is dropped (a pause blanks both slots).
+    if (this.#afterDeath) {
+      slots.clear(slot);
+      pins.release('preparing');
+      return this.afterDeath();
+    }
+    // The spot loaded here died while it waited (a refit failed, it navigated away): `died` counted it, and it is never shown.
+    if (this.#dead.has(slot)) {
+      slots.clear(slot);
+      pins.release('preparing');
+      return this.failed(step, m);
+    }
     this.#cutIn = false;
     events.status('');
     const startedAt = clock.mono();
     this.activity.spotStartedAt = startedAt;
     const shownAt = clock.now();
     this.activity.phase = 'transition';
+    this.settleTurn();
     const prev = this.#onScreen;
-    const { started, done } = slots.show(slot, prev ? this.#front : undefined, tr);
+    const prevSlot = this.#front;
+    this.#back = undefined;
+    // On screen from here, before `show` plays it: a death from now on is the spot on screen's (`died`).
+    this.#front = slot;
+    const on: OnScreen = { step, spot: step.spot, manifest: m, startedAt, shownAt, counted: false, settled: false };
+    this.#onScreen = on;
+    const { started, done } = slots.show(slot, prev ? prevSlot : undefined, tr);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
     const playing = this.filesFor(step.spot, m);
     pins.hold('playing', prev ? [...playing, ...this.filesFor(prev.spot, prev.manifest)] : playing);
     pins.release('preparing');
-    this.#front = slot;
-    this.#onScreen = { spot: step.spot, manifest: m, startedAt };
     // A spot counts, and plays, once it has started: a video whose play() the browser refuses is a failed spot.
     const playedOk = await started.then(
       () => true,
       (err: unknown) => {
-        events.skipped(`${step.spot.id}: did not start: ${message(err)}`);
+        // A failed refit rejects `play` too, and `died` has counted it.
+        if (!this.#dead.has(slot)) events.skipped(`${step.spot.id}: did not start: ${message(err)}`);
         return false;
       },
     );
     await done;
     pins.hold('playing', playing);
     this.activity.phase = 'play';
-    if (!playedOk) return this.failed(step, m);
+    // One that did not start, or died before its play counted, is not played: its slot is blank,
+    // so the next spot cuts in as soon as it is ready. On a one-spot playlist, the same spot again.
+    if (!playedOk || this.#dead.has(slot)) {
+      this.#cutIn = true;
+      return this.failed(step, m);
+    }
     // After the transition: storing the play and a new last good manifest costs frames on a Pi.
-    this.#failures = 0;
-    this.#failedInManifest = 0;
+    // The failure count is not reset here but when the spot's turn ends alive (`settleTurn`), so
+    // a template that dies just after its play counts still reaches the pause.
+    on.counted = true;
     this.record(step, m.id, shownAt);
     this.promote(step.spot, m.id);
   }
@@ -327,7 +427,7 @@ export class Playback {
   }
 
   private hold(ms: number): Promise<void> {
-    return Promise.race([this.wait(ms), this.#asleep.promise, this.#tookOver.promise]);
+    return Promise.race([this.wait(ms), this.#asleep.promise, this.#tookOver.promise, this.#frontDied.promise]);
   }
 
   private watchTakeover(): void {
@@ -351,6 +451,9 @@ export class Playback {
   private blank(text: string): void {
     this.o.slots.clear(0);
     this.o.slots.clear(1);
+    this.#dead.clear();
+    this.#afterDeath = undefined;
+    this.#back = undefined;
     this.#onScreen = undefined;
     this.o.pins.release('playing');
     this.o.pins.release('preparing');
@@ -358,6 +461,8 @@ export class Playback {
   }
 
   private async prepare(slot: SlotIndex, step: Step, m: ScreenManifest): Promise<boolean> {
+    this.#dead.delete(slot);
+    this.#back = slot;
     try {
       const t0 = this.o.clock.mono();
       await this.o.slots.prepare(slot, step.spot, m);
@@ -371,7 +476,13 @@ export class Playback {
   }
 
   /** A spot of `m` failed to prepare or to start: fall back after a full pass of them, pause after a few in a row. */
-  private async failed(step: Step, m: ScreenManifest): Promise<void> {
+  private failed(step: Step, m: ScreenManifest): Promise<void> {
+    return this.afterFailure(this.countFailure(step, m));
+  }
+
+  /** Count a failure of a spot of `m`, and say what it calls for, if anything. */
+  private countFailure(step: Step, m: ScreenManifest): AfterFailure | undefined {
+    this.settleTurn();
     if (this.#failingManifest !== m.id) {
       this.#failingManifest = m.id;
       this.#failedInManifest = 0;
@@ -379,15 +490,24 @@ export class Playback {
     if (++this.#failedInManifest >= step.playlist.items.length && this.#lastGood && m.id !== this.#lastGood.id) {
       this.#failures = 0;
       this.#failedInManifest = 0;
-      this.fallBack();
-      return;
+      return 'fall back';
     }
-    if (++this.#failures >= MAX_CONSECUTIVE_FAILURES) {
-      this.blank('SignForge\nContent is unavailable. Retrying…');
-      this.o.events.progress();
-      await this.wait(5000);
-      this.#failures = 0;
-    }
+    return ++this.#failures >= MAX_CONSECUTIVE_FAILURES ? 'pause' : undefined;
+  }
+
+  private afterDeath(): Promise<void> {
+    const next = this.#afterDeath;
+    this.#afterDeath = undefined;
+    return this.afterFailure(next);
+  }
+
+  private async afterFailure(next: AfterFailure | undefined): Promise<void> {
+    if (next === 'fall back') return this.fallBack();
+    if (next !== 'pause') return;
+    this.blank('SignForge\nContent is unavailable. Retrying…');
+    this.o.events.progress();
+    await this.wait(5000);
+    this.#failures = 0;
   }
 
   /** Nothing in the current manifest has played for a full pass of its playlist: play the last good one until a newer one comes. */

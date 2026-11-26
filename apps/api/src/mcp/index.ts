@@ -207,9 +207,8 @@ function recordedAs(tool: string, change: boolean, needs: Scope | null, args: un
 }
 
 /**
- * What an agent's tools may use: the API's services for the grant's org, counted against its member,
- * with no Better Auth. An agent has no session, so the member tools that act through one (`members`)
- * are not offered. mcp-tools.test.ts lists the registry against exactly these.
+ * What an agent's tools may use: the API's services for the grant's org, counted against its member.
+ * mcp-tools.test.ts lists the registry against exactly these.
  */
 export const agentServices = (c: Context<McpEnv>, grant: { orgId: string; userId: string }) => toolServices(c, { orgId: grant.orgId, member: grant.userId });
 

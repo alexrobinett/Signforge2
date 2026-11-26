@@ -25,6 +25,7 @@ export {
   type AlertSecretSealer,
   type AnyTool,
   type Connectors,
+  type CursorSealer,
   type DataScope,
   type FeedUrlSealer,
   type Place,
@@ -67,7 +68,7 @@ export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
 export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS } from './assets';
 export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS } from './screens';
-export { entryView } from './schedule';
+export { entryToDelete, entryView } from './schedule';
 export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
 export { kitColors, type StoredColors } from './brand';
 export type { StoredCheckReport } from './templates';

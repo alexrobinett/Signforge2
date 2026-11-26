@@ -38,6 +38,12 @@ export function recordPlay(at: number, spot: string, ms: number): void {
   save();
 }
 
+/** Take back a play `recordPlay` counted, while its hour is still open (`PlayLedger.retract`). */
+export function retractPlay(at: number, spot: string, ms: number): void {
+  ledger.retract(at, spot, ms);
+  save();
+}
+
 /** The counts the next sync carries (see `PlayLedger.batch`). */
 export function playBatch(now: number): PlayBatch {
   const b = ledger.batch(now, MAX_SYNC_PLAY_COUNTS);

@@ -6,9 +6,10 @@
  *
  * Feed URLs, provider resources, and alert channels' URLs and signing secrets (#88) are sealed
  * under DATA_SOURCE_KEY, the channels under a key of their own (their org, kind and field as
- * additional data); connections' credentials under CONNECTION_KEY (../connectors/vault.ts).
+ * additional data), and every list's cursors under another (their org and list, #345);
+ * connections' credentials under CONNECTION_KEY (../connectors/vault.ts).
  */
-import type { AlertSecretSealer, FeedUrlSealer } from '@signforge/tools';
+import type { AlertSecretSealer, CursorSealer, FeedUrlSealer } from '@signforge/tools';
 
 /** Only for `wrangler dev` and tests. Every other environment must set the DATA_SOURCE_KEY secret. */
 const DEV_KEY = 'signforge-dev-data-source-key-not-for-deployed-environments';
@@ -59,8 +60,9 @@ export async function seal(key: CryptoKey, aad: string, plain: string): Promise<
 
 /** What was sealed under `key` for `aad`, or undefined if it was sealed for something else, under another key, or is not sealed. */
 export async function open(key: CryptoKey, aad: string, sealed: string): Promise<string | undefined> {
-  const [v, iv, data] = sealed.split('.');
-  if (v !== 'v1' || !iv || !data) return undefined;
+  const parts = sealed.split('.');
+  const [v, iv, data] = parts;
+  if (parts.length !== 3 || v !== 'v1' || !iv || !data) return undefined;
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(iv), additionalData: encoder.encode(aad) }, key, fromB64url(data));
     return new TextDecoder().decode(plain);
@@ -85,6 +87,18 @@ export async function openFeedUrl(env: KeyEnv, source: Source, sealed: string): 
 const channelKey = (env: KeyEnv) =>
   sealingKey({ secret: env.DATA_SOURCE_KEY, devSecret: DEV_KEY, name: 'DATA_SOURCE_KEY', info: 'sf-alert-channel.v1', environment: env.ENVIRONMENT });
 const channelAad = (channel: Channel, field: 'url' | 'secret') => `${channel.orgId}/${channel.kind}/${field}`;
+
+const cursorKey = (env: KeyEnv) =>
+  sealingKey({ secret: env.DATA_SOURCE_KEY, devSecret: DEV_KEY, name: 'DATA_SOURCE_KEY', info: 'sf-cursor.v1', environment: env.ENVIRONMENT });
+
+/** A list's cursors, sealed for one org and tool (#345): no caller reads the ids in one, and none from another list opens. */
+export function cursorSealer(env: KeyEnv): CursorSealer {
+  const aad = ({ orgId, tool }: { orgId: string; tool: string }) => `${orgId}/${tool}`;
+  return {
+    seal: async (scope, cursor) => seal(await cursorKey(env), aad(scope), cursor),
+    open: async (scope, sealed) => open(await cursorKey(env), aad(scope), sealed),
+  };
+}
 
 export function alertSecretSealer(env: KeyEnv): AlertSecretSealer {
   return { seal: async (channel, field, value) => seal(await channelKey(env), channelAad(channel, field), value) };

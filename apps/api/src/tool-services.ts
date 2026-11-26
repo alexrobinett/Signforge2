@@ -5,16 +5,14 @@
  * provider until a tool uses it.
  *
  * `/mcp` (M4-06, src/mcp) is the third adapter: it builds its services here, with the grant's org and
- * member as its `ServiceScope`. It gets no `members`, which needs a Better Auth that acts as the grant's
- * member and an audit hook that records the agent: only a session's request has one (`auth`).
+ * member as its `ServiceScope`.
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
 import { aiProviders } from './agent/provider';
 import { agentCallLog } from './agents/calls';
-import type { Auth } from './auth';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
-import { alertSecretSealer, feedUrlSealer } from './data/cipher';
+import { alertSecretSealer, cursorSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
 import { openMeteoPlaces } from './data/places';
 import { tableReader } from './data/tables';
@@ -44,8 +42,6 @@ export interface ServiceScope {
   email?: EmailSender;
   /** Reaches providers. Tests pass a fake provider's; otherwise `connectorDeps(env)`. */
   connectors?: ConnectorDeps;
-  /** The request's Better Auth, for the member tools, which act as its session's member. Only `/api` has one. */
-  auth?: Auth;
 }
 
 /** Every service, each key present, so a service added to `ToolServices` is a type error here until it is built. */
@@ -76,6 +72,7 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
       return user.success && ip.success;
     },
     notify: screenNotifier(env),
+    cursors: cursorSealer(env),
     cmsOrigin: env.CMS_ORIGIN,
     deliverNow:
       orgId === null

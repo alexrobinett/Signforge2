@@ -283,7 +283,7 @@ export const publishOutput = z.object({
     .describe('What it made live, and the schedule entries it removed, by kind; null for a roll back, and for a publish made before these were kept'),
 });
 
-export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
+export const OUTCOMES = ['playing', 'downloading', 'asleep', 'unreachable', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
 
 // ------------------------------------------------------------------ templates
 
@@ -466,7 +466,7 @@ export const dataSourceOutput = z.object({
   refreshS: z.number(),
   horizonDays: z.number().nullable(),
   rowsPath: z.string().nullable().describe('A json-table source: the path to its list of objects; null for the whole document'),
-  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. Ignored for other formats"),
+  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. False for every other format"),
   nextPollAt: z.number(),
   failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
   lastError: z
@@ -950,6 +950,7 @@ export const outputs = {
         filesMissing: z.number().nullable().describe('downloading: files it has still to fetch'),
         wakesAt: z.string().nullable().describe('asleep: when it wakes'),
         lastSeenAt: z.number().nullable(),
+        state: z.enum(STATE_KINDS).describe("The screen's state now, as read screen_status gives it: a screen playing this may since have become unreachable"),
       }),
     ),
   }),

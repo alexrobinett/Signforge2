@@ -218,7 +218,7 @@ const listEntries = defineTool({
 const startTakeover = defineTool({
   name: 'start_takeover',
   description:
-    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. A new one on the same screens replaces one running (describe(schedule_entry) says which wins). End one now with takeover (action end), or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
+    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two aimed alike, the later wins (describe(schedule_entry) has the rule). End one now with takeover (action end), or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -333,14 +333,27 @@ const saveEntry = defineTool({
  * published goes at once (version null); a published one needs the right to publish, and is marked deleted until a
  * publish applies it (its new version).
  */
+/**
+ * A schedule entry `delete` can remove, and whether that needs the right to publish: one published waits for a publish
+ * (#523). Undefined for one gone or already marked deleted, which `delete` refuses as not found. The drawer's delete card
+ * asks this too, so it offers a press exactly where the tool would run it.
+ */
+export async function entryToDelete(org: OrgScope, scheduleEntryId: string) {
+  const row = await org.scheduleEntries.get(scheduleEntryId);
+  if (!row || row.deletedAt !== null) return undefined;
+  return { row, needsPublish: published(row) !== undefined };
+}
+
 export async function deleteScheduleEntry(
   { org, write, publishRight }: Pick<ToolContext<unknown>, 'org' | 'write' | 'publishRight'>,
   scheduleEntryId: string,
   ifVersion: number | undefined,
 ): Promise<number | null> {
-  const row = await requireEntry(org, scheduleEntryId);
+  const found = await entryToDelete(org, scheduleEntryId);
+  if (!found) throw notFound('schedule entry', scheduleEntryId);
+  const { row } = found;
   if (ifVersion !== undefined && row.rowVersion !== ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
-  if (!published(row)) {
+  if (!found.needsPublish) {
     write(org.scheduleEntries.stage.remove(row));
     return null;
   }

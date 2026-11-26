@@ -4,7 +4,7 @@
 // so nothing depends on the hour the test runs at. What the screen's page says it plays is what
 // was published, not the draft; a takeover's publish offers no Undo, and a removal waits for Publish.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, testScreenToPair, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.137';
@@ -46,11 +46,10 @@ test.beforeAll(async ({ browser }) => {
   await tool(page, 'set_default_playlist', { playlistId: playlist['All day'] });
 
   // A test screen, paired by its code as the Screens page pairs one, put in a new group, Front, from its settings.
-  screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
+  const pairing = await testScreenToPair(browser);
+  screen = pairing.screen;
   const { screen: paired } = await tool(page, 'claim_screen', {
-    code: (await playing(screen))!.pairing,
+    code: pairing.code,
     name: 'Front window',
     timezone: 'UTC',
     orientation: 'landscape',

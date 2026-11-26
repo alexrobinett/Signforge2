@@ -23,6 +23,7 @@ import {
   type ScreenNotifier,
   ToolError,
   type ToolServices,
+  type CursorSealer,
 } from '../src';
 import { racing } from './calls';
 import { fakeServices } from './services';
@@ -818,6 +819,97 @@ describe('tool services', () => {
     expect(await dispatch(reg, 'find_nearby', { query: 'Atlanta' }, { ...caller('viewer'), services })).toEqual({ ok: true, output: { found: 0 } });
     expect(ran).toHaveLength(1);
     expect(ran[0]).toBe(services);
+  });
+});
+
+describe("a list's cursor (#345)", () => {
+  /** Reversible, so a test sees what was sealed and for which org and tool. */
+  const cursors: CursorSealer = {
+    seal: async ({ orgId, tool }, cursor) => `sealed:${orgId}/${tool}:${cursor}`,
+    open: async ({ orgId, tool }, sealed) => (sealed.startsWith(`sealed:${orgId}/${tool}:`) ? sealed.slice(`sealed:${orgId}/${tool}:`.length) : undefined),
+  };
+  const sealing = (): Caller => ({ ...caller('viewer'), services: { ...fakeServices, cursors } });
+
+  it('is sealed for its org and tool as it leaves, and opened as it comes back, so the next page follows', async () => {
+    const first = await dispatch(registry, 'list_spots', { limit: 1 }, sealing());
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    const { next, spots } = first.output as { next: string; spots: { id: string }[] };
+    expect(next).toMatch(new RegExp(`^sealed:${o.orgId}/list_spots:`));
+    const second = await dispatch(registry, 'list_spots', { limit: 1, cursor: next }, sealing());
+    expect(second).toMatchObject({ ok: true });
+    if (second.ok) expect((second.output as { spots: { id: string }[] }).spots[0]?.id).not.toBe(spots[0]?.id);
+  });
+
+  /** The test sealer, recording each cursor it is asked to open. */
+  const counted = () => {
+    const opened: string[] = [];
+    const sealer: CursorSealer = { ...cursors, open: async (scope, sealed) => (opened.push(sealed), cursors.open(scope, sealed)) };
+    return { opened, sealer };
+  };
+
+  it('counts an agent over its limit before it opens a cursor: rate_limited (review of #534)', async () => {
+    const { opened, sealer } = counted();
+    const agentLimiter: AgentLimiter = { take: async () => ({ ok: false, limit: 'calls_per_minute', retryAfterSeconds: 5 }), audited: async () => {} };
+    const overLimit: Caller = {
+      ...caller('viewer', ['content:read'], { kind: 'agent', id: 'grant-cursor', clientId: 'agent-app' }),
+      services: { ...fakeServices, cursors: sealer },
+      agentLimiter,
+    };
+    expect(await dispatch(registry, 'list_spots', { cursor: 'not-ours' }, overLimit)).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect(opened).toEqual([]);
+  });
+
+  it('answers a call to no tool unknown_tool, whatever cursor it carries (review of #534)', async () => {
+    const { opened, sealer } = counted();
+    const sealing: Caller = { ...caller('viewer'), services: { ...fakeServices, cursors: sealer } };
+    expect(await dispatch(registry, 'no_such_tool', { cursor: 'not-ours' }, sealing)).toMatchObject({ ok: false, error: 'unknown_tool' });
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a cursor longer than a sealed one can be without opening it (review of #534)', async () => {
+    const { opened, sealer } = counted();
+    const sealing: Caller = { ...caller('viewer'), services: { ...fakeServices, cursors: sealer } };
+    expect(await dispatch(registry, 'list_spots', { cursor: 'x'.repeat(2001) }, sealing)).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'cursor' }],
+    });
+    expect(opened).toEqual([]);
+  });
+
+  it('audits a refused press of a card whose cursor does not open, as any refused press is (review of #534)', async () => {
+    const pressed: Caller = { ...sealing(), confirmed: { summary: 'Listed', runId: 'run-cursor', callId: 'call-cursor' } };
+    const before = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
+    expect(await dispatch(registry, 'list_spots', { cursor: 'not-ours' }, pressed)).toMatchObject({ ok: false, error: 'invalid_input' });
+    const after = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
+    expect(after.length).toBe(before.length + 1);
+    expect(after.find((e) => e.action === 'list_spots')?.detailJson).toContain('"cursor":"[redacted]"');
+  });
+
+  it("opens a read's cursor only for the type it read (review of #534)", async () => {
+    const first = await dispatch(registry, 'read', { type: 'spot', limit: 1 }, sealing());
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    const next = (first.output as { next: string }).next;
+    expect(next).toMatch(new RegExp(`^sealed:${o.orgId}/read/spot:`));
+    expect(await dispatch(registry, 'read', { type: 'spot', limit: 1, cursor: next }, sealing())).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'read', { type: 'screen', limit: 1, cursor: next }, sealing())).toMatchObject({ ok: false, error: 'invalid_input' });
+  });
+
+  it("refuses a cursor not sealed for this list: a plain one, another tool's, another org's", async () => {
+    const first = await dispatch(registry, 'list_spots', { limit: 1 }, sealing());
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    const next = (first.output as { next: string }).next;
+    const plain = next.slice(`sealed:${o.orgId}/list_spots:`.length);
+    for (const [name, cursor] of [
+      ['list_spots', plain],
+      ['list_playlists', next],
+      ['list_spots', next.replace(o.orgId, 'org-other')],
+    ] as const)
+      expect(await dispatch(registry, name, { limit: 1, cursor }, sealing()), `${name} ${cursor}`).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'cursor' }],
+      });
   });
 });
 
