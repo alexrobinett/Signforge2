@@ -15,9 +15,9 @@
  * the stage to play until the source's first poll.
  */
 import { type LiveSourceDef, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
-import { bindAll, type PlaceView, type TableFormat, weatherSource, type WeatherUnits } from '~/lib/live-data';
+import { bindAll, type PlaceView, type TableFormat, weatherSource, weatherToKeep, weatherToReuse, type WeatherUnits } from '~/lib/live-data';
 import type { SpotView } from '~/lib/spots';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import { dataSourceKeys, dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
@@ -232,7 +232,26 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       attempt(t, async () => {
         const wanted = await weatherSource(t.live, place, units);
         const { dataSources } = await queryClient.query(dataSourcesQuery(t.orgId));
-        const id = dataSources.some((d) => d.id === wanted.id) ? wanted.id : await create(t.orgId, { ...wanted, format: 'json' });
+        const ids = dataSources.map((d) => d.id);
+        const make = async () => {
+          try {
+            return await create(t.orgId, { ...wanted, format: 'json' });
+          } catch (err) {
+            // The org at its ten (#541): the spot stays on the same place's source it reads, if any, until one is free.
+            // Any other refusal is shown.
+            const atCap = err instanceof Refusal && err.code === 'conflict' && typeof err.details === 'object' && err.details !== null && 'max' in err.details;
+            const current = atCap
+              ? weatherToKeep(
+                  wanted.id,
+                  Object.keys(t.live.fields).map((f) => t.spot.bindings?.[f]?.dataSourceId),
+                  ids,
+                )
+              : undefined;
+            if (current === undefined) throw err;
+            return current;
+          }
+        };
+        const id = weatherToReuse(t.live, wanted.id, ids) ?? (await make());
         const data: Record<string, unknown> = {};
         const { place: placeField, units: unitFields } = t.live;
         const placeDef = placeField ? t.manifest.fields[placeField] : undefined;

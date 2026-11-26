@@ -75,7 +75,8 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   rowsPath: d.rowsPath,
   // An rss source's switch; no other format has photos, whatever an older row stored (#345).
   photos: d.format === 'rss' && d.photos,
-  nextPollAt: d.nextPollAt,
+  // 0 is the poller's "due now", not a time (#543).
+  nextPollAt: d.nextPollAt === 0 ? null : d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
   version: d.rowVersion,
@@ -269,7 +270,8 @@ const saveDataSource = defineTool({
       if (format === 'provider')
         publishRight("Reading a new resource through a person's connection needs the right to publish: ask someone who may publish to add it");
       const existing = await org.dataSources.list();
-      if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);
+      if (existing.length >= MAX_DATA_SOURCES)
+        throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`, { max: MAX_DATA_SOURCES });
       if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
       // The URL (or resource) is sealed to the row's id, so the id is chosen first.
       const sourceId = input.id ?? newId('src');

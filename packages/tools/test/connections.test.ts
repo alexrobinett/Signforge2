@@ -227,7 +227,7 @@ describe('a provider data source', () => {
     expect(JSON.stringify(await owner.org.auditLog.list({ limit: 100 }))).not.toContain('sheet-abc');
 
     const { dataSource: moved } = await call('save_data_source', { dataSourceId: 'sheet', resource: 'sheet-abc!A1:C40' });
-    expect(moved).toMatchObject({ failures: 0, nextPollAt: 0 });
+    expect(moved).toMatchObject({ failures: 0, nextPollAt: null });
     expect(await owner.org.dataSources.get('sheet')).toMatchObject({ urlEncrypted: `sealed:${o.orgId}/sheet:sheet-abc!A1:C40` });
   });
 
