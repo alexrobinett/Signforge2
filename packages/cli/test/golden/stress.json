@@ -81,8 +81,8 @@
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
     },
-    "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b": {
-      "size": 81204,
+    "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62": {
+      "size": 80559,
       "type": "text/html"
     },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
@@ -604,10 +604,10 @@
       },
       "html": "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79"
     },
-    "base/agenda@1.4.0": {
+    "base/agenda@1.5.0": {
       "manifest": {
         "id": "agenda",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "name": "Agenda",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
         "fields": {
@@ -693,7 +693,7 @@
         },
         "protocol": 2
       },
-      "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
+      "html": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62"
     },
     "base/info-frame@1.2.0": {
       "manifest": {
@@ -1608,7 +1608,7 @@
       "id": "holidays",
       "name": "US holidays (Google Calendar)",
       "kind": "template",
-      "template": "base/agenda@1.4.0",
+      "template": "base/agenda@1.5.0",
       "data": {
         "title": "Holidays",
         "subtitle": "United States",
@@ -1755,7 +1755,7 @@
       "id": "meeting-room",
       "name": "Meeting room (fixed data)",
       "kind": "template",
-      "template": "base/agenda@1.4.0",
+      "template": "base/agenda@1.5.0",
       "data": {
         "title": "Room 4B",
         "subtitle": "This week's bookings",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "b40df17b565667358ca681b1db444b542bb47f2c1d459ac0f38407a5a246c501"
+  "id": "1b151a7b6f3f0c7451d7909811523e9ce9f1f8dd35e2c42bd45c5c1ecdd05daf"
 }
