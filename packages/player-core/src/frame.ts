@@ -72,5 +72,10 @@ export function containedFrames(bundle: string): { wrapper: string; template: st
   return { wrapper, template };
 }
 
+/** Throw if the work was cancelled while it waited: the Frame host's and the slot's check after each await. */
+export function alive(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('cancelled');
+}
+
 /** The template frame's `sandbox`: scripts only, so an opaque origin, no popups, forms or navigating other frames. */
 export const TEMPLATE_SANDBOX = 'allow-scripts';

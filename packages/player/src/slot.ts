@@ -16,7 +16,7 @@ import {
   type Spot,
   type TemplateManifest,
 } from '@signforge/contract';
-import { READY_TIMEOUT_MS, resolveSpotData, screenLocale } from '@signforge/player-core';
+import { alive, READY_TIMEOUT_MS, resolveSpotData, screenLocale } from '@signforge/player-core';
 import { openFrameHost, type FrameHost } from '@signforge/player-core/frame-host';
 import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
@@ -25,11 +25,6 @@ import { getFile } from './source';
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
-
-/** Throw if the load was cancelled while it waited. */
-function alive(signal: AbortSignal): void {
-  if (signal.aborted) throw new Error('cancelled');
-}
 
 const orientationOf = (w: number, h: number): Orientation => (w >= h ? 'landscape' : 'portrait');
 
