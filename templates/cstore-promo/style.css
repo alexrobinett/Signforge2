@@ -346,7 +346,7 @@ body {
   right: -10vmin;
   top: 68%;
 }
-/* Between the copy panel and the products, right of the tallest bottle. */
+/* Between the copy and the products, right of the tallest bottle. */
 [data-orientation='portrait'] .badge {
   top: 40%;
   right: 5%;
