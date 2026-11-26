@@ -39,7 +39,7 @@ import {
 } from '../src/data/feed-photos';
 import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
-import { orgBlobKey } from '../src/r2';
+import { manifestKey, orgBlobKey } from '../src/r2';
 import { fakeProvider } from './fake-provider';
 
 const DAY_MS = 24 * 3_600_000;
@@ -738,6 +738,89 @@ describe('only fetching for sources something will show', () => {
     expect(take()).toEqual([]);
     expect(await row(photo2)).toBeUndefined();
     await o.scope.spots.delete(textOnlySpotId);
+  });
+});
+
+describe('photos for what screens play, and a feed unchanged since photos were turned on (#481)', () => {
+  /**
+   * A manifest as `sf push` uploads one for `org`'s screen: a News spot binding `sourceIds`' stories, with no published
+   * spot behind it. The screen is told to play it.
+   */
+  async function pushed(org: SeededOrg, sourceIds: string[]) {
+    const manifestId = (++n).toString(16).padStart(64, 'f');
+    const template = 'org/news-test@2.0.0';
+    const manifest = {
+      schema: 2,
+      screen: { locale: 'en-GB' },
+      templates: { [template]: { html: 'a'.repeat(64), manifest: { fields: PHOTO_NEWS_FIELDS, protocol: 1 } } },
+      spots: Object.fromEntries(
+        sourceIds.map((id) => [`pushed-${id}`, { kind: 'template', id: `pushed-${id}`, template, bindings: { items: { source: id, path: 'items' } } }]),
+      ),
+      files: {},
+      dataSources: Object.fromEntries(sourceIds.map((id) => [id, {}])),
+    };
+    await env.BLOBS.put(manifestKey(org.orgId, org.screen, manifestId), JSON.stringify(manifest));
+    await org.scope.screens.update(org.screen, { desiredManifestId: manifestId });
+  }
+
+  it("queues photos for a source only a screen's pushed manifest shows: no published spot binds it", async () => {
+    const org = await seedOrg(env.DB, `push-481-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    const feed = 'https://pushed.test/rss';
+    const id = await news(feed, { org, bind: false });
+    await pushed(org, [id]);
+    const photo = (i: number) => `https://cdn.pushed.test/${i}.jpg`;
+    await poll({ now: NOW, guards: web({ [feed]: { body: feedOf(2, photo) } }).guards });
+    expect(
+      take()
+        .filter((job) => job.sourceId === id)
+        .map((job) => job.url),
+    ).toEqual([photo(0), photo(1)]);
+  });
+
+  it('reads a feed whole once when photos are shown but were never read from it, though it answers 304, then takes 304s again', async () => {
+    const feed = 'https://unchanged.test/rss';
+    const id = await news(feed);
+    const photo = (i: number) => `https://cdn.unchanged.test/${i}.jpg`;
+    // As demo's NYT had it: a snapshot read with no photo recorded, and validators that make every request a 304.
+    await o.scope.dataSources.putSnapshot(id, {
+      version: 'text-only',
+      fetchedAt: NOW - DAY_MS,
+      checkedAt: NOW - DAY_MS,
+      dataJson: JSON.stringify({ items: [{ title: 'Story 0' }] }),
+    });
+    await o.scope.dataSources.update(id, { etag: '"rss"', photoUrlsJson: JSON.stringify({ stories: [null] }) });
+    const rss = web({ [feed]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body: feedOf(2, photo), headers: { etag: '"rss"' } }) });
+    await poll({ now: NOW, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.has('if-none-match')).toBe(false);
+    expect(
+      take()
+        .filter((job) => job.sourceId === id)
+        .map((job) => job.url),
+    ).toEqual([photo(0), photo(1)]);
+    // Read with photos now: the next poll asks for changes only.
+    await o.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN });
+    await poll({ now: NOW + 5 * MIN, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss"');
+  });
+
+  it("keeps a poll of 5 sources a pushed manifest shows under the Free plan's D1 limits", async () => {
+    const org = await seedOrg(env.DB, `push-481-budget-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    const answers: Record<string, Answer> = {};
+    const ids: string[] = [];
+    for (let s = 0; s < 5; s++) {
+      const feedUrl = `https://push-budget-${s}.test/rss`;
+      ids.push(await news(feedUrl, { org, bind: false }));
+      answers[feedUrl] = { body: feedOf(10, (i) => `https://cdn.push-budget-${s}.test/${i}.jpg`) };
+    }
+    await pushed(org, ids);
+    const counter = countingDb(env.DB);
+    await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db });
+    // Measured: pollInit is one batch, the screens' manifests a statement in it; the manifests themselves are R2 reads, not D1.
+    // 13 calls is what D1 counts against an invocation's 50.
+    expect(counter.counts()).toEqual({ apiCalls: 13, statements: 38 });
+    expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(NEW_PER_ORG_PER_DAY);
   });
 });
 

@@ -128,10 +128,10 @@ export interface PhotoPlan {
 }
 
 /**
- * Start the photo half of a poll: only RSS sources take a read token and check whether any published spot shows photos,
- * by the rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose
- * rows declare an `image` property. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no
- * photo work.
+ * Start the photo half of a poll: only RSS sources take a read token and check whether anything shows photos, by the
+ * rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose rows
+ * declare an `image` property, in a screen's desired manifest (a CMS publish's or an `sf push`'s, #481) or a published
+ * spot. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no photo work.
  */
 export function startPhotoPoll(row: DataSourceRow, bound: readonly BoundField[], now: number): PhotoPoll | undefined {
   if (row.format !== 'rss') return undefined;

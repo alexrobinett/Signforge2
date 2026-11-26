@@ -1977,15 +1977,16 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * Everything the poller needs once per org: the claimed sources with their latest snapshot
-       * versions, plus published spots (with template manifests) and screen/org locales for bound
-       * field checks — all in one D1 batch.
+       * versions, plus published spots (with template manifests), the screens' desired manifests (an
+       * `sf push`'s as well as a publish's, #481) and screen/org locales for bound field checks — all
+       * in one D1 batch.
        */
       pollInit: async (ids: readonly string[]) => {
-        if (!ids.length) return { rows: [], spots: [], locales: [null as string | null] };
+        if (!ids.length) return { rows: [], spots: [], manifests: [], locales: [null as string | null] };
         const ds = s.dataSources;
         const sp = s.spots;
         const tv = s.templateVersions;
-        const [rows, spots, screenLocales, settings] = await db.batch([
+        const [rows, spots, manifests, screenLocales, settings] = await db.batch([
           db
             .select({ source: ds, snapshotVersion: snap.version })
             .from(ds)
@@ -1996,12 +1997,17 @@ export function scoped(d1: D1Database, orgId: string) {
             .from(sp)
             .leftJoin(tv, sql`${tv.id} = json_extract(${sp.publishedJson}, '$.templateVersionId') AND (${tv.orgId} IS NULL OR ${tv.orgId} = ${sp.orgId})`)
             .where(and(eq(sp.orgId, orgId), isNotNull(sp.publishedJson))),
+          db
+            .select({ screenId: s.screens.id, manifestId: s.screens.desiredManifestId })
+            .from(s.screens)
+            .where(and(eq(s.screens.orgId, orgId), isNotNull(s.screens.desiredManifestId))),
           db.selectDistinct({ locale: s.screens.locale }).from(s.screens).where(eq(s.screens.orgId, orgId)),
           db.select({ locale: s.orgSettings.locale }).from(s.orgSettings).where(eq(s.orgSettings.orgId, orgId)).limit(1),
         ]);
         return {
           rows: rows.map((r) => ({ source: r.source, snapshotVersion: r.snapshotVersion ?? null })),
           spots: spots.filter((r): r is { id: string; publishedJson: string; manifestJson: string | null } => r.publishedJson !== null),
+          manifests: manifests.flatMap((r) => (r.manifestId === null ? [] : [{ screenId: r.screenId, manifestId: r.manifestId }])),
           locales: screenLocales.length ? screenLocales.map((r) => r.locale) : [settings[0]?.locale ?? null],
         };
       },

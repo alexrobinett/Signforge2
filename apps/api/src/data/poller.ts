@@ -26,7 +26,8 @@
 import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed, parseNews } from '@signforge/feeds';
-import { type BindingSpot, type BoundField, boundFields, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
+import { type BindingSpot, type BoundField, boundFields, hasBoundListImage, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
+import { manifestSummary } from '../device/manifests';
 import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
 import { openGrant, sealGrant } from '../connectors/vault';
@@ -130,7 +131,12 @@ export async function pollDataSources(
       for (const item of init.rows) {
         rowsByKey.set(`${orgId}:${item.source.id}`, { org, ...item });
       }
-      pass.boundByOrg.set(orgId, computeBoundFields(init.spots, init.locales));
+      const bound = computeBoundFields(init.spots, init.locales);
+      // What screens play counts too (#481): a manifest `sf push` uploaded has no published spot behind it. Read from R2
+      // only when a claimed source's photos are on and no published spot shows them, as sync and the blob route do.
+      const unshown = init.rows.some(({ source }) => source.format === 'rss' && source.photos && !hasBoundListImage(bound.get(source.id) ?? []));
+      if (unshown) await addManifestBound(env.BLOBS, orgId, init.manifests, bound);
+      pass.boundByOrg.set(orgId, bound);
     }),
   );
   const hosts = new Map<string, Promise<void>[]>();
@@ -188,7 +194,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     const { held } = await org.dataSources.savePoll(row.id, {
       source,
       ...(snapshotChanged ? { snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } } : { checkedAt: now }),
-      ...(photo ? { photos: { read: photo.read, stories: res.stories ?? null, hold: photos } } : {}),
+      ...(photo ? { photos: { read: photo.read, stories: res.stories ? { version, urls: res.stories } : null, hold: photos } } : {}),
     });
     await enqueueFeedPhotos(run.photoQueue, org.orgId, row.id, held);
   } catch (e) {
@@ -324,6 +330,21 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizon
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+/**
+ * Adds to `bound` what the screens' desired manifests bind, each manifest read once (its id is its body's hash) and
+ * kept for the isolate, as the device routes read them (../device/manifests.ts).
+ */
+async function addManifestBound(
+  bucket: R2Bucket,
+  orgId: string,
+  manifests: readonly { screenId: string; manifestId: string }[],
+  bound: Map<string, BoundField[]>,
+): Promise<void> {
+  const one = new Map(manifests.map((m) => [m.manifestId, m.screenId]));
+  const read = await Promise.all([...one].map(([manifestId, screenId]) => manifestSummary(bucket, orgId, screenId, manifestId)));
+  for (const summary of read) for (const [sourceId, fields] of summary?.bound ?? []) bound.set(sourceId, [...(bound.get(sourceId) ?? []), ...fields]);
+}
 
 /**
  * The fields published spots bind to each source in an org (drafts do not count: screens play what
