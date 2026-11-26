@@ -35,13 +35,41 @@ beforeEach(() => {
   calls = [];
   replies = [];
   vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+    // The toast's count after a change (#187): answered here, apart from the calls a test answers in turn.
+    if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
     const reply = replies.shift() ?? { status: 200, body: {} };
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
 });
 
+/** What `preview_publish` answers: two screens would change. */
+const PREVIEW = {
+  screens: [
+    { screenId: 'scr_1', name: 'Lobby', reasons: ['joined North'] },
+    { screenId: 'scr_2', name: 'Till', reasons: ['joined North'] },
+  ],
+  unchanged: 0,
+  failed: [],
+  groups: [],
+  samples: [],
+};
+
 describe("a screen's label editor", () => {
+  it('says, once saved, how many screens the next publish would change, read with preview_publish (#187)', async () => {
+    const { toast } = await import('sonner');
+    const s = store();
+    s.getState().editScreenLabels(screen);
+    s.getState().typeLabel({ screenId: screen.id }, 0, { key: 'region', value: 'south' });
+    await s.getState().saveScreenLabels(ORG, screen);
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenLastCalledWith(
+        'Labels saved',
+        expect.objectContaining({ description: 'Takes effect at the next publish: 2 screens would change.' }),
+      ),
+    );
+  });
+
   it('saves one merge: the keys changed or added, the keys taken out, and closes', async () => {
     const s = store();
     s.getState().editScreenLabels(screen);
@@ -194,6 +222,7 @@ describe('bulk "Labels…" on a selection', () => {
       let answer: () => void = () => {};
       const answered = new Promise<void>((r) => (answer = r));
       vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
         calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
         await answered;
         return new Response(JSON.stringify(reply.body), { status: reply.status });
@@ -240,6 +269,7 @@ describe('"Import labels…" (#188)', () => {
       let answer: () => void = () => {};
       const answered = new Promise<void>((r) => (answer = r));
       vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        if (url.endsWith('/preview_publish')) return new Response(JSON.stringify(PREVIEW));
         calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
         await answered;
         return new Response(JSON.stringify(reply.body), { status: reply.status });

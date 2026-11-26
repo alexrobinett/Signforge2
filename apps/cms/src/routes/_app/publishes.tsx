@@ -6,17 +6,20 @@
  */
 import { useDeferredValue } from 'react';
 import { PublishTitle } from '~/components/publishes/latest-publish';
-import { useSuspenseQuery } from '@tanstack/react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, rolloutComplete, standing, versionName, type PublishDetail, type PublishView } from '~/lib/publishes';
 import { PublishChanges } from '~/components/publishes/changes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
+import { screensQuery } from '~/queries/screens';
+import { Badge } from '~/components/ui/badge';
+import { byName } from '~/lib/targets';
 import { useAppStore } from '~/state/provider';
 
 const publishesSearch = (s: Record<string, unknown>): { id?: string } => (typeof s.id === 'string' && s.id ? { id: s.id } : {});
@@ -50,7 +53,7 @@ function PublishesPage() {
   // Deferred: another publish picked keeps this one shown, and the focus, until its own arrives.
   const search = useDeferredValue(Route.useSearch());
   const current = useSuspenseQuery(publishQuery(orgId, search.id ?? null));
-  const { publish, screens } = current.data;
+  const { publish, screens, targets } = current.data;
   const { publishes } = useSuspenseQuery(publishesQuery(orgId)).data;
   const canPublish = useCanPublish();
   const pending = useAppStore((s) => s.publishing.pending);
@@ -102,6 +105,8 @@ function PublishesPage() {
           <p className="text-muted-foreground">It switched no screen: what it published plays nowhere yet.</p>
         )}
       </section>
+
+      {targets && targets.length > 0 && <GroupsReached orgId={orgId} targets={targets} />}
 
       <section aria-labelledby="history-title" className="flex flex-col gap-3">
         <h2 id="history-title" className="text-lg font-semibold">
@@ -175,5 +180,47 @@ function PublishesPage() {
         </ol>
       </section>
     </div>
+  );
+}
+
+const NAMED = 8;
+
+/**
+ * Whom each group reached at this publish (#187), as it resolved them: a smart group's screens are the ones its rule
+ * matched then, so this answers why a screen played what it did after its labels moved. Screens by their names now.
+ */
+function GroupsReached({ orgId, targets }: { orgId: string; targets: NonNullable<PublishDetail['targets']> }) {
+  const names = new Map((useQuery(screensQuery(orgId)).data?.screens ?? []).map((s) => [s.id, s.name]));
+  return (
+    <section aria-labelledby="groups-reached-title" className="flex flex-col gap-3">
+      <h2 id="groups-reached-title" className="text-lg font-semibold">
+        Whom each group reached
+      </h2>
+      <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+        {targets.map((g) => {
+          const reached = g.screenIds.map((id) => ({ id, name: names.get(id) ?? id })).toSorted(byName);
+          return (
+            <li key={g.groupId} className="flex flex-col gap-1 px-4 py-3 text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{g.name}</span>
+                {g.rule && <Badge>Rule</Badge>}
+                <span className="text-muted-foreground tabular-nums">
+                  {reached.length} {reached.length === 1 ? 'screen' : 'screens'}
+                </span>
+              </span>
+              {reached.length > 0 && (
+                <span className="text-muted-foreground">
+                  {reached
+                    .slice(0, NAMED)
+                    .map((r) => r.name)
+                    .join(', ')}
+                  {reached.length > NAMED && ` and ${reached.length - NAMED} more`}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

@@ -66,7 +66,14 @@ export interface PublishAll {
   noDefault: { makes: string | null } | null;
   /** A takeover goes with it: no Undo, as on the Schedule page. */
   takeover: boolean;
+  /**
+   * What it would change on screens (#187, `preview_publish`): which screens and why, and who joins or leaves each
+   * group. Undefined while it is read; null when it could not be read, which the dialog does without.
+   */
+  preview?: PublishPreview | null;
 }
+
+export type PublishPreview = ToolOutput<'preview_publish'>;
 
 /** The most drafts one publish pins (`publish`'s `drafts`, at most 500). */
 export const MAX_PINS = 500;
@@ -524,7 +531,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       }
       const mine = ++asked;
       showAll({ orgId, asked: mine, pins: null, counts: { spots: 0, playlists: 0, schedule: 0 }, tooMany: false, noDefault: null, takeover: false });
-      const drafts = await readDrafts(orgId, 'Not published');
+      // Read beside the drafts, so the dialog shows what it would change on screens with what it publishes (#187).
+      const [drafts, preview] = await Promise.all([readDrafts(orgId, 'Not published'), callTool('preview_publish', {}, orgId).catch(() => null)]);
       // Cancelled, or asked again, meanwhile: this read is no one's.
       if (get().publishing.all?.asked !== mine) return;
       if (!drafts || !showing(orgId)) {
@@ -547,6 +555,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         tooMany: pins.length > MAX_PINS,
         noDefault: noDefaultOf(drafts.playlists, entries),
         takeover: entries.some((e) => e.takeover),
+        preview,
       });
       // Nothing to publish after all: the counts were behind, so they are read again.
       if (!pins.length) void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
@@ -554,8 +563,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
     async confirmPublishAll() {
       const all = get().publishing.all;
-      // Never an empty publish: `drafts: []` would compile every screen again for nothing.
-      if (!all?.pins?.length || all.tooMany) return false;
+      // Never an empty publish for nothing: `drafts: []` only when the preview says screens would change, as labels moved
+      // a smart group's members since the last publish (#187).
+      if (!all?.pins || all.tooMany || (!all.pins.length && !all.preview?.screens.length)) return false;
       showAll(null);
       if (!showing(all.orgId)) {
         toast.error('Not published', { description: 'The organization is changing. Publish once it shows.' });

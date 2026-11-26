@@ -21,7 +21,7 @@ import { SidebarMenuButton } from '~/components/ui/sidebar';
 import { useCanPublish } from '~/lib/live';
 import { useOpenerFocus } from '~/lib/opener-focus';
 import { cn } from '~/lib/utils';
-import { MAX_PINS, type PublishAll } from '~/state/publishing';
+import { MAX_PINS, type PublishAll, type PublishPreview } from '~/state/publishing';
 import { useAppStore } from '~/state/provider';
 
 export interface DraftCounts {
@@ -74,6 +74,41 @@ export function UnpublishedChanges({ orgId, counts, folded }: { orgId: string; c
 }
 
 /** The sidebar's question, in the shell: open while the store holds one (`publishing.all`). */
+const screensWord = (n: number) => `${n} ${n === 1 ? 'screen' : 'screens'}`;
+
+/** "3 screens would change · +2 join North drive-thru · 1 leaves Lobby portrait": what a publish would do on screens (#187). */
+function previewLine(p: PublishPreview): string {
+  const head = p.screens.length ? `${screensWord(p.screens.length)} would change` : 'No screen would change';
+  const groups = p.groups.flatMap((g) => [
+    ...(g.joined.length ? [`+${g.joined.length} join ${g.name}`] : []),
+    ...(g.left.length ? [`${g.left.length} ${g.left.length === 1 ? 'leaves' : 'leave'} ${g.name}`] : []),
+  ]);
+  return [head, ...groups].join(' · ');
+}
+
+/** The preview, said in a line and then screen by screen with why, in the dialog's scrolling description. */
+function PreviewOf({ preview }: { preview: PublishPreview }) {
+  return (
+    <>
+      <span className="block font-medium text-foreground">{previewLine(preview)}</span>
+      {preview.screens.length > 0 && (
+        <ul aria-label="Screens that would change" className="space-y-1">
+          {preview.screens.map((s) => (
+            <li key={s.screenId}>
+              <span className="text-foreground">{s.name}</span>: {s.reasons.join(', ')}
+            </li>
+          ))}
+        </ul>
+      )}
+      {preview.failed.length > 0 && (
+        <span className="block">
+          {screensWord(preview.failed.length)} could not be compiled and keep what they have: {preview.failed.map((f) => f.name).join(', ')}.
+        </span>
+      )}
+    </>
+  );
+}
+
 export function PublishAllDialog() {
   const all = useAppStore((s) => s.publishing.all);
   return all ? <OpenPublishAll all={all} /> : null;
@@ -85,51 +120,69 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
   const cancel = useAppStore((s) => s.cancelPublishAll);
   const returnFocus = useOpenerFocus();
   const total = all.pins?.length ?? 0;
+  // No draft waiting, yet screens would change: labels moved a smart group's members since the last publish (#187).
+  const moved = total === 0 && Boolean(all.preview?.screens.length);
+  const nothing = total === 0 && !moved;
   return (
     <AlertDialog open onOpenChange={(open) => !open && cancel()}>
       <AlertDialogContent onCloseAutoFocus={returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {!all.pins ? 'Publish every unpublished change?' : total === 0 ? 'Everything is already published' : `Publish ${changes(total)}?`}
+            {!all.pins
+              ? 'Publish every unpublished change?'
+              : moved
+                ? 'Publish the group changes?'
+                : nothing
+                  ? 'Everything is already published'
+                  : `Publish ${changes(total)}?`}
           </AlertDialogTitle>
-          <AlertDialogDescription className="max-h-60 space-y-2 overflow-y-auto">
-            {!all.pins ? (
-              <span className="flex items-center gap-2">
-                <LoaderCircleIcon className="size-4 animate-spin" aria-hidden /> Reading what is not published…
-              </span>
-            ) : total === 0 ? (
-              <span className="block">Every change in this organization is on its screens already. There is nothing to publish.</span>
-            ) : all.tooMany ? (
-              <span className="block">
-                {total} changes are not published, more than one publish takes ({MAX_PINS}). Publish them from their own pages, or from Overview's list.
-              </span>
-            ) : (
-              <>
-                <span className="block">
-                  {whatGoes(all.counts)}, as drafted now, by everyone in this organization. Screens switch as they hear of it. A change made after this was read
-                  is not published with it.
+          {/* A div, not the default paragraph: the preview holds a list (#187). */}
+          <AlertDialogDescription asChild className="max-h-60 space-y-2 overflow-y-auto">
+            <div>
+              {!all.pins ? (
+                <span className="flex items-center gap-2">
+                  <LoaderCircleIcon className="size-4 animate-spin" aria-hidden /> Reading what is not published…
                 </span>
-                {all.noDefault?.makes && (
+              ) : nothing ? (
+                <span className="block">Every change in this organization is on its screens already. There is nothing to publish.</span>
+              ) : moved && all.preview ? (
+                <>
+                  <span className="block">No draft is waiting, but labels moved screens in or out of smart groups since the last publish.</span>
+                  <PreviewOf preview={all.preview} />
+                </>
+              ) : all.tooMany ? (
+                <span className="block">
+                  {total} changes are not published, more than one publish takes ({MAX_PINS}). Publish them from their own pages, or from Overview's list.
+                </span>
+              ) : (
+                <>
                   <span className="block">
-                    There is no default playlist yet: this publish makes {all.noDefault.makes} the default, which every screen plays when nothing else is
-                    scheduled.
+                    {whatGoes(all.counts)}, as drafted now, by everyone in this organization. Screens switch as they hear of it. A change made after this was
+                    read is not published with it.
                   </span>
-                )}
-                {all.noDefault && !all.noDefault.makes && (
-                  <span className="block">
-                    No screen will change until there's a default playlist.{' '}
-                    <Link to="/playlists" onClick={cancel} className="font-medium text-foreground underline underline-offset-4">
-                      Choose a default playlist
-                    </Link>
-                  </span>
-                )}
-              </>
-            )}
+                  {all.noDefault?.makes && (
+                    <span className="block">
+                      There is no default playlist yet: this publish makes {all.noDefault.makes} the default, which every screen plays when nothing else is
+                      scheduled.
+                    </span>
+                  )}
+                  {all.noDefault && !all.noDefault.makes && (
+                    <span className="block">
+                      No screen will change until there's a default playlist.{' '}
+                      <Link to="/playlists" onClick={cancel} className="font-medium text-foreground underline underline-offset-4">
+                        Choose a default playlist
+                      </Link>
+                    </span>
+                  )}
+                  {all.preview && <PreviewOf preview={all.preview} />}
+                </>
+              )}
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{all.pins && total === 0 ? 'Close' : 'Cancel'}</AlertDialogCancel>
-          {all.pins && total === 0 ? null : all.tooMany ? (
+          <AlertDialogCancel>{all.pins && nothing ? 'Close' : 'Cancel'}</AlertDialogCancel>
+          {all.pins && nothing ? null : all.tooMany ? (
             <Button asChild>
               <Link to="/" hash="unpublished" onClick={cancel}>
                 Open Overview
