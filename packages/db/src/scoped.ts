@@ -972,6 +972,45 @@ export function scoped(d1: D1Database, orgId: string) {
             );
             return staged(undefined, ...queries);
           },
+          /**
+           * Each screen its own merge (#188, a CSV import): a key in its `set` takes that value, a key in its `remove`
+           * goes, its other labels stay. Written as one batch, so all of it lands or none, with the same limit check as
+           * `update`. Throws `NotInOrgError` if a screen is not the org's. Three statements however many screens: the
+           * changes go as JSON.
+           */
+          each: async (changes: readonly { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] }[]): Promise<Staged> => {
+            const ids = await orgScreens(changes.map((c) => c.screenId));
+            const idsJson = JSON.stringify(ids);
+            const gone = JSON.stringify(changes.flatMap((c) => c.remove.map((k) => [c.screenId, k])));
+            const set = JSON.stringify(changes.flatMap((c) => Object.entries(c.set).map(([k, v]) => [c.screenId, k, v])));
+            const sc = s.screens;
+            const now = Date.now();
+            const crowded = sql`EXISTS (SELECT 1 FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.screenId} IN (SELECT value FROM json_each(${idsJson})) GROUP BY ${sl.screenId} HAVING count(*) > ${LABEL_LIMITS.perScreen})`;
+            const keys = sql`(SELECT count(DISTINCT ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId})`;
+            return staged(
+              undefined,
+              db
+                .delete(sl)
+                .where(
+                  and(
+                    eq(sl.orgId, orgId),
+                    sql`EXISTS (SELECT 1 FROM json_each(${gone}) AS g WHERE json_extract(g.value, '$[0]') = ${sl.screenId} AND json_extract(g.value, '$[1]') = ${sl.key})`,
+                  ),
+                ),
+              db
+                .insert(sl)
+                // The table's columns in order: org, screen, key, value, created_at. Only the org's screens are joined.
+                .select(
+                  sql`SELECT ${sc.orgId}, ${sc.id}, json_extract(r.value, '$[1]'), json_extract(r.value, '$[2]'), ${now} FROM json_each(${set}) AS r
+                      JOIN ${sc} ON ${sc.orgId} = ${orgId} AND ${sc.id} = json_extract(r.value, '$[0]')`,
+                )
+                .onConflictDoUpdate({ target: [sl.orgId, sl.screenId, sl.key], set: { value: sql`excluded.value` } }),
+              db
+                .select({ ok: sql`json(CASE WHEN ${crowded} OR ${keys} > ${LABEL_LIMITS.keys} THEN 'over a label limit' ELSE '1' END)` })
+                .from(s.organization)
+                .where(eq(s.organization.id, orgId)),
+            );
+          },
         },
       },
       /** Ids of the groups a screen belongs to. */
