@@ -466,7 +466,10 @@ describe('feed images on screens (#196)', () => {
     // Restarted, the first sync asks for the manifest's files to be checked, and that keeps failing.
     await p.page.reload();
     await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
-    expect(p.server.requestsTo(/^\/content\/manifest\.json$/).at(-1)?.status).toBe(503);
+    // The manifest's GETs: each comes after a CORS preflight, answered 204 at once, which the latest request can be
+    // while its GET is on its way (#565). Waited for as the GET's answer, not read at a moment.
+    const gets = () => p.server.requestsTo(/^\/content\/manifest\.json$/).filter((r) => r.method === 'GET');
+    await expect.poll(() => gets().at(-1)?.status, { timeout: 10_000 }).toBe(503);
   }, 30_000);
 
   it('shows snapshot images in editor preview and tolerates a missing blob without failing the preview', async () => {
