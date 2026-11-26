@@ -246,3 +246,21 @@ describe('list_audit_log', () => {
     expect(await all({ query: 'z'.repeat(100) })).toEqual([]);
   });
 });
+
+describe('list_audit_log by a screen command (#345)', () => {
+  it("finds screen_command's rows under the tool each command replaced, and only those", async () => {
+    const mine = await seedOrg(env.DB, 'audit-commands');
+    const editor = member(mine.orgId, 'editor');
+    for (const command of ['identify', 'restart', 'display_on', 'display_auto'])
+      expect(await dispatch(registry, 'screen_command', { screenId: mine.screen, command }, editor), command).toMatchObject({ ok: true });
+    const commands = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, editor);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => (e.detail.input as { command: string }).command).sort();
+    };
+    expect(await commands('restart_screen')).toEqual(['restart']);
+    expect(await commands('identify_screen')).toEqual(['identify']);
+    expect(await commands('set_display_override')).toEqual(['display_auto', 'display_on']);
+    expect(await commands('screen_command')).toEqual(['display_auto', 'display_on', 'identify', 'restart']);
+  });
+});

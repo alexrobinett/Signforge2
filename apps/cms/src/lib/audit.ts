@@ -89,11 +89,12 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
  * under: each tool that changes something (test/registry checks), Better Auth's membership changes
  * (apps/api src/auth/options.ts) and an agent refused for its limits.
  */
-export const ACTIONS: Record<string, { group: string; words: string }> = {
+export const ACTIONS: Record<string, { group: string; words: string; unlisted?: true }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
   update_screen: { group: 'Screens', words: 'Changed' },
-  screen_command: { group: 'Screens', words: 'Command sent' },
+  // Not a What option of its own: Identified, Player restarted and Woken or put to sleep find its rows (list_audit_log).
+  screen_command: { group: 'Screens', words: 'Command sent', unlisted: true },
   // Recorded before #345 merged them into update_screen, screen_command and save_group: their rows keep these names.
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
@@ -177,7 +178,8 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
 
 /** The What filter's options, in ACTIONS' groups. */
 export const ACTION_GROUPS = Object.entries(ACTIONS).reduce<{ group: string; actions: { value: string; label: string }[] }[]>(
-  (groups, [value, { group, words }]) => {
+  (groups, [value, { group, words, unlisted }]) => {
+    if (unlisted) return groups;
     const last = groups.at(-1);
     if (last?.group === group) last.actions.push({ value, label: words });
     else groups.push({ group, actions: [{ value, label: words }] });

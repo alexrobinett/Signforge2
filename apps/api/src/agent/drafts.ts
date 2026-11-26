@@ -36,6 +36,8 @@ interface Target {
   out: string;
   /** The only fields the drawer drafts, where its tool takes more: the model is shown these alone, and refused the rest. */
   fields?: readonly string[];
+  /** What the drawer says the draft does, with `fields`: its tool's own description would offer the rest. */
+  says?: string;
 }
 
 /** The writes the drawer drafts, and their targets; a creation has none. Each has its undo in the CMS (src/state/agent-drawer.ts). */
@@ -45,7 +47,14 @@ const DRAFTS: Record<string, Target | null> = {
   update_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry' },
   create_schedule_entry: null,
   // A screen's settings change what it plays when, so the drawer drafts its name alone (#345).
-  update_screen: { kind: 'screen', read: 'get_screen', id: 'screenId', out: 'screen', fields: ['name'] },
+  update_screen: {
+    kind: 'screen',
+    read: 'get_screen',
+    id: 'screenId',
+    out: 'screen',
+    fields: ['name'],
+    says: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
+  },
 };
 
 /** At most this many drafts in a turn, and in one save. */
@@ -97,9 +106,14 @@ export function draftTools(grant: Grant) {
     if (!tool?.mutates || tool.people || !permits(asked, tool)) return [];
     const fields = target?.fields;
     if (!fields || !(tool.input instanceof z.ZodObject)) return [{ name, description: tool.description, input: tool.input }];
-    // The target and these fields, each required: the version is the drawer's to add, from its read.
+    // The target, required, and these fields: the version is the drawer's to add, from its read. Other keys are kept, not
+    // stripped, so the draft's refusal names them rather than proposing what is left (`draftRefusal`).
     const shape: Record<string, z.ZodType> = tool.input.shape;
-    return [{ name, description: tool.description, input: z.object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!]))).required() }];
+    const input = z
+      .object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!])))
+      .required({ [target.id]: true })
+      .loose();
+    return [{ name, description: target.says ?? tool.description, input }];
   });
 }
 
@@ -129,6 +143,8 @@ function draftRefusal(name: string, input: Row, target: Row | null): string | un
       if (input[key] !== undefined) return `the agent changes a spot's name, length and fields, not its ${key}`;
   }
   const t = DRAFTS[name];
+  // A change must change something: its tool refuses one that does not when it runs, not when it is drafted.
+  if (t && input[t.id] !== undefined && Object.keys(input).every((k) => k === t.id || k === 'ifVersion')) return `nothing to change in the ${t.kind}`;
   if (t?.fields)
     for (const key of Object.keys(input))
       if (![t.id, 'ifVersion', ...t.fields].includes(key))

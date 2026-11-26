@@ -50,8 +50,9 @@ const saveGroup = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  // Strict: a field it does not take (the old tools' add or remove lists) is refused by name, not dropped.
   input: z
-    .object({
+    .strictObject({
       groupId: id('group').optional().describe('The group to change; omit to create one'),
       name: name('group').optional(),
       screenIds: z.array(id('screen')).max(1000).optional().describe("A new group's first screens, or the screens membership adds, removes or sets"),
@@ -68,12 +69,16 @@ const saveGroup = defineTool({
               ? 'a new group needs a name; give groupId to change one'
               : v.membership === 'remove'
                 ? 'a new group has no screens to remove'
-                : undefined
-            : v.screenIds !== undefined && v.membership === undefined
-              ? 'give membership with screenIds: add, remove or set'
-              : v.name === undefined && v.screenIds === undefined
-                ? 'give a name or screenIds to change'
-                : undefined;
+                : v.ifVersion !== undefined
+                  ? 'a new group has no version yet: ifVersion is for a change'
+                  : undefined
+            : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
+              ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
+              : v.screenIds !== undefined && v.membership === undefined
+                ? 'give membership with screenIds: add, remove or set'
+                : v.name === undefined && v.screenIds === undefined
+                  ? 'give a name or screenIds to change'
+                  : undefined;
       if (problem) ctx.addIssue({ code: 'custom', message: problem });
     }),
   output: outputs.save_group,
@@ -96,11 +101,11 @@ const saveGroup = defineTool({
       guard = undefined;
     }
     if (input.membership === 'set') group = write(await org.screenGroups.stage.setMembers(group, screenIds, { ifVersion: guard }));
-    if (input.membership === 'add' && screenIds.length) {
+    if (input.membership === 'add') {
       group = write(await org.screenGroups.stage.addMembers(group, screenIds, guard));
       members = [...new Set([...members, ...screenIds])];
     }
-    if (input.membership === 'remove' && screenIds.length) {
+    if (input.membership === 'remove') {
       group = write(await org.screenGroups.stage.removeMembers(group, screenIds, guard));
       members = members.filter((s) => !screenIds.includes(s));
     }

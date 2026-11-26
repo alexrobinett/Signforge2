@@ -121,6 +121,27 @@ describe('groups', () => {
     expect(await said({ groupId: o.group })).toMatch(/give a name or screenIds/);
   });
 
+  it('refuses what it does not take by name, ifVersion on a new group, and add or remove of no screens, writing nothing', async () => {
+    const said = async (name: string, input: Record<string, unknown>) => {
+      const r = await refusal(name, input);
+      expect(r, JSON.stringify(input)).toMatchObject({ ok: false, error: 'invalid_input' });
+      return r.ok ? '' : r.message;
+    };
+    expect(await said('save_group', { groupId: o.group, name: 'Door', add: [o.screen] })).toMatch(/add/);
+    expect(await said('screen_command', { screenId: o.screen, command: 'display_on', state: 'on' })).toMatch(/state/);
+    expect(await said('update_screen', { screenId: o.screen, name: 'Door', mode: 'x' })).toMatch(/mode/);
+    expect(await said('save_group', { name: 'New', ifVersion: 1 })).toMatch(/ifVersion is for a change/);
+    for (const membership of ['add', 'remove'])
+      expect(await said('save_group', { groupId: o.group, screenIds: [], membership })).toMatch(/an empty list changes nothing/);
+    const { group } = await call('save_group', { name: 'Stale', screenIds: [o.screen] });
+    await call('save_group', { groupId: group.id, name: 'Moved on', ifVersion: group.version });
+    expect(await refusal('save_group', { groupId: group.id, screenIds: [o.screen], membership: 'remove', ifVersion: group.version })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    expect((await call('list_groups', {})).groups.find((g: { id: string }) => g.id === group.id).screenIds).toEqual([o.screen]);
+  });
+
   it('creates nothing when a screen is unknown', async () => {
     const before = (await call('list_groups', {})).groups.length;
     expect(await refusal('save_group', { name: 'Bad', screenIds: ['scr_nope'] })).toMatchObject({ ok: false, error: 'not_found' });
