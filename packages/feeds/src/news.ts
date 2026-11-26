@@ -1,6 +1,7 @@
-import { NEWS_SUMMARY_MAX, type NewsFeed, SCREEN_BOX } from '@signforge/contract';
+import { NEWS_SUMMARY_MAX, type NewsFeed } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { checkSize, FeedError, LIMITS } from './errors';
+import { rendition, TARGET_BOX } from './renditions';
 import { isoInstant } from './time';
 
 export interface NewsOptions {
@@ -244,9 +245,6 @@ const pixels = (v: string): number | undefined => (/^\d{1,6}$/.test(v) && Number
 function sized(url: string, width: number | undefined, height: number | undefined): FeedImage {
   return { url, ...(width ? { width } : {}), ...(height ? { height } : {}) };
 }
-
-/** The screen box a feed photo aims to cover: choosing a candidate close to this avoids downloading and scaling 4K copies. */
-const TARGET_BOX = SCREEN_BOX.landscape;
 
 const coversTarget = (width: number | undefined, height: number | undefined): boolean =>
   width !== undefined && width >= TARGET_BOX.w && (height === undefined || height >= TARGET_BOX.h);
@@ -665,7 +663,8 @@ function readNews(body: string, options: NewsOptions): { title: string; language
 
 /**
  * An RSS 2.0 or Atom feed as a NewsFeed (the channel title and the items that have titles, newest
- * first), with each kept item's image and the feed's logo, within `SEARCH_BUDGET`.
+ * first), with each kept item's image (the copy a known image CDN serves at the size the screen
+ * needs, `rendition`) and the feed's logo, within `SEARCH_BUDGET`.
  */
 export function parseNews(body: string, options: NewsOptions = {}): ParsedNews {
   const { title, language, stories, logo: logoOf } = readNews(body, options);
@@ -673,8 +672,8 @@ export function parseNews(body: string, options: NewsOptions = {}): ParsedNews {
   const share = Math.floor(SEARCH_BUDGET / (stories.length + 1));
   const logo = logoOf({ left: share });
   const items = stories.map((s) => {
-    const image = s.image({ left: share });
-    return image ? { ...s.item, image } : s.item;
+    const found = s.image({ left: share });
+    return found ? { ...s.item, image: rendition(found) } : s.item;
   });
   return { title, language, items, ...(logo ? { logo } : {}) };
 }
