@@ -37,6 +37,7 @@ import {
   WEATHER_UNITS,
   type BrandKit,
   type DisplayHours,
+  type DisplayOutput,
   type FieldDef,
   type NewsImage,
   type ScalarFieldDef,
@@ -1035,7 +1036,19 @@ function displayStatusProblems(d: unknown): string[] {
   if (typeof d.on !== 'boolean') errors.push('display on must be true or false');
   if (d.methods !== undefined && !(isObj(d.methods) && Object.values(d.methods).every(isStr))) errors.push('display methods must map names to text');
   if (d.override !== undefined) errors.push(...prefix('display', overrideProblems(d.override)));
+  if (d.output !== undefined) {
+    if (!isObj(d.output) || !isStr(d.output.mode) || !OUTPUT_MODE.test(d.output.mode)) errors.push('display output mode must be <width>x<height>@<Hz>');
+    else if (!Number.isSafeInteger(d.output.resets) || Number(d.output.resets) < 0) errors.push('display output resets must be a whole number from 0');
+  }
   return errors;
+}
+
+/** A video mode as the supervisor writes it: `1920x1080@60`. */
+const OUTPUT_MODE = /^\d{1,5}x\d{1,5}@\d{1,3}$/;
+
+/** Whether `v` is a `DisplayOutput` a sync takes: the player checks the supervisor's reply with it, so a bad one never fails the sync. */
+export function isDisplayOutput(v: unknown): v is DisplayOutput {
+  return isObj(v) && isStr(v.mode) && OUTPUT_MODE.test(v.mode) && Number.isSafeInteger(v.resets) && Number(v.resets) >= 0;
 }
 
 /** The start of an hour in UTC, as play counts are keyed: `2026-11-17T13:00Z`. */

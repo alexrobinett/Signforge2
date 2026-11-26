@@ -36,6 +36,7 @@ import {
   sampleAsset,
   validateBrandKit,
   displayHoursProblems,
+  isDisplayOutput,
   scheduleEntryProblems,
   readPath,
   boundValue,
@@ -379,7 +380,7 @@ const validSyncRequest = (): SyncRequest => ({
   epoch: 'e7Hq2',
   player: { version: '1.2.3', manifestSchemas: [2, 3], protocols: [1, 2] },
   manifest: { active: M1, filesMissing: 0, fallbackFrom: M2, lastGood: M1 },
-  display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
+  display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' }, output: { mode: '1920x1080@60', resets: 1 } },
   deviceTime: '2026-11-17T13:05:00Z',
   clock: { offsetMs: -1200, trusted: true },
   playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', plays: 4, ms: 32_000 }],
@@ -1907,6 +1908,24 @@ describe('validatePairStartRequest', () => {
   it('refuses another kind', () => {
     expect(validatePairStartRequest({ kind: 'tv' })).toEqual(['kind must be one of device, browser']);
     expect(validatePairStartRequest(null)).toEqual(['request is not an object']);
+  });
+});
+
+describe('sync display output (#511)', () => {
+  const withOutput = (output: unknown) => ({ ...validSyncRequest(), display: { on: true, output } });
+  it('takes the mode the supervisor read and how often it set it back', () => {
+    expect(validateSyncRequest(withOutput({ mode: '3840x2160@60', resets: 0 }))).toEqual([]);
+    expect(isDisplayOutput({ mode: '3840x2160@60', resets: 0 })).toBe(true);
+  });
+  it.each([
+    [{ mode: '4K', resets: 0 }, 'display output mode must be <width>x<height>@<Hz>'],
+    [{ mode: '1920x1080@60\n', resets: 0 }, 'display output mode must be <width>x<height>@<Hz>'],
+    [{ mode: '1920x1080@60', resets: -1 }, 'display output resets must be a whole number from 0'],
+    [{ mode: '1920x1080@60', resets: 1.5 }, 'display output resets must be a whole number from 0'],
+    ['1920x1080@60', 'display output mode must be <width>x<height>@<Hz>'],
+  ])('refuses %j', (output, problem) => {
+    expect(validateSyncRequest(withOutput(output))).toEqual([problem]);
+    expect(isDisplayOutput(output)).toBe(false);
   });
 });
 
