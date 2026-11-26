@@ -49,9 +49,12 @@ export const PASS_THROUGH_MAX_BYTES = 1_000_000;
 const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math.round(SCREEN_BOX.landscape.h * 1.25) } as const;
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
-/** Rows expired and delete candidates scanned per daily run; the org cap bounds the run to 11 D1 calls. */
-const FORGET_PER_RUN = 100;
-const DELETE_PER_RUN = 100;
+/**
+ * Rows expired and delete candidates scanned per daily run: a day's at the cap (60 rows, up to 120 blobs an org) for
+ * each of the CLEANUP_ORGS_PER_RUN orgs, so the sweep keeps up. The org cap bounds the run to 11 D1 calls, whatever these are.
+ */
+const FORGET_PER_RUN = 180;
+const DELETE_PER_RUN = 360;
 const CLEANUP_ORGS_PER_RUN = 3;
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */
 const QUALITY = 85;

@@ -610,8 +610,10 @@ describe('feed photos', () => {
     const urls = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://budget.example/${tag}-${i}.jpg`);
     for (const id of ['one', 'two', 'three']) await ensureSource(s.a, id);
     await ensureSource(s.b, 'one');
-    // Each source's share of org A's day: its photo sources, in org A alone, divide it (#481).
-    const { n } = (await env.DB.prepare("SELECT count(*) AS n FROM data_sources WHERE org_id = ? AND format = 'rss' AND photos = 1")
+    // Each source's share of org A's day: the sources a screen shows and the one polling, in org A alone, divide it (#481).
+    const { n } = (await env.DB.prepare(
+      "SELECT count(*) AS n FROM data_sources WHERE org_id = ? AND format = 'rss' AND photos = 1 AND (photo_urls_json IS NOT NULL OR id = 'one')",
+    )
       .bind('org-a')
       .first<{ n: number }>())!;
     const share = Math.min(NEW_PER_SOURCE_PER_DAY, Math.floor(NEW_PER_ORG_PER_DAY / n));

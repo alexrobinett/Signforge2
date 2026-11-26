@@ -45,8 +45,8 @@ export const PHOTOS_PER_SOURCE = 10;
  * A story past them plays with no photo until the next day. The org's 60 are a hard ceiling, however
  * many source ids hold photos: 1,800 a month, at ~1 Images transformation each (its thumbnail), about
  * 36% of the 5,000 free ones. They are shared fairly (#481): each source may take its share,
- * `min(NEW_PER_SOURCE_PER_DAY, NEW_PER_ORG_PER_DAY / the org's RSS sources with photos on)`, so the
- * sources that poll first never take another's, and every source an org shows gets photos every day.
+ * `min(NEW_PER_SOURCE_PER_DAY, NEW_PER_ORG_PER_DAY / the org's RSS sources whose photos a screen shows)`,
+ * floored, so the sources that poll first never take another's, and every source an org shows gets photos every day.
  */
 export const NEW_PER_SOURCE_PER_DAY = 30;
 export const NEW_PER_ORG_PER_DAY = 60;
@@ -195,7 +195,9 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
           .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
             WITH counts AS (
               SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n,
-                (SELECT count(*) FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.format} = 'rss' AND ${ds.photos} = 1) AS sources
+                -- The org's RSS sources whose photos a screen shows: a full read records their URLs only then, and this one is shown.
+                (SELECT count(*) FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.format} = 'rss' AND ${ds.photos} = 1
+                  AND (${ds.photoUrlsJson} IS NOT NULL OR ${ds.id} = ${dataSourceId})) AS sources
               FROM ${fi}
               WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
             )

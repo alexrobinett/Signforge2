@@ -18,11 +18,16 @@ let T = 2_000_000_000_000;
 
 type Org = Seeded['a'];
 
+/** A full read of a feed whose photos a screen shows, as the poller saves it: it records the stories' photo URLs. */
 const hold = async (org: Org, sourceId: string, fresh: readonly string[], now: number) => {
   const row = (await org.scope.dataSources.get(sourceId))!;
   const { held } = await org.scope.dataSources.savePoll(sourceId, {
     source: { nextPollAt: now + HOUR, failures: 0, lastError: null },
-    photos: { read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] }, hold: { again: [], fresh } },
+    photos: {
+      read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] },
+      stories: { version: `v-${now}`, urls: [...fresh] },
+      hold: { again: [], fresh },
+    },
   });
   return held;
 };
@@ -35,15 +40,23 @@ async function fresh(org: Org) {
 let serial = 0;
 const unseen = (id: string, n = 10) => Array.from({ length: n }, () => `https://${id}.example/${serial++}.jpg`);
 
-/** `feeds` busy feeds, ten unseen photos every hourly poll for `days`, in this order every hour: what each held per day. */
-async function busy(feeds: string[], days: number, joinsAt: Record<string, number> = {}) {
+/**
+ * `feeds` busy feeds, ten unseen photos every hourly poll for `days`, in this order every hour: what each held per day.
+ * Each was shown before the first day, by a read with no photos new, unless `newAt` says when it was added and first shown.
+ */
+async function busy(feeds: string[], days: number, joinsAt: Record<string, number> = {}, newAt: Record<string, number> = {}) {
   await fresh(s.a);
-  for (const id of feeds) await add(s.a, id);
+  for (const id of feeds) {
+    if (id in newAt) continue;
+    await add(s.a, id);
+    await hold(s.a, id, [], T - HOUR);
+  }
   const perDay = Object.fromEntries(feeds.map((id) => [id, Array<number>(days).fill(0)]));
   for (let hour = 0; hour < days * 24; hour++) {
     const now = T + hour * HOUR;
     for (const id of feeds) {
-      if (now < T + (joinsAt[id] ?? 0)) continue;
+      if (now < T + (joinsAt[id] ?? newAt[id] ?? 0)) continue;
+      if (now === T + (newAt[id] ?? -1)) await add(s.a, id);
       perDay[id]![Math.floor(hour / 24)]! += (await hold(s.a, id, unseen(id), now)).length;
     }
   }
@@ -60,12 +73,32 @@ describe('the day of new feed photos', () => {
     });
   }, 120_000);
 
+  it('makes a feed added and first shown when the day is spent wait for it to free up, then gives it its share', async () => {
+    const share = NEW_PER_ORG_PER_DAY / 3;
+    expect(await busy(['new-guardian', 'new-verge', 'new-nyt'], 3, {}, { 'new-nyt': 15 * HOUR })).toEqual({
+      'new-guardian': [NEW_PER_SOURCE_PER_DAY, share, share],
+      'new-verge': [NEW_PER_SOURCE_PER_DAY, share, share],
+      'new-nyt': [0, share, share],
+    });
+  }, 120_000);
+
   it('gives each of six busy feeds its share every day', async () => {
     const feeds = Array.from({ length: 6 }, (_, i) => `p6-${i}`);
     const perDay = await busy(feeds, 3);
     const share = Math.min(NEW_PER_SOURCE_PER_DAY, Math.floor(NEW_PER_ORG_PER_DAY / 6));
     for (const id of feeds) expect(perDay[id], id).toEqual([share, share, share]);
   }, 120_000);
+
+  it('shares the day among the feeds a screen shows: three shown beside three that are not get 20 each', async () => {
+    await fresh(s.a);
+    // Photos on, but no screen shows them: their polls read no photos and record none.
+    for (const id of ['unshown-0', 'unshown-1', 'unshown-2']) await add(s.a, id);
+    const shown = ['shown-guardian', 'shown-verge', 'shown-nyt'];
+    for (const id of shown) await add(s.a, id);
+    const held = Object.fromEntries(shown.map((id) => [id, 0]));
+    for (let hour = 0; hour < 24; hour++) for (const id of shown) held[id]! += (await hold(s.a, id, unseen(id), T + hour * HOUR)).length;
+    expect(held).toEqual(Object.fromEntries(shown.map((id) => [id, NEW_PER_ORG_PER_DAY / 3])));
+  });
 
   it('holds the org to its day however many source ids come and go (Fable P2): 40 ids, one alive at a time', async () => {
     await fresh(s.a);

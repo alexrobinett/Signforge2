@@ -1101,9 +1101,7 @@ describe('budgets, resilience and cleanup', () => {
 
     // Phase 1 at cleanupAt: forgets dropUrl and queues dropSha durably in feed_image_deletes (kept during grace window).
     const cleanupAt = NOW + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
-    // Oldest first, 100 a run: earlier tests' rows are older, so it may take more than one run to reach this one.
     expect(await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt)).toBeGreaterThanOrEqual(1);
-    for (let run = 0; run < 10 && (await row(dropUrl)); run++) await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt);
     expect(await row(dropUrl)).toBeUndefined();
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toContain(dropSha);
     expect(photoBlobs.has(feedBlobKey(o.orgId, dropSha))).toBe(true);
