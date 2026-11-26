@@ -104,7 +104,8 @@ const savePlaylist = defineTool({
   mutates: true,
   idempotent: true,
   partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
-  input: z.object({
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+  input: z.strictObject({
     playlistId: id('playlist').optional().describe('The playlist to change; omit to create one'),
     name: name('playlist').optional(),
     transition: transition.optional(),
@@ -118,6 +119,7 @@ const savePlaylist = defineTool({
   handler: async ({ org, actor, input, write }) => {
     const { playlistId, name } = input;
     if (playlistId === undefined) {
+      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new playlist has no version yet: ifVersion is for a change');
       if (name === undefined) throw new ToolError('invalid_input', 'a new playlist needs a name; give playlistId to change one');
       const items = input.spotIds ?? [];
       const row = write(await org.playlists.stage.insert({ name, transitionJson: JSON.stringify(input.transition ?? DEFAULT_TRANSITION) }, items));

@@ -93,6 +93,19 @@ describe('content saves (#345 PR 4): one tool creates or changes each kind', () 
     expect(await refused('save_data_source', { dataSourceId: o.dataSource, format: 'rss' })).toMatch(/a data source's format is fixed once made/);
   });
 
+  it('refuses a field it does not take by name, and ifVersion on a new one, as save_group does (review of #499)', async () => {
+    expect(await refused('save_spot', { spotId: o.imageSpot, name: 'X', colour: 'red' })).toMatch(/colour/);
+    expect(await refused('save_playlist', { playlistId: o.playlist, name: 'X', isDefault: true })).toMatch(/isDefault/);
+    expect(await refused('save_brand_kit', { brandKitId: o.brandKit, isDefault: true })).toMatch(/isDefault/);
+    for (const [name, input] of [
+      ['save_spot', { name: 'New', kind: 'url', url: 'https://example.com', ifVersion: 1 }],
+      ['save_playlist', { name: 'New', ifVersion: 1 }],
+      ['save_schedule_entry', { playlistId: o.playlist, target: 'org', ifVersion: 1 }],
+      ['save_data_source', { name: 'New', format: 'json', feedUrl: 'https://example.com/data.json', ifVersion: 1 }],
+    ] as const)
+      expect(await refused(name, input), name).toMatch(/has no version yet: ifVersion is for a change/);
+  });
+
   it('refuses a change that changes nothing, which would write nothing to guard', async () => {
     expect(await refused('save_spot', { spotId: o.imageSpot })).toMatch(/nothing to change/);
     expect(await refused('save_playlist', { playlistId: o.playlist })).toMatch(/nothing to change/);

@@ -275,7 +275,8 @@ const saveSpot = defineTool({
   mutates: true,
   idempotent: true,
   partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
-  input: z.object({
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+  input: z.strictObject({
     spotId: id('spot').optional().describe('The spot to change; omit to create one'),
     name: name('spot').optional(),
     kind: z.enum(SPOT_KINDS).optional().describe("A new spot's kind; fixed once made"),
@@ -301,6 +302,7 @@ const saveSpot = defineTool({
   handler: async ({ org, actor, input, write }) => {
     const { spotId, name, kind } = input;
     if (spotId === undefined) {
+      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new spot has no version yet: ifVersion is for a change');
       if (name === undefined || kind === undefined) throw invalid(name === undefined ? 'name' : 'kind', ['a new spot needs a name and a kind; give spotId to change one']);
       refuseOtherKinds(kind, input);
       if (kind === 'template') {

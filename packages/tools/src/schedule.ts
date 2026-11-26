@@ -244,8 +244,9 @@ const saveEntry = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
   input: z
-    .object({
+    .strictObject({
       scheduleEntryId: id('schedule entry').optional().describe('The entry to change; omit to create one'),
       playlistId: id('playlist').optional(),
       target: scheduleTarget.optional(),
@@ -265,6 +266,7 @@ const saveEntry = defineTool({
   handler: async ({ org, input, write }) => {
     const { scheduleEntryId } = input;
     if (scheduleEntryId === undefined) {
+      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new schedule entry has no version yet: ifVersion is for a change');
       const { playlistId, target } = input;
       if (playlistId === undefined || target === undefined)
         throw new ToolError('invalid_input', 'a new entry needs a playlistId and a target; give scheduleEntryId to change one');

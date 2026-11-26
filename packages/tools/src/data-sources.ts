@@ -174,7 +174,8 @@ const saveDataSource = defineTool({
   mutates: true,
   idempotent: true,
   needs: ['feedUrls'],
-  input: z.object({
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+  input: z.strictObject({
     dataSourceId: id('data source').optional().describe('The source to change; omit to add one'),
     id: id('data source').optional().describe('A new source: the id spots bind with, such as weather; made for you if absent'),
     name: name('data source').optional(),
@@ -208,6 +209,7 @@ const saveDataSource = defineTool({
   handler: async ({ org, input, write, publishRight, services: { feedUrls } }) => {
     const { dataSourceId } = input;
     if (dataSourceId === undefined) {
+      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new data source has no version yet: ifVersion is for a change');
       const { name, format } = input;
       if (name === undefined || format === undefined)
         throw new ToolError('invalid_input', 'a new data source needs a name and a format; give dataSourceId to change one');

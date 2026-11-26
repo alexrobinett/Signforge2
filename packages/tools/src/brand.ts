@@ -208,7 +208,8 @@ const saveBrandKit = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z.object({
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+  input: z.strictObject({
     brandKitId: id('brand kit').optional().describe('The kit to change; omit to create one'),
     name: name('brand kit').optional(),
     colors: colorsPatch.optional(),
@@ -235,6 +236,7 @@ const saveBrandKit = defineTool({
     const lightOnly = (dark: string | null | undefined, light: string | null | undefined) =>
       light && !dark ? new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }]) : undefined;
     if (input.brandKitId === undefined) {
+      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new brand kit has no version yet: ifVersion is for a change');
       const { name, colors } = input;
       const missing = BASE_COLORS.filter((k) => colors?.[k] === undefined);
       if (name === undefined || missing.length)
