@@ -1680,7 +1680,8 @@ describe("a CDN's copy at the size the screen needs", () => {
   }
 
   /** An answer with ETag `etag`, a 304 to a request that sends it: BBC's, the same for every size of a photo. */
-  const tagged = (etag: string, body: Uint8Array) => (req: Request) => (req.headers.get('if-none-match') === etag ? { status: 304 } : { body, headers: { etag } });
+  const tagged = (etag: string, body: Uint8Array) => (req: Request) =>
+    req.headers.get('if-none-match') === etag ? { status: 304 } : { body, headers: { etag } };
 
   it("fetches the CDN's copy and stores it under the feed's URL", async () => {
     const { feedPhoto, copy } = bbc();
@@ -1729,7 +1730,10 @@ describe("a CDN's copy at the size the screen needs", () => {
   it('falls back when the copy is too large to fetch', async () => {
     const { feedPhoto, copy } = bbc();
     const thumb = jpeg(240, 135, 'tiny');
-    const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { body: jpeg(1920, 1080), headers: { 'content-length': '9000000' } }, [feedPhoto]: { body: thumb } });
+    const { asked, stored } = await delivered(
+      { feedPhoto },
+      { [copy]: { body: jpeg(1920, 1080), headers: { 'content-length': '9000000' } }, [feedPhoto]: { body: thumb } },
+    );
     expect(asked).toEqual([copy, feedPhoto]);
     expect(stored).toMatchObject({ fileSha256: await sha256Hex(thumb), lastError: null });
   });
