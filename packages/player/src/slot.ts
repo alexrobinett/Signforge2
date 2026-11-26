@@ -3,7 +3,8 @@
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
 import {
-  SUPPORTED_PROTOCOLS,
+  playsProtocol,
+  THIS_PLAYER,
   isNewsImage,
   rowAsset,
   sampleAsset,
@@ -511,7 +512,7 @@ export class Slot {
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
-    if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
+    if (!playsProtocol(THIS_PLAYER, protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const locale = screenLocale(manifest);
     const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
     if (report) reportRejected(rejected);
