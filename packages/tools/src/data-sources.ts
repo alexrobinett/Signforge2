@@ -19,6 +19,8 @@ import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './o
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
 const MIN_REFRESH_S = 300;
+/** A news feed polls hourly unless a person chooses faster (owner decision on #339): stories turn over in hours, and each poll can queue photos. */
+const RSS_REFRESH_S = 3600;
 const MAX_REFRESH_S = 86_400;
 
 const feedUrl = z
@@ -166,7 +168,7 @@ const getDataSource = defineTool({
 
 const createDataSource = defineTool({
   name: 'create_data_source',
-  description: `Add a feed the server polls for spots to bind to. At most ${MAX_DATA_SOURCES} per organization. The first poll runs within a minute. Pass an idempotencyKey so a retry cannot add it twice. Returns { dataSource }.`,
+  description: `Add a feed the server polls for spots to bind to. At most ${MAX_DATA_SOURCES} per organization. The first poll runs within a minute; it polls every refreshS seconds after, by default every ${RSS_REFRESH_S} for rss and ${MIN_REFRESH_S} for the rest. Pass an idempotencyKey so a retry cannot add it twice. Returns { dataSource }.`,
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -180,7 +182,11 @@ const createDataSource = defineTool({
       feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
       connectionId: id('connection').optional().describe('Provider sources only: the connection to read through'),
       resource: resource.optional(),
-      refreshS: refreshS.default(MIN_REFRESH_S),
+      refreshS: refreshS
+        .optional()
+        .describe(
+          `How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}; default ${RSS_REFRESH_S} for rss, ${MIN_REFRESH_S} for the rest`,
+        ),
       horizonDays: horizonDays.optional(),
       rowsPath: rowsPath.optional(),
       photos: photos.optional(),
@@ -216,7 +222,7 @@ const createDataSource = defineTool({
         format: input.format,
         urlEncrypted,
         connectionId: input.connectionId ?? null,
-        refreshS: input.refreshS,
+        refreshS: input.refreshS ?? (input.format === 'rss' ? RSS_REFRESH_S : MIN_REFRESH_S),
         horizonDays: input.horizonDays ?? null,
         rowsPath: input.rowsPath ?? null,
         photos: input.photos ?? true,
