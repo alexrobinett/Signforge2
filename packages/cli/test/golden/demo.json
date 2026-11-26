@@ -141,8 +141,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd": {
-      "size": 400017,
+    "903680c897915d62e3ad0330c6b033841b7c5dfe0c5a3e8cde97987b762553d3": {
+      "size": 400029,
       "type": "text/html"
     },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
@@ -1150,7 +1150,7 @@
           }
         }
       },
-      "html": "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd"
+      "html": "903680c897915d62e3ad0330c6b033841b7c5dfe0c5a3e8cde97987b762553d3"
     }
   },
   "spots": {
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "e4adacc005c34f5793ed696a5533750d9268fad1c8225e963369bf94c51a9b27"
+  "id": "a08b03d43071330dbf3c157fffdba6f3b6a8c7e7d66831322f8bd5b32d477799"
 }

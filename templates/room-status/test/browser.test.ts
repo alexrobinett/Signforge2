@@ -212,6 +212,16 @@ describe('room status (#199)', () => {
       allDay: null,
     };
     expect(found).toEqual(Object.fromEntries(Object.keys(found).map((k) => [k, unavailable])));
+    // Neither free's colour nor busy's: the word is in the look's muted ink, in every look.
+    for (const look of looks) {
+      const f = await r.show({ look, events: [] }, undefined, NOW, 'UTC', ['events']);
+      const [word, muted] = await f.evaluate(() => {
+        const probe = document.querySelector('.stage')!.appendChild(document.createElement('i'));
+        probe.style.color = 'var(--lk-muted)';
+        return [getComputedStyle(document.querySelector('.word')!).color, getComputedStyle(probe).color];
+      });
+      expect(word, look).toBe(muted);
+    }
     // A field the screen does not name plays live: the same room, free, when only another field is on its fallback.
     expect(await says(await r.show({ look: 'pop', events: [] }, undefined, NOW, 'UTC', ['room']))).toMatchObject({ state: 'free', freeDay: 'Free all day' });
   });

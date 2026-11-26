@@ -60,8 +60,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd": {
-      "size": 400017,
+    "903680c897915d62e3ad0330c6b033841b7c5dfe0c5a3e8cde97987b762553d3": {
+      "size": 400029,
       "type": "text/html"
     },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
@@ -1376,7 +1376,7 @@
           }
         }
       },
-      "html": "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd"
+      "html": "903680c897915d62e3ad0330c6b033841b7c5dfe0c5a3e8cde97987b762553d3"
     },
     "base/weather@1.7.0": {
       "manifest": {
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "3e5b35bdf91f9b76307511c27df0cc055e958c66a9fa73bb3d1e2bcdc3ce453b"
+  "id": "8251b1219138a3fa97adf624a4528396eee730fa111f453ebee8ee35f63c04ed"
 }
