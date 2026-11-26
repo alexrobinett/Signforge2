@@ -165,6 +165,13 @@ describe('an org always keeps an owner (#292)', () => {
 
   // The refusal a request gets when the other owner's change landed after Better Auth's own count.
   const lostRace = { code: 'ORGANIZATION_NEEDS_AN_OWNER', message: expect.stringContaining('at least one owner') };
+  /** `b`'s change went in and `a`'s was refused as the lost race, leaving `owner` the one owner. */
+  const bWon = async (res: { a: Response; b: Response }, owners: () => Promise<string[]>, owner: string) => {
+    expect(res.b.status).toBe(200);
+    expect(res.a.status).toBe(400);
+    expect(await res.a.json()).toMatchObject(lostRace);
+    expect(await owners()).toEqual([owner]);
+  };
 
   it('two owners demoting each other at once leaves exactly one owner', async () => {
     const { org, bUser, aMember, bMember, owners, race, audit } = await twoOwners();
@@ -172,10 +179,7 @@ describe('an org always keeps an owner (#292)', () => {
       (a) => a.post('/api/auth/organization/update-member-role', { memberId: bMember.id, role: 'editor', organizationId: org.id }),
       (b) => b.post('/api/auth/organization/update-member-role', { memberId: aMember.id, role: 'editor', organizationId: org.id }),
     );
-    expect(res.b.status).toBe(200);
-    expect(res.a.status).toBe(400);
-    expect(await res.a.json()).toMatchObject(lostRace);
-    expect(await owners()).toEqual([bUser.id]);
+    await bWon(res, owners, bUser.id);
     // Only the change that happened is in the log.
     expect((await audit('update_member_role')).map((r) => r.targetId)).toEqual([aMember.id]);
   });
@@ -186,10 +190,7 @@ describe('an org always keeps an owner (#292)', () => {
       (a) => a.post('/api/auth/organization/remove-member', { memberIdOrEmail: bMember.id, organizationId: org.id }),
       (b) => b.post('/api/auth/organization/remove-member', { memberIdOrEmail: aMember.id, organizationId: org.id }),
     );
-    expect(res.b.status).toBe(200);
-    expect(res.a.status).toBe(400);
-    expect(await res.a.json()).toMatchObject(lostRace);
-    expect(await owners()).toEqual([bUser.id]);
+    await bWon(res, owners, bUser.id);
     expect((await audit('remove_member')).map((r) => r.targetId)).toEqual([aMember.id]);
   });
 
@@ -199,10 +200,7 @@ describe('an org always keeps an owner (#292)', () => {
       (a) => a.post('/api/auth/organization/leave', { organizationId: org.id }),
       (b) => b.post('/api/auth/organization/leave', { organizationId: org.id }),
     );
-    expect(res.b.status).toBe(200);
-    expect(res.a.status).toBe(400);
-    expect(await res.a.json()).toMatchObject(lostRace);
-    expect(await owners()).toEqual([aUser.id]);
+    await bWon(res, owners, aUser.id);
     expect((await audit('leave_organization')).map((r) => r.targetId)).toEqual([bMember.id]);
   });
 
