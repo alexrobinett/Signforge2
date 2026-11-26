@@ -22,6 +22,19 @@ describe('PlayLedger', () => {
     });
   });
 
+  it('takes back a play while its hour is open, and leaves one already in a batch', () => {
+    const l = PlayLedger.fresh('ep1');
+    l.record(H, 'menu', 8000);
+    l.record(H + MIN, 'menu', 8000);
+    l.retract(H + MIN, 'menu', 8000);
+    l.record(H + 2 * MIN, 'news', 1000);
+    l.retract(H + 2 * MIN, 'news', 1000);
+    const sent = l.batch(H + 61 * MIN);
+    expect(sent.counts).toEqual([{ hour: '2026-11-17T13:00Z', spot: 'menu', plays: 1, ms: 8000 }]);
+    l.retract(H, 'menu', 8000);
+    expect(l.batch(H + 61 * MIN)).toEqual(sent);
+  });
+
   it('sends the same batch again until it is acknowledged in its epoch, and plays meanwhile wait for the next', () => {
     const l = PlayLedger.fresh('ep1');
     l.record(H, 'menu', 1000);

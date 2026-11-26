@@ -54,6 +54,8 @@ interface PlaybackEvents {
   status(text: string): void;
   /** A spot shown at `at` (corrected time) has started and its transition ended: log and count it. */
   played(step: Step, manifestId: string, at: number): void;
+  /** A play `played` counted died before its turn was over (`Playback.died`): take it back. */
+  unplayed(step: Step, manifestId: string, at: number): void;
   /** A spot was skipped: it did not become ready, or did not start. */
   skipped(message: string): void;
   /** Preview: a new version of the spot on screen could not be shown. */
@@ -106,6 +108,19 @@ class Signal {
   }
 }
 
+/**
+ * The spot on screen. Its play is `pending` until it counts (`played`), `counted` until it has played
+ * on alive to the next pass, which resets the failure count, then `proven`.
+ */
+interface OnScreen {
+  step: Step;
+  spot: Spot;
+  manifest: ScreenManifest;
+  startedAt: number;
+  shownAt: number;
+  play: 'pending' | 'counted' | 'proven';
+}
+
 export class Playback {
   readonly activity: Activity = { phase: 'idle', preparing: '', spotStartedAt: 0, spot: '', playlist: '' };
 
@@ -120,7 +135,9 @@ export class Playback {
   /** The slot on screen, or the one last on screen while `#onScreen` is unset. */
   #front: SlotIndex = 0;
   /** The spot on screen, the manifest its files are named in, and when it started (monotonic). */
-  #onScreen?: { spot: Spot; manifest: ScreenManifest; startedAt: number };
+  #onScreen?: OnScreen;
+  /** The spot on screen died after its play counted: the next pass counts it as a failure. */
+  #deathToCount = false;
   #failures = 0;
   /** Spots of `#failingManifest` that failed in a row, never reset by the pause after a few failures. */
   #failedInManifest = 0;
@@ -199,6 +216,11 @@ export class Playback {
     if (!spot || !this.#manifest) return undefined;
     try {
       await this.o.slots.update(this.#front, spot, this.#manifest);
+      // The draft loaded afresh in a slot whose spot had died: it is not cut short for that death.
+      if (this.#dead.delete(this.#front)) {
+        this.#cutIn = false;
+        this.#deathToCount = false;
+      }
       return spot.id;
     } catch (err) {
       this.o.events.updateFailed(`${spot.id}: ${message(err)}`);
@@ -208,15 +230,23 @@ export class Playback {
 
   /**
    * The spot loaded in `slot` died and the slot is blank (a refit failed, the template navigated
-   * away). It counts as skipped. On screen, the next spot cuts in as soon as it is ready, instead
-   * of the slot staying blank for the rest of the spot; underneath, it is never shown.
+   * away). It counts as skipped, and as a failure towards the pause after a few in a row. On
+   * screen, the next spot cuts in as soon as it is ready, instead of the slot staying blank for
+   * the rest of the spot, and its play, if it counted before the next spot began to load, is taken
+   * back; underneath, it is never shown.
    */
   died(slot: SlotIndex, why: string): void {
     this.#dead.add(slot);
     this.o.events.skipped(why);
-    if (slot !== this.#front || !this.#onScreen) return;
+    const on = this.#onScreen;
+    if (slot !== this.#front || !on) return;
     this.#cutIn = true;
     this.#frontDied.raise();
+    // A death once it has played on to the next pass is no flood, and its play stands.
+    if (on.play !== 'counted') return;
+    on.play = 'pending';
+    this.#deathToCount = true;
+    this.o.events.unplayed(on.step, on.manifest.id, on.shownAt);
   }
 
   /** The display loop's decision. Off, the spot on screen gives way at once and nothing is drawn until it is on again. */
@@ -248,6 +278,17 @@ export class Playback {
     // Start loading the next spot shortly before the current one ends, or at once when a takeover cuts in.
     if (this.#onScreen && !this.#cutIn) await this.hold(this.#onScreen.startedAt + this.#onScreen.spot.durationMs - PREPARE_LEAD_MS - clock.mono());
     if (!this.#displayOn) return;
+    // A template that dies on every play must reach the pause, not loop at the speed of a prepare.
+    if (this.#deathToCount && this.#onScreen) {
+      this.#deathToCount = false;
+      return this.failed(this.#onScreen.step, this.#onScreen.manifest);
+    }
+    // The spot on screen played on, alive, until the next was due (or a takeover cut in): its turn went well.
+    if (this.#onScreen?.play === 'counted') {
+      this.#onScreen.play = 'proven';
+      this.#failures = 0;
+      this.#failedInManifest = 0;
+    }
 
     const m = this.#manifest;
     const chosenAt = new Date(clock.now());
@@ -317,7 +358,8 @@ export class Playback {
     const prevSlot = this.#front;
     // On screen from here, before `show` plays it: a death from now on is the spot on screen's (`died`).
     this.#front = slot;
-    this.#onScreen = { spot: step.spot, manifest: m, startedAt };
+    const on: OnScreen = { step, spot: step.spot, manifest: m, startedAt, shownAt, play: 'pending' };
+    this.#onScreen = on;
     const { started, done } = slots.show(slot, prev ? prevSlot : undefined, tr);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
@@ -343,8 +385,9 @@ export class Playback {
       return this.failed(step, m);
     }
     // After the transition: storing the play and a new last good manifest costs frames on a Pi.
-    this.#failures = 0;
-    this.#failedInManifest = 0;
+    // The failure count is reset only once the spot has played on alive (the next pass), so a
+    // template that dies just after its play counts still reaches the pause.
+    on.play = 'counted';
     this.record(step, m.id, shownAt);
     this.promote(step.spot, m.id);
   }
@@ -385,6 +428,7 @@ export class Playback {
     this.o.slots.clear(0);
     this.o.slots.clear(1);
     this.#dead.clear();
+    this.#deathToCount = false;
     this.#onScreen = undefined;
     this.o.pins.release('playing');
     this.o.pins.release('preparing');

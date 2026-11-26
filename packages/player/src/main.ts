@@ -64,7 +64,7 @@ import {
   startDataLoop,
 } from './data';
 import { activeOverride, savedOverride, setOverride, wakeable } from './override';
-import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
+import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retractPlay } from './plays';
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
@@ -408,6 +408,13 @@ const playback = new Playback({
         durationMs: step.spot.durationMs,
       });
       if (state.log.length > 500) state.log.shift();
+    },
+    unplayed(step, manifestId, at) {
+      state.played--;
+      if (SOURCE === 'device' && clock.trusted) retractPlay(at, step.spot.id, step.spot.durationMs);
+      const startedAt = new Date(at).toISOString();
+      const i = state.log.findLastIndex((e) => e.spot === step.spot.id && e.manifest === manifestId && e.startedAt === startedAt);
+      if (i >= 0) state.log.splice(i, 1);
     },
     skipped(message) {
       state.skipped++;

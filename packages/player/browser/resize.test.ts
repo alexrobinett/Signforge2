@@ -142,6 +142,7 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
   it('loads a template on screen whose refit fails afresh at the new size, and counts it skipped (#522)', async () => {
     const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])));
     await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', playing: '1' });
+    const first = (await p.until((s) => s.log.length === 1)).log[0]!.startedAt;
     await (await visibleFrame(p.page, 'label'))!.evaluate(() => {
       (window as unknown as { sfFailNext: boolean }).sfFailNext = true;
     });
@@ -149,9 +150,10 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
     await p.page.setViewportSize(PORTRAIT);
     // Its next play cuts in at once, in a fresh frame, rather than the slot staying blank for 60 s.
     await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', viewport: '540x960 portrait', playing: '1' });
-    const s = await p.state();
+    // The play that died is taken back, so the log holds only the fresh one (two, had it stayed).
+    const s = await p.until((s) => s.log.length === 1 && s.log[0]!.startedAt !== first);
+    expect(spotsPlayed(s)).toEqual(['a']);
     expect(s.skipped).toBe(1);
     expect(s.lastError).toBe('a: refit failed: template error: fixture refit failed');
-    expect(spotsPlayed(s)).toEqual(['a', 'a']);
   });
 });

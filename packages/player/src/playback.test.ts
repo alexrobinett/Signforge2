@@ -166,6 +166,7 @@ function setup({ preview = false } = {}) {
     events: {
       status: (text) => seen.status.push(text),
       played: (step: Step, manifestId: string) => seen.played.push(`${step.spot.id}@${manifestId}`),
+      unplayed: (step: Step, manifestId: string) => seen.played.splice(seen.played.lastIndexOf(`${step.spot.id}@${manifestId}`), 1),
       skipped: (message) => seen.skipped.push(message),
       updateFailed: () => {},
       prepared: () => {},
@@ -469,7 +470,27 @@ describe('playback', () => {
       await clock.until(2 * MINUTE);
       expect(shown()).toEqual(['a@m1 200', `a@m1 ${MINUTE + PREPARE_MS}`]);
       expect(seen.skipped).toEqual(['a: template navigated away']);
-      expect(seen.played).toEqual(['a@m1', 'a@m1']);
+      // The play that died is taken back; the one after it counts.
+      expect(seen.played).toEqual(['a@m1']);
+    });
+
+    it('that dies just after each play counts, on a cut, pauses after three in a row and counts none (#528)', async () => {
+      const { clock, slots, seen, playback, run, shown } = setup();
+      // A template that navigates as it plays: its death lands just after its play counted.
+      const played = slots.show.bind(slots);
+      slots.show = (slot, prev, transition) => {
+        const r = played(slot, prev, transition);
+        clock.after(1, () => playback.died(slot, 'a: template navigated away'));
+        return r;
+      };
+      playback.adopt(manifest('m1', [spot('a', HOUR)]));
+      run();
+      await clock.until(MINUTE);
+      // Three plays, each dying 1 ms in; the third death (603) pauses for 5 s; then three more, and so on.
+      expect(shown().slice(0, 4)).toEqual(['a@m1 200', 'a@m1 401', 'a@m1 602', `a@m1 ${603 + 5 * SECOND + PREPARE_MS}`]);
+      expect(seen.status).toContain('SignForge\nContent is unavailable. Retrying…');
+      expect(shown().length).toBeLessThan(40);
+      expect(seen.played).toEqual([]);
     });
 
     it('underneath, is never shown, and the spot on screen plays its full length', async () => {
@@ -507,6 +528,20 @@ describe('playback', () => {
       expect(shown()).toEqual(['a@m1 200', `a@m1 ${2 * PREPARE_MS}`]);
       expect(seen.skipped).toEqual(['a: did not start: play() refused']);
       expect(seen.played).toEqual(['a@m1']);
+    });
+
+    it('in the preview, does not cut short the draft that reloads it in place', async () => {
+      const { clock, slots, playback, run, shown } = setup({ preview: true });
+      playback.adopt(manifest('m1', [spot('a', HOUR)]));
+      run();
+      await clock.until(MINUTE);
+      playback.died(1, 'a: template navigated away');
+      // The next play is loading when the draft arrives and reloads the spot on screen.
+      await clock.until(MINUTE + 100);
+      await playback.adoptDraft(manifest('m2', [spot('a', HOUR)]));
+      await clock.until(2 * MINUTE);
+      expect(slots.log).toContain(`${MINUTE + 100} update 1 a@m2`);
+      expect(shown()).toEqual(['a@m1 200']);
     });
   });
 });

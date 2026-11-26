@@ -87,9 +87,12 @@ describe('a template that navigates its own frame', () => {
     // An hour long: b plays within the wait only if evil gives way when it dies.
     const { p, leaks } = await hostile('navigate-on-play', undefined, h.templateHtml, 3_600_000);
     const s = await afterEvil(p);
-    // Whether evil's play counted first depends on when the navigation lands; it is skipped either way.
-    expect(spotsPlayed(s).filter((id) => id !== 'evil')).toEqual(['a', 'b']);
+    // Never played: had its play counted before the navigation landed, it is taken back (#528).
+    expect(spotsPlayed(s)).toEqual(['a', 'b']);
     expect(s.lastError).toBe('evil: template navigated away');
+    // Its frame is gone: no template on the page still shows it.
+    const labels = await Promise.all(p.page.frames().map((f) => f.evaluate(() => document.getElementById('label')?.textContent).catch(() => undefined)));
+    expect(labels).not.toContain('evil');
     expect(p.console.some((l) => l.includes('navigated'))).toBe(true);
     expect(leaks()).toEqual([]);
   });

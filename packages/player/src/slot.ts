@@ -516,7 +516,11 @@ export class Slot {
         console.warn(`[sf] template ${spot.template} navigated away; removed`);
         wrapperFrame.remove();
         if (live.waiter) live.waiter.reject(new Error('template navigated away'));
-        else this.died(`${live.spot.id}: template navigated away`);
+        else {
+          // Aborted, so a resize before the slot is cleared cannot refit it and report a second death.
+          this.abort?.abort();
+          this.died(`${live.spot.id}: template navigated away`);
+        }
       },
       { signal },
     );
