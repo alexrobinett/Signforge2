@@ -96,6 +96,11 @@ describe('list_audit_log', () => {
     expect(await actions({ from: new Date(T + 1).toISOString() })).toEqual([`rate_limited@${T + 1000}`]);
     const refused = await dispatch(registry, 'list_audit_log', { from: 'yesterday' }, as('viewer'));
     expect(JSON.stringify(refused)).toMatch(/ISO 8601 time with its offset.*ms since the epoch/);
+    // Seconds since the epoch, read as ms, would be January 1970: refused, saying so; an ISO time before 2000 alike (#543).
+    const seconds = await dispatch(registry, 'list_audit_log', { from: Math.floor(T / 1000) }, as('viewer'));
+    expect(JSON.stringify(seconds)).toMatch(/one this small is seconds: multiply it by 1000/);
+    const early = await dispatch(registry, 'list_audit_log', { from: '1969-12-31T23:00:00Z' }, as('viewer'));
+    expect(JSON.stringify(early)).toMatch(/a time from 2000 on/);
     // Described as date-time, without zod's regex.
     const d = await dispatch(registry, 'describe', { type: 'audit_entry' }, as('viewer'));
     expect(JSON.stringify(d)).toContain('"format":"date-time"');

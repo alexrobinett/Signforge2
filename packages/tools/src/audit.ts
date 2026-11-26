@@ -67,20 +67,27 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
 
 const isoTime = z.iso.datetime({ offset: true });
 /**
+ * The earliest time a filter takes, 2000-01-01: no log goes back further, and a number below it is seconds since the
+ * epoch, which as ms would mean January 1970 (#543). An ISO time before it is refused alike, never a negative ms.
+ */
+const EARLIEST = Date.UTC(2000, 0, 1);
+/**
  * A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler.
  * Checked by refine, so its schema says date-time rather than carry zod's regex (#543).
  */
-const instant = z.union(
-  [
-    z.number().int().nonnegative(),
-    z
-      .string()
-      .refine((t) => isoTime.safeParse(t).success)
-      .meta({ format: 'date-time' })
-      .transform((t) => Date.parse(t)),
-  ],
-  { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
-);
+const instant = z
+  .union(
+    [
+      z.number().int(),
+      z
+        .string()
+        .refine((t) => isoTime.safeParse(t).success)
+        .meta({ format: 'date-time' })
+        .transform((t) => Date.parse(t)),
+    ],
+    { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
+  )
+  .refine((ms) => ms >= EARLIEST, 'a time from 2000 on: a number is ms since the epoch, so one this small is seconds: multiply it by 1000');
 
 const listAuditLog = defineTool({
   name: 'list_audit_log',

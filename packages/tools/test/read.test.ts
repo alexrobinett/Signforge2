@@ -65,6 +65,12 @@ describe('read', () => {
     const latest = await call(as('viewer'), 'get_publish', {});
     const [read] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'], detail: 'full' })).items;
     expect(read).toMatchObject({ id: latest.publish.id, rollout: latest.screens });
+    // At summary detail too, each screen with where it stands and its state now (#541).
+    const [summary] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'] })).items;
+    expect(latest.screens.length).toBeGreaterThan(0);
+    expect(summary.rollout).toEqual(
+      latest.screens.map((s: Record<string, unknown>) => ({ screenId: s.screenId, name: s.name, outcome: s.outcome, state: s.state })),
+    );
     // Its version on screens: published, then drafted again, so the two differ.
     const mine = await seedOrg(env.DB, 'read-tool-published');
     const owner = member(mine.orgId, 'owner');
