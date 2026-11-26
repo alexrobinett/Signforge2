@@ -884,6 +884,14 @@ export const agentUsageOutput = z.object({
 });
 export type AgentUsage = z.infer<typeof agentUsageOutput>;
 
+/** Whom one group reached at a publish (#187), by its name then. */
+const groupReach = z.object({
+  groupId: z.string(),
+  name: z.string().describe('Its name at the publish'),
+  rule: z.boolean().describe('A smart group: its screens are the ones its rule matched'),
+  screenIds: z.array(z.string()),
+});
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
@@ -949,6 +957,19 @@ export const outputs = {
   roll_back_publish: z.object({ publish: madeOutput }),
   list_publishes: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
   count_drafts: z.object({ spots: z.number(), playlists: z.number(), scheduleEntries: z.number() }),
+  preview_publish: z.object({
+    screens: z
+      .array(z.object({ screenId: z.string(), name: z.string(), reasons: z.array(z.string()).describe('Why its content would change, each in words') }))
+      .describe('The screens whose content would change, by name'),
+    unchanged: z.number().int().describe('Screens that would keep what they have'),
+    failed: z.array(z.object({ screenId: z.string(), name: z.string(), problems: z.array(z.string()) })).describe('Screens that could not be compiled: they keep what they have'),
+    groups: z
+      .array(z.object({ groupId: z.string(), name: z.string(), joined: z.array(z.string()), left: z.array(z.string()) }))
+      .describe("Each group whose screens would change since the last publish's record of them; none before the first such record"),
+    samples: z
+      .array(z.object({ spotId: z.string(), name: z.string(), fields: z.array(z.string()) }))
+      .describe("Spots that would go live with their template's sample text: a publish refuses them unless a person says so"),
+  }),
   get_publish: z.object({
     publish: publishOutput.nullable(),
     screens: z.array(
@@ -965,6 +986,10 @@ export const outputs = {
           .describe("The screen's state now, its kind and reason as read screen_status gives them"),
       }),
     ),
+    targets: z
+      .array(groupReach)
+      .nullable()
+      .describe('Whom each group reached at this publish, as it resolved them (#187); null for a roll back, or a publish made before it was kept'),
   }),
   list_templates: z.object({ templates: z.array(templateOutput), next: nextOutput }),
   get_template: z.object({ template: templateOutput }),

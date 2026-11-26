@@ -28,7 +28,7 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { loadOrg, publishOrg, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
+import { loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
@@ -123,11 +123,14 @@ async function switchScreens(
   rows: { screenId: string; manifestId: string; photoSources: string[] | null }[],
   restoresId?: string,
   changes?: PublishView['changes'],
+  targetsJson: string | null = null,
 ) {
   const { org, actor, write, notify } = ctx;
   const [previous] = await org.publishes.history({ limit: 1 });
   const changesJson = changes ? JSON.stringify(changes) : null;
-  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson }));
+  const made = write(
+    org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson, targetsJson }),
+  );
   const switched = rows.map(({ screenId, manifestId }) => ({ screenId, manifestId }));
   write(org.publishes.stage.addScreens(made.id, switched));
   for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId, r.photoSources));
@@ -261,6 +264,8 @@ export async function runPublish(
     changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id, photoSources: manifestPhotoSources(m) })),
     undefined,
     changes,
+    // Whom each group reached, as this publish resolved them (#187), with its row in the same batch.
+    recordTargets(result.graph),
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -633,7 +638,7 @@ const listPublishes = defineTool({
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens }, or { publish: null } if there has been no publish.",
+    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens, targets }, or { publish: null } if there has been no publish; targets: whom each group reached then.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -648,8 +653,8 @@ const getPublish = defineTool({
       // The history from this publish down: its first row is this one, with its rollout counts.
       beforeRevision = asked.revision + 1;
     }
-    const [found] = await org.publishes.history({ limit: 1, beforeRevision });
-    if (!found) return { publish: null, screens: [] };
+    const [found] = await org.publishes.history({ limit: 1, beforeRevision, targets: true });
+    if (!found) return { publish: null, screens: [], targets: null };
     const [rows, afterMs] = await Promise.all([org.publishes.rollout(found.id), unreachableAfterMs(org)]);
     const now = Date.now();
     const screens = rows.map((r) => {
@@ -666,7 +671,7 @@ const getPublish = defineTool({
         state: { kind: state.kind, reason: state.reason },
       };
     });
-    return { publish: publishView(found), screens };
+    return { publish: publishView(found), screens, targets: found.targetsJson === null ? null : readTargets(found.targetsJson) };
   },
 });
 

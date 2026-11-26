@@ -911,7 +911,7 @@ describe('the publish tools (M3-18)', () => {
     const { org, lobby, hall } = await seedSmallOrg('tool-rollout');
     const p = publisher(org);
     const call = editorCalls(org);
-    expect(await ok(call('get_publish', {}))).toEqual({ publish: null, screens: [] });
+    expect(await ok(call('get_publish', {}))).toEqual({ publish: null, screens: [], targets: null });
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
     const manifest = (await org.screens.get(lobby.id))!.desiredManifestId!;
     await org.screens.reportManifest(lobby.id, manifest, { arrivedAt: Date.now() });

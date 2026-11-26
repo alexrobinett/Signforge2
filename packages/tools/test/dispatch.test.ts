@@ -117,6 +117,7 @@ describe('the registry', () => {
       'list_screens',
       'list_spots',
       'list_templates',
+      'preview_publish',
       'publish',
       'publish_manifest_to_screen',
       'read',

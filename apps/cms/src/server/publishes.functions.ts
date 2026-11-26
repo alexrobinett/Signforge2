@@ -6,7 +6,7 @@ import { createServerFn } from '@tanstack/react-start';
 import type { PublishDetail } from '~/lib/publishes';
 import { inOrg, tool } from './tools.server';
 
-const NONE: PublishDetail = { publish: null, screens: [] };
+const NONE: PublishDetail = { publish: null, screens: [], targets: null };
 
 /** The newest publishes: the history a person reads, not every one. */
 export const getPublishes = createServerFn({ method: 'GET' }).handler(async () => ({

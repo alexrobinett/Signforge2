@@ -105,3 +105,17 @@ it('costs no more by ids when a group chose a kit, and pins what smart groups ma
   // Measured, as the most each may take: a new statement fails this on purpose.
   expect(costs).toEqual({ readKits: 15, listKits: 7, assign: 11, saveRule: 7, saveList: 5 });
 });
+
+it('previews a publish within a request’s budget, reading the last publish’s record of whom its groups reached (#187)', async () => {
+  const t = testApp();
+  const owner = new Client(t);
+  await owner.signIn(email('read-cost-preview'));
+  const org = await owner.createOrg('Read Cost Preview');
+  const o = await seedOrg(env.DB, org.id);
+  await owner.ok('/api/tools/set_default_playlist', { playlistId: o.playlist });
+  await owner.ok('/api/tools/publish', {});
+  const cost = await measure((b) => as(owner, b).ok('/api/tools/preview_publish', {}));
+  expect(cost.queries).toBeLessThan(50);
+  // Measured, as the most it may take: a new statement fails this on purpose.
+  expect(cost).toEqual({ statements: 17, queries: 17, rpcs: [] });
+});

@@ -62,6 +62,8 @@ export interface OrgGraph {
   /** The org's smart groups' rules, and its screens' labels (none read without a rule), as read: what a smart group's takeover is held to. */
   rules: { id: string; selectorJson: string }[];
   labels: { screenId: string; key: string; value: string }[];
+  /** Every group, by id with its name, as read: what a publish records each one reached (#187). */
+  groups: { id: string; name: string }[];
   /** Template versions spots may play (approved or retired), and draft ones, by version id. */
   templateVersions: Map<string, { key: string; manifest: TemplateManifest; html: string; size: number; status: TemplateVersion['status'] }>;
   assets: Map<string, { asset: Asset; renditions: AssetRendition[] }>;
@@ -87,7 +89,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   // The publish revision first, before any content: a publish that commits after this read moves
   // it on, so whatever it changed cannot be in what is read below without failing the guard.
   const settings = await org.settings.get();
-  const [screens, { members, rules, labels }, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
+  const [screens, { members, rules, labels, groups }, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
     org.screens.list(),
     // A smart group's members are the screens its rule matches as labelled now (#186): the labels are read only when
     // the org has one, so an org without costs no query more.
@@ -117,6 +119,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     groupsOf,
     rules,
     labels,
+    groups,
     templateVersions,
     assets: new Map(assets.map((a) => [a.id, { asset: a, renditions: byAsset.get(a.id) ?? [] }])),
     // The feed URL stays on the server; a screen learns the id and refresh rate.
@@ -539,7 +542,7 @@ const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name:
  * for their template's sample text are named, and it is worked out again acknowledging exactly those,
  * as the person's press does. Any other refusal is thrown.
  */
-export async function dryPublish(org: OrgScope, opts: CompileOptions, pins: readonly DraftPin[], exact: boolean, loaded?: OrgGraph) {
+export async function dryPublish(org: OrgScope, opts: CompileOptions, pins?: readonly DraftPin[], exact = false, loaded?: OrgGraph) {
   // The org read once, for the first run and the one acknowledging sample text alike: nothing is written between them.
   const graph = loaded ?? (await loadOrg(org));
   const run = (allow: SampleAck[]) => publishOrg(org, opts, pins, [], exact, allow, [], graph);
@@ -719,4 +722,45 @@ function firstDefault(graph: OrgGraph, drafts: DraftReport): { id: string; name:
   const row = graph.playlists.find((p) => p.id === only);
   const live = row && published(row);
   return live ? { id: only, name: live.name } : null;
+}
+
+/** Whom one group reached at a publish (#187): its screens as resolved then, a smart group's by its rule. */
+export interface GroupReach {
+  groupId: string;
+  name: string;
+  rule: boolean;
+  screenIds: string[];
+}
+
+/** `publishes.targets_json` as stored: each screen id once, each group's members as indexes into them. */
+interface TargetsRecord {
+  screens: string[];
+  groups: { id: string; name: string; rule: boolean; members: number[] }[];
+}
+
+/** Every group's members in `graph`, as a publish records them (`publishes.targets_json`), groups and screens by id. */
+export function recordTargets(graph: Pick<OrgGraph, 'groups' | 'groupsOf' | 'rules'>): string {
+  const screens = [...graph.groupsOf.keys()].toSorted();
+  const at = new Map(screens.map((id, i) => [id, i]));
+  const ruled = new Set(graph.rules.map((r) => r.id));
+  const record: TargetsRecord = {
+    screens,
+    groups: graph.groups
+      .toSorted((a, b) => (a.id < b.id ? -1 : 1))
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        rule: ruled.has(g.id),
+        members: screens.flatMap((id) => (graph.groupsOf.get(id)?.includes(g.id) ? [at.get(id)!] : [])),
+      })),
+  };
+  return JSON.stringify(record);
+}
+
+/** A stored record (`recordTargets`) read back, each group with its screens' ids, by name. */
+export function readTargets(json: string): GroupReach[] {
+  const record: TargetsRecord = JSON.parse(json);
+  return record.groups
+    .map((g) => ({ groupId: g.id, name: g.name, rule: g.rule, screenIds: g.members.map((i) => record.screens[i]!) }))
+    .toSorted((a, b) => a.name.localeCompare(b.name) || (a.groupId < b.groupId ? -1 : 1));
 }
