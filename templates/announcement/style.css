@@ -628,7 +628,6 @@ body {
 [data-look='corporate'] .tile {
   border: var(--lk-rule) solid var(--lk-rule-color);
 }
-
 [data-look='corporate'] .photo {
   flex-basis: 39.6vw;
 }

@@ -100,7 +100,6 @@ describe('announcement (#197)', () => {
       expect(found).toEqual([]);
     }, 180_000);
 
-  // #224: with it, a portrait screen gets the landscape rendition, which must never be drawn larger than it is.
   // The board's announcement (#news-design): facts as ruled rows that wrap rather than cut ("9 am" stays whole), the
   // code's label under it, the label as text not a pill, a straight photo block, and one accent a look.
   for (const orientation of ['landscape', 'portrait'] as const)
@@ -149,6 +148,7 @@ describe('announcement (#197)', () => {
       expect(found).toEqual([]);
     });
 
+  // #224: with it, a portrait screen gets the landscape rendition, which must never be drawn larger than it is.
   it('draws the photo within the portraitBox it declares, in every look and toggle, over the whole spot', async () => {
     const { manifest } = t();
     const def = manifest.fields.photo;
