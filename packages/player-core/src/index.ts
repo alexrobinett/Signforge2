@@ -349,6 +349,7 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
 export { Clock, CLOCK_JUMP_MS, type ClockOptions, type ClockTrust, type PersistedClock } from './clock';
 export { PlayLedger, hourOf, type PlayBatch } from './plays';
 export { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
+export { openFrameHost, type FrameHost, type FrameHostOptions } from './frame-host';
 export {
   boundFields,
   boundImageHashes,
