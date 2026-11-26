@@ -15,8 +15,9 @@
  *  - A template bundle records the frame protocol it was built against (`TemplateManifest.protocol`)
  *    and the player speaks every protocol in SUPPORTED_PROTOCOLS. A bundle is immutable; a protocol
  *    change must never strand templates already published.
- *  - A player reports the manifest schemas it can play in every sync. The server compiles each
- *    screen at the newest schema that screen supports, and tells an outdated player to reload.
+ *  - A player reports the manifest schemas and frame protocols it can play in every sync. The compiler
+ *    makes every manifest at MANIFEST_SCHEMA, and the server tells a player that cannot play its screen's
+ *    to reload (`canPlay`, ./playable.ts, the one rule the server and the player use; #156).
  *  - A player release plays schema N and N-1, so a screen updated while offline still plays the
  *    manifest it cached under the previous release.
  */
@@ -27,4 +28,5 @@ export * from './sample.ts';
 export * from './shapes.ts';
 export * from './validate.ts';
 export * from './parse.ts';
+export * from './playable.ts';
 export * from './scripts.ts';
