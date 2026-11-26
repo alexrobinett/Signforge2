@@ -545,3 +545,22 @@ test("the Screens page's pairing form, and its search and filters, are disabled 
   await expect(page.getByLabel('Status', { exact: true })).toBeEnabled();
   await expect(page.getByLabel('Group', { exact: true })).toBeEnabled();
 });
+
+test("at a phone's width, a new org's pairing code takes all six characters in view, none clipped (review of #491)", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInAs(page, `e2e-screens-pair-phone-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Quayside Fudge', ADDRESS);
+  await page.goto('/screens');
+  await hydrated(page);
+  const sixth = page.getByLabel('Character 6 of 6');
+  const first = page.getByLabel('Character 1 of 6');
+  await expect(sixth).toBeVisible();
+  // Each box whole, inside the window, and wide enough for its character.
+  const [a, b] = await Promise.all([first.boundingBox(), sixth.boundingBox()]);
+  expect(b!.x + b!.width).toBeLessThanOrEqual(390 - 16);
+  expect(a!.x).toBeGreaterThanOrEqual(16);
+  expect(b!.width).toBeGreaterThanOrEqual(32);
+  // And the card holding them does not clip the last: what is drawn at its middle is it.
+  const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.getAttribute('aria-label'), [b!.x + b!.width / 2, b!.y + b!.height / 2]);
+  expect(hit).toBe('Character 6 of 6');
+});

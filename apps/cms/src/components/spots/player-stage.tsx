@@ -222,7 +222,7 @@ export function PlayerStage({
         <div ref={roomRef} className={cn('relative min-h-0 flex-1', scale === 'actual' ? 'max-h-(--editor-height) overflow-auto' : 'overflow-hidden')}>
           <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
             <div
-              className="relative shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-stage-edge"
+              className="relative shrink-0 overflow-hidden rounded-sm bg-letterbox ring-1 ring-stage-edge"
               style={{ width: size.w * shown, height: size.h * shown }}
             >
               {/* A new frame per orientation: the player sizes itself to its window when it starts. */}

@@ -70,7 +70,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
             aria-label="A screen showing its pairing code"
             className="flex aspect-video flex-col items-center justify-center gap-3 bg-stage text-stage-foreground"
           >
-            <span className="text-md text-stage-foreground">Pair this screen</span>
+            <span className="text-md">Pair this screen</span>
             <span className="font-mono text-4xl font-semibold tracking-[0.08em] sm:text-5xl">K7M 2QX</span>
             <span className="text-meta text-stage-muted-foreground">Enter this code in SignForge to add the screen</span>
           </div>
