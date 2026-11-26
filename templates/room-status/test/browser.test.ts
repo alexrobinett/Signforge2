@@ -246,6 +246,9 @@ describe('room status (#199)', () => {
       },
     ],
     ['empty', { ...longest, events: [] }],
+    // A room's name on two lines with "Booked by" on left the meeting line less than a line (review of #606).
+    ['busy, a one-line title', { ...longest, events: [booking('Quarterly budget review with finance', -0.25, 0.75, 'Priya Shah')] }],
+    ['busy, a shorter room', { room: 'Executive boardroom, east wing', events: [booking(long, -0.25, 0.75, 'Priya Shah')] }],
   ];
   const toggles = ['showSchedule', 'showNext', 'showClock', 'showFacts', 'showNowLine', 'showOrganiser'];
   const allOn: Data = Object.fromEntries(toggles.map((t) => [t, true]));
@@ -253,12 +256,44 @@ describe('room status (#199)', () => {
   /** Every toggle on, each one off on its own, and all of them off. */
   const toggleSets: Data[] = [allOn, ...toggles.map((t) => ({ ...allOn, [t]: false })), allOff];
 
-  /** The layout's faults, the now line and the pin counted as text, and a schedule drawn empty. */
+  /**
+   * The layout's faults, the now line and the pin counted as text, a schedule drawn empty, and a line of text its own
+   * box or one around it cuts through, not at a line's edge: a clamp ends on a whole line.
+   */
   const faults = async (f: Frame) => [
     ...(await layoutFaults(f, '.nowline, .pin-pill')),
     ...(await f.evaluate(() => {
+      const found: string[] = [];
       const schedule = document.querySelector('.schedule');
-      return schedule && !schedule.querySelector('.item, .block, .free-day') ? ['an empty schedule'] : [];
+      if (schedule && !schedule.querySelector('.item, .block, .free-day')) found.push('an empty schedule');
+      for (const el of document.querySelectorAll<HTMLElement>('.stage *'))
+        for (const n of el.childNodes) {
+          if (n.nodeType !== Node.TEXT_NODE || !n.textContent!.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          // The line box, centred on the glyph box: a tight leading's glyphs stand past it, into the clamp's hidden line.
+          const lh = Number.parseFloat(getComputedStyle(el).lineHeight) || 0;
+          for (const r of range.getClientRects()) {
+            const h = lh || r.height;
+            let [top, bottom] = [r.top + (r.height - h) / 2, r.top + (r.height + h) / 2];
+            let past = false;
+            for (let p: HTMLElement | null = el; p && p !== document.body; p = p.parentElement) {
+              const s = getComputedStyle(p);
+              if (s.overflowY === 'visible') continue;
+              const c = p.getBoundingClientRect();
+              // A line after a clamp's last starts at its content's edge and is not painted, though its padding shows.
+              if (s.webkitLineClamp !== 'none' && s.display !== 'flex' && top >= c.bottom - Number.parseFloat(s.paddingBottom) - 1) past = true;
+              [top, bottom] = [Math.max(top, c.top), Math.min(bottom, c.bottom)];
+            }
+            if (past) continue;
+            const shown = (bottom - top) / h;
+            if (shown > 0.1 && shown < 0.9) {
+              found.push(`${el.className || el.tagName} cut through a line (${Math.round(shown * 100)}% shown)`);
+              break;
+            }
+          }
+        }
+      return found;
     })),
   ];
 
@@ -275,6 +310,11 @@ describe('room status (#199)', () => {
                 .join(', ') || 'all on';
             for (const fault of await faults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
+      // The light kit's faces set the lines a little taller.
+      for (const look of looks)
+        for (const [day, data] of days.slice(-2))
+          for (const fault of await faults(await r.show({ look, ...data, ...allOn }, noDemoAndLight(LIGHT_KIT).at(-1)![1])))
+            found.push(`${look}, ${day}, the light kit: ${fault}`);
       // The timeline's hours across a change of clocks and from midnight.
       for (const look of looks)
         for (const [day, now, events] of zoned)
