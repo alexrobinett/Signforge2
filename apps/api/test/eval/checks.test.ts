@@ -57,7 +57,10 @@ describe('a reply over /mcp that is no finished turn', () => {
   });
 
   it('records a 200 that reads as no message as unreadable, not a harness failure', async () => {
-    for (const body of [{}, { type: 'error', error: { type: 'overloaded_error' } }]) {
+    const content = [{ type: 'text', text: 'done' }];
+    const usage = { input_tokens: 1, output_tokens: 1 };
+    // Content with no stop reason, or a null one, is no finished message either (review of #566).
+    for (const body of [{}, { type: 'error', error: { type: 'overloaded_error' } }, { content, usage }, { content, usage, stop_reason: null }]) {
       const record = await runTask(task, 'mcp', answering(body));
       expect(record.errors, JSON.stringify(body)).toEqual(['model_unreadable']);
       expect(record.modelCalls).toBe(1);

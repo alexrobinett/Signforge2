@@ -30,11 +30,12 @@ function catalogueSize(tools: readonly unknown[]) {
 
 /**
  * The words the model is sent beside the tools: the system prompt (/mcp's server instructions and the eval's own lines,
- * or the drawer's) and, in the drawer, its first message's context around the question (the role, what it may not do).
- * Pinned with the catalogue, so text moved out of tool descriptions into either is still counted (review of #470).
+ * or the drawer's) and, in the drawer, its first message's context around the question (the role, what it may not do)
+ * and its answer's schema with its field descriptions (`output_config`, review of #566). Pinned with the catalogue, so
+ * text moved out of tool descriptions into any of them is still counted (review of #470).
  */
-function promptSize(system: unknown, first: unknown) {
-  const text = JSON.stringify([system ?? '', first ?? '']);
+function promptSize(system: unknown, first: unknown, output?: unknown) {
+  const text = JSON.stringify([system ?? '', first ?? '', ...(output === undefined ? [] : [output])]);
   return { bytes: new TextEncoder().encode(text).length, tokens: o200k.encode(text).length };
 }
 
@@ -168,7 +169,7 @@ export type Step = Turn | ((results: string[]) => Turn);
 
 /** A request to Anthropic's Messages API, and its answer, as the eval saw them. */
 interface Exchange {
-  body: { tools?: unknown[]; system?: unknown; messages: { role: string; content: unknown }[] };
+  body: { tools?: unknown[]; system?: unknown; messages: { role: string; content: unknown }[]; output_config?: unknown };
   answered: Promise<{ toolUses: string[]; input: number; output: number; problem?: string }>;
 }
 
@@ -239,7 +240,10 @@ class ModelLog {
           // Read inside the try: a body that fails mid-read is the model's answer failing, not the harness (review of #470).
           const text = mine ? await new Response(mine).text() : '';
           if (!res.headers.get('content-type')?.includes('event-stream')) {
-            const msg: { content: { type: string; name?: string }[]; usage: Usage; stop_reason?: string } = JSON.parse(text);
+            // Read as the /mcp loop reads it: a 200 that is no finished message (no stop_reason) does not read (review of #566).
+            const parsed = reply.safeParse(JSON.parse(text));
+            if (!parsed.success) return { toolUses: [], input: 0, output: 0, problem: 'model_unreadable' };
+            const msg = parsed.data;
             const blocks = msg.content;
             // As a stream's: a tool call the reply was cut off in is none.
             const cut = msg.stop_reason === 'max_tokens' && blocks.at(-1)?.type === 'tool_use' ? blocks.slice(0, -1) : blocks;
@@ -526,10 +530,16 @@ async function overMcp(task: Task, model: Model, log: ModelLog): Promise<Ran> {
   return { world, discovery, errors, drafts: [], cards: [] };
 }
 
-/** A reply's message, as the /mcp loop reads it: else the exchange records it as model_unreadable. */
+/** A reply's message, as the /mcp loop and the exchange both read it: else the exchange records it as model_unreadable. */
 const reply = z.object({
   content: z.array(z.object({ type: z.string(), id: z.string().optional(), name: z.string().optional(), input: z.record(z.string(), z.unknown()).optional() })),
   stop_reason: z.string(),
+  usage: z.object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+  }),
 });
 
 /** What a check reads of the drawer's answer card: the changes it drafted. */
@@ -643,7 +653,11 @@ export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, scr
       inputTokens: answers.reduce((n, a) => n + a.input, 0),
       outputTokens: answers.reduce((n, a) => n + a.output, 0),
       catalogue: catalogueSize(log.exchanges[0]?.body.tools ?? []),
-      prompt: promptSize(log.exchanges[0]?.body.system, arm === 'drawer' ? log.exchanges[0]?.body.messages[0]?.content : undefined),
+      prompt: promptSize(
+        log.exchanges[0]?.body.system,
+        arm === 'drawer' ? log.exchanges[0]?.body.messages[0]?.content : undefined,
+        arm === 'drawer' ? log.exchanges[0]?.body.output_config : undefined,
+      ),
       ...(ran.discovery ? { discovery: ran.discovery } : {}),
       errors,
     };
