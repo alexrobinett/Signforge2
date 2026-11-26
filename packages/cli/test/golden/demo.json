@@ -101,13 +101,17 @@
     }
   },
   "files": {
-    "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
-      "size": 401879,
+    "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56": {
+      "size": 398206,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45": {
+      "size": 401879,
+      "type": "text/html"
     },
     "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
       "size": 582,
@@ -117,6 +121,10 @@
       "size": 1042,
       "type": "image/svg+xml"
     },
+    "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396": {
+      "size": 403253,
+      "type": "text/html"
+    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -125,7 +133,7 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c": {
+    "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f": {
       "size": 396225,
       "type": "text/html"
     },
@@ -161,28 +169,20 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
-      "size": 398206,
-      "type": "text/html"
-    },
-    "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c": {
-      "size": 403253,
+    "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0": {
+      "size": 388707,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
-    },
-    "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b": {
-      "size": 388707,
-      "type": "text/html"
     }
   },
   "templates": {
-    "base/announcement@1.0.2": {
+    "base/announcement@1.0.3": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -304,12 +304,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a"
+      "html": "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56"
     },
-    "base/countdown@1.0.2": {
+    "base/countdown@1.0.3": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -432,7 +432,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c"
+      "html": "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -601,10 +601,10 @@
       },
       "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
-    "base/info-frame@1.0.2": {
+    "base/info-frame@1.0.3": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -889,12 +889,12 @@
         },
         "protocol": 2
       },
-      "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
+      "html": "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396"
     },
-    "base/news@2.0.1": {
+    "base/news@2.0.2": {
       "manifest": {
         "id": "news",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1013,12 +1013,12 @@
         },
         "protocol": 2
       },
-      "html": "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b"
+      "html": "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0"
     },
-    "base/room-status@1.0.2": {
+    "base/room-status@1.0.3": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1139,7 +1139,7 @@
         },
         "protocol": 2
       },
-      "html": "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28"
+      "html": "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45"
     }
   },
   "spots": {
@@ -1147,7 +1147,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.0.2",
+      "template": "base/announcement@1.0.3",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1182,7 +1182,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.0.2",
+      "template": "base/countdown@1.0.3",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1251,7 +1251,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.0.2",
+      "template": "base/info-frame@1.0.3",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1314,7 +1314,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1345,7 +1345,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1376,7 +1376,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1407,7 +1407,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.0.2",
+      "template": "base/room-status@1.0.3",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1532,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "e7f9534b00ae58285d8e553ed4300c96d3ce7ee453b259f4867b76ff1c20f3a3"
+  "id": "a6f5654124df38997746a6059d7c5d116dbae5867d90e5553e3bc899bc842e85"
 }

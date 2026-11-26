@@ -129,12 +129,12 @@ The kit's build test (all four looks within the bundle budget, the colour lint, 
 
 | Role | Brand token | Pop | Poster | Night | Corporate |
 | --- | --- | --- | --- | --- | --- |
-| `--lk-bg` | `--sf-bg` | blush `#fbede7` | paper `#f1f1ec` | `#0e1512` | white |
-| `--lk-surface` | `--sf-surface` | `#f3ddd3` | `#e2e2da` | `#18231e` | `#f3f5f8` |
-| `--lk-text` | `--sf-text` | warm black `#1e1a17` | ink `#111111` | `#f2f5f0` | navy `#0b1f3a` |
-| `--lk-muted` | `--sf-muted` | `#6b5f58` | `#55554e` | `#cbd5cf` | slate `#4b5b70` |
-| `--lk-primary`, on it `--lk-on-primary` | `--sf-primary`, `--sf-on-primary` | tomato `#ff5a36`, ink | red `#e8401c`, ink | lime `#d4ff3a`, ground | navy, white |
-| `--lk-accent`, on it `--lk-on-accent` | `--sf-accent`, `--sf-on-accent` | cobalt `#2e44d9`, white | red `#e8401c`, ink | lilac `#c4b5fd`, ground | blue `#1f5eff`, white |
+| `--lk-bg` | `--sf-bg` | blush `#fbede7` | paper `#f1f1ec` | warm black `#15110e` | white |
+| `--lk-surface` | `--sf-surface` | `#f3ddd3` | `#e2e2da` | `#221c17` | `#f3f5f8` |
+| `--lk-text` | `--sf-text` | warm black `#1e1a17` | ink `#111111` | warm paper `#f4ece1` | navy `#0b1f3a` |
+| `--lk-muted` | `--sf-muted` | `#6b5f58` | `#55554e` | `#b9ab9a` | slate `#4b5b70` |
+| `--lk-primary`, on it `--lk-on-primary` | `--sf-primary`, `--sf-on-primary` | tomato `#ff5a36`, ink | red `#e8401c`, ink | amber `#ffab40`, ground | navy, white |
+| `--lk-accent`, on it `--lk-on-accent` | `--sf-accent`, `--sf-on-accent` | cobalt `#2e44d9`, white | red `#e8401c`, ink | amber `#ffab40`, ground | blue `#1f5eff`, white |
 
 Text in the primary or accent colour on the page uses `--lk-primary-ink` or `--lk-accent-ink` (4.5:1), or `--lk-primary-ink-large` or `--lk-accent-ink-large` for large text only (3:1). Text on a primary or accent fill uses `--lk-on-primary` or `--lk-on-accent`. `applyLook` passes each through `readableOn`, on `--lk-bg` or on its fill. So tomato, which is 2.71:1 on Pop's ground, never becomes text there. Poster's red is 3.58:1 on paper: its large text is red and its small text a darker red, `#c2330f` (4.91:1). Text on any other backdrop, such as a surface or a photo, goes through `readableOn` or `readableOver` in the template itself. A rule is `--lk-rule` thick in `--lk-rule-color`. Shades are mixes over `--lk-bg`, as under Brand.
 

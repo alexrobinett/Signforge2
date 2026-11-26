@@ -13,6 +13,12 @@ export interface ScreenHeartbeat {
   /** Server time minus the screen's own uncorrected clock when it sent the sync, in ms. */
   driftMs: number;
   dataRejected: Record<string, number>;
+  /**
+   * The feed photos the screen held (`SyncRequest.blobs`), and whether the reply asked it to fetch more: the next sync
+   * comes soon only while those asks bring photos in (sync.ts, `MORE_PHOTOS_SYNC_S`); `after` is the source the asked
+   * photos ended on, which the next reply's turn starts after. Absent before the fast sync.
+   */
+  photos?: { held: number; asked: boolean; after?: string };
 }
 
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {

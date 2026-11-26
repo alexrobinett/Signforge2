@@ -52,7 +52,13 @@ function Toggle<T extends string>({
     // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the canvas draws it; a fieldset would need a legend shown.
     <div role="group" aria-label={label} className="flex rounded-xl bg-stage-control p-1">
       {options.map((o) => (
-        <Choice key={o.value} tone="stage" selected={value === o.value} onClick={() => onChange(o.value)} className="h-9 rounded-lg px-3 font-medium">
+        <Choice
+          key={o.value}
+          tone="stage"
+          selected={value === o.value}
+          onClick={() => onChange(o.value)}
+          className="h-9 rounded-[calc(var(--radius-xl)-(--spacing(1)))] px-3 font-medium"
+        >
           {o.label}
         </Choice>
       ))}
@@ -216,7 +222,7 @@ export function PlayerStage({
         <div ref={roomRef} className={cn('relative min-h-0 flex-1', scale === 'actual' ? 'max-h-(--editor-height) overflow-auto' : 'overflow-hidden')}>
           <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
             <div
-              className="relative shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-stage-edge"
+              className="relative shrink-0 overflow-hidden rounded-sm bg-letterbox ring-1 ring-stage-edge"
               style={{ width: size.w * shown, height: size.h * shown }}
             >
               {/* A new frame per orientation: the player sizes itself to its window when it starts. */}

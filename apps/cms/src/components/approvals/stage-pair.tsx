@@ -35,7 +35,7 @@ function Player({ stageKey, orgId, spot, label, after }: { stageKey: string; org
   );
   const boxRef = useWidthRef(measure);
   return (
-    <div ref={boxRef} className={cn('relative aspect-video overflow-hidden rounded-md bg-black', after ? 'ring-2 ring-primary' : 'ring-1 ring-border')}>
+    <div ref={boxRef} className={cn('relative aspect-video overflow-hidden rounded-md bg-letterbox', after ? 'ring-2 ring-primary' : 'ring-1 ring-border')}>
       {hydrated && (
         <iframe
           ref={frameRef}
@@ -48,7 +48,7 @@ function Player({ stageKey, orgId, spot, label, after }: { stageKey: string; org
         />
       )}
       {status?.error && (
-        <p className="absolute inset-x-0 bottom-0 bg-black/80 px-3 py-2 text-xs text-white" role="status">
+        <p className="absolute inset-x-0 bottom-0 bg-letterbox/80 px-3 py-2 text-xs text-stage-foreground" role="status">
           The player cannot show it: {status.error}
         </p>
       )}
