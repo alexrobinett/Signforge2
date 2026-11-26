@@ -20,6 +20,7 @@ import {
   type TemplateManifest,
   type WEATHER_UNITS,
 } from '@signforge/contract';
+import { isStale, sourceStaleS } from '@signforge/player-core';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import { ago } from './screen-status';
 
@@ -254,9 +255,15 @@ export async function weatherSource(live: LiveSourceDef, place: PlaceView, asked
   };
 }
 
-/** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
-export const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
-  snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
+/** How long screens keep a source's data with no confirmed check (#624): a calendar's minutes, or a day. */
+export const keepsFor = (source: { format: string; refreshS: number }) => (sourceStaleS(source.format, source.refreshS) ?? SNAPSHOT_STALE_MS / 1000) * 1000;
+
+/** `keepsFor` in words: "a day", or how many minutes or hours. */
+export const keepsForWords = (source: { format: string; refreshS: number }) => (keepsFor(source) === SNAPSHOT_STALE_MS ? 'a day' : ago(keepsFor(source)));
+
+/** Whether screens show the snapshot: not stale by the age the server gives its source (player-core's `isStale`). */
+export const isFresh = (source: { format: string; refreshS: number }, snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
+  snapshot !== null && !isStale(snapshot, { staleS: sourceStaleS(source.format, source.refreshS) }, now);
 
 /** How fresh the source's data is, and what screens do about it. */
 export function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {
@@ -266,9 +273,9 @@ export function freshness(source: DataSourceView, snapshot: SnapshotView | null,
       ? `The first check failed: ${failing}. Screens show the fallback values until it works.`
       : 'Waiting for the first check, within a minute. Until then screens show the fallback values.';
   const since = now - Date.parse(snapshot.checkedAt);
-  if (!isFresh(snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
+  if (!isFresh(source, snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
   const when = since < 60_000 ? 'Checked just now.' : `Checked ${ago(since)} ago.`;
-  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for a day, then show the fallback values.` : when;
+  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for ${keepsForWords(source)}, then show the fallback values.` : when;
 }
 
 /** WMO weather codes, as Open-Meteo sends them, in words. */

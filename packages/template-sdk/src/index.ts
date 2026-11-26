@@ -23,7 +23,7 @@
  * it is. `ready` waits for the fonts.
  *
  * Live data (protocol 2). A field bound to a data source plays the spot's static value when its source is missing,
- * has not been confirmed for a day (`SNAPSHOT_STALE_MS`) or sent a value that does not fit. `ctx.fallback` names
+ * has not been confirmed within its stale age (a calendar's minutes, a day for the rest) or sent a value that does not fit. `ctx.fallback` names
  * those fields, so a template can say its data is not current rather than show the fallback as if it were:
  * `if (ctx.fallback.has('events'))`. It holds for the play, as `data` does.
  *

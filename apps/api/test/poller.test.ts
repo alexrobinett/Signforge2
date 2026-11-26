@@ -130,7 +130,8 @@ describe('pollDataSources', () => {
     const row = await o.scope.dataSources.get(id);
     expect(row).toMatchObject({ failures: 9, lastError: 'http-status' });
     expect(JSON.stringify(row)).not.toContain('token');
-    expect((await o.scope.dataSources.snapshots([id]))[0]?.dataJson).toBe('{"ok":true}');
+    // The last good check stays where it was, so the snapshot ages on screens and goes stale at its source's age (#624).
+    expect((await o.scope.dataSources.snapshots([id]))[0]).toMatchObject({ dataJson: '{"ok":true}', checkedAt: NOW });
     // The first success clears it.
     answer = { body: '{"ok":true}' };
     await poll(feed.guards, at);

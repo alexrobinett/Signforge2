@@ -9,6 +9,7 @@ import {
   SNAPSHOT_STALE_MS,
   requiredFiles,
   type DataSnapshot,
+  type DataSource,
   type DisplayHours,
   type Playlist,
   type ScheduleEntry,
@@ -322,11 +323,41 @@ export interface Rejected {
 }
 
 /**
+ * How far ahead of a screen's clock a snapshot's `checkedAt` may be and still count as just checked. A screen sets its
+ * clock from the server's on each sync, so a confirmed snapshot is never ahead by more than that leaves; further, the
+ * screen's clock is wrong (a Pi after a power cut, before its first sync) and the snapshot's age cannot be told.
+ */
+export const CHECKED_AHEAD_MS = 60_000;
+
+/**
+ * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its source's `staleS`, or a day
+ * (`SNAPSHOT_STALE_MS`) without one; with no `checkedAt` the screen can read; or confirmed more than CHECKED_AHEAD_MS
+ * after `now`, when the screen's clock is behind and the age is unknown. A stale snapshot plays the spot's fallback,
+ * which the template is told of (`InitPayload.fallback`): unknown data is not shown as current.
+ */
+export function isStale(snapshot: Pick<DataSnapshot, 'checkedAt'>, source: Pick<DataSource, 'staleS'> | undefined, now: number): boolean {
+  const at = Date.parse(snapshot.checkedAt);
+  if (!Number.isFinite(at)) return true;
+  const age = now - at;
+  return age > (source?.staleS === undefined ? SNAPSHOT_STALE_MS : source.staleS * 1000) || age < -CHECKED_AHEAD_MS;
+}
+
+/**
+ * The `staleS` the server gives a source of `format` polled every `refreshS` seconds, at publish (#624). A calendar
+ * (`ical`) is stale once it has missed two polls, plus the ten minutes a screen takes to hear of one (its sync, and
+ * the poller's minute): 20 minutes at its default 5-minute poll, and at most a day. Any other kind keeps the day: old
+ * weather, news or a menu misleads no one into a booked room.
+ */
+export function sourceStaleS(format: string, refreshS: number): number | undefined {
+  if (format !== 'ical') return undefined;
+  return Math.min(2 * refreshS + 600, SNAPSHOT_STALE_MS / 1000);
+}
+
+/**
  * The data a template spot plays with at `now`: its static values, with each bound field replaced
  * by the latest snapshot value when that value fits the field (the contract's `boundValue`; a
  * table's rows mapped onto a list field, numbers written in `locale`). A missing source, or a
- * snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`, leaves the static
- * fallback in place quietly; a value that is missing at its path or does not fit also leaves the
+ * stale snapshot (`isStale`, by its source in `sources`), leaves the static fallback in place quietly; a value that is missing at its path or does not fit also leaves the
  * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
  * `fallback` names each bound field left on its static value, for `init` to tell the template (#225); a list that
  * kept some rows of a table is live.
@@ -335,6 +366,7 @@ export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
+  sources: Readonly<Record<string, DataSource>>,
   now: number,
   locale: string,
 ): { data: Record<string, unknown>; rejected: Rejected[]; fallback: string[] } {
@@ -343,7 +375,7 @@ export function resolveSpotData(
   const fallback: string[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) {
+    if (!snapshot || isStale(snapshot, sources[b.source], now)) {
       fallback.push(field);
       continue;
     }
