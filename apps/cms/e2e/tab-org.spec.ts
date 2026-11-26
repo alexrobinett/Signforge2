@@ -44,7 +44,6 @@ test('a save from a tab left on the old org is refused, and the new org is not c
   await switchInAnotherTab(page);
 
   await zone.selectOption('Europe/London');
-  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText(refusal)).toBeVisible();
 
   // Reloaded, the tab shows Southside Deli, untouched by the refused save.

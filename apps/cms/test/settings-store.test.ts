@@ -4,15 +4,18 @@
 // made on. Edits, running actions and errors belong to the org they were made in. Better Auth's
 // client, the tools and the router are stubs whose answers the test holds and lets go; nothing
 // waits on a clock.
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { Member, OrgSettings } from '../src/lib/settings';
-import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, type SettingsSlice } from '../src/state/settings';
+import { initialOrgs, type OrgsState } from '../src/state/orgs';
+import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, settingsProblems, type SettingsSlice } from '../src/state/settings';
 
 const auth = vi.hoisted(() => ({
   organization: { updateMemberRole: vi.fn(), inviteMember: vi.fn(), removeMember: vi.fn(), acceptInvitation: vi.fn(), update: vi.fn() },
   linkSocial: vi.fn(),
+  updateUser: vi.fn(),
 }));
 vi.mock('~/lib/auth-client', async (original) => ({ ...(await original<typeof import('../src/lib/auth-client')>()), authClient: auth }));
 // The tab's org comes from the page's router, which a store test has none of.
@@ -61,6 +64,8 @@ const refused = (message: string): Reply => ({ status: 400, body: { error: 'erro
 
 /** Each tool call, and the answers to give them in turn (held ones until the test settles them); `{}` when none is queued. */
 let calls: { name: string; input: unknown }[] = [];
+/** The org each call named, in the order sent (`TAB_ORG_HEADER`). */
+let named: (string | null)[] = [];
 let replies: (Reply | Promise<Reply>)[] = [];
 const lastCall = () => calls.at(-1);
 
@@ -71,15 +76,20 @@ const showOrg = (id: string) => {
 };
 
 function settingsStore() {
-  return createStore<SettingsSlice>()((set, get) => createSettingsSlice(set as never, get as never, { router, queryClient: {} } as never));
+  return createStore<SettingsSlice & { orgs: OrgsState }>()((set, get) => ({
+    orgs: initialOrgs,
+    ...createSettingsSlice(set as never, get as never, { router, queryClient: {} } as never),
+  }));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   calls = [];
   replies = [];
-  vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+  named = [];
+  vi.stubGlobal('fetch', async (url: string, init: { body: string; headers: HeadersInit }) => {
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+    named.push(new Headers(init.headers).get(TAB_ORG_HEADER));
     const reply = await (replies.shift() ?? { status: 200, body: {} });
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
@@ -215,11 +225,91 @@ describe('a settings save (re-check of #143, 1)', () => {
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
-  it('with nothing edited, sends nothing, and says so', async () => {
+  it('with nothing edited, as when a field is left unchanged, sends nothing and says nothing (#366)', async () => {
     const store = settingsStore();
     await store.getState().saveSettings(A, 'screens', settings);
     expect(calls).toEqual([]);
-    expect(toast).toHaveBeenCalledWith('Nothing to save');
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('Settings save on change (#366)', () => {
+  it('a saved change says so quietly, in the form, with no toast', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '15' });
+    await store.getState().saveSettings(A, 'screens', settings);
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 15, ifVersion: 1 } });
+    expect(store.getState().settings.drafts.screens).toMatchObject({ status: 'saved' });
+    expect(toast).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('a field left with a value the server would refuse is marked there and not sent; fixed, it saves', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '12' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(calls).toEqual([]);
+    expect(store.getState().settings.drafts.general?.status).toBe('invalid');
+    expect(settingsProblems({ auditRetentionDays: '12' }, settings)).toEqual({ auditRetentionDays: 'A whole number of days, 30 to 3,650.' });
+    expect(settingsProblems({ name: ' ', updateTo: '02:00' }, settings)).toEqual({
+      name: 'Enter a name.',
+      updateTo: 'The window must end at another time than it starts.',
+    });
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '120' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 1 } });
+  });
+
+  it('two choices made while the first saves: the second follows it with the latest, and nothing is left unsaved', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: false });
+    const one = store.getState().saveSettings(A, 'publishing', settings);
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: true });
+    const two = store.getState().saveSettings(A, 'publishing', settings);
+    first.resolve(saved(2));
+    await Promise.all([one, two]);
+    expect(calls.map((c) => c.input)).toEqual([
+      { editorsPublish: false, ifVersion: 1 },
+      { editorsPublish: true, ifVersion: 2 },
+    ]);
+    expect(store.getState().settings.drafts.publishing).toMatchObject({ status: 'saved', version: 3 });
+  });
+
+  it('an AI choice made while the one before it saves follows it, on the version that save made: not dropped, not a conflict', async () => {
+    const first = held<Reply>();
+    const provider = (version: number): Reply => ({ status: 200, body: { provider: { version } } });
+    replies.push(first.promise, provider(3), provider(4));
+    const store = settingsStore();
+    const one = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 1);
+    // Chosen from the page as it was drawn, on version 1, while the first is on its way; and a third meanwhile: the
+    // two waiting go one after the other, neither dropped.
+    const two = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '' }, 1);
+    const three = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '300' }, 1);
+    first.resolve(provider(2));
+    await Promise.all([one, two, three]);
+    expect(calls.map((c) => c.input)).toMatchObject([
+      { capableModel: null, ifVersion: 1 },
+      { capableModel: 'big-1', ifVersion: 2 },
+      { dailyTurnCeiling: 300, ifVersion: 3 },
+    ]);
+  });
+
+  it('a choice made while an action runs on its page waits for that action, then saves: it is not dropped', async () => {
+    const removal = held<Reply>();
+    replies.push(removal.promise, saved(2));
+    const store = settingsStore();
+    void store.getState().removeAlertChannel(A, 'webhook');
+    store.getState().editSettings(A, 'notifications', 1, { alerts: { screen_offline: { slack: true } } });
+    const saving = store.getState().saveSettings(A, 'notifications', settings);
+    await new Promise((r) => setImmediate(r));
+    expect(calls.map((c) => c.name)).toEqual(['remove_alert_channel']);
+    removal.resolve({ status: 200, body: {} });
+    await saving;
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { alerts: { screen_offline: { slack: true } }, ifVersion: 1 } });
   });
 });
 
@@ -562,5 +652,103 @@ describe('focus as Remove gives way to its confirmation, and back (#289)', () =>
     showOrg(A);
     store.getState().forgetOrgSettings();
     expect(mount(store, 'confirm:key')).not.toHaveBeenCalled();
+  });
+});
+
+describe('a save made in one org never writes to another (review of #466)', () => {
+  it('an AI choice waiting behind another is not sent once the tab has left its org; the one sent named its org', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, { status: 200, body: { provider: { version: 5 } } });
+    const store = settingsStore();
+    const one = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 3);
+    const two = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '' }, 3);
+    showOrg(B);
+    store.getState().forgetOrgSettings();
+    first.resolve({ status: 200, body: { provider: { version: 4 } } });
+    await Promise.all([one, two]);
+    expect(calls.map((c) => c.name)).toEqual(['save_ai_provider']);
+    expect(named).toEqual([A]);
+  });
+
+  it('a settings save names the org its edits were made in, whatever the tab names by then', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '100' });
+    const one = store.getState().saveSettings(A, 'general', settings);
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '120' });
+    const two = store.getState().saveSettings(A, 'general', settings);
+    first.resolve(saved(2));
+    await Promise.all([one, two]);
+    expect(named).toEqual([A, A]);
+  });
+
+  it("a choice waits for an action on its page that is not the page's own run, Connect GitHub, rather than spinning", async () => {
+    let linked: (v: unknown) => void = () => {};
+    auth.linkSocial.mockReturnValueOnce(new Promise((r) => (linked = r)));
+    auth.updateUser.mockResolvedValue(ok);
+    let reads = 0;
+    // A loop that never yields would read the state without end: stopped, so the test says so rather than hanging.
+    const store = createStore<SettingsSlice & { orgs: OrgsState }>()((set, get) => ({
+      orgs: initialOrgs,
+      ...createSettingsSlice(
+        set as never,
+        (() => {
+          if (++reads > 100_000) throw new Error('read the state with no end, without yielding');
+          return get();
+        }) as never,
+        { router, queryClient: {} } as never,
+      ),
+    }));
+    void store.getState().connectGithub();
+    const saving = store.getState().saveProfile('Maria Okafor');
+    await new Promise((r) => setImmediate(r));
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    linked({ data: {}, error: null });
+    await saving;
+    expect(auth.updateUser).toHaveBeenCalledWith({ name: 'Maria Okafor' });
+  });
+});
+
+describe('the org name and the AI version, saved on change (review of #466)', () => {
+  it('a name put back while its rename is on its way is sent, not taken for the name the page read', async () => {
+    let renamed: (v: unknown) => void = () => {};
+    auth.organization.update.mockReturnValueOnce(new Promise((r) => (renamed = r))).mockResolvedValue(ok);
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Northside Diner' });
+    const one = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    await new Promise((r) => setImmediate(r));
+    store.getState().editSettings(A, 'general', 1, { name: 'Northside' });
+    const two = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    renamed(ok);
+    await Promise.all([one, two]);
+    expect(auth.organization.update.mock.calls.map((c) => c[0].data.name)).toEqual(['Northside Diner', 'Northside']);
+  });
+
+  it('after the key is removed and saved again, a model choice builds on the provider as read, not a version from before', async () => {
+    replies.push(
+      { status: 200, body: { provider: { version: 5 } } },
+      { status: 200, body: {} },
+      { status: 200, body: { provider: { version: 1 } } },
+      {
+        status: 200,
+        body: { provider: { version: 2 } },
+      },
+    );
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    await store.getState().removeAiKey(A);
+    await store.getState().saveAiKey(A, { provider: 'anthropic', apiKey: 'sk-new', baseUrl: '', acceptsImages: false, jsonSchemaOutput: false });
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-2', capableModel: '', dailyTurnCeiling: '' }, 1);
+    expect(calls.at(-1)).toMatchObject({ name: 'save_ai_provider', input: { fastModel: 'fast-2', ifVersion: 1 } });
+  });
+
+  it('display hours the page marks are not sent with the next change', async () => {
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { displayHours: { weekly: [{ days: [], from: '09:00', to: '17:00' }] } });
+    store.getState().editSettings(A, 'general', 1, { timezone: 'Europe/London' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(calls).toEqual([]);
+    expect(store.getState().settings.drafts.general?.status).toBe('invalid');
   });
 });

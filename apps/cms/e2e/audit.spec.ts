@@ -15,8 +15,7 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await page.goto('/settings/general');
   await hydrated(page);
   await page.getByLabel('Time zone').selectOption('Europe/London');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   // A screen paired, whose code the log keeps redacted, and renamed 55 times: more than a page.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': SCREEN_ADDRESS } });

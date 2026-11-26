@@ -5,18 +5,19 @@
  */
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
-import { describeHours, DisplayHoursEditor, hoursProblems } from '~/components/screens/display-hours-editor';
+import { describeHours, DisplayHoursEditor } from '~/components/screens/display-hours-editor';
+import { hoursProblems } from '~/lib/screen-types';
 import { zones } from '~/components/screens/pair-screen-form';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection } from '~/components/settings/parts';
+import { FieldProblem, SaveState, SettingsSection } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useOrgId, useRole } from '~/lib/live';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
-import { editsIn, type SettingsEdits } from '~/state/settings';
+import { editsIn, settingsProblems, type SettingsEdits } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/general')({
   loader: () => getOrgSettings(),
@@ -52,12 +53,18 @@ function GeneralSettings() {
   const timezone = edits.timezone ?? settings.timezone ?? '';
   const locale = edits.locale ?? settings.locale ?? '';
   const locales = locale && !LOCALES.includes(locale) ? [locale, ...LOCALES] : LOCALES;
+  const problems = settingsProblems(edits, settings);
   const edit = (change: SettingsEdits) => editSettings(orgId, 'general', settings.version, change);
+  // Each change saves itself (#366): a choice at once, a typed field when it is left (or on Enter).
+  const save = () => void saveSettings(orgId, 'general', settings, org);
+  const choose = (change: SettingsEdits) => {
+    edit(change);
+    save();
+  };
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!org || !settings || hoursProblems(hours).length) return;
-    void saveSettings(orgId, 'general', settings, org);
+    save();
   }
 
   return (
@@ -72,10 +79,14 @@ function GeneralSettings() {
               name="name"
               value={edits.name ?? org.name}
               onChange={(e) => edit({ name: e.target.value })}
+              onBlur={save}
               maxLength={100}
               required
               disabled={!canEdit}
+              aria-invalid={problems.name !== undefined || undefined}
+              aria-describedby={problems.name ? `${id}-name-bad` : undefined}
             />
+            <FieldProblem id={`${id}-name-bad`} text={problems.name} />
           </div>
         </SettingsSection>
 
@@ -87,7 +98,7 @@ function GeneralSettings() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid content-start gap-1.5">
               <Label htmlFor={`${id}-tz`}>Time zone</Label>
-              <NativeSelect id={`${id}-tz`} name="timezone" value={timezone} onChange={(e) => edit({ timezone: e.target.value })} disabled={!canEdit}>
+              <NativeSelect id={`${id}-tz`} name="timezone" value={timezone} onChange={(e) => choose({ timezone: e.target.value })} disabled={!canEdit}>
                 <option value="">The browser's, when pairing</option>
                 {zones.map((z) => (
                   <option key={z} value={z}>
@@ -102,7 +113,7 @@ function GeneralSettings() {
                 id={`${id}-locale`}
                 name="locale"
                 value={locale}
-                onChange={(e) => edit({ locale: e.target.value })}
+                onChange={(e) => choose({ locale: e.target.value })}
                 disabled={!canEdit}
                 aria-describedby={`${id}-locale-help`}
               >
@@ -126,7 +137,12 @@ function GeneralSettings() {
           description="New screens start with these. Outside them a screen turns its panel off and keeps syncing."
         >
           {canEdit ? (
-            <DisplayHoursEditor value={hours} onChange={(displayHours) => edit({ displayHours })} headed />
+            <DisplayHoursEditor
+              value={hours}
+              // Hours a screen would refuse are said in the editor, and not sent.
+              onChange={(displayHours) => (hoursProblems(displayHours).length ? edit({ displayHours }) : choose({ displayHours }))}
+              headed
+            />
           ) : (
             <p className="text-sm">{describeHours(settings.displayHours)}</p>
           )}
@@ -149,17 +165,20 @@ function GeneralSettings() {
               inputMode="numeric"
               value={edits.auditRetentionDays ?? settings.auditRetentionDays}
               onChange={(e) => edit({ auditRetentionDays: e.target.value })}
+              onBlur={save}
               disabled={!canEdit}
               className="w-24"
-              aria-describedby={`${id}-retention-unit`}
+              aria-invalid={problems.auditRetentionDays !== undefined || undefined}
+              aria-describedby={problems.auditRetentionDays ? `${id}-retention-unit ${id}-retention-bad` : `${id}-retention-unit`}
             />
             <span id={`${id}-retention-unit`} className="text-sm">
               days, 30 to 3,650
             </span>
           </div>
+          <FieldProblem id={`${id}-retention-bad`} text={problems.auditRetentionDays} />
         </SettingsSection>
 
-        <SaveRow at="general" scope={{ page: 'general', orgId }} canEdit={canEdit} />
+        <SaveState form="general" canEdit={canEdit} />
       </EditorFields>
     </form>
   );

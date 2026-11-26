@@ -9,7 +9,7 @@ import { EllipsisIcon, LoaderCircleIcon, RotateCwIcon, SearchIcon } from 'lucide
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection } from '~/components/settings/parts';
+import { FieldProblem, SaveState, SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
@@ -30,7 +30,7 @@ import { cn } from '~/lib/utils';
 import { getOrgSettings } from '~/server/settings.functions';
 import { memberChecked } from '~/state/groups';
 import { useAppStore } from '~/state/provider';
-import { editsIn, type SettingsEdits } from '~/state/settings';
+import { editsIn, settingsProblems, type SettingsEdits } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/screens')({
   loader: async ({ context: { queryClient }, parentMatchPromise }) => {
@@ -60,15 +60,18 @@ function ScreenSettings() {
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   if (!settings) return null;
+  const problems = settingsProblems(edits, settings);
   const edit = (change: SettingsEdits) => editSettings(orgId, 'screens', settings.version, change);
+  // Each typed field saves itself when it is left, or on Enter (#366).
+  const save = () => void saveSettings(orgId, 'screens', settings);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (settings) void saveSettings(orgId, 'screens', settings);
+    save();
   }
 
   return (
-    // Space enough that the form's Save reads as the form's, not the Groups list's.
+    // Space enough that the form's save status reads as the form's, not the Groups list's.
     <div className="space-y-10">
       <form onSubmit={submit} className="space-y-6" noValidate>
         <EditorFields>
@@ -87,9 +90,13 @@ function ScreenSettings() {
                   type="time"
                   value={edits.updateFrom ?? settings.updateWindow.from}
                   onChange={(e) => edit({ updateFrom: e.target.value })}
+                  onBlur={save}
                   disabled={!canEdit}
                   className="w-36"
+                  aria-invalid={problems.updateFrom !== undefined || undefined}
+                  aria-describedby={problems.updateFrom ? `${id}-from-bad` : undefined}
                 />
+                <FieldProblem id={`${id}-from-bad`} text={problems.updateFrom} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor={`${id}-to`}>To</Label>
@@ -99,9 +106,13 @@ function ScreenSettings() {
                   type="time"
                   value={edits.updateTo ?? settings.updateWindow.to}
                   onChange={(e) => edit({ updateTo: e.target.value })}
+                  onBlur={save}
                   disabled={!canEdit}
                   className="w-36"
+                  aria-invalid={problems.updateTo !== undefined || undefined}
+                  aria-describedby={problems.updateTo ? `${id}-to-bad` : undefined}
                 />
+                <FieldProblem id={`${id}-to-bad`} text={problems.updateTo} />
               </div>
             </div>
             <p className="text-meta text-muted-foreground">Local time at each screen. A window that ends before it starts runs past midnight.</p>
@@ -124,14 +135,17 @@ function ScreenSettings() {
                 inputMode="numeric"
                 value={edits.unreachableAfterMinutes ?? settings.unreachableAfterMinutes}
                 onChange={(e) => edit({ unreachableAfterMinutes: e.target.value })}
+                onBlur={save}
                 disabled={!canEdit}
                 className="w-24"
-                aria-describedby={`${id}-minutes-unit`}
+                aria-invalid={problems.unreachableAfterMinutes !== undefined || undefined}
+                aria-describedby={problems.unreachableAfterMinutes ? `${id}-minutes-unit ${id}-minutes-bad` : `${id}-minutes-unit`}
               />
               <span id={`${id}-minutes-unit`} className="text-sm">
                 minutes without a heartbeat
               </span>
             </div>
+            <FieldProblem id={`${id}-minutes-bad`} text={problems.unreachableAfterMinutes} />
             <p className="text-meta text-muted-foreground">
               Screens check in every 5 minutes. One email goes out when a screen passes this, and one when it is back.{' '}
               <Link to="/settings/notifications" className="text-primary underline underline-offset-4">
@@ -141,7 +155,7 @@ function ScreenSettings() {
             </p>
           </SettingsSection>
 
-          <SaveRow at="screens" scope={{ page: 'screens', orgId }} canEdit={canEdit} />
+          <SaveState form="screens" canEdit={canEdit} />
         </EditorFields>
       </form>
       <Groups />

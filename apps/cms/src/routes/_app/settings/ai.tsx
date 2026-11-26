@@ -9,7 +9,7 @@ import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute } from '@tanstack/react-router';
 import { KeyRoundIcon, LoaderCircleIcon, PlugZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
-import { EditorFields } from '~/components/editor';
+import { EditorFields, saveWord } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -266,6 +266,9 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
   const id = useId();
   const listed = useAppStore((s) => (s.settings.aiModels?.orgId === orgId ? s.settings.aiModels.models : null));
   const save = useAppStore((s) => s.saveAiChoices);
+  const editChoices = useAppStore((s) => s.editAiChoices);
+  const edit = useAppStore((s) => (s.settings.aiEdit?.orgId === orgId ? s.settings.aiEdit.choices : null));
+  const savedAt = useAppStore((s) => s.settings.savedAt.choices ?? null);
   const running = useRunning(pageOf(orgId));
   if (!canEdit)
     return (
@@ -282,16 +285,16 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
         </dl>
       </SettingsSection>
     );
+  // Each field shows its edit, else the provider as read: a Reload after a conflict shows what is there now (review of #466).
+  const choices = {
+    fastModel: edit?.fastModel ?? provider.fastModel ?? '',
+    capableModel: edit?.capableModel ?? provider.capableModel ?? '',
+    dailyTurnCeiling: edit?.dailyTurnCeiling ?? String(provider.dailyTurnCeiling ?? ''),
+  };
+  const saveNow = (change: Partial<typeof choices> = {}) => void save(orgId, provider.provider, { ...choices, ...change }, provider.version);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const value = (name: string) => String(form.get(name) ?? '');
-    void save(
-      orgId,
-      provider.provider,
-      { fastModel: value('fastModel'), capableModel: value('capableModel'), dailyTurnCeiling: value('dailyTurnCeiling') },
-      provider.version,
-    );
+    if (edit) saveNow();
   };
   return (
     <SettingsSection
@@ -304,8 +307,7 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
       }
     >
       <EditorFields>
-        {/* A new list or a new save shows afresh: the selects read what the page has now. */}
-        <form key={`${provider.version}/${listed?.join() ?? ''}`} method="post" onSubmit={submit} className="space-y-4" noValidate>
+        <form method="post" onSubmit={submit} className="space-y-4" noValidate>
           <div className="grid gap-4 sm:grid-cols-2">
             {MODELS.map((m) => {
               const options = [...new Set([...(listed ?? []), ...(provider[m.name] ? [provider[m.name]!] : [])])];
@@ -315,9 +317,14 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
                   <NativeSelect
                     id={`${id}-${m.name}`}
                     name={m.name}
-                    defaultValue={provider[m.name] ?? ''}
+                    value={choices[m.name]}
                     className="w-full font-mono"
                     disabled={!options.length}
+                    // A choice saves at once (#366).
+                    onChange={(e) => {
+                      editChoices(orgId, { [m.name]: e.target.value });
+                      saveNow({ [m.name]: e.target.value });
+                    }}
                   >
                     <option value="">Not chosen</option>
                     {options.map((o) => (
@@ -340,16 +347,19 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
                 type="number"
                 inputMode="numeric"
                 min={1}
-                defaultValue={provider.dailyTurnCeiling ?? ''}
+                value={choices.dailyTurnCeiling}
                 className="w-28 tabular-nums"
+                onChange={(e) => editChoices(orgId, { dailyTurnCeiling: e.target.value })}
+                // Saved once it is left, if it was changed (#366).
+                onBlur={() => edit?.dailyTurnCeiling !== undefined && saveNow()}
               />
               <span className="text-sm text-muted-foreground">agent turns a day, then it pauses until midnight. Empty for none.</span>
             </div>
           </div>
           <ActionError at="choices" />
-          <Button type="submit" aria-disabled={running !== undefined || undefined}>
-            {running === 'choices' && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
-          </Button>
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {running === 'choices' ? 'Saving…' : edit ? 'Unsaved changes' : savedAt ? saveWord('saved', savedAt) : 'Changes save as you make them.'}
+          </p>
         </form>
       </EditorFields>
     </SettingsSection>

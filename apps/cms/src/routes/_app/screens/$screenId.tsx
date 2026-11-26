@@ -11,7 +11,8 @@ import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-ro
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon, ZapIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
-import { describeHours, DisplayHoursEditor, hoursProblems, WeekBars } from '~/components/screens/display-hours-editor';
+import { describeHours, DisplayHoursEditor, WeekBars } from '~/components/screens/display-hours-editor';
+import { hoursProblems } from '~/lib/screen-types';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { ScreenStatus } from '~/components/screens/status';
 import {
