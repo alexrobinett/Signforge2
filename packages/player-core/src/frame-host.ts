@@ -13,7 +13,8 @@
  * only the bundle's own scripts, each of which first takes WebRTC away from its realm (`containedFrames`).
  * See "Template containment" in docs/architecture.md.
  *
- * DOM only, and nothing runs at import.
+ * DOM only, and nothing runs at import. Its own entry (`@signforge/player-core/frame-host`), so packages
+ * that read the rest of player-core without the DOM's types (the tools, the API) never compile it.
  */
 import type { HostMessage, InitPayload, TemplateMessage } from '@signforge/contract';
 import { READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';

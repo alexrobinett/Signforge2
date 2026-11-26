@@ -16,7 +16,8 @@ import {
   type Spot,
   type TemplateManifest,
 } from '@signforge/contract';
-import { openFrameHost, READY_TIMEOUT_MS, resolveSpotData, screenLocale, type FrameHost } from '@signforge/player-core';
+import { READY_TIMEOUT_MS, resolveSpotData, screenLocale } from '@signforge/player-core';
+import { openFrameHost, type FrameHost } from '@signforge/player-core/frame-host';
 import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
