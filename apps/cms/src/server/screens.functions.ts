@@ -1,6 +1,6 @@
 /**
  * The Screens pages' reads, through the tool registry as the signed-in member: the same tools an
- * agent calls (`list_screens`, `list_screen_status`, `get_screen`, `list_groups`). Writes go from
+ * agent calls (`list_screens`, `list_screen_status`, `get_screen`, `list_groups`, `list_label_keys`). Writes go from
  * the browser to `/api/tools/:name` (src/lib/tools.ts).
  */
 import { createServerFn } from '@tanstack/react-start';
@@ -10,6 +10,9 @@ export const getScreens = createServerFn({ method: 'GET' }).handler(async () => 
   const [screens, groups] = await inOrg(() => Promise.all([all('list_screens', (p) => p.screens), all('list_groups', (p) => p.groups)]), [[], []]);
   return { screens, groups, at: Date.now() };
 });
+
+/** The org's label keys, each with its values and how many screens have each: the label editors' suggestions (#185). */
+export const getLabelKeys = createServerFn({ method: 'GET' }).handler(async () => ({ keys: await inOrg(() => all('list_label_keys', (p) => p.keys), []) }));
 
 /** What each screen is doing, for the Screens page's poll: no settings or manifests, about three D1 rows a screen (packages/tools README, `list_screen_status`). */
 export const getScreenStatus = createServerFn({ method: 'GET' }).handler(async () => {

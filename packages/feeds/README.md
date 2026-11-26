@@ -4,7 +4,7 @@ Turns a data source's feed body into the contract's shapes. Pure functions: no f
 
 - `parseCalendar(text, { now })`: iCalendar to `CalendarFeed`.
 - `parseNews(text, { url })`: RSS 2.0 or Atom to `NewsFeed`, with the feed's `language` (RSS `<language>`, Atom `xml:lang`) (`''` unless it declares a BCP 47 tag), plus each story's `image` and the feed's `logo` (below). `url` is the feed's own address, for relative links.
-- `parseCsv(text)`: a CSV file to `TableFeed`.
+- `parseCsv(text, { maxBytes?, maxCells? })`: a CSV file to `TableFeed`, at most `maxCells` cells (a table spot's default: what can fit a snapshot). `readCsv` reads the same, with each row's number as a spreadsheet shows the file (`rowAt`), for the CMS's label import.
 - `parseJsonTable(text, { rowsPath })`: a JSON list of objects (the document, or the list at `rowsPath`) to `TableFeed`.
 - `normaliseFeed(format, text, options)`: any of them, by the data source's `ical`, `rss`, `csv` or `json-table` format. For `rss` it gives the `NewsFeed` alone, what a snapshot carries: no image is looked for, and none is in it.
 

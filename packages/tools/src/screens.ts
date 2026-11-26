@@ -1,11 +1,11 @@
 /** Screen tools: read screens, rename them or change their settings, send them a command (wake, sleep, identify, restart), revoke a credential. */
+import { labelsByScreen, resolveGroups } from './memberships';
 import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
 import { matches, systemLabels } from '@signforge/compiler/selector';
 import { displayHours, id, ifVersion, locale, name, orientation, selector, timezone } from './fields';
-import { labelsByScreen } from './labels';
 import { parseHeartbeat } from './heartbeat';
 import { keysetPage, page, pageInput } from './paging';
 import { manifestKey } from './r2';
@@ -163,7 +163,7 @@ const EVENTS = 20;
 const listScreens = defineTool({
   name: 'list_screens',
   description:
-    'List the screens in the organization with their settings, labels, status and manifests, ordered by id, a page at a time. Give a selector to list only the screens it matches, such as every north drive-thru ({ all: [{ key: "region", op: "eq", values: ["north"] }, { key: "type", op: "eq", values: ["drive-thru"] }] }) or every portrait screen ({ all: [{ key: "orientation", op: "eq", values: ["portrait"] }] }); list_label_keys says which keys and values exist. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
+    'List the screens in the organization with their settings, labels, status and manifests, ordered by id, a page at a time. A selector lists only the screens it matches, such as every north drive-thru: { all: [{ key: "region", op: "eq", values: ["north"] }, { key: "type", op: "eq", values: ["drive-thru"] }] }; list_label_keys says which keys and values exist. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -180,7 +180,7 @@ const listScreens = defineTool({
     const labels = labelsByScreen(labelRows);
     const of = (id: string) => labels.get(id) ?? {};
     const { selector: wanted } = input;
-    const picked = wanted ? all.filter((s) => matches(wanted, { ...of(s.id), ...systemLabels(s) })) : all;
+    const picked = wanted ? all.filter((s) => matches(wanted, { ...systemLabels(s), ...of(s.id) })) : all;
     const { rows, next } = page(picked, (s) => [s.id], input);
     const now = Date.now();
     const credentialsOf = (id: string) => credentials.filter((c) => c.screenId === id);
@@ -229,14 +229,18 @@ const getScreen = defineTool({
   input: z.object({ screenId: id('screen') }),
   output: outputs.get_screen,
   example: { screenId: 'scr_example' },
-  handler: async ({ org, input, blobs }) => {
+  handler: async ({ org, input, blobs, memo }) => {
     const screen = await requireScreen(org, input.screenId);
-    const [groupIds, credentials, audit, view] = await Promise.all([
-      org.screens.groupsOf(screen.id),
+    const [{ members, rules }, credentials, audit, view] = await Promise.all([
+      // Once for a read of several screens.
+      memo('membership', () => org.screenGroups.membership()),
       org.screens.credentials.forScreen(screen.id),
       org.auditLog.list({ target: { kind: 'screen', id: screen.id }, limit: EVENTS }),
       screenView(org, screen, blobs),
     ]);
+    // Its groups as the publish resolves them, smart ones by its own labels (review of #608).
+    const own = Object.entries(view.labels).map(([key, value]) => ({ screenId: screen.id, key, value }));
+    const groupIds = resolveGroups([screen], own, rules, members).get(screen.id) ?? [];
     const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId }, input: inputOf(e.detailJson) }));
     const fellBackFrom = view.heartbeat?.fallbackFrom;
     // When it first said so; a screen last synced before that was kept (#367) says so from its last heartbeat.
