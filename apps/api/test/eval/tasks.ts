@@ -110,7 +110,7 @@ export const TASKS: Task[] = [
     id: 'read-screens',
     prompt: 'What screens do we have?',
     role: 'viewer',
-    script: both(() => [[{ name: 'list_screens', input: {} }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'screen' } }]]),
     check: read((w) => ({
       [w.screens.baysideDoor]: { name: 'Bayside door' },
       [w.screens.baysideTill]: { name: 'Bayside till' },
@@ -122,10 +122,10 @@ export const TASKS: Task[] = [
     id: 'read-screen-timezone',
     prompt: 'What time zone is the Harbor lobby screen set to?',
     role: 'viewer',
-    script: both(() => [[{ name: 'list_screens', input: {} }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'screen' } }]]),
     variants: [
       {
-        name: 'each screen by get_screen',
+        name: 'each screen by get_screen, called by name (#345: still answers)',
         arm: 'mcp',
         passes: true,
         script: (w) => [[{ name: 'get_screen', input: { screenId: w.screens.cafe } }], [{ name: 'get_screen', input: { screenId: w.screens.harbor } }]],
@@ -138,28 +138,28 @@ export const TASKS: Task[] = [
     prompt: 'Which of our screens are offline right now?',
     role: 'viewer',
     // Every screen's name and state: list_screens has both; list_screen_status has states alone.
-    script: both(() => [[{ name: 'list_screens', input: {} }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'screen' } }]]),
     variants: [
       {
-        name: 'each screen by get_screen, in separate responses',
+        name: 'each screen by read with ids, in separate responses',
         arm: 'mcp',
         passes: true,
-        script: (w) => Object.values(w.screens).map((screenId) => [{ name: 'get_screen', input: { screenId } }]),
+        script: (w) => Object.values(w.screens).map((id) => [{ name: 'read', input: { type: 'screen', ids: [id] } }]),
       },
       {
         name: 'states, then names, in separate responses',
         arm: 'drawer',
         passes: true,
-        script: () => [[{ name: 'list_screen_status', input: {} }], [{ name: 'list_screens', input: {} }]],
+        script: () => [[{ name: 'read', input: { type: 'screen_status' } }], [{ name: 'read', input: { type: 'screen' } }]],
       },
-      { name: 'states without names', arm: 'mcp', passes: false, script: () => [[{ name: 'list_screen_status', input: {} }]] },
+      { name: 'states without names', arm: 'mcp', passes: false, script: () => [[{ name: 'read', input: { type: 'screen_status' } }]] },
       {
         name: 'two of the four screens',
         arm: 'mcp',
         passes: false,
         script: (w) => [
-          [{ name: 'get_screen', input: { screenId: w.screens.baysideDoor } }],
-          [{ name: 'get_screen', input: { screenId: w.screens.baysideTill } }],
+          [{ name: 'read', input: { type: 'screen', ids: [w.screens.baysideDoor] } }],
+          [{ name: 'read', input: { type: 'screen', ids: [w.screens.baysideTill] } }],
         ],
       },
     ],
@@ -169,7 +169,7 @@ export const TASKS: Task[] = [
     id: 'read-default-playlist',
     prompt: 'Which playlist plays on our screens when nothing is scheduled?',
     role: 'viewer',
-    script: both(() => [[{ name: 'list_playlists', input: { isDefault: true } }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'playlist', filter: { isDefault: true } } }]]),
     check: read((w) => ({ [w.playlists.lobby]: { name: 'Lobby loop', isDefault: true } })),
   },
   {
@@ -177,8 +177,8 @@ export const TASKS: Task[] = [
     prompt: 'Which spots does the Lobby loop playlist play, in order?',
     role: 'viewer',
     // Its play order, and the names of the spots in it: a playlist lists its spots by id.
-    script: both(() => [[{ name: 'list_playlists', input: {} }], [{ name: 'list_spots', input: {} }]]),
-    variants: [{ name: 'the play order without the spots’ names', arm: 'mcp', passes: false, script: () => [[{ name: 'list_playlists', input: {} }]] }],
+    script: both(() => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'read', input: { type: 'spot' } }]]),
+    variants: [{ name: 'the play order without the spots’ names', arm: 'mcp', passes: false, script: () => [[{ name: 'read', input: { type: 'playlist' } }]] }],
     check: read((w) => ({
       [w.playlists.lobby]: { name: 'Lobby loop', spotIds: [w.spots.breakfast, w.spots.weather] },
       [w.spots.breakfast]: { name: 'Breakfast menu' },
@@ -189,22 +189,22 @@ export const TASKS: Task[] = [
     id: 'read-menu-template',
     prompt: 'Which template should I use to put a menu on a screen?',
     role: 'editor',
-    script: both(() => [[{ name: 'list_templates', input: {} }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'template' } }]]),
     check: read((w) => ({ [w.templates.menu]: { name: true } })),
   },
   {
     id: 'read-unpublished',
     prompt: 'What changes have not been published yet?',
     role: 'editor',
-    script: both(() => [[{ name: 'list_spots', input: { unpublished: true } }]]),
-    variants: [{ name: 'a count of drafts, naming none', arm: 'drawer', passes: false, script: () => [[{ name: 'count_drafts', input: {} }]] }],
+    script: both(() => [[{ name: 'read', input: { type: 'spot', filter: { unpublished: true } } }]]),
+    variants: [{ name: 'a count of drafts, naming none', arm: 'drawer', passes: false, script: () => [[{ name: 'read', input: { type: 'draft_count' } }]] }],
     check: read((w) => ({ [w.spots.lunch]: { name: 'Lunch specials', draftChanged: true } })),
   },
   {
     id: 'read-audit',
     prompt: 'Who last changed the Lunch specials spot, and what did they change?',
     role: 'owner',
-    script: both((w) => [[{ name: 'list_audit_log', input: { target: { kind: 'spot', id: w.spots.lunch } } }]]),
+    script: both((w) => [[{ name: 'read', input: { type: 'audit_entry', filter: { target: { kind: 'spot', id: w.spots.lunch } } } }]]),
     check(o) {
       const entries = o.results.flatMap((r) => (r.ok ? objectsIn(parsed(r.text)) : []));
       const hit = entries.some(
@@ -217,7 +217,7 @@ export const TASKS: Task[] = [
     id: 'read-schedule',
     prompt: 'What is scheduled on the Bayside screens?',
     role: 'viewer',
-    script: both(() => [[{ name: 'list_schedule_entries', input: {} }]]),
+    script: both(() => [[{ name: 'read', input: { type: 'schedule_entry' } }]]),
     check: read((w) => ({ [w.entry]: { playlistId: w.playlists.breakfast, groupId: w.groups.bayside, days: true, from: true, to: true } })),
   },
 
@@ -226,7 +226,10 @@ export const TASKS: Task[] = [
     id: 'write-rename-screen',
     prompt: 'Rename the Harbor lobby screen to "Harbor entrance".',
     role: 'owner',
-    script: both((w) => [[{ name: 'list_screens', input: {} }], [{ name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }]]),
+    script: both((w) => [
+      [{ name: 'read', input: { type: 'screen' } }],
+      [{ name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }],
+    ]),
     async check(o) {
       if (o.arm === 'drawer')
         return draftOf(o, 'rename_screen', o.world.screens.harbor)?.input.name === 'Harbor entrance' ? undefined : 'no draft renaming Harbor lobby';
@@ -238,7 +241,7 @@ export const TASKS: Task[] = [
     id: 'write-spot-duration',
     prompt: 'Make the Weather spot show for 15 seconds.',
     role: 'editor',
-    script: both((w) => [[{ name: 'list_spots', input: {} }], [{ name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } }]]),
+    script: both((w) => [[{ name: 'read', input: { type: 'spot' } }], [{ name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } }]]),
     async check(o) {
       if (o.arm === 'drawer') return draftOf(o, 'update_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
       const ms = (await o.scope.spots.get(o.world.spots.weather))?.durationMs;
@@ -263,7 +266,7 @@ export const TASKS: Task[] = [
     prompt: 'Add the Weather spot to the end of the Breakfast playlist.',
     role: 'editor',
     script: both((w) => [
-      [{ name: 'list_playlists', input: {} }],
+      [{ name: 'read', input: { type: 'playlist' } }],
       [{ name: 'update_playlist', input: { playlistId: w.playlists.breakfast, spotIds: [w.spots.breakfast, w.spots.weather] } }],
     ]),
     async check(o) {
@@ -279,7 +282,10 @@ export const TASKS: Task[] = [
     prompt: 'Create a playlist called "Lunch" that plays Lunch specials, then Weather.',
     role: 'editor',
     script: {
-      mcp: (w) => [[{ name: 'list_spots', input: {} }], [{ name: 'create_playlist', input: { name: 'Lunch', spotIds: [w.spots.lunch, w.spots.weather] } }]],
+      mcp: (w) => [
+        [{ name: 'read', input: { type: 'spot' } }],
+        [{ name: 'create_playlist', input: { name: 'Lunch', spotIds: [w.spots.lunch, w.spots.weather] } }],
+      ],
     },
     async check(o) {
       const made = await playlistNamed(o, 'Lunch');
@@ -292,8 +298,8 @@ export const TASKS: Task[] = [
     role: 'editor',
     script: both((w) => [
       [
-        { name: 'list_playlists', input: {} },
-        { name: 'list_groups', input: {} },
+        { name: 'read', input: { type: 'playlist' } },
+        { name: 'read', input: { type: 'group' } },
       ],
       [
         {
@@ -378,8 +384,8 @@ export const TASKS: Task[] = [
     script: {
       mcp: (w) => [
         [
-          { name: 'list_spots', input: {} },
-          { name: 'list_groups', input: {} },
+          { name: 'read', input: { type: 'spot' } },
+          { name: 'read', input: { type: 'group' } },
         ],
         [{ name: 'create_playlist', input: { name: 'Morning', spotIds: [w.spots.breakfast, w.spots.weather] } }],
         ([made = '']) => [
@@ -402,7 +408,7 @@ export const TASKS: Task[] = [
     role: 'owner',
     script: {
       mcp: (w) => [
-        [{ name: 'list_spots', input: {} }],
+        [{ name: 'read', input: { type: 'spot' } }],
         [{ name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 20_000 } }],
         [{ name: 'publish', input: {} }],
       ],
@@ -419,8 +425,8 @@ export const TASKS: Task[] = [
     script: {
       drawer: (w) => [
         [
-          { name: 'list_screens', input: {} },
-          { name: 'list_spots', input: {} },
+          { name: 'read', input: { type: 'screen' } },
+          { name: 'read', input: { type: 'spot' } },
         ],
         [
           { name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
@@ -440,7 +446,7 @@ export const TASKS: Task[] = [
     prompt: 'Delete the Winter promo playlist.',
     role: 'owner',
     press: true,
-    script: both((w) => [[{ name: 'list_playlists', input: {} }], [{ name: 'delete_playlist', input: { playlistId: w.playlists.winter } }]]),
+    script: both((w) => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'delete_playlist', input: { playlistId: w.playlists.winter } }]]),
     async check(o) {
       return (await o.scope.playlists.get(o.world.playlists.winter)) ? 'Winter promo is still there' : undefined;
     },
@@ -452,7 +458,7 @@ export const TASKS: Task[] = [
     press: true,
     script: {
       drawer: (w) => [
-        [{ name: 'list_spots', input: { unpublished: true } }],
+        [{ name: 'read', input: { type: 'spot', filter: { unpublished: true } } }],
         [{ name: 'publish', input: { drafts: [{ kind: 'spot', id: w.spots.lunch, version: w.lunchVersion }] } }],
       ],
     },

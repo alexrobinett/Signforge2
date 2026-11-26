@@ -29,7 +29,7 @@ import {
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server';
 import { agentGrantForToken, scoped } from '@signforge/db';
-import { type Caller, dispatch, grantOf, overLimit, ROLES, registry, SCOPES } from '@signforge/tools';
+import { type Caller, dispatch, grantOf, isReadType, overLimit, ROLES, registry, type Scope, SCOPES, toolsOf } from '@signforge/tools';
 import { type Context, Hono } from 'hono';
 import { recordCall, type CallRecord, UNKNOWN_TOOL } from '../agents/calls';
 import { agentLimiter, refusalAlertDue } from '../agents/grant-object';
@@ -77,7 +77,8 @@ const RATE_LIMITED = -32000;
 const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 
 const INSTRUCTIONS = `SignForge runs digital signage. You act as one member in one organization, with the scopes they granted; the tools listed are the ones you may use.
-- Changes are drafts. Screens show them only once published; without content:publish, ask a person with request_publish, pinning each draft at the version you read, and follow it with get_publish_request.
+- Changes are drafts. Screens show them only once published; without content:publish, ask a person with request_publish, pinning each draft at the version you read, and follow it with read({ type: 'publish_request', ids }).
+- Read anything with read: a type, and ids or a filter. describe(type) gives a type's filters and fields, once per type before you filter it. Read with detail full before you change a thing whole.
 - Updates take ifVersion: send the version you read. A conflict means someone changed it since: read it again, then decide.
 - Creating tools take an optional idempotencyKey: send the same key when you retry a creation, and a new one for each new thing.
 - Limits per grant: 120 calls a minute (tools/list included), 30 changes a minute and 2,000 a UTC day. Over one, a call is refused with rate_limited and retryAfterSeconds; wait that long.
@@ -176,7 +177,7 @@ function serverFor(caller: Caller, version: string, record: (call: Called) => vo
         await recorded(
           record,
           // A name that is no tool is the agent's own text: recorded as unknown, never as sent.
-          { tool: tool ? name : UNKNOWN_TOOL, change: tool?.mutates ?? false, needs: tool?.scope ?? null },
+          recordedAs(tool ? name : UNKNOWN_TOOL, tool?.mutates ?? false, tool?.scope ?? null, args),
           () => dispatch(registry, name, args, caller),
           (answer) => {
             if (!answer.ok) return { result: answer.error, target: null };
@@ -189,6 +190,18 @@ function serverFor(caller: Caller, version: string, record: (call: Called) => vo
     );
   });
   return server;
+}
+
+/**
+ * How a call is recorded: as its tool, and `read` and `describe` (#345) as the type they read (`read:invitation`) and the
+ * scope that type's own read needs, so a refused or costly read says what it was of.
+ */
+function recordedAs(tool: string, change: boolean, needs: Scope | null, args: unknown) {
+  const type = typeof args === 'object' && args !== null && 'type' in args ? args.type : undefined;
+  if ((tool !== 'read' && tool !== 'describe') || !isReadType(type)) return { tool, change, needs };
+  const [first] = toolsOf(type);
+  const scope = first === undefined ? undefined : registry.get(first)?.scope;
+  return { tool: `${tool}:${type}`, change, needs: scope ?? needs };
 }
 
 /**

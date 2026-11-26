@@ -3,7 +3,7 @@
  * give, so every tool's listing is tested without a request (test/mcp-tools.test.ts).
  */
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
-import { type DispatchResult, describeTools, type Grant, registry, type ToolServices } from '@signforge/tools';
+import { type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
 
 /** Tools that take something away for good: a person should look before an agent runs them. */
 const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
@@ -22,10 +22,11 @@ const isObjectSchema = (s: unknown): s is Tool['inputSchema'] => isRecord(s) && 
  * written to be checked by other code.
  */
 export function listedTools(grant: Grant, services: ToolServices): Tool[] {
-  return describeTools(registry, grant).flatMap((described): Tool[] => {
+  return describeTools(registry, grant, services).flatMap((described): Tool[] => {
     const tool = registry.get(described.name);
     const runnable = (tool?.needs ?? []).every((need) => services[need] !== undefined);
-    if (!tool || tool.people || !runnable || !isObjectSchema(described.inputSchema)) return [];
+    // A type's own read is listed as `read` where read serves it for this grant (#345); called by name, it still answers.
+    if (!tool || tool.people || servedByRead(registry, grant, tool.name, services) || !runnable || !isObjectSchema(described.inputSchema)) return [];
     return [
       {
         name: described.name,
