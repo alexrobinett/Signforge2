@@ -240,6 +240,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
       on: d.on,
       ...(d.methods !== undefined && { methods: { ...d.methods } }),
       ...(d.override !== undefined && { override: { state: d.override.state, until: d.override.until } }),
+      ...(d.output !== undefined && { output: { mode: d.output.mode, resets: d.output.resets } }),
     },
     clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     driftMs: now - Date.parse(req.deviceTime),

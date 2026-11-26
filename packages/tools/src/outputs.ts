@@ -67,6 +67,12 @@ export const screenOutput = z.object({
       filesMissing: z.number(),
       fallbackFrom: z.string().nullable().describe('A newer manifest that played nothing, so the screen went back to its last good one'),
       displayOn: z.boolean(),
+      displayOutput: z
+        .object({ mode: z.string(), resets: z.number().int() })
+        .nullable()
+        .describe(
+          'The video mode its supervisor last read (1920x1080@60 when right) and how often it set it back since it started; null on a screen without one',
+        ),
       clockTrusted: z.boolean(),
       driftMs: z.number(),
     })

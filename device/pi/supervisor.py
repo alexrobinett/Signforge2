@@ -7,7 +7,7 @@ the supervisor only does *how*, over a local HTTP API:
 
   POST /display/on    signal on at 1080p60, then wake the TV and select this input over CEC
   POST /display/off   put the TV in standby over CEC, then turn the video signal off
-  GET  /display       last state and which methods worked
+  GET  /display       last state, which methods worked, and the output's mode (see below)
   GET  /credential    the screen's API credential and the API it is for, for the player's own origin (see below)
   POST /credential    {"credential": "sfd_...", "api": "https://<api>/v1/device"}: store what pairing gave the player
   DELETE /credential  forget it: the server revoked it
@@ -45,6 +45,14 @@ frozen panel. The player beats POST /alive with the token instead; with no beat 
 supervisor restarts the kiosk unit (allowed by signforge-supervisor.rules, a polkit rule for that
 one unit and verb). Only a beat arms the check, and a restart disarms it until the next beat, so a
 player that never beats (an older build, a kiosk URL without the player) is never restarted in a loop.
+
+The output's mode (#511). kiosk.sh sets 1920x1080 at 60 Hz before the browser starts (a Pi 4 cannot
+animate at 4K), but a panel can bring its own mode back during play: a hotplug, an input switch. So
+every MODE_CHECK_S while the panel is on, the supervisor reads the mode (one wlr-randr call, which
+wakes nothing), and when it is not MODE sets it back as kiosk.sh does and logs it. GET /display
+reports the last reading and how often it set it back ("output": {"mode", "resets"}); the player
+sends it in its heartbeat, so the screen's tools show it. Not read while the panel is off: the
+signal is off by design then, and setting a mode would turn it on.
 """
 import hmac, ipaddress, json, os, re, secrets, subprocess, threading, time
 from urllib.parse import urlsplit
@@ -59,6 +67,9 @@ KIOSK_UNIT = "signforge-kiosk.service"
 # Six missed beats: a page reload, or a busy moment in a slow prepare, is not a hang.
 STALE_S = 30
 CREDENTIAL_FILE = os.path.expanduser("~/signforge/device.credential")
+MODE_CHECK_S = 60
+# wlr-randr's line for the mode in use: "    1920x1080 px, 60.000000 Hz (preferred, current)".
+MODE_LINE = re.compile(r"^\s+(\d+)x(\d+) px, ([\d.]+) Hz \([^)]*\bcurrent\b")
 
 
 def load_token():
@@ -189,6 +200,44 @@ def set_display(on):
         return dict(state)
 
 
+def output_mode(randr):
+    """The current mode in wlr-randr's listing as `<w>x<h>@<Hz>` (Hz rounded, as `--mode` takes it), or None for an output that is off or has none."""
+    if re.search(r"^\s+Enabled: no$", randr, re.M):
+        return None
+    m = next(filter(None, map(MODE_LINE.match, randr.splitlines())), None)
+    return f"{m[1]}x{m[2]}@{round(float(m[3]))}" if m else None
+
+
+def read_mode():
+    """The output's name and current mode, or None while there is no compositor or the output is off."""
+    out = wayland()
+    if not out:
+        return None
+    rc, randr = run("wlr-randr")
+    mode = output_mode(randr) if rc == 0 else None
+    return (out, mode) if mode else None
+
+
+def watch_mode():
+    while True:
+        time.sleep(MODE_CHECK_S)
+        with lock:
+            if not state["on"]:
+                continue
+            found = read_mode()
+            if not found:
+                continue
+            out, mode = found
+            resets = state.get("output", {}).get("resets", 0)
+            if mode != MODE:
+                rc, msg = run("wlr-randr", "--output", out, "--mode", MODE)
+                after = read_mode()
+                resets += 1
+                print(f"output at {mode}, not {MODE}: set back, now {after[1] if after else 'unknown'}{'' if rc == 0 else ' (' + msg.strip()[:120] + ')'}", flush=True)
+                mode = after[1] if after else mode
+            state["output"] = {"mode": mode, "resets": resets}
+
+
 # time.monotonic() of the player's last beat; None until a beat after a start or a restart.
 last_beat = None
 
@@ -291,4 +340,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=watch_player, daemon=True).start()
+    threading.Thread(target=watch_mode, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
