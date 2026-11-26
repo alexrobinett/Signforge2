@@ -347,18 +347,19 @@ describe('live data', () => {
     expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW, 'en-US')).toEqual({
       data: { city: 'Atlanta', temp: 41.2, high: 60.6 },
       rejected: [],
+      fallback: [],
     });
   });
 
-  it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, fields, new Map(), NOW, 'en-US')).toEqual({ data: bound.data, rejected: [] });
+  it('falls back to the static value when there is no snapshot yet, and names each bound field', () => {
+    expect(resolveSpotData(bound, fields, new Map(), NOW, 'en-US')).toEqual({ data: bound.data, rejected: [], fallback: ['temp', 'high'] });
   });
 
-  it('falls back to the static value once the server has not confirmed the snapshot for a day', () => {
-    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, 'en-US').data;
+  it('falls back to the static value once the server has not confirmed the snapshot for a day, and says so', () => {
+    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, 'en-US');
     expect(SNAPSHOT_STALE_MS).toBe(24 * 3_600_000);
-    expect(at('2026-11-16T12:00:00Z')).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
-    expect(at('2026-11-16T11:59:59Z')).toEqual(bound.data);
+    expect(at('2026-11-16T12:00:00Z')).toMatchObject({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, fallback: [] });
+    expect(at('2026-11-16T11:59:59Z')).toMatchObject({ data: bound.data, fallback: ['temp', 'high'] });
   });
 
   it('keeps the static value for a live value that does not fit its field, and says why', () => {
@@ -369,6 +370,7 @@ describe('live data', () => {
         { source: 'weather', problem: 'field "temp" must be at most 100' },
         { source: 'weather', problem: 'field "high" has no value at the bound path' },
       ],
+      fallback: ['temp', 'high'],
     });
   });
 
@@ -403,12 +405,15 @@ describe('live data', () => {
         ],
       },
       rejected: [{ source: 'menu', problem: 'field "items": row 2: price is longer than 6' }],
+      // Some rows kept: the list is live.
+      fallback: [],
     });
     // A mapped column the file lost: the fallback, and why.
     const lost = { ...menu, data: { columns: ['Dish', 'Price'], rows: [] } };
     expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), NOW, 'en-US')).toEqual({
       data: { items: [] },
       rejected: [{ source: 'menu', problem: 'field "items": the table has no column "Item"' }],
+      fallback: ['items'],
     });
   });
 
@@ -543,11 +548,14 @@ describe('a template with two sources (#193)', () => {
   });
 
   it('plays both sources live, one stale with its fields on their fallback, and neither with every fallback', () => {
-    expect(play(forecast, news)).toEqual({ data: { city: 'Atlanta', temp: 41.2, items: live }, rejected: [] });
+    expect(play(forecast, news)).toEqual({ data: { city: 'Atlanta', temp: 41.2, items: live }, rejected: [], fallback: [] });
     const stale = { ...forecast, checkedAt: '2026-11-16T11:59:59Z' };
-    expect(play(stale, news)).toEqual({ data: { city: 'Atlanta', temp: 72, items: live }, rejected: [] });
-    expect(play(forecast, { ...news, checkedAt: '2026-11-16T11:59:59Z' }).data).toEqual({ city: 'Atlanta', temp: 41.2, items: [{ title: 'Fallback' }] });
-    expect(play()).toEqual({ data: frame.data, rejected: [] });
+    expect(play(stale, news)).toEqual({ data: { city: 'Atlanta', temp: 72, items: live }, rejected: [], fallback: ['temp'] });
+    expect(play(forecast, { ...news, checkedAt: '2026-11-16T11:59:59Z' })).toMatchObject({
+      data: { city: 'Atlanta', temp: 41.2, items: [{ title: 'Fallback' }] },
+      fallback: ['items'],
+    });
+    expect(play()).toEqual({ data: frame.data, rejected: [], fallback: ['temp', 'items'] });
   });
 });
 

@@ -993,6 +993,12 @@ ol {
 [data-look='corporate'] .stage[data-state='busy'] {
   --tone: var(--lk-text);
 }
+/* Unknown (#225): the calendar is not updating. Neither free's accent nor busy's fill, in any look: the muted ink,
+   which main.ts sets on the stage as `--tone` once it is read on the page. */
+[data-look] .stage[data-state='unknown'] {
+  --tone: var(--lk-muted);
+  --tone-fill: var(--lk-muted);
+}
 [data-look='pop'][data-orientation='portrait'] .stage {
   padding: 7.4vmin 6.5vmin;
 }

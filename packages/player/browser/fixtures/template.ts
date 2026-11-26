@@ -125,6 +125,8 @@ defineTemplate({
     const w = window as unknown as { sfInits?: number; sfHold?: Promise<void>; sfFailNext?: boolean };
     document.body.dataset.inits = String((w.sfInits = (w.sfInits ?? 0) + 1));
     document.body.dataset.viewport = `${ctx.viewport.width}x${ctx.viewport.height} ${ctx.orientation}`;
+    // The bound fields the player says play their fallback (#225).
+    document.body.dataset.fallback = [...ctx.fallback].join(',');
     if (w.sfFailNext) {
       w.sfFailNext = false;
       throw new Error('fixture refit failed');

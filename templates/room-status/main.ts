@@ -130,6 +130,24 @@ defineTemplate({
       if (kick) line.append(Object.assign(document.createElement('span'), { className: 'kick', textContent: kick }));
       if (title) line.append(Object.assign(document.createElement('span'), { className: 'title', textContent: title }));
     };
+    // The calendar is not updating (#225): the bookings are the spot's fallback, so whether the room is free is not
+    // known. Say so, rather than "Free" from a list that may be out of date.
+    if (ctx.fallback.has('events')) {
+      const stage = el('.stage')!;
+      stage.dataset.state = 'unknown';
+      // The muted ink, read on the page as free's accent is (`--lk-accent-ink-large`): a kit's may be too pale.
+      const page = getComputedStyle(ctx.root);
+      stage.style.setProperty('--tone', readableOn(page.getPropertyValue('--lk-bg').trim(), page.getPropertyValue('--lk-muted').trim(), { large: true }));
+      target = undefined;
+      el('.word')!.textContent = 'Schedule unavailable';
+      say('Check the booking before you use the room', '');
+      for (const part of ['.for', '.until', '.org', '.next', '.allday', '.items', '.pin', '.track']) drop(part);
+      put('.free-day', "The room's calendar is not updating");
+      render(ctx);
+      inkCards();
+      fitWord(el('.word')!);
+      return;
+    }
     if (current) {
       const until = at(current.end);
       say(look === 'poster' ? `Now, until ${until}` : look === 'night' ? '' : `Until ${until} · `, current.title);

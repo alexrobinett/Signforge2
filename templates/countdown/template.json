@@ -1,6 +1,6 @@
 {
   "id": "countdown",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "name": "Countdown",
   "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
   "fields": {

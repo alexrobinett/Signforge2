@@ -125,17 +125,17 @@ describe('a template with two sources (#193)', () => {
   it('plays both sources when both are fresh', async () => {
     const now = new Date().toISOString();
     const p = await playWith({ weather: now, news: now });
-    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Sunny, 21°', items: 'Live 1, Live 2' });
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Sunny, 21°', items: 'Live 1, Live 2', fallback: '' });
     expect((await p.state()).dataRejected).toEqual({});
   });
 
-  it('plays the fallback of a stale source only, and the other source live', async () => {
+  it('plays the fallback of a stale source only, and the other source live, and tells the template which (#225)', async () => {
     const p = await playWith({ weather: stale(), news: new Date().toISOString() });
-    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Live 1, Live 2' });
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Live 1, Live 2', fallback: 'label' });
   });
 
-  it('plays every fallback with neither source', async () => {
+  it('plays every fallback with neither source, and tells the template so (#225)', async () => {
     const p = await playWith({});
-    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Fallback item' });
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Fallback item', fallback: 'label,items' });
   });
 });

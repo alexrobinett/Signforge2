@@ -56,6 +56,8 @@ interface LiveFrame {
   spot: TemplateSpot;
   manifest: ScreenManifest;
   data: Record<string, unknown>;
+  /** The bound fields `data` holds on their fallback (`resolveSpotData`): `init` names them, protocol 2 (#225). */
+  fallback: string[];
   locale: string;
   assets: Record<string, Blob>;
   /** The screen's brand kit as the frame takes it; protocol 2 only. */
@@ -458,7 +460,7 @@ export class Slot {
     const protocol = t.manifest.protocol ?? 1;
     if (!playsProtocol(THIS_PLAYER, protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const locale = screenLocale(manifest);
-    const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
+    const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
     if (report) reportRejected(rejected);
     const [{ wrapper: wrapperHtml, template: templateHtml }, baseAssets, rowImages, theme] = await Promise.all([
       framesFor(manifest, t.html),
@@ -493,6 +495,8 @@ export class Slot {
         locale: live!.locale,
         clock: frameClock(),
         ...(live!.theme ? { theme: live!.theme } : {}),
+        // Protocol 2, as `theme` is: a protocol 1 bundle's SDK predates the list.
+        ...(live!.protocol >= 2 ? { fallback: live!.fallback } : {}),
       }),
       label: spot.template,
       signal,
@@ -511,6 +515,7 @@ export class Slot {
       spot,
       manifest,
       data,
+      fallback,
       locale,
       assets,
       theme,
@@ -541,7 +546,7 @@ export class Slot {
     const signal = this.abort.signal;
     const work = (async () => {
       const locale = screenLocale(manifest);
-      const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
+      const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
       reportRejected(rejected);
       const [baseAssets, rowImages, theme] = await Promise.all([
         spotAssets(spot, manifest),
@@ -549,7 +554,7 @@ export class Slot {
         brandTheme(manifest),
       ]);
       alive(signal);
-      Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
+      Object.assign(live, { spot, manifest, data: rowImages.data, fallback, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
       // The frames are reused, so a rename in the editor must reach their titles too.
       live.host.setTitle(spot.name);
       this.spot = spot;
