@@ -437,7 +437,8 @@ export async function host(orientation: Orientation = 'landscape', full: boolean
  * with its text and again with the text hidden, at rest. Each
  * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
  * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
- * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+ * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1; text a clipping box
+ * hides (a crawl's copy past its window) is not read.
  */
 export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Promise<string[]> {
   const { card, texts } = await f.evaluate((scope) => {
@@ -450,7 +451,15 @@ export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Pr
       const range = document.createRange();
       range.selectNode(own[0]!);
       range.setEndAfter(own.at(-1)!);
+      // Only what its clipping boxes show: a crawl's second copy can sit past its window, where it paints nothing.
       const r = range.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (getComputedStyle(p).overflow === 'visible') continue;
+        const c = p.getBoundingClientRect();
+        const [x, y] = [Math.max(r.x, c.x), Math.max(r.y, c.y)];
+        [r.width, r.height] = [Math.max(0, Math.min(r.right, c.right) - x), Math.max(0, Math.min(r.bottom, c.bottom) - y)];
+        [r.x, r.y] = [x, y];
+      }
       const s = getComputedStyle(el);
       const size = Number.parseFloat(s.fontSize);
       texts.push({
