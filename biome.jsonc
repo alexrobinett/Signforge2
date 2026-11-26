@@ -74,6 +74,7 @@
         "packages/template-test/**",
         "packages/db/src/**",
         "packages/contract/src/parse.ts",
+        "packages/contract/src/shape.ts",
         "packages/contract/src/validate.ts",
         "spike/**"
       ],
