@@ -141,8 +141,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
-      "size": 399570,
+    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
+      "size": 399498,
       "type": "text/html"
     },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
@@ -1026,10 +1026,10 @@
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
-    "base/room-status@1.1.1": {
+    "base/room-status@1.2.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1150,7 +1150,7 @@
         },
         "protocol": 2
       },
-      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
+      "html": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1"
     }
   },
   "spots": {
@@ -1415,7 +1415,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.1.1",
+      "template": "base/room-status@1.2.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "9c84fed6fa61a08bd918ef61d26875fd95cb6593d0c01df0b96afb4be8605646"
+  "id": "fdfc57417a13beca51cbb6b7ae2e4f2419a11cf7f473f6457dd50e4db073d1de"
 }

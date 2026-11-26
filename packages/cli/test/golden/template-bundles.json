@@ -9,5 +9,6 @@
   "base/menu-board@1.5.0": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c",
   "base/news@2.1.2": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5",
   "base/photo-promo@1.6.0": "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660",
+  "base/room-status@1.2.0": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1",
   "base/weather@1.7.0": "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08"
 }
