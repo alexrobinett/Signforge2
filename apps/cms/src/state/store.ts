@@ -25,6 +25,7 @@ import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createProposalsSlice, type ProposalsSlice } from './proposals';
 import { createPublishingSlice, type PublishingSlice } from './publishing';
+import { connectSaveAsGroup, createSaveAsGroupSlice, type SaveAsGroupSlice } from './save-as-group';
 import { createScheduleSlice, type ScheduleSlice } from './schedule';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
@@ -50,6 +51,7 @@ export type AppState = UiSlice &
   PublishingSlice &
   ScheduleSlice &
   TargetPickerSlice &
+  SaveAsGroupSlice &
   GroupsSlice &
   ConnectSlice &
   AgentSlice &
@@ -87,6 +89,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createPublishingSlice(set, get, deps),
     ...createScheduleSlice(set, get, deps),
     ...createTargetPickerSlice(set, get, deps),
+    ...createSaveAsGroupSlice(set, get, deps),
     ...createGroupsSlice(set, get, deps),
     ...createConnectSlice(set, get, deps),
     ...createAgentSlice(set, get, deps),
@@ -98,6 +101,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     connectUi(store, deps);
     connectCommandMenu(store, deps);
     connectLabels(store, deps);
+    connectSaveAsGroup(store, deps);
     // An edit still to be saved would go with the tab: its save goes now, and the browser asks before the tab closes.
     window.addEventListener('beforeunload', (e) => {
       if (!savesWaiting()) return;

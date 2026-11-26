@@ -56,6 +56,7 @@ import { labelKeysQuery, screensQuery, screenStatusQuery } from '~/queries/scree
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 import { NEXT_PUBLISH } from '~/state/labels';
+import { tooManyFilters } from '~/state/save-as-group';
 import { searchText, selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
@@ -272,7 +273,8 @@ function ScreensPage() {
         </EditorFields>
       </div>
 
-      <LabelFilterRow terms={terms} keys={keys} onChange={setTerms} />
+      <LabelFilterRow terms={terms} keys={keys} canManage={canManage} onChange={setTerms} />
+      <SaveAsGroupDialog screens={active} others={Boolean(search.q || search.group || search.status)} />
 
       {shown.length === 0 ? (
         <p className="rounded-xl border bg-card p-8 text-center text-muted-foreground">No screens match. Clear the search or filters to see them all.</p>
@@ -453,7 +455,19 @@ function Section({ by, section, children }: { by: string; section: LabelSection<
  * The label chips in the URL, each removable, and the dialog the toolbar's "+ Filter" opens, which adds one from the
  * keys and values the org's screens have (`list_label_keys`). A chip on a key replaces that key's chip: a screen has one value of a key.
  */
-function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: LabelKey[]; onChange: (terms: LabelTerm[]) => void }) {
+function LabelFilterRow({
+  terms,
+  keys,
+  canManage,
+  onChange,
+}: {
+  terms: LabelTerm[];
+  keys: LabelKey[];
+  canManage: boolean;
+  onChange: (terms: LabelTerm[]) => void;
+}) {
+  const orgId = useOrgId();
+  const openSaveAsGroup = useAppStore((s) => s.openSaveAsGroup);
   const open = useAppStore((s) => s.labels.filter);
   const openLabelFilter = useAppStore((s) => s.openLabelFilter);
   const chooseFilterKey = useAppStore((s) => s.chooseFilterKey);
@@ -509,6 +523,16 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
               >
                 Clear filters
               </Button>
+              {canManage && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'done')}>
+                    Save as group…
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'schedule')}>
+                    Schedule a playlist for these…
+                  </Button>
+                </>
+              )}
             </div>
           </EditorFields>
         </div>
@@ -1001,5 +1025,75 @@ function ScreenTable({
         </div>
       </div>
     </EditorFields>
+  );
+}
+
+/**
+ * "Save as group…" (#186): the label chips as a smart group's rule, named here, with how many screens it matches now;
+ * the search and the group and status filters are not part of a rule, and it says so when one is on.
+ */
+function SaveAsGroupDialog({ screens, others }: { screens: ScreenView[]; others: boolean }) {
+  const id = useId();
+  const d = useAppStore((s) => s.saveAsGroup);
+  const name = useAppStore((s) => s.nameGroupFromFilters);
+  const close = useAppStore((s) => s.closeSaveAsGroup);
+  const save = useAppStore((s) => s.saveFiltersAsGroup);
+  if (!d) return null;
+  const tooMany = tooManyFilters(d.terms);
+  const n = screens.filter((s) => matchesTerms(s, d.terms)).length;
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{d.then === 'schedule' ? 'Schedule a playlist for these screens' : 'Save as group'}</DialogTitle>
+          <DialogDescription>
+            A smart group: the screens whose labels match these filters, now and at each publish.
+            {d.then === 'schedule' && ' Saved first, then aimed at by a new schedule entry.'}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <ul aria-label="Its rule" className="flex flex-wrap gap-1.5 text-sm">
+            {d.terms.map((t) => (
+              <li key={t.key} className="rounded-full border px-2.5 py-0.5">
+                <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Matches {n} {n === 1 ? 'screen' : 'screens'} now.
+            {others && <span className="text-muted-foreground"> The search and the group and status filters are not part of it.</span>}
+          </p>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-name`}>Name</Label>
+            <Input
+              id={`${id}-name`}
+              value={d.name}
+              onChange={(e) => name(e.target.value)}
+              maxLength={100}
+              placeholder="North drive-thru"
+              disabled={Boolean(tooMany)}
+            />
+          </div>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {tooMany ?? d.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={Boolean(tooMany)} aria-disabled={d.pending || undefined}>
+              {d.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
+              {d.then === 'schedule' ? 'Save and schedule…' : 'Save group'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

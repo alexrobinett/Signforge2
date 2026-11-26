@@ -262,3 +262,57 @@ test('a smart group is shown where a screen is in it, never offered to tick by h
   await page.getByRole('region', { name: 'Selected screens' }).getByRole('button', { name: 'Add to group' }).click();
   await expect(page.getByRole('menuitem')).toHaveText(['Listed']);
 });
+
+/** With E2E_SCREENSHOTS: light and dark at the desktop's width, then at a phone's (390 px). */
+async function shotsBoth(page: Page, name: string) {
+  if (!process.env.E2E_SCREENSHOTS) return;
+  const size = page.viewportSize()!;
+  await shots(page, `${name}-desktop`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, `${name}-390`);
+  await page.setViewportSize(size);
+}
+
+test("save a filtered view as a smart group, then schedule a playlist to it (#186's done when)", async ({ page }) => {
+  await signInAs(page, `e2e-save-as-group-${Date.now()}@example.com`, '192.0.2.207');
+  await createOrg(page, 'Filter Deli', '192.0.2.207');
+  const door = await pairScreen(page, 'North door', '192.0.2.208');
+  const kiosk = await pairScreen(page, 'North kiosk', '192.0.2.209');
+  const south = await pairScreen(page, 'South door', '192.0.2.210');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id, kiosk.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [kiosk.id], set: { type: 'kiosk' } });
+  await tool(page, 'update_screen_labels', { screenIds: [south.id], set: { region: 'south' } });
+  await tool(page, 'save_playlist', { name: 'Breakfast', transition: { type: 'cut' } });
+
+  // The view filtered to region north, with a search the rule leaves out.
+  await page.goto('/screens?view=table&l=region:north&q=door');
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'Save as group…' })).toBeVisible();
+  await shotsBoth(page, '186-filter-actions');
+  await page.getByRole('button', { name: 'Schedule a playlist for these…' }).click();
+  const save = page.getByRole('dialog', { name: 'Schedule a playlist for these screens' });
+  await expect(save.getByRole('list', { name: 'Its rule' })).toHaveText('region: north');
+  await expect(save).toContainText('Matches 2 screens now. The search and the group and status filters are not part of it.');
+  await save.getByLabel('Name').fill('North');
+  await axe(page);
+  await shotsBoth(page, '186-save-as-group');
+  await save.getByRole('button', { name: 'Save and schedule…' }).click();
+
+  // Saved, and the entry dialog opened aimed at it: a playlist chosen, the entry saved as a draft.
+  await expect(save).toBeHidden();
+  const entry = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await expect(entry.getByRole('combobox', { name: 'Plays on' })).toHaveText('North');
+  await expect(entry.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('2 screens: North door, North kiosk');
+  await entry.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Breakfast' });
+  await entry.getByRole('button', { name: 'Save draft' }).click();
+  await expect(entry).toBeHidden();
+  const groups = (await tool(page, 'list_groups', {})) as { groups: { name: string; selector: unknown; screenIds: string[] }[] };
+  expect(groups.groups).toEqual([
+    expect.objectContaining({ name: 'North', selector: { all: [{ key: 'region', op: 'eq', values: ['north'] }] }, screenIds: [door.id, kiosk.id].toSorted() }),
+  ]);
+  await page.goto('/schedule');
+  await hydrated(page);
+  const entries = page.getByRole('region', { name: 'Entries' }).getByRole('listitem');
+  await expect(entries).toHaveCount(1);
+  await expect(entries.first()).toContainText('Group North · Always · Draft, not published');
+});
