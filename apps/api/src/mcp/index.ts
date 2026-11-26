@@ -186,6 +186,8 @@ function serverFor(caller: Caller, version: string, record: (call: Called) => vo
             return { result: 'ok', target: (input?.success && tool?.target?.(input.data, answer.output)) || null };
           },
         ),
+        name,
+        args,
       ),
     );
   });

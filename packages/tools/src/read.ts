@@ -8,6 +8,7 @@
 import { VIDEO_SPEC } from '@signforge/contract';
 import { z } from 'zod';
 import { effectiveScopes, type Grant, permits } from './dispatch';
+import { agentTimeProperties, applyTimes, type TimePlan, timePlan } from './agent-times';
 import { outputs } from './outputs';
 import { id } from './fields';
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
@@ -331,7 +332,13 @@ function rowFieldsOf(tools: Tools, type: ReadType, byIds: boolean): Record<strin
 }
 
 /** Every top-level field a row of `type` can have, with its JSON Schema: a list's rows, and what its get adds. */
+/** Every field of `type`'s `full` rows as JSON Schema, each time as an agent reads it, ISO 8601 (`agentOutputOf`). */
 function fieldsOf(tools: Tools, type: ReadType): Record<string, unknown> {
+  return agentTimeProperties(fieldsAsTools(tools, type));
+}
+
+/** Every field of `type`'s `full` rows as its own read tools give them: a time as ms since the epoch. */
+function fieldsAsTools(tools: Tools, type: ReadType): Record<string, unknown> {
   const def = defOf(type);
   if (type === 'org')
     return {
@@ -339,7 +346,7 @@ function fieldsOf(tools: Tools, type: ReadType): Record<string, unknown> {
       name: { type: 'string' },
       role: { type: 'string' },
       scopes: { type: 'array', items: { type: 'string' } },
-      settings: propertiesOf(tools, 'get_org_settings', 'settings'),
+      settings: { type: 'object', properties: propertiesOf(tools, 'get_org_settings', 'settings') },
       aiProvider: propertiesOf(tools, 'get_ai_provider').provider,
     };
   if (def.one) return propertiesOf(tools, def.one);
@@ -518,4 +525,34 @@ export function readTools(tools: Tools) {
   });
 
   return [read, describe];
+}
+
+/**
+ * A tool's output as an agent reads it (#345): each time its output schema declares as ISO 8601 (./agent-times.ts),
+ * and `read`'s rows by their type's own fields, as `describe` lists them. Nothing else is touched: no value a schema
+ * leaves opaque (a snapshot's data, a spot's data, an audit entry's detail), and no output of a name no tool has.
+ */
+export function agentOutputOf(tools: Tools) {
+  const plans = new Map<string, TimePlan | undefined>();
+  const planOf = (key: string, make: () => TimePlan | undefined) => {
+    if (!plans.has(key)) plans.set(key, make());
+    return plans.get(key);
+  };
+  return (name: string, input: unknown, output: unknown): unknown => {
+    if (name === 'read') {
+      const type = typeof input === 'object' && input !== null && 'type' in input ? input.type : undefined;
+      if (!isReadType(type)) return output;
+      const rows = () => timePlan({ type: 'object', properties: fieldsAsTools(tools, type) });
+      return applyTimes(
+        planOf(`read/${type}`, () => ({ props: { items: { items: rows() } } })),
+        output,
+      );
+    }
+    const tool = tools.get(name);
+    if (!tool) return output;
+    return applyTimes(
+      planOf(name, () => timePlan(z.toJSONSchema(tool.output, { io: 'output', unrepresentable: 'any' }))),
+      output,
+    );
+  };
 }

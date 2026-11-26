@@ -205,6 +205,25 @@ describe('describe', () => {
     }
   });
 
+  it("describes a type's times as an agent reads them, ISO 8601 (#345)", async () => {
+    const r = await dispatch(registry, 'describe', { type: 'spot' }, as('owner'));
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const { fields } = r.output as { fields: Record<string, { type?: unknown; format?: string }> };
+    expect(fields.createdAt).toMatchObject({ type: 'string', format: 'date-time' });
+    expect(fields.publishedAt).toMatchObject({ type: ['string', 'null'], format: 'date-time' });
+    expect(fields.durationMs).toMatchObject({ type: 'number' });
+    // As read gives them (review of #538): an org's settings' time, and an audit entry's, its description too.
+    const fieldsOf = async (type: string) => {
+      const d = await dispatch(registry, 'describe', { type }, as('owner'));
+      if (!d.ok) throw new Error(JSON.stringify(d));
+      return (d.output as { fields: Record<string, { type?: unknown; format?: string; description?: string; properties?: Record<string, unknown> }> }).fields;
+    };
+    expect((await fieldsOf('org')).settings?.properties?.updatedAt).toMatchObject({ format: 'date-time' });
+    const at = (await fieldsOf('audit_entry')).at;
+    expect(at).toMatchObject({ type: 'string', format: 'date-time' });
+    expect(at?.description).not.toContain('ms');
+  });
+
   it('describes every type a caller may read, its tools all in the registry', async () => {
     for (const type of TYPES) {
       for (const name of toolsOf(type)) expect(registry.get(name), `${type}: ${name}`).toBeDefined();

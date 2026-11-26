@@ -60,6 +60,9 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
   set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
 };
 
+/** A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler. */
+const instant = z.union([z.number().int().nonnegative(), z.iso.datetime({ offset: true }).transform((t) => Date.parse(t))]);
+
 const listAuditLog = defineTool({
   name: 'list_audit_log',
   description:
@@ -85,8 +88,8 @@ const listAuditLog = defineTool({
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()
       .describe('Only what was done to this kind of thing, or this one thing, even one since deleted'),
-    from: z.number().int().nonnegative().optional().describe('Only entries at or after this time, in ms'),
-    to: z.number().int().nonnegative().optional().describe('Only entries before this time, in ms'),
+    from: instant.optional().describe('Only entries at or after this time: ISO 8601, or ms since the epoch'),
+    to: instant.optional().describe('Only entries before this time: ISO 8601, or ms since the epoch'),
     query: z.string().trim().min(1).max(100).optional().describe('Only entries whose action, actor, target or recorded input contains this text'),
   }),
   output: outputs.list_audit_log,
