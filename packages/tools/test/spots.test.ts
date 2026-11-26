@@ -158,13 +158,11 @@ describe('spot drafts', () => {
 
   it('refuses data the contract refuses, naming the field', async () => {
     const { call, version } = await setup('spots-invalid');
-    expect(await call('save_spot', { name: 'x', kind: 'template', templateVersionId: version, data: { headline: 'Far too long a headline' } })).toMatchObject(
-      {
-        ok: false,
-        error: 'invalid_input',
-        details: [{ path: 'data', message: 'field "headline" is longer than 12' }],
-      },
-    );
+    expect(await call('save_spot', { name: 'x', kind: 'template', templateVersionId: version, data: { headline: 'Far too long a headline' } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'data', message: 'field "headline" is longer than 12' }],
+    });
     const { spot } = await ok(call('save_spot', { name: 'x', kind: 'template', templateVersionId: version }));
     const spotId = (spot as { id: string }).id;
     for (const data of [{ nope: 1 }, { items: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }, { accent: '$brand.nope' }]) {

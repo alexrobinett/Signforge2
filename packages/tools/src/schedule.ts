@@ -270,7 +270,8 @@ const saveEntry = defineTool({
       const { playlistId, target } = input;
       if (playlistId === undefined || target === undefined)
         throw new ToolError('invalid_input', 'a new entry needs a playlistId and a target; give scheduleEntryId to change one');
-      if (input.startsAt !== undefined || input.endsAt !== undefined) throw new ToolError('invalid_input', 'startsAt and endsAt belong to a takeover: use start_takeover');
+      if (input.startsAt !== undefined || input.endsAt !== undefined)
+        throw new ToolError('invalid_input', 'startsAt and endsAt belong to a takeover: use start_takeover');
       const aimedAt = await requireAim(org, { playlistId, target, groupId: input.groupId, screenId: input.screenId });
       const values: Stored = {
         playlistId,

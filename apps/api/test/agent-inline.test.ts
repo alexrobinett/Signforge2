@@ -790,9 +790,7 @@ describe('POST /api/agent/inline with a spot, and Keep (#264)', () => {
     m.answer({ items: [{ name: 'Latte', price: '$4.75' }] });
     const { review } = await (await m.update()).json<any>();
     // Someone saves the spot meanwhile.
-    expect((await m.owner.tool('save_spot', { spotId: m.spot.id, data: { ...MENU_DATA, title: 'Their title' }, ifVersion: review.version })).status).toBe(
-      200,
-    );
+    expect((await m.owner.tool('save_spot', { spotId: m.spot.id, data: { ...MENU_DATA, title: 'Their title' }, ifVersion: review.version })).status).toBe(200);
     const res = await m.keep({ spotId: m.spot.id, ifVersion: review.version, data: review.data });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'conflict' });

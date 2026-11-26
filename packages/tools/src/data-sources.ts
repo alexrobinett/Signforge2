@@ -213,7 +213,8 @@ const saveDataSource = defineTool({
       const { name, format } = input;
       if (name === undefined || format === undefined)
         throw new ToolError('invalid_input', 'a new data source needs a name and a format; give dataSourceId to change one');
-      if (!calendarOnly(format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL, [{ path: 'horizonDays', message: HORIZON_ONLY_ICAL }]);
+      if (!calendarOnly(format, input.horizonDays))
+        throw new ToolError('invalid_input', HORIZON_ONLY_ICAL, [{ path: 'horizonDays', message: HORIZON_ONLY_ICAL }]);
       if (!jsonTableOnly(format, input.rowsPath))
         throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE, [{ path: 'rowsPath', message: ROWS_PATH_ONLY_JSON_TABLE }]);
       if (!rssOnly(format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS, [{ path: 'photos', message: PHOTOS_ONLY_RSS }]);

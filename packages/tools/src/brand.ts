@@ -234,7 +234,9 @@ const saveBrandKit = defineTool({
     await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
     await checkLogo(org, input.logoOnLightAssetId, 'logoOnLightAssetId');
     const lightOnly = (dark: string | null | undefined, light: string | null | undefined) =>
-      light && !dark ? new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }]) : undefined;
+      light && !dark
+        ? new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }])
+        : undefined;
     if (input.brandKitId === undefined) {
       if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new brand kit has no version yet: ifVersion is for a change');
       const { name, colors } = input;

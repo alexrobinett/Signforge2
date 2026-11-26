@@ -273,8 +273,9 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
   await page.goto(`/brand-kits/${brandKit.id}`);
   await hydrated(page);
   await expect(page.getByLabel('Primary', { exact: true })).toBeEnabled();
-  const copies = await holdFirst(page, '/api/tools/save_brand_kit');
-  const saving = await holdFirst(page, '/api/tools/save_brand_kit');
+  // One tool creates a kit and changes one (#345): a copy is a save with no brandKitId.
+  const copies = await holdFirst(page, '/api/tools/save_brand_kit', (body) => body.brandKitId === undefined);
+  const saving = await holdFirst(page, '/api/tools/save_brand_kit', (body) => body.brandKitId !== undefined);
   // Its autosave, held on its way.
   await page.getByLabel('Primary', { exact: true }).fill('#335577');
   const saveAnswer = await saving.arrived;

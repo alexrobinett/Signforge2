@@ -303,7 +303,8 @@ const saveSpot = defineTool({
     const { spotId, name, kind } = input;
     if (spotId === undefined) {
       if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new spot has no version yet: ifVersion is for a change');
-      if (name === undefined || kind === undefined) throw invalid(name === undefined ? 'name' : 'kind', ['a new spot needs a name and a kind; give spotId to change one']);
+      if (name === undefined || kind === undefined)
+        throw invalid(name === undefined ? 'name' : 'kind', ['a new spot needs a name and a kind; give spotId to change one']);
       refuseOtherKinds(kind, input);
       if (kind === 'template') {
         if (!input.templateVersionId) throw invalid('templateVersionId', ['a template spot needs a templateVersionId']);
@@ -338,9 +339,7 @@ const saveSpot = defineTool({
       if (!input.assetId) throw invalid('assetId', [`a ${kind} spot needs an assetId`]);
       await checkMedia(org, kind, input.assetId);
       return {
-        spot: spotView(
-          write(await org.spots.stage.insert({ name, kind, durationMs, assetId: input.assetId, fit: input.fit ?? DEFAULT_FIT })),
-        ),
+        spot: spotView(write(await org.spots.stage.insert({ name, kind, durationMs, assetId: input.assetId, fit: input.fit ?? DEFAULT_FIT }))),
       };
     }
     for (const fixed of ['kind', 'templateVersionId', 'sample'] as const)

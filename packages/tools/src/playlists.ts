@@ -289,12 +289,4 @@ const setDefaultPlaylist = defineTool({
   },
 });
 
-export const playlistTools = [
-  listPlaylists,
-  getPlaylist,
-  savePlaylist,
-  revertPlaylistDraft,
-  keepPlaylistDraft,
-  deletePlaylist,
-  setDefaultPlaylist,
-];
+export const playlistTools = [listPlaylists, getPlaylist, savePlaylist, revertPlaylistDraft, keepPlaylistDraft, deletePlaylist, setDefaultPlaylist];

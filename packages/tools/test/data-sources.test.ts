@@ -98,11 +98,9 @@ describe('data sources', () => {
     const off = await call('save_data_source', { dataSourceId: 'headlines', photos: false });
     expect(off.dataSource).toMatchObject({ photos: false });
     expect(await owner.org.dataSources.get('headlines')).toMatchObject({ photos: false, etag: null, nextPollAt: 0 });
-    expect((await call('save_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject(
-      {
-        photos: false,
-      },
-    );
+    expect((await call('save_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject({
+      photos: false,
+    });
     for (const id of ['headlines', (await owner.org.dataSources.list()).find((d) => d.name === 'Quiet')!.id])
       await call('delete_data_source', { dataSourceId: id });
   });

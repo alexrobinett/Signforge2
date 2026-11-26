@@ -1283,9 +1283,9 @@ describe('confirmation cards (#269)', () => {
       role: 'editor',
       steps: (body) => (body.messages.length === 1 ? { calls: [{ name: ask.name!, input: ask.called }] } : ANSWER),
     });
-    expect(
-      (await s.owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status,
-    ).toBe(200);
+    expect((await s.owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
     const before = await s.scope.dataSources.get('menu');
     expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
     const cardFor = async (name: string, called: Record<string, unknown>) => {
