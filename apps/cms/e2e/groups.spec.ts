@@ -226,13 +226,17 @@ test('groups and screens in name order wherever they are listed, though their id
   await expect(page.getByText('Screen 2, Screen 10 are in groups that chose different kits')).toBeVisible();
 });
 
-test("a smart group is shown where a screen is in it, never offered to tick by hand (#186, review of #608)", async ({ page }) => {
+test('a smart group is shown where a screen is in it, never offered to tick by hand (#186, review of #608)', async ({ page }) => {
   await signInAs(page, `e2e-smart-groups-${Date.now()}@example.com`, '192.0.2.201');
   await createOrg(page, 'Smart Deli', '192.0.2.201');
   const { id } = await pairScreen(page, 'Bayside door', '192.0.2.202');
   await tool(page, 'update_screen_labels', { screenIds: [id], set: { store: 'bayside' } });
   await tool(page, 'save_group', { name: 'Listed', idempotencyKey: `listed-${Date.now()}` });
-  await tool(page, 'save_group', { name: 'Bayside', selector: { all: [{ key: 'store', op: 'eq', values: ['bayside'] }] }, idempotencyKey: `bayside-${Date.now()}` });
+  await tool(page, 'save_group', {
+    name: 'Bayside',
+    selector: { all: [{ key: 'store', op: 'eq', values: ['bayside'] }] },
+    idempotencyKey: `bayside-${Date.now()}`,
+  });
   const ticks = (where: ReturnType<Page['getByRole']>) => where.getByRole('group', { name: 'Groups' }).getByRole('checkbox');
 
   // Its page names the group its rule puts it in, and its settings offer only the listed one.

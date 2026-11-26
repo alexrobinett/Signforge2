@@ -681,9 +681,11 @@ describe('confirmation cards (#269)', () => {
     const screens = await s.scope.screens.list();
     const bayside = screens.filter((x) => x.name.startsWith('Bayside')).map((x) => x.id);
     await s.scope.commit((await s.scope.screens.labels.stage.update(bayside, { set: { store: 'bayside' }, remove: [] })).writes);
-    const group = await s.scope.screenGroups.insert({ name: 'Bayside', selectorJson: JSON.stringify({ all: [{ key: 'store', op: 'eq', values: ['Bayside'] }] }) });
-    s.called.target = 'group';
-    (s.called as Record<string, unknown>).groupId = group.id;
+    const group = await s.scope.screenGroups.insert({
+      name: 'Bayside',
+      selectorJson: JSON.stringify({ all: [{ key: 'store', op: 'eq', values: ['Bayside'] }] }),
+    });
+    Object.assign(s.called, { target: 'group', groupId: group.id });
     let all: any[] = [];
     const cost = await measure(async (b) => {
       all = await raw(await as(s.member, b).post('/api/agent/chat', run('Close Bayside for the storm')));
