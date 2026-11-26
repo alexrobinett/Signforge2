@@ -166,7 +166,16 @@ export async function finalizeVideo(
     // `info` is null only alongside a problem; testing it narrows its type below.
     await blobs.delete(staged);
     write(org.assets.stage.update(asset, { status: 'rejected' }));
-    throw new ToolError('invalid_input', `the video was rejected and deleted: ${problems.map((p) => p.message).join('; ')}. ${EXPORT_ADVICE}`, problems, true);
+    throw new ToolError(
+      'invalid_input',
+      `the video was rejected and deleted: ${problems.map((p) => p.message).join('; ')}. ${EXPORT_ADVICE}`,
+      problems,
+      true,
+      undefined,
+      {
+        kind: 'video',
+      },
+    );
   }
 
   if (key === staged) {

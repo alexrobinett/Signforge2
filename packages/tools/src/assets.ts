@@ -347,7 +347,16 @@ export async function finalizeImage({ org, blobs, write }: Pick<ToolContext<unkn
   if (problems.length) {
     await blobs.delete(staged);
     write(org.assets.stage.update(asset, { status: 'rejected' }));
-    throw new ToolError('invalid_input', `the upload was rejected and deleted: ${problems.map((p) => `${p.path}: ${p.message}`).join('; ')}`, problems, true);
+    throw new ToolError(
+      'invalid_input',
+      `the upload was rejected and deleted: ${problems.map((p) => `${p.path}: ${p.message}`).join('; ')}`,
+      problems,
+      true,
+      undefined,
+      {
+        kind: 'image',
+      },
+    );
   }
   if (missing.length) {
     throw new ToolError(

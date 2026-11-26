@@ -392,6 +392,8 @@ export class ToolError extends Error {
     readonly details?: unknown,
     readonly changed = false,
     options?: ErrorOptions,
+    /** With `changed`: what its audit row records under `detail`, as a tool's `auditDetail` does for a success. */
+    readonly auditDetail?: Record<string, unknown>,
   ) {
     super(message, options);
     this.name = 'ToolError';

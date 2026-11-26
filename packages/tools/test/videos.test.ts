@@ -163,6 +163,9 @@ describe('finalize_upload, a video', () => {
     expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
     expect(await env.BLOBS.head(orgBlobKey(o.orgId, sha))).toBeNull();
     expect(await call('get_asset', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'rejected' } });
+    // Found under the tool it replaced, as a finish that passed is (review of #516).
+    const { entries } = await call('list_audit_log', { action: 'finalize_video_upload' });
+    expect(entries.map((e: { target: { id: string } }) => e.target.id)).toContain(created.asset.id);
   });
 
   it('rejects bytes that do not hash to the claimed SHA-256', async () => {

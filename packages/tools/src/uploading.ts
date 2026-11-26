@@ -88,7 +88,8 @@ const finalizeUpload = defineTool({
   output: outputs.finalize_upload,
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
-  // Its input names no kind: the audit log says an image or a video was checked, and finds it by that.
+  // Its input names no kind: the audit log says an image or a video was checked, and finds it by that; a rejection
+  // records it the same way (`ToolError`'s `auditDetail`).
   auditDetail: (output) => ({ kind: output.asset.kind }),
   handler: async (ctx) => {
     const { org, input } = ctx;

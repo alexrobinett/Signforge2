@@ -295,7 +295,10 @@ describe('finalize_upload, an image', () => {
     expect(await run('finalize_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
     const [entry] = await owner.org.auditLog.list({ limit: 1 });
     expect(entry).toMatchObject({ action: 'finalize_upload', targetKind: 'asset', targetId: created.asset.id });
-    expect(JSON.parse(entry!.detailJson!)).toMatchObject({ refused: { error: 'invalid_input' } });
+    expect(JSON.parse(entry!.detailJson!)).toMatchObject({ refused: { error: 'invalid_input' }, detail: { kind: 'image' } });
+    // Found under the tool it replaced, as a finish that passed is (review of #516).
+    const found = await run('list_audit_log', { action: 'finalize_asset' });
+    expect(found.ok && (found.output as { entries: { target: { id: string } }[] }).entries.map((e) => e.target.id)).toContain(created.asset.id);
   });
 
   it('refuses a file whose type or pixel size is not what was claimed, or too big for the box', async () => {
