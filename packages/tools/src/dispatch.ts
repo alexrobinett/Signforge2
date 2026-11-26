@@ -164,7 +164,9 @@ export async function dispatch<D extends DataScope>(
   if (sealer && scope && isRecord(rawInput) && typeof rawInput.cursor === 'string') {
     const cursor = await sealer.open(scope, rawInput.cursor);
     if (cursor === undefined)
-      return fail('invalid_input', 'cursor is not one this list returned; start again without it', [{ path: 'cursor', message: 'not a cursor from this list' }]);
+      return fail('invalid_input', 'cursor is not one this list returned; start again without it', [
+        { path: 'cursor', message: 'not a cursor from this list' },
+      ]);
     input = { ...rawInput, cursor };
   }
   const result = await dispatchCall(registry, name, input, caller, audited);
