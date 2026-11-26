@@ -7,8 +7,8 @@
     "orientation": "landscape"
   },
   "files": {
-    "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e": {
-      "size": 79560,
+    "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c": {
+      "size": 78652,
       "type": "text/html"
     },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
@@ -985,10 +985,10 @@
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/menu-board@1.4.0": {
+    "base/menu-board@1.5.0": {
       "manifest": {
         "id": "menu-board",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "name": "Menu Board",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
         "fields": {
@@ -1080,7 +1080,7 @@
         },
         "protocol": 2
       },
-      "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
+      "html": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c"
     },
     "base/news@2.1.2": {
       "manifest": {
@@ -1807,7 +1807,7 @@
       "id": "menu",
       "name": "Coffee menu",
       "kind": "template",
-      "template": "base/menu-board@1.4.0",
+      "template": "base/menu-board@1.5.0",
       "data": {
         "title": "Coffee bar",
         "subtitle": "Made to order, all day",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "8904a0a589a197d492e2dc15e9e174b7d0ccdf0f7e88038237b8f69dd738373e"
+  "id": "b40df17b565667358ca681b1db444b542bb47f2c1d459ac0f38407a5a246c501"
 }
