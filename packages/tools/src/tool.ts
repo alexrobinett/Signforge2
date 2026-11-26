@@ -400,6 +400,14 @@ export class ToolError extends Error {
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
 
+/** An `invalid_input` refusal naming the fields at fault in `details`, as a schema's own refusal does: `[{ path, message }]`. */
+export const invalidFields = (message: string, ...paths: string[]) =>
+  new ToolError(
+    'invalid_input',
+    message,
+    paths.map((path) => ({ path, message })),
+  );
+
 /** An agent is calling: a Milestone 4 grant, or the in-CMS agent acting as its member. A tool only a person may run refuses both. */
 export const isAgent = (actor: Actor) => actor.kind === 'agent' || actor.clientId === CMS_AGENT_CLIENT_ID;
 

@@ -38,7 +38,7 @@ import {
   scoped,
   takeImagesTransforms,
 } from '@signforge/db';
-import type { ParsedNews } from '@signforge/feeds';
+import { rendition, type ParsedNews } from '@signforge/feeds';
 import { readImageInfo } from '@signforge/media/image-info';
 import { type BoundField, hasBoundListImage } from '@signforge/player-core';
 import { workerFetch } from '../connectors';
@@ -334,9 +334,9 @@ async function deliverFeedPhoto(
   const [row] = await org.feedPhotos.get([url]);
   // Deleted, or its photos switched off, since the poll queued it; or forgotten since (rows are made before they are queued).
   if (!source?.photos || !row) return;
-  try {
-    if (spent) throw new PhotoFailure('images-month-budget');
-    const fetched = await guardedImageFetch(httpsOf(url), row, guards);
+  /** Fetch, check and store the photo from `from`, under the feed's URL whichever it is. */
+  const storeFrom = async (from: string) => {
+    const fetched = await guardedImageFetch(from, row, guards);
     if (fetched.status === 'not-modified') {
       await org.feedPhotos.delivered(url, { result: 'unchanged', now, sourceId, checked: row });
       return;
@@ -370,11 +370,29 @@ async function deliverFeedPhoto(
         }
       },
     });
+  };
+  // A CDN's copy at the size the screen needs first (#488); the feed's own when the CDN refuses that size or sends what
+  // does not decode, so a CDN that changes its sizes costs no photo.
+  const larger = rendition(url);
+  try {
+    if (spent) throw new PhotoFailure('images-month-budget');
+    if (!larger) await storeFrom(httpsOf(url));
+    else
+      await storeFrom(larger).catch((e: unknown) => {
+        if (!refusedCopy(e)) throw e;
+        console.warn(`[feed images] ${larger} was refused (${e.code}); fetching the feed's ${url}`);
+        return storeFrom(httpsOf(url));
+      });
   } catch (e) {
     if (!(e instanceof FetchError || e instanceof PhotoFailure)) throw e;
     await org.feedPhotos.delivered(url, { result: 'failed', now, checked: row, error: e.code, passing: mayPass(e) });
   }
 }
+
+/** Whether a CDN's rewritten copy was refused as that copy: a 4xx, or bytes that are not a photo it can decode. */
+const refusedCopy = (e: unknown): e is FetchError | PhotoFailure =>
+  (e instanceof FetchError && e.code === 'http-status' && e.status !== undefined && e.status >= 400 && e.status < 500) ||
+  (e instanceof PhotoFailure && (e.code === 'not-an-image' || e.code === 'undecodable'));
 
 /** Many feeds still name `http:` photos: each is tried once over https, and dropped if that fails the guards. */
 function httpsOf(url: string): string {

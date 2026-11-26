@@ -13,7 +13,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError, type ToolContext } from './tool';
+import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
 import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
@@ -61,12 +61,9 @@ const resource = z
   .describe('Provider sources only: what to read at the provider, such as a calendar id or a sheet range. Stored encrypted and never shown again');
 const PROVIDER_FIELDS = 'a provider source takes connectionId and resource, and no feedUrl; any other format takes feedUrl only';
 
-/** What a new source reads: a provider source a resource through its connection, a feed its URL; refused if it is given the other's fields. */
-function locatorOf(v: { format: string; feedUrl?: string; connectionId?: string; resource?: string }): string {
-  const locator = v.format === 'provider' ? !v.feedUrl && v.connectionId && v.resource : !v.connectionId && !v.resource && v.feedUrl;
-  if (!locator) throw new ToolError('invalid_input', PROVIDER_FIELDS);
-  return locator;
-}
+/** What a new source reads: a provider source a resource through its connection, a feed its URL; none if it is given the other's fields. */
+const locatorOf = (v: { format: string; feedUrl?: string; connectionId?: string; resource?: string }) =>
+  (v.format === 'provider' ? !v.feedUrl && v.connectionId && v.resource : !v.connectionId && !v.resource && v.feedUrl) || undefined;
 
 const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   id: d.id,
@@ -164,6 +161,56 @@ const getDataSource = defineTool({
   },
 });
 
+// Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+export const saveDataSourceInput = z.strictObject({
+  dataSourceId: id('data source').optional().describe('The source to change; omit to add one'),
+  id: id('data source').optional().describe('A new source: the id spots bind with, such as weather; made for you if absent'),
+  name: name('data source').optional(),
+  format: sourceFormat.optional().describe("A new source's format; fixed once made"),
+  feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
+  connectionId: id('connection').optional().describe('A new provider source: the connection to read through'),
+  resource: resource.optional(),
+  refreshS: refreshS
+    .optional()
+    .describe(
+      `How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}; for a new source default ${RSS_REFRESH_S} for rss, ${MIN_REFRESH_S} for the rest`,
+    ),
+  horizonDays: horizonDays.nullable().optional(),
+  rowsPath: rowsPath.nullable().optional(),
+  photos: photos.optional(),
+  ifVersion,
+  idempotencyKey,
+});
+
+type DataSourceFormat = z.infer<typeof sourceFormat>;
+
+/**
+ * Why save_data_source refuses this input, on what it gives alone and, for a change, the source's format: the agent
+ * drawer's card asks it too, so it never offers a press that can only be refused (#507).
+ */
+export function sourceRefusal(input: z.infer<typeof saveDataSourceInput>, current?: DataSourceFormat): ToolError | undefined {
+  const created = input.dataSourceId === undefined;
+  if (created && input.ifVersion !== undefined) return invalidFields('a new data source has no version yet: ifVersion is for a change', 'ifVersion');
+  if (created && (input.name === undefined || input.format === undefined))
+    return invalidFields(
+      'a new data source needs a name and a format; give dataSourceId to change one',
+      ...(['name', 'format'] as const).filter((k) => input[k] === undefined),
+    );
+  const fixed = created ? [] : (['id', 'format', 'connectionId'] as const).filter((k) => input[k] !== undefined);
+  if (fixed.length)
+    return invalidFields(`a data source's ${fixed.join(', ')} ${fixed.length > 1 ? 'are' : 'is'} fixed once made: add another source for another`, ...fixed);
+  const format = input.format ?? current;
+  if (format === undefined) return undefined;
+  if (!calendarOnly(format, input.horizonDays)) return invalidFields(HORIZON_ONLY_ICAL, 'horizonDays');
+  if (!jsonTableOnly(format, input.rowsPath)) return invalidFields(ROWS_PATH_ONLY_JSON_TABLE, 'rowsPath');
+  if (!rssOnly(format, input.photos)) return invalidFields(PHOTOS_ONLY_RSS, 'photos');
+  const wrongLocator = created
+    ? !locatorOf({ ...input, format })
+    : (format === 'provider' && input.feedUrl !== undefined) || (format !== 'provider' && input.resource !== undefined);
+  if (wrongLocator) return invalidFields(PROVIDER_FIELDS, ...(['feedUrl', 'connectionId', 'resource'] as const).filter((k) => input[k] !== undefined));
+  return undefined;
+}
+
 const saveDataSource = defineTool({
   name: 'save_data_source',
   description: `Add a feed the server polls for spots to bind to, or change one. Without dataSourceId it adds one: a name, a format, and a feedUrl (a provider source: a connectionId and its resource); at most ${MAX_DATA_SOURCES} per organization. The first poll runs within a minute; it polls every refreshS seconds after, by default every ${RSS_REFRESH_S} for rss and ${MIN_REFRESH_S} for the rest. Pass an idempotencyKey so a retry cannot add it twice. With dataSourceId it changes what you give: its name, feed URL (a provider source: its resource), refresh, calendar look-ahead, a json-table's rows path (null clears either) or whether a news feed's photos are shown; a new URL or resource is polled afresh within a minute. A source's format and connection are fixed once made. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.`,
@@ -172,26 +219,7 @@ const saveDataSource = defineTool({
   mutates: true,
   idempotent: true,
   needs: ['feedUrls'],
-  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-  input: z.strictObject({
-    dataSourceId: id('data source').optional().describe('The source to change; omit to add one'),
-    id: id('data source').optional().describe('A new source: the id spots bind with, such as weather; made for you if absent'),
-    name: name('data source').optional(),
-    format: sourceFormat.optional().describe("A new source's format; fixed once made"),
-    feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
-    connectionId: id('connection').optional().describe('A new provider source: the connection to read through'),
-    resource: resource.optional(),
-    refreshS: refreshS
-      .optional()
-      .describe(
-        `How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}; for a new source default ${RSS_REFRESH_S} for rss, ${MIN_REFRESH_S} for the rest`,
-      ),
-    horizonDays: horizonDays.nullable().optional(),
-    rowsPath: rowsPath.nullable().optional(),
-    photos: photos.optional(),
-    ifVersion,
-    idempotencyKey,
-  }),
+  input: saveDataSourceInput,
   output: outputs.save_data_source,
   example: {
     id: 'weather',
@@ -207,15 +235,11 @@ const saveDataSource = defineTool({
   handler: async ({ org, input, write, publishRight, services: { feedUrls } }) => {
     const { dataSourceId } = input;
     if (dataSourceId === undefined) {
-      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new data source has no version yet: ifVersion is for a change');
-      const { name, format } = input;
-      if (name === undefined || format === undefined)
-        throw new ToolError('invalid_input', 'a new data source needs a name and a format; give dataSourceId to change one');
-      if (!calendarOnly(format, input.horizonDays))
-        throw new ToolError('invalid_input', HORIZON_ONLY_ICAL, [{ path: 'horizonDays', message: HORIZON_ONLY_ICAL }]);
-      if (!jsonTableOnly(format, input.rowsPath))
-        throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE, [{ path: 'rowsPath', message: ROWS_PATH_ONLY_JSON_TABLE }]);
-      if (!rssOnly(format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS, [{ path: 'photos', message: PHOTOS_ONLY_RSS }]);
+      const refused = sourceRefusal(input);
+      if (refused) throw refused;
+      // Given, and a locator with them: sourceRefusal refuses a new source otherwise.
+      const name = input.name!;
+      const format = input.format!;
       // A provider source reads whatever its resource names through a person's connection, and get_data_source shows what it
       // read: it is added only with the right to publish, by a person or an agent (#122; for people too, owner decision on #424).
       if (format === 'provider')
@@ -225,7 +249,7 @@ const saveDataSource = defineTool({
       if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
       // The URL (or resource) is sealed to the row's id, so the id is chosen first.
       const sourceId = input.id ?? newId('src');
-      const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locatorOf({ ...input, format }));
+      const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locatorOf({ ...input, format })!);
       const row = write(
         await org.dataSources.stage.insert({
           id: sourceId,
@@ -241,18 +265,16 @@ const saveDataSource = defineTool({
       );
       return { dataSource: viewOf(row) };
     }
-    for (const fixed of ['id', 'format', 'connectionId'] as const)
-      if (input[fixed] !== undefined) throw new ToolError('invalid_input', `a data source's ${fixed} is fixed once made: add another source for another`);
+    const fixed = sourceRefusal(input);
+    if (fixed) throw fixed;
     const row = await requireSource(org, dataSourceId);
     // The poller takes a source's change to screens with no publish, whatever spot shows it now or later (one published
     // meanwhile, a rolled-back screen still syncing it): anything but its name changes only with the right to publish, held
     // to the commit, for an agent (#122, reviews of #419) and a person alike (owner decision on #424). A name reaches no screen.
     if (reachesScreens(input))
       publishRight('Changing a data source needs the right to publish: screens follow its changes with no publish. Its name alone may change');
-    if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
-    if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
-    if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
-    if ((row.format === 'provider' && input.feedUrl) || (row.format !== 'provider' && input.resource)) throw new ToolError('invalid_input', PROVIDER_FIELDS);
+    const refused = sourceRefusal(input, row.format);
+    if (refused) throw refused;
     // A new feed, or new rows in it, starts clean: the old one's validators and failures say nothing about it.
     // Feed photos' own read-afresh rule (packages/db `feed-photos.ts`) resets the rest when `photos` or the URL changes.
     const locator = input.feedUrl ?? input.resource;

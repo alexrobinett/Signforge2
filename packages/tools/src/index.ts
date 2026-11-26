@@ -124,4 +124,4 @@ export {
 } from './screen-state';
 export { tally } from './rollout';
 export { orgSettings } from './settings';
-export { madeBySpotEditor, reachesScreens } from './data-sources';
+export { madeBySpotEditor, reachesScreens, saveDataSourceInput, sourceRefusal } from './data-sources';

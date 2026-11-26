@@ -11,7 +11,7 @@ import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError } from './tool';
+import { defineTool, invalidFields, notFound, ToolError } from './tool';
 import { brandShape, outputs, type BrandKitView } from './outputs';
 
 // ------------------------------------------------------------------ colours
@@ -234,17 +234,16 @@ const saveBrandKit = defineTool({
     await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
     await checkLogo(org, input.logoOnLightAssetId, 'logoOnLightAssetId');
     const lightOnly = (dark: string | null | undefined, light: string | null | undefined) =>
-      light && !dark
-        ? new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }])
-        : undefined;
+      light && !dark ? invalidFields('a light logo needs a dark one', 'logoOnDarkAssetId') : undefined;
     if (input.brandKitId === undefined) {
-      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new brand kit has no version yet: ifVersion is for a change');
+      if (input.ifVersion !== undefined) throw invalidFields('a new brand kit has no version yet: ifVersion is for a change', 'ifVersion');
       const { name, colors } = input;
       const missing = BASE_COLORS.filter((k) => colors?.[k] === undefined);
       if (name === undefined || missing.length)
-        throw new ToolError(
-          'invalid_input',
+        throw invalidFields(
           `a new brand kit needs a name and the colours ${BASE_COLORS.join(', ')}${missing.length ? ` (missing ${missing.join(', ')})` : ''}; give brandKitId to change one`,
+          ...(name === undefined ? ['name'] : []),
+          ...missing.map((k) => `colors.${k}`),
         );
       const refused = lightOnly(input.logoOnDarkAssetId, input.logoOnLightAssetId);
       if (refused) throw refused;

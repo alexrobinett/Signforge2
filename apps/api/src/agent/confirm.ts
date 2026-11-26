@@ -26,7 +26,9 @@ import {
   reachesScreens,
   refusedPress,
   registry,
+  saveDataSourceInput,
   sha256Hex,
+  sourceRefusal,
   ToolError,
 } from '@signforge/tools';
 import { z } from 'zod';
@@ -474,6 +476,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     description: describedAs('save_data_source'),
     needsPublish: (called) => (called.dataSourceId === undefined ? called.format === 'provider' : reachesScreens(called)),
     async make(org, called) {
+      // Refused now, not at the press, when the press could only be refused (#507).
+      const refuse = (refused: ToolError | undefined) => {
+        if (refused) throw new CardProblem(refused.message, { cause: refused });
+      };
+      const asked = saveDataSourceInput.parse(called);
+      refuse(sourceRefusal(asked));
       if (called.dataSourceId === undefined) {
         const minutes = Math.max(1, Math.round(Number(called.refreshS ?? 60) / 60));
         return {
@@ -494,6 +502,7 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       }
       const source = await org.dataSources.get(str(called.dataSourceId));
       if (!source) throw new CardProblem(`no data source ${str(called.dataSourceId)}`);
+      refuse(sourceRefusal(asked, source.format));
       return {
         input: { ...called, ifVersion: source.rowVersion },
         withheld: resourceLines(called),

@@ -15,7 +15,7 @@ import { DECIDING, decidedMeanwhile, keptFor, playlistContent, shownVersion } fr
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
-import { defineTool, isAgent, notFound, ToolError, type ToolContext } from './tool';
+import { defineTool, invalidFields, isAgent, notFound, ToolError, type ToolContext } from './tool';
 import { outputs, transition, type PlaylistView } from './outputs';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
@@ -119,8 +119,8 @@ const savePlaylist = defineTool({
   handler: async ({ org, actor, input, write }) => {
     const { playlistId, name } = input;
     if (playlistId === undefined) {
-      if (input.ifVersion !== undefined) throw new ToolError('invalid_input', 'a new playlist has no version yet: ifVersion is for a change');
-      if (name === undefined) throw new ToolError('invalid_input', 'a new playlist needs a name; give playlistId to change one');
+      if (input.ifVersion !== undefined) throw invalidFields('a new playlist has no version yet: ifVersion is for a change', 'ifVersion');
+      if (name === undefined) throw invalidFields('a new playlist needs a name; give playlistId to change one', 'name');
       const items = input.spotIds ?? [];
       const row = write(await org.playlists.stage.insert({ name, transitionJson: JSON.stringify(input.transition ?? DEFAULT_TRANSITION) }, items));
       return { playlist: playlistView(row, items, null) };

@@ -1344,6 +1344,28 @@ describe('confirmation cards (#269)', () => {
     expect(await cardFor('save_data_source', { dataSourceId: 'menu', name: 'Menu board' })).toMatchObject({ token: expect.any(String), why: null });
   });
 
+  it('offers no card for a data source save its press could only refuse, saying why (#507)', async () => {
+    const ask: { called?: Record<string, unknown> } = {};
+    const s = await setup({ steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'save_data_source', input: ask.called }] } : ANSWER) });
+    expect((await s.owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
+    for (const [called, why] of [
+      [{ name: 'Menu', feedUrl: 'https://menu.example.com/a.json' }, /needs a name and a format/],
+      [{ name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json', ifVersion: 1 }, /no version yet/],
+      [{ dataSourceId: 'menu', format: 'rss' }, /format is fixed once made/],
+      [{ dataSourceId: 'menu', photos: false }, /photos is for rss sources only/],
+    ] as const) {
+      ask.called = called;
+      const all = await raw(await s.ask('q'));
+      expect(
+        all.some((e) => e.name === CHAT_EVENTS.confirm),
+        JSON.stringify(called),
+      ).toBe(false);
+      expect(all.at(-1), JSON.stringify(called)).toMatchObject({ type: 'RUN_ERROR', code: 'unreadable', message: expect.stringMatching(why) });
+    }
+  });
+
   it("keeps a provider's resource out of the audit row, and audits a source refused in its handler, writing nothing", async () => {
     const steps: Step[] = [];
     const s = await setup({ steps });
