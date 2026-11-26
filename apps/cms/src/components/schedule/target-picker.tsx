@@ -98,7 +98,7 @@ export function TargetPicker({
           </button>
         </DialogPrimitive.Trigger>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
           {/* Full-screen on a phone, where a list in a dialog in a dialog has no room; a panel like ⌘K's above it. */}
           <DialogPrimitive.Content
             aria-describedby={undefined}

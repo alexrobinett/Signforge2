@@ -171,13 +171,48 @@ it('a selected stage choice reads at 4.5:1, its edge and focus ring at 3:1', () 
   }
 });
 
-// Every colour and text size in a class is a token (#405): a raw hex or a px/rem text size in one does not follow the
-// themes or the type scale, and a contrast check above cannot see it.
-it('no class names a raw colour or text size', () => {
+// Every colour and text size in a class is a token (#405, review of #491): one written out in a class does not follow
+// the themes or the type scale, and no contrast check above can see it. Classes in `.tsx` and `.ts` alike.
+const RAW = [
+  // An arbitrary colour in any utility: hex, a colour function, a typed colour, a shadow's.
+  /-\[(?:color:)?(?:#[0-9a-f]{3,8}|(?:oklch|oklab|rgba?|hsla?|lab|lch|hwb)\()/gi,
+  /\bshadow-\[[^\]]*(?:#[0-9a-f]{3,8}|rgba?\(|hsla?\(|oklch\()/gi,
+  // An arbitrary text size: a length, a typed length, a calc, the property itself.
+  /\btext-\[(?:length:|calc\(|[0-9.]+(?:px|rem|em)\])/gi,
+  /\[font-size:/gi,
+  // Tailwind's own palette, white and black included: the themes do not set it.
+  /\b(?:text|bg|border|fill|stroke|ring|outline|decoration|divide|placeholder|caret|accent|shadow|from|via|to)-(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3})\b/g,
+];
+it('no class names a colour or a text size that is not a token', () => {
   const root = fileURLToPath(new URL('../src', import.meta.url));
-  const raw = /-\[#[0-9a-f]{3,8}\]|\btext-\[[0-9.]+(?:px|rem|em)\]/gi;
   const found = readdirSync(root, { recursive: true, encoding: 'utf8' })
-    .filter((f) => f.endsWith('.tsx'))
-    .flatMap((f) => [...readFileSync(join(root, f), 'utf8').matchAll(raw)].map((m) => `${f}: ${m[0]}`));
+    .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
+    .flatMap((f) => {
+      const source = readFileSync(join(root, f), 'utf8');
+      return RAW.flatMap((raw) => [...source.matchAll(raw)].map((m) => `${f}: ${m[0]}`));
+    });
   expect(found).toEqual([]);
 });
+it.each([
+  'stroke-[oklch(0.3_0.12_272)]',
+  'bg-[rgb(0_0_0)]',
+  'text-[hsl(0_0%_100%)]',
+  'bg-[color:#0f1115]',
+  'shadow-[0_1px_2px_#000]',
+  '[font-size:15px]',
+  'text-[length:13px]',
+  'text-[calc(1rem+2px)]',
+  'text-[15px]',
+  'text-white',
+  'bg-black/50',
+  'ring-slate-200',
+])('takes %s for what it is: not a token', (cls) => {
+  expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(true);
+});
+
+it.each(['bg-stage', 'text-meta', 'rounded-[calc(var(--radius-lg)-(--spacing(1)))]', 'w-[calc(100%-2rem)]', 'text-muted-foreground', 'bg-scrim'])(
+  'leaves %s be',
+  (cls) => {
+    expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(false);
+  },
+);

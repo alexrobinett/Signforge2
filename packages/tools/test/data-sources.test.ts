@@ -43,6 +43,15 @@ describe('data sources', () => {
     expect(JSON.stringify(await owner.org.auditLog.list())).not.toContain('key=private');
   });
 
+  it('polls a news feed hourly by default, and the rest every five minutes; a person may still choose faster (#339)', async () => {
+    const rss = await call('create_data_source', { name: 'Hourly news', format: 'rss', feedUrl: 'https://news.example.com/hourly' });
+    expect(rss.dataSource).toMatchObject({ format: 'rss', refreshS: 3600 });
+    const json = await call('create_data_source', { name: 'Five-minute data', format: 'json', feedUrl: 'https://data.example.com/five' });
+    expect(json.dataSource).toMatchObject({ format: 'json', refreshS: 300 });
+    const fast = await call('create_data_source', { name: 'Fast news', format: 'rss', feedUrl: 'https://news.example.com/fast', refreshS: 300 });
+    expect(fast.dataSource).toMatchObject({ format: 'rss', refreshS: 300 });
+  });
+
   it('lists and gets, with the latest snapshot', async () => {
     const { dataSources } = await call('list_data_sources', {});
     expect(dataSources.map((d: { id: string }) => d.id)).toContain('holidays');

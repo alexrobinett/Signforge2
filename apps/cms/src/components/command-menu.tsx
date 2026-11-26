@@ -192,7 +192,7 @@ export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, n
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => (o ? openMenu() : close())}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
         <DialogPrimitive.Content
           onCloseAutoFocus={focusBack}
           className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong"

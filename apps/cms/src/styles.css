@@ -106,6 +106,15 @@
   --toast-link: #c7d2fe;
   --toast-action: #ffffff;
   --toast-action-foreground: #101828;
+
+  /* What a screen shows around a spot that does not fill it, behind every preview: black, as a panel is. The same in
+     both themes. */
+  --letterbox: #000000;
+  /* The page behind a dialog, a sheet or the command menu, dimmed. */
+  --scrim: rgb(0 0 0 / 0.5);
+  /* The mark on a dark picture in either theme (the sign-in page): a white square, its screen drawn in deep indigo. */
+  --logo-inverse: #ffffff;
+  --logo-inverse-ink: oklch(0.3 0.12 272);
   color-scheme: light;
 }
 
@@ -177,6 +186,8 @@
   --toast-link: #c7d2fe;
   --toast-action: #ffffff;
   --toast-action-foreground: #101828;
+
+  --scrim: rgb(0 0 0 / 0.7);
   color-scheme: dark;
 }
 
@@ -246,6 +257,10 @@
   --color-toast-link: var(--toast-link);
   --color-toast-action: var(--toast-action);
   --color-toast-action-foreground: var(--toast-action-foreground);
+  --color-letterbox: var(--letterbox);
+  --color-scrim: var(--scrim);
+  --color-logo-inverse: var(--logo-inverse);
+  --color-logo-inverse-ink: var(--logo-inverse-ink);
   /* Type steps between Tailwind's (#372): row and meta lines, large controls and lead text, and the
      smallest labels on a thumbnail. Every size in the CMS is one of these or Tailwind's own. */
   --text-2xs: 0.6875rem;
