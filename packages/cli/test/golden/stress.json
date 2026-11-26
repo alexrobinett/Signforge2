@@ -20,8 +20,8 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda": {
-      "size": 90311,
+    "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08": {
+      "size": 90063,
       "type": "text/html"
     },
     "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660": {
@@ -1378,10 +1378,10 @@
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.6.1": {
+    "base/weather@1.7.0": {
       "manifest": {
         "id": "weather",
-        "version": "1.6.1",
+        "version": "1.7.0",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1489,7 +1489,7 @@
           }
         }
       },
-      "html": "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda"
+      "html": "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08"
     }
   },
   "spots": {
@@ -2023,7 +2023,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.6.1",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2083,7 +2083,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.1",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2105,7 +2105,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.1",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "b1fc365a4f1b120cbde64d2ff0694a4dc9dc0e0424d0605d74669c02ee0c0e77"
+  "id": "c2f0e7edf3010a913dcc18e01c87d367ab798abcdc22c331f9a9d975bee616ad"
 }
