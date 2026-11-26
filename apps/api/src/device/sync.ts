@@ -30,6 +30,12 @@ import { issueTicket } from './ticket';
 
 /** How often a screen syncs. */
 const SYNC_INTERVAL_S = 300;
+/**
+ * How soon a screen syncs again while feed photos it lacks are left out of a reply (`MAX_SYNC_RESPONSE_BLOBS`): a few
+ * replies bring a new feed's photos in a minute, not one batch every interval (#476). Each sync writes one D1 row, and
+ * this lasts only while photos are missing.
+ */
+const MORE_PHOTOS_SYNC_S = 15;
 /** Counts for an hour this far past the server's are not believed: the screen's clock is wrong. */
 const FUTURE_SLACK_MS = 3_600_000;
 
@@ -43,7 +49,8 @@ function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
 /**
  * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it
  * holds at the current version were last checked, and any feed image blob hashes referenced by
- * those snapshots that the screen did not report holding (capped at `MAX_SYNC_RESPONSE_BLOBS`).
+ * those snapshots that the screen did not report holding (capped at `MAX_SYNC_RESPONSE_BLOBS`),
+ * and whether more were left out.
  */
 async function snapshotsFor(
   env: Env,
@@ -52,34 +59,35 @@ async function snapshotsFor(
   held: Record<string, number>,
   heldBlobs: readonly string[] | undefined,
   includeBlobs: boolean,
-): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'>> {
-  if (!desired?.dataSources.size) return { snapshots: [], checked: {} };
+): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'> & { morePhotos: boolean }> {
+  if (!desired?.dataSources.size) return { snapshots: [], checked: {}, morePhotos: false };
   const rows = await scoped(env.DB, screen.orgId).dataSources.snapshots([...desired.dataSources]);
   // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
   const snapshots: DataSnapshot[] = [];
   const checked: NonNullable<SyncResponse['checked']> = {};
   const have = new Set(heldBlobs ?? []);
-  const missingBlobs = new Set<string>();
+  /** Each source's missing photos, in story order. */
+  const missingBySource: string[][] = [];
   for (const r of rows) {
     const checkedAt = new Date(r.checkedAt).toISOString();
     if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
     const bound = desired.bound.get(r.dataSourceId) ?? [];
     const newer = r.fetchedAt > (held[r.dataSourceId] ?? -1);
-    const wantBlobs = includeBlobs && hasBoundListImage(bound) && missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS;
+    const wantBlobs = includeBlobs && hasBoundListImage(bound);
     if (!newer && !wantBlobs) continue;
     const data: unknown = JSON.parse(r.dataJson);
     // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
     if (snapshotFit(bound, data).refused) continue;
     if (newer) snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
-    if (wantBlobs) {
-      for (const sha of boundImageHashes(bound, data)) {
-        if (have.has(sha)) continue;
-        missingBlobs.add(sha);
-        if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
-      }
-    }
+    if (wantBlobs) missingBySource.push(boundImageHashes(bound, data).filter((sha) => !have.has(sha)));
   }
-  return { snapshots, checked, ...(missingBlobs.size ? { blobs: [...missingBlobs] } : {}) };
+  // One from each source in turn: every feed's first stories come before any feed's later ones, rather than the
+  // sources first in order filling the reply.
+  const missing = new Set<string>();
+  for (let i = 0; missing.size <= MAX_SYNC_RESPONSE_BLOBS && missingBySource.some((m) => i < m.length); i++)
+    for (const m of missingBySource) if (i < m.length) missing.add(m[i]!);
+  const blobs = [...missing].slice(0, MAX_SYNC_RESPONSE_BLOBS);
+  return { snapshots, checked, ...(blobs.length ? { blobs } : {}), morePhotos: missing.size > blobs.length };
 }
 
 const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
@@ -179,13 +187,14 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const display = overrideCommand(screen, req.display.override, now);
   if (display) commands.push(display);
 
+  const { morePhotos, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable);
   const res: SyncResponse = {
     serverTime: new Date().toISOString(),
-    nextSyncS: SYNC_INTERVAL_S,
+    nextSyncS: morePhotos ? MORE_PHOTOS_SYNC_S : SYNC_INTERVAL_S,
     epoch: req.epoch,
     ackSeq: stored.ackSeq,
     ...(screen.desiredManifestId ? { desiredManifest: screen.desiredManifestId } : {}),
-    ...(await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable)),
+    ...snapshotsOut,
     socketTicket: await issueTicket(c.env, { screenId: screen.screenId, credentialId: c.get('credentialId') }),
     commands,
   };

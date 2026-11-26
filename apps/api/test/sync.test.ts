@@ -484,7 +484,7 @@ describe('snapshot feed blobs (#196)', () => {
     expect(complete.blobs).toBeUndefined();
   });
 
-  it('caps missing blobs per sync at MAX_SYNC_RESPONSE_BLOBS and sends the rest once reported held', async () => {
+  it("caps missing blobs per sync at MAX_SYNC_RESPONSE_BLOBS, every feed's first stories first, and asks for a sync soon while more wait", async () => {
     const s = await setUp('sync-feed-blobs-limit');
     const src1 = s.seed.dataSource;
     const src2 = (await s.seed.scope.dataSources.insert({ name: 'News 2', format: 'rss', urlEncrypted: 'enc:2', refreshS: 300 })).id;
@@ -509,10 +509,17 @@ describe('snapshot feed blobs (#196)', () => {
 
     const r1 = await sync(s, body());
     expect(r1.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
+    // Not the first feed's ten stories and none of the second's (#476's demo: The Verge, after The Guardian, showed no
+    // photo for a sync interval or more): the first five stories' photo and thumbnail of each.
+    const firstFive = (offset: number) => Array.from({ length: 10 }, (_, i) => hash(offset + i + 1));
+    expect(new Set(r1.blobs)).toEqual(new Set([...firstFive(100), ...firstFive(200)]));
+    // More wait: the screen comes back for them in seconds, not at the next 5-minute sync.
+    expect(r1.nextSyncS).toBeLessThan(60);
 
     const r2 = await sync(s, body({ snapshots: { [src1]: 6000, [src2]: 6000 }, blobs: r1.blobs }));
     expect(r2.blobs).toHaveLength(40 - MAX_SYNC_RESPONSE_BLOBS);
     expect(new Set([...r1.blobs!, ...r2.blobs!]).size).toBe(40);
+    expect(r2.nextSyncS).toBe(300);
 
     const r3 = await sync(s, body({ snapshots: { [src1]: 6000, [src2]: 6000 }, blobs: [...r1.blobs!, ...r2.blobs!] }));
     expect(r3.blobs).toBeUndefined();
