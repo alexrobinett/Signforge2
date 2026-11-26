@@ -5,7 +5,7 @@
  */
 import { Link } from '@tanstack/react-router';
 import { ChevronLeftIcon, MoreHorizontalIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useCallback } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { AlertDialog, AlertDialogContent } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
@@ -80,11 +80,31 @@ export function EditorHeader({
 
 /** A save that failed, under the header; a refused one (`stale`: someone else changed it) offers a reload. */
 export function SaveAlert({ error, stale, onReload, onRetry }: { error: string | null; stale: boolean; onReload: () => void; onRetry: () => void }) {
+  // Its height while it sticks, as `--save-alert-height` on the page, for the scroll padding a focused field keeps clear
+  // of it (styles.css): measured, as a long refusal wraps to more lines (#495). None while it scrolls with the form.
+  const measured = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const root = document.documentElement;
+    const seen = new ResizeObserver(() =>
+      root.style.setProperty('--save-alert-height', getComputedStyle(el).position === 'sticky' ? `${el.offsetHeight}px` : '0px'),
+    );
+    seen.observe(el);
+    return () => {
+      seen.disconnect();
+      root.style.removeProperty('--save-alert-height');
+    };
+  }, []);
   if (!stale && !error) return null;
   return (
     // Announced as it appears (#479), and kept in view under a phone's top bar while the form scrolls. Only in a narrow
     // editor: a wide one fits the viewport, with its stage sticky at the top, where it would cover the toggles (#485).
-    <Alert variant="destructive" role="alert" data-save-alert className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 lg:top-0 @3xl:static">
+    <Alert
+      ref={measured}
+      variant="destructive"
+      role="alert"
+      data-save-alert
+      className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 lg:top-0 @3xl:static"
+    >
       <AlertDescription className="flex flex-wrap items-center gap-3">
         {error}
         {stale ? (

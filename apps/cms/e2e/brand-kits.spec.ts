@@ -185,7 +185,7 @@ test('a change someone else made while the kit was open is not overwritten: its 
   await expect(page.getByText('Edits reach 1 screen at the next publish: Coffee bar.')).toBeVisible();
 });
 
-test('a save that gets no answer offers Try again, which saves the edit; until then, closing the tab asks (review of #461)', async () => {
+test('a save that gets no answer offers Try again, which saves the edit (review of #461, #479)', async () => {
   await page.goto('/brand-kits');
   await hydrated(page);
   await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();

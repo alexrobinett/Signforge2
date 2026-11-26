@@ -356,7 +356,7 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
               <span className="text-sm text-muted-foreground">agent turns a day, then it pauses until midnight. Empty for none.</span>
             </div>
           </div>
-          <ActionError at="choices" />
+          <ActionError at="choices" onRetry={() => saveNow()} />
           <p className="text-sm text-muted-foreground" aria-live="polite">
             {running === 'choices' ? 'Saving…' : edit ? 'Unsaved changes' : savedAt ? saveWord('saved', savedAt) : 'Changes save as you make them.'}
           </p>

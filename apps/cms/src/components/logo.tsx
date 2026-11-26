@@ -1,22 +1,21 @@
 import { cn } from '~/lib/utils';
 
 /** The SignForge mark: a screen on a stand. */
-function LogoMark({ className, inverse = false }: { className?: string; inverse?: boolean }) {
-  const ink = inverse ? 'stroke-logo-inverse-ink' : 'stroke-primary-foreground';
+function LogoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" aria-hidden className={cn('size-8 shrink-0', className)}>
-      <rect width="32" height="32" rx="8" className={inverse ? 'fill-logo-inverse' : 'fill-primary'} />
-      <rect x="7" y="9" width="18" height="11" rx="2" fill="none" strokeWidth="2.4" className={ink} />
-      <path d="M12 24h8M16 20v4" strokeWidth="2.4" strokeLinecap="round" className={ink} />
+      <rect width="32" height="32" rx="8" className="fill-primary" />
+      <rect x="7" y="9" width="18" height="11" rx="2" fill="none" strokeWidth="2.4" className="stroke-primary-foreground" />
+      <path d="M12 24h8M16 20v4" strokeWidth="2.4" strokeLinecap="round" className="stroke-primary-foreground" />
     </svg>
   );
 }
 
-/** The mark and the name. `inverse` is for dark backgrounds in either theme. */
-export function Logo({ className, inverse = false }: { className?: string; inverse?: boolean }) {
+/** The mark and the name. */
+export function Logo({ className }: { className?: string }) {
   return (
     <span className={cn('flex items-center gap-2.5 font-semibold tracking-tight', className)}>
-      <LogoMark inverse={inverse} />
+      <LogoMark />
       <span className="text-base">SignForge</span>
     </span>
   );
