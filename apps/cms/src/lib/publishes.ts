@@ -15,7 +15,7 @@ export type PublishDetail = ToolOutput<'get_publish'>;
 /** One screen of a publish's rollout. */
 export type RolloutScreen = PublishDetail['screens'][number];
 
-export type Outcome = RolloutScreen['outcome'];
+type Outcome = RolloutScreen['outcome'];
 
 /** How a past publish's rollout stands, in a few words. */
 export function standing(p: PublishView): string {
@@ -73,10 +73,21 @@ const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
 export const byWord = (p: Pick<PublishView, 'by'>, me: string) =>
   p.by.kind === 'user' && p.by.id === me ? 'you' : p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
 
-export const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'unreachable', 'fell_back', 'revoked', 'replaced'];
+const ORDER: Outcome[] = ['playing', 'waiting', 'downloading', 'asleep', 'unreachable', 'fell_back', 'revoked', 'replaced'];
+
+/**
+ * An outcome this page does not know: the API's, deployed ahead of the CMS while the two differ, a word it has since
+ * added or renamed (`offline` became `unreachable`, #532). Its screens are counted and said, not left out (#541).
+ */
+const UNKNOWN = 'unknown';
+type Part = Outcome | typeof UNKNOWN;
+
+/** The bar's parts, in order: each known outcome, then any this page does not know. */
+export const PARTS: Part[] = [...ORDER, UNKNOWN];
 
 /** Each outcome's mark on the bar: the chart tokens, and the one red for a screen that needs a person. */
-export const OUTCOME_COLOR: Record<Outcome, string> = {
+export const OUTCOME_COLOR: Record<Part, string> = {
+  unknown: 'var(--muted-foreground)',
   playing: 'var(--chart-1)',
   waiting: 'var(--chart-5)',
   downloading: 'var(--chart-2)',
@@ -89,7 +100,7 @@ export const OUTCOME_COLOR: Record<Outcome, string> = {
 
 /** One part of a rollout: the screens in one state, what it is in a few words, and why they wait. */
 export interface Segment {
-  outcome: Outcome;
+  outcome: Part;
   count: number;
   label: string;
   why: string;
@@ -101,7 +112,20 @@ const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digi
 /** A rollout grouped by where each screen stands, in the bar's order, with reasons. */
 export function segments(publish: Pick<PublishView, 'revision' | 'restoresRevision'>, screens: readonly RolloutScreen[], now: number): Segment[] {
   const v = playsWord(publish);
-  return ORDER.flatMap((outcome) => {
+  const known = new Set<string>(ORDER);
+  const unknown = screens.filter((s) => !known.has(s.outcome));
+  const others: Segment[] = unknown.length
+    ? [
+        {
+          outcome: UNKNOWN,
+          count: unknown.length,
+          names: unknown.map((s) => s.name),
+          label: 'in a state this page does not know',
+          why: 'The server is newer than this page: reload it to see where they stand.',
+        },
+      ]
+    : [];
+  const parts = ORDER.flatMap((outcome): Segment[] => {
     const these = screens.filter((s) => s.outcome === outcome);
     if (!these.length) return [];
     const n = these.length;
@@ -134,6 +158,7 @@ export function segments(publish: Pick<PublishView, 'revision' | 'restoresRevisi
         return [{ ...base, label: 'moved on', why: 'A later publish switched them since.' }];
     }
   });
+  return [...parts, ...others];
 }
 
 function agoWords(ms: number): string {
