@@ -777,12 +777,16 @@ describe("the sidebar's Publish (#361)", () => {
     vi.mocked(getPlaylists).mockResolvedValue({ playlists } as never);
     vi.mocked(getSchedule).mockResolvedValue({ entries } as never);
   }
-  beforeEach(() =>
-    vi
-      .mocked(callTool)
+  /** What `preview_publish` answers (#187), unless a test says otherwise: no screen would change. */
+  let preview: object = { screens: [], unchanged: 1, failed: [], groups: [], samples: [] };
+  beforeEach(() => {
+    preview = { screens: [], unchanged: 1, failed: [], groups: [], samples: [] };
+    vi.mocked(callTool)
       .mockReset()
-      .mockImplementation(async () => published(++revision) as never),
-  );
+      .mockImplementation(async (name: string) => (name === 'preview_publish' ? preview : published(++revision)) as never);
+  });
+  /** The calls made but the preview read beside the drafts. */
+  const sent = () => vi.mocked(callTool).mock.calls.filter(([name]) => name !== 'preview_publish');
 
   it('publishes exactly what it read and showed, at those versions, naming the org it read', async () => {
     drafts([spot('spt_a', 3), spot('spt_b', 1, { draftChanged: false })]);
@@ -792,7 +796,7 @@ describe("the sidebar's Publish (#361)", () => {
     // Edited and added since it was read: neither is what was shown.
     drafts([spot('spt_a', 4), spot('spt_new', 1)]);
     expect(await store.getState().confirmPublishAll()).toBe(true);
-    expect(vi.mocked(callTool)).toHaveBeenCalledExactlyOnceWith('publish', { drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }] }, ORG);
+    expect(sent()).toEqual([['publish', { drafts: [{ kind: 'spot', id: 'spt_a', version: 3 }] }, ORG]]);
   });
 
   it('fails, publishing nothing, when a draft it showed was edited since: the server refuses the old version', async () => {
@@ -818,7 +822,7 @@ describe("the sidebar's Publish (#361)", () => {
     await asking;
     expect(store.getState().publishing.all).toBeNull();
     expect(await store.getState().confirmPublishAll()).toBe(false);
-    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(sent()).toEqual([]);
   });
 
   it('is refused while the tab switches org, reading nothing', async () => {
@@ -845,7 +849,7 @@ describe("the sidebar's Publish (#361)", () => {
     await store.getState().askPublishAll(ORG);
     expect(store.getState().publishing.all).toMatchObject({ tooMany: true });
     expect(await store.getState().confirmPublishAll()).toBe(false);
-    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(sent()).toEqual([]);
   });
 
   it('says what it does with no default playlist, as the server decides: it makes the first default, or no screen changes', async () => {
@@ -882,7 +886,37 @@ describe("the sidebar's Publish (#361)", () => {
     expect(store.getState().publishing.all).toMatchObject({ pins: [] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org', ORG, 'overview'] });
     expect(await store.getState().confirmPublishAll()).toBe(false);
-    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+    expect(sent()).toEqual([]);
+  });
+
+  it('shows what it would change on screens, read beside the drafts, and with no draft but screens moving, publishes none to send them (#187)', async () => {
+    const moved = {
+      screens: [{ screenId: 'scr_1', name: 'Till', reasons: ['joined North'] }],
+      unchanged: 2,
+      failed: [],
+      groups: [{ groupId: 'grp_n', name: 'North', joined: ['scr_1'], left: [] }],
+      samples: [],
+    };
+    preview = moved;
+    drafts([spot('spt_a', 3, { draftChanged: false })]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    expect(store.getState().publishing.all).toMatchObject({ pins: [], preview: moved });
+    expect(await store.getState().confirmPublishAll()).toBe(true);
+    expect(sent()).toEqual([['publish', { drafts: [], ifScreens: ['scr_1'] }, ORG]]);
+  });
+
+  it('with no draft, is refused when the screens it would change are not the ones shown, and says so (review of #621)', async () => {
+    preview = { screens: [{ screenId: 'scr_1', name: 'Till', reasons: ['joined North'] }], unchanged: 0, failed: [], groups: [], samples: [] };
+    drafts([]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(new Refusal('conflict', 'changed', { screens: ['scr_1', 'scr_2'] }));
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    const t = toast.getToasts().findLast((x) => 'title' in x && x.title === 'Not published');
+    expect(t).toMatchObject({ description: 'Which screens it would change has changed since you were shown. Press Publish again to see them.' });
   });
 
   it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins acknowledging exactly what it showed (#360)', async () => {

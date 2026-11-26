@@ -395,3 +395,64 @@ test("save a filtered view as a smart group, then schedule a playlist to it (#18
   await expect(entries).toHaveCount(1);
   await expect(entries.first()).toContainText('Group North · Always · Draft, not published');
 });
+
+test('the Publish button says which screens would change and why, and a publish records whom each group reached (#187)', async ({ page }) => {
+  await signInAs(page, `e2e-publish-preview-${Date.now()}@example.com`, '192.0.2.244');
+  await createOrg(page, 'Preview Deli', '192.0.2.244');
+  const door = await pairScreen(page, 'North door', '192.0.2.245');
+  const till = await pairScreen(page, 'Till', '192.0.2.246');
+  await pairScreen(page, 'South door', '192.0.2.247');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [till.id], set: { region: 'south' } });
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast', transition: { type: 'cut' } })) as { playlist: { id: string } };
+  await tool(page, 'set_default_playlist', { playlistId: playlist.id });
+  const { group } = (await tool(page, 'save_group', {
+    name: 'North',
+    selector: { all: [{ key: 'region', op: 'eq', values: ['north'] }] },
+    idempotencyKey: `north-${Date.now()}`,
+  })) as { group: { id: string } };
+  await tool(page, 'publish', {});
+
+  // A draft entry for the smart group: the sidebar's Publish says which screen it would change, and why.
+  await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: group.id, priority: 1, idempotencyKey: `entry-${Date.now()}` });
+  await page.goto('/screens');
+  await hydrated(page);
+  await page.getByRole('button', { name: '1 unpublished change · Publish' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish 1 unpublished change?' });
+  await expect(ask).toContainText('1 screen would change');
+  await expect(ask.getByRole('list', { name: 'Screens that would change' })).toHaveText('North door: entry Breakfast added');
+  await axe(page);
+  await shotsBoth(page, '187-publish-preview');
+  await ask.getByRole('button', { name: 'Publish' }).click();
+  await expect(ask).toBeHidden();
+
+  // Till labelled north on its page: the toast says what the next publish would change, and its Publish asks with the preview.
+  await page.goto(`/screens/${till.id}`);
+  await hydrated(page);
+  await page.getByRole('region', { name: 'Labels' }).getByRole('button', { name: 'Edit labels' }).click();
+  const labels = page.getByRole('dialog', { name: 'Labels' });
+  await labels.getByLabel('Label 1 value').fill('north');
+  await labels.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Takes effect at the next publish: 1 screen would change.')).toBeVisible();
+  await page.getByRole('button', { name: 'Publish…' }).click();
+  const moved = page.getByRole('alertdialog', { name: 'Publish the group changes?' });
+  await expect(moved).toContainText('1 screen would change · +1 join North');
+  await expect(moved.getByRole('list', { name: 'Screens that would change' })).toHaveText('Till: joined North');
+  await shotsBoth(page, '187-publish-group-changes');
+  await moved.getByRole('button', { name: 'Publish' }).click();
+  await expect(moved).toBeHidden();
+
+  // The Publishes page lists whom each group reached at that publish.
+  await page.goto('/publishes');
+  await hydrated(page);
+  const reached = page.getByRole('region', { name: 'Whom each group reached' });
+  await expect(reached.getByRole('listitem')).toHaveCount(1);
+  await expect(reached.getByRole('listitem').first()).toContainText('North');
+  await expect(reached.getByRole('listitem').first()).toContainText('Rule');
+  await expect(reached.getByRole('listitem').first()).toContainText('2 screens');
+  await expect(reached.getByRole('listitem').first()).toContainText('North door and Till');
+  // Its history row says which group it was for, as no draft changed.
+  await expect(page.getByRole('region', { name: 'Publish history' }).getByRole('listitem').first()).toContainText('Screens moved in or out of North');
+  await axe(page);
+  await shotsBoth(page, '187-groups-reached');
+});
