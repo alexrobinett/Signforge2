@@ -139,8 +139,8 @@ describe("an agent's proposal", () => {
     // The read again fails: the Reject's run ends refused, and the Undo still goes.
     fail(new Error('offline'));
     await expect(first).rejects.toThrow('offline');
-    for (let i = 0; i < 5; i++) await Promise.resolve();
-    expect(callTool).toHaveBeenLastCalledWith('revert_spot_draft', { spotId: 'spt_soup', ifVersion: 8 }, ORG);
+    // Waited for as the call itself, not a count of microtask turns that a longer chain would outgrow.
+    await vi.waitFor(() => expect(callTool).toHaveBeenLastCalledWith('revert_spot_draft', { spotId: 'spt_soup', ifVersion: 8 }, ORG));
   });
 
   it('runs an Undo pressed while the Reject is still read again once it is, and is never left pending by a read that fails', async () => {

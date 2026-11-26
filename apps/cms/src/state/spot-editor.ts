@@ -37,7 +37,7 @@ import { overviewKey } from '~/lib/overview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { problemWords } from '~/lib/field-words';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
-import { orgOnScreen } from '~/lib/live';
+import { newSpotAsked, orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
 import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
@@ -454,7 +454,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
-        await router.navigate({ to: '/spots/$spotId', params: { spotId: spot.id } });
+        await router.navigate({ to: '/spots/$spotId', params: { spotId: spot.id }, replace: newSpotAsked(router) });
         editor((e) => ({ ...e, newSpot: newSpotDraft() }));
       } catch (err) {
         editor((e) => ({ ...e, newSpot: { ...e.newSpot, pending: false, error: toolMessage(err) } }));

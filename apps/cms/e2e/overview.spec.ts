@@ -57,6 +57,10 @@ test('a new org follows the setup checklist to a playing screen, and Overview sh
   await dialog.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Opening', level: 1 })).toBeVisible();
   const spotId = new URL(page.url()).pathname.split('/').at(-1);
+  // Back leaves the spot for where New spot was pressed: the address that asked for the dialog is gone (review of #562).
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('dialog', { name: 'New spot' })).toHaveCount(0);
 
   await page.goto('/');
   await expect(setup).toContainText('1 of 3 done');

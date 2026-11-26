@@ -29,6 +29,7 @@ import { MediaError, scaledPhoto, uploadImage } from '@signforge/media';
 import { tabOrgHeaders } from '~/lib/tab-org';
 import { answer, callToolByName, Refusal, toolMessage } from '~/lib/tools';
 import { overviewKey } from '~/lib/overview';
+import { newSpotAsked } from '~/lib/live';
 import { spotKeys, spotQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
@@ -217,7 +218,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
           filled: marked ? { ...a.filled, [made.spot.id]: { kind: 'new', marks: made.marks, photo, link, uploading: false, uploadError: null } } : a.filled,
         }));
         get().openNewSpot(false);
-        await router.navigate({ to: '/spots/$spotId', params: { spotId: made.spot.id } });
+        await router.navigate({ to: '/spots/$spotId', params: { spotId: made.spot.id }, replace: newSpotAsked(router) });
       } catch (err) {
         failed(err);
       }
