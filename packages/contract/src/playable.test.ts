@@ -24,6 +24,7 @@ describe('whether a player can play a manifest', () => {
   it("is this build's own: the schema it makes and the one before, and its protocols", () => {
     expect(THIS_PLAYER).toEqual({ manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS });
     expect(playsSchema(THIS_PLAYER, MANIFEST_SCHEMA)).toBe(true);
+    expect(playsSchema(THIS_PLAYER, MANIFEST_SCHEMA - 1)).toBe(true);
     expect(playsSchema(THIS_PLAYER, MANIFEST_SCHEMA - 2)).toBe(false);
     expect(playsSchema(THIS_PLAYER, String(MANIFEST_SCHEMA))).toBe(false);
     expect(playsProtocol(THIS_PLAYER, Math.max(...SUPPORTED_PROTOCOLS) + 1)).toBe(false);

@@ -14,8 +14,8 @@ export interface ManifestNeeds {
 
 /** What a player can play: the manifest schemas and frame protocols it reports. */
 export interface PlayerPlays {
-  manifestSchemas: readonly number[];
-  protocols: readonly number[];
+  readonly manifestSchemas: readonly number[];
+  readonly protocols: readonly number[];
 }
 
 /** What this build of the player can play. */
