@@ -1458,3 +1458,87 @@ Every base template at master `c08fbb3f` (after the motion refresh, #501 and #52
 - **First prepares after a page load** over the proposed ~600 ms cold-start budget: Announcement in portrait (948 to 1,133 ms, every look; its repeats 399 to 448 ms are within the 500 ms budget, which #229's 662 ms Pop portrait median no longer misses); Info frame (680 to 716 ms landscape, 762 to 825 ms portrait; repeats 345 to 418 ms); and just over it, Announcement in landscape but Poster (611 to 613 ms), Countdown's Pop and Poster in landscape and Pop in portrait (612 to 629 ms) and Room status's Pop in landscape (638 ms). Every other kit template's first prepare is 539 to 598 ms, and every other template's 292 to 437 ms (Weather's in landscape was 829 ms in the first pass, 471 and 481 ms in the re-runs; Photo promo's portrait ones are above).
 
 **Within budget:** every other spec, in both orientations: repeat prepares 142 to 448 ms, 0.00 to 0.78% dropped. Two single long frames while playing in the first pass (News Poster landscape, 283 ms, 1.11% overall; Alert notice landscape, 233 ms) did not come again in two re-runs each (0.17 to 0.22%, 0.00 to 0.06%). The worst frame is 50 to 100 ms while the next spot loads in most kit specs, as in every earlier run of them; while playing it stays at 17 to 50 ms but for Weather.
+
+## The template set on the N100 (issue #462, 2026-11-26)
+
+The #203 batch above, rerun on the N100 test rig ([`device/n100/README.md`](../../device/n100/README.md)): the same player build (master `c08fbb3f`) and the same content, 31 spots per orientation, served beside the deployed player at `/m203/<orientation>/`, with the same method (a fresh load per spot, its first prepare, then 30 s measured from 10 s in). Only the hardware differs: an Intel N100 (4 cores, the LXC given 2 GB) with Chromium 156 on Debian 13, scanning out on its iGPU through the forced virtual display, at 1920x1080 and at 3840x2160, both at 60 Hz, portrait by `wlr-randr --transform 90`. `cadence.py` read 60.00 fps (16.6 to 16.8 ms) in all four modes before each pass. Raw rows are in [`results/n100-462/`](results/n100-462/).
+
+Each cell is **Pi 1080p / N100 1080p / N100 4K**. The repeat prepare is the median of a spot's prepares while measured.
+
+**Landscape** (first prepare; median repeat prepare; dropped overall; worst frame: Pi 1080p / N100 1080p / N100 4K)
+| Spot | First prepare, ms | Repeat prepare, ms | Dropped | Worst frame, ms |
+| --- | --- | --- | --- | --- |
+| announcement-pop | 613 / 232 / 257 | 326 / 132 / 134 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| announcement-poster | 594 / 224 / 276 | 329 / 133 / 132 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| announcement-night | 613 / 218 / 221 | 312 / 132 / 133 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-corporate | 611 / 218 / 207 | 312 / 134 / 132 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-pop | 614 / 198 / 193 | 225 / 99 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-poster | 612 / 183 / 240 | 230 / 99 / 99 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-night | 582 / 201 / 238 | 246 / 99 / 100 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-corporate | 587 / 226 / 202 | 208 / 83 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-pop | 693 / 322 / 312 | 380 / 131 / 149 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| info-frame-poster | 696 / 249 / 231 | 361 / 133 / 132 | 0.44% / 0.00% / 0.00% | 67 / 17 / 17 |
+| info-frame-night | 716 / 241 / 272 | 394 / 132 / 131 | 0.67% / 0.00% / 0.00% | 100 / 17 / 17 |
+| info-frame-corporate | 680 / 231 / 213 | 375 / 133 / 132 | 0.50% / 0.00% / 0.00% | 67 / 17 / 17 |
+| news-pop | 539 / 189 / 206 | 197 / 100 / 98 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-poster | 550 / 162 / 177 | 191 / 99 / 97 | 1.11% / 0.00% / 0.00% | 283 / 17 / 17 |
+| news-night | 577 / 160 / 175 | 193 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-corporate | 561 / 172 / 174 | 202 / 100 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-pop | 638 / 185 / 223 | 211 / 100 / 100 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-poster | 560 / 172 / 180 | 217 / 97 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-night | 566 / 180 / 185 | 229 / 99 / 99 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-corporate | 558 / 160 / 171 | 214 / 97 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| alert-emergency | 366 / 125 / 119 | 195 / 82 / 82 | 0.11% / 0.11% / 0.17% | 33 / 33 / 33 |
+| alert-warning | 357 / 128 / 134 | 168 / 83 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| alert-advisory | 340 / 130 / 144 | 162 / 84 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| alert-notice | 336 / 135 / 126 | 161 / 83 / 82 | 0.72% / 0.00% / 0.00% | 233 / 17 / 17 |
+| menu-dark | 297 / 112 / 145 | 160 / 84 / 83 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| menu-light | 292 / 121 / 113 | 161 / 83 / 83 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| agenda | 307 / 122 / 123 | 144 / 67 / 66 | 0.22% / 0.06% / 0.67% | 67 / 33 / 67 |
+| clock | 322 / 110 / 129 | 165 / 83 / 82 | 0.11% / 0.11% / 0.00% | 33 / 33 / 17 |
+| cstore-promo | 337 / 133 / 148 | 178 / 82 / 83 | 0.11% / 0.00% / 0.28% | 33 / 17 / 67 |
+| photo-promo | 375 / 144 / 178 | 266 / 99 / 150 | 0.11% / 0.00% / 0.00% | 33 / 17 / 17 |
+| weather | 829 / 146 / 177 | 413 / 100 / 147 | 1.89% / 0.11% / 1.50% | 117 / 33 / 67 |
+
+**Portrait** (first prepare; median repeat prepare; dropped overall; worst frame: Pi 1080p / N100 1080p / N100 4K)
+| Spot | First prepare, ms | Repeat prepare, ms | Dropped | Worst frame, ms |
+| --- | --- | --- | --- | --- |
+| announcement-pop | 1133 / 254 / 259 | 409 / 182 / 182 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-poster | 1016 / 253 / 268 | 413 / 183 / 183 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| announcement-night | 970 / 274 / 278 | 424 / 183 / 183 | 0.44% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-corporate | 990 / 261 / 274 | 425 / 183 / 182 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-pop | 629 / 205 / 204 | 223 / 99 / 98 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| countdown-poster | 594 / 196 / 212 | 304 / 99 / 100 | 0.44% / 0.00% / 0.00% | 67 / 17 / 17 |
+| countdown-night | 578 / 194 / 202 | 210 / 99 / 98 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| countdown-corporate | 584 / 199 / 199 | 229 / 99 / 99 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-pop | 825 / 260 / 253 | 395 / 150 / 150 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-poster | 811 / 242 / 247 | 411 / 149 / 149 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-night | 762 / 251 / 306 | 394 / 133 / 132 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-corporate | 762 / 259 / 260 | 392 / 150 / 165 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-pop | 551 / 161 / 173 | 200 / 99 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-poster | 557 / 181 / 171 | 204 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-night | 565 / 158 / 181 | 204 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-corporate | 558 / 174 / 175 | 193 / 98 / 99 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| room-status-pop | 596 / 182 / 178 | 236 / 99 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-poster | 574 / 194 / 160 | 226 / 100 / 97 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-night | 573 / 190 / 183 | 297 / 99 / 100 | 0.78% / 0.00% / 0.00% | 100 / 17 / 17 |
+| room-status-corporate | 573 / 182 / 181 | 234 / 96 / 96 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| alert-emergency | 401 / 143 / 136 | 261 / 82 / 82 | 0.28% / 0.17% / 0.17% | 50 / 34 / 33 |
+| alert-warning | 387 / 122 / 130 | 192 / 82 / 82 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| alert-advisory | 379 / 121 / 127 | 188 / 82 / 83 | 0.06% / 0.00% / 0.00% | 33 / 17 / 17 |
+| alert-notice | 378 / 125 / 122 | 191 / 82 / 83 | 0.06% / 0.00% / 0.00% | 33 / 17 / 17 |
+| menu-dark | 296 / 116 / 114 | 178 / 82 / 82 | 0.00% / 0.00% / 0.06% | 17 / 17 / 33 |
+| menu-light | 301 / 126 / 116 | 174 / 83 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| agenda | 310 / 110 / 109 | 150 / 84 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| clock | 325 / 119 / 119 | 202 / 83 / 83 | 0.28% / 0.00% / 0.17% | 50 / 17 / 33 |
+| cstore-promo | 349 / 130 / 119 | 197 / 82 / 82 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| photo-promo | 724 / 193 / 314 | 747 / 149 / 266 | 0.72% / 0.28% / 0.00% | 67 / 67 / 17 |
+| weather | 437 / 146 / 176 | 472 / 97 / 216 | 5.06% / 0.17% / 2.67% | 100 / 33 / 67 |
+
+**What it shows.**
+- **The N100 prepares 2 to 3 times faster than the Pi, at either size.** First prepares are 109 to 322 ms against the Pi's 292 to 1,133 ms, and median repeats 64 to 300 ms against 142 to 780 ms. The median of each spot's median is 99 ms on the N100 against the Pi's 214 (landscape) and 229 ms (portrait). Every spot is inside the 500 ms repeat budget and the proposed ~600 ms cold start, in both modes. 4K costs the N100 little in prepare, except where a template draws large images: Photo promo in portrait goes from 149 to 266 ms, and Weather from 97 to 216 ms.
+- **At 1080p60 the N100 drops almost nothing:** at most 0.28%, and the worst frame is 33 ms, apart from 67 ms once in Photo promo portrait. The Pi drops 0.00 to 5.06%, with worst frames of 50 to 283 ms. So a Pi number cannot be judged from the N100's at 1080p: the N100 hides what the Pi shows, as a laptop does.
+- **At 4K60, Weather is over 1% on the N100 too.** Across three passes, landscape dropped 1.50, 2.17 and 2.06% and portrait 2.67, 3.17 and 2.44% (in the two reruns, 1.7 to 1.8% and 2.3 to 2.6% while playing), with worst frames of 67 to 100 ms. On the Pi, Weather is the template over budget (#96). Its cost grows with the screen's pixels, so it is the template to look at for a 4K screen. Agenda (0.67%) and C-store promo (0.28%) also lost a few frames at 4K landscape; every other spot stays at 0.00 to 0.17%.
+- **Nothing was skipped** in any pass.
+
+**A rig fault, not a template's.** In the first pass of each landscape run, the player stopped getting any spot ready partway through: from the 11th spot at 4K and the 3rd at 1080p, every load reported `not ready within 2000 ms`. It stayed that way across fresh page loads, until the next `wlr-randr` mode change. The kiosk's journal had DRM page-flip errors (`Atomic commit failed: Device or resource busy`) as each stall began. Those errors also came during passes that ran clean, so they don't explain the stall alone. Plex (LXC 102) shares the iGPU, but its logs show no transcoding at those times. Both landscape passes were rerun spot by spot with memory logged, and came back whole: 31 of 31 each, memory steady (used 555 to 1,393 MB of 2,048, the most during Weather), with 13 of the same errors during the 1080p rerun and no stall. The tables use the reruns; the first passes are kept as `first-pass-*.jsonl`. On this rig, a run that stops getting spots ready is the rig: change the mode or restart the kiosk, and run it again.
