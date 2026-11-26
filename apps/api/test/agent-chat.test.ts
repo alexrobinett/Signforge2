@@ -252,7 +252,7 @@ describe('POST /api/agent/chat', () => {
     expect(result.content.match(/<\/data>/g)).toHaveLength(1);
   });
 
-  it("gives the model a free-form value as stored, whatever its keys, and no number breaks the turn (review of #538)", async () => {
+  it('gives the model a free-form value as stored, whatever its keys, and no number breaks the turn (review of #538)', async () => {
     const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'audit_entry', detail: 'full' } }] }, ANSWER] });
     await s.scope.auditLog.append({
       at: Date.UTC(2026, 10, 26, 9),

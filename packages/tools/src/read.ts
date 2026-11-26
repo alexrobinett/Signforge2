@@ -539,10 +539,16 @@ export function agentOutputOf(tools: Tools) {
       const type = typeof input === 'object' && input !== null && 'type' in input ? input.type : undefined;
       if (!isReadType(type)) return output;
       const rows = () => timePlan({ type: 'object', properties: fieldsAsTools(tools, type) });
-      return applyTimes(planOf(`read/${type}`, () => ({ props: { items: { items: rows() } } })), output);
+      return applyTimes(
+        planOf(`read/${type}`, () => ({ props: { items: { items: rows() } } })),
+        output,
+      );
     }
     const tool = tools.get(name);
     if (!tool) return output;
-    return applyTimes(planOf(name, () => timePlan(z.toJSONSchema(tool.output, { io: 'output', unrepresentable: 'any' }))), output);
+    return applyTimes(
+      planOf(name, () => timePlan(z.toJSONSchema(tool.output, { io: 'output', unrepresentable: 'any' }))),
+      output,
+    );
   };
 }

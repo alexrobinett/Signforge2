@@ -37,13 +37,14 @@ export function timePlan(schema: unknown, key?: string): TimePlan | undefined {
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   if (key !== undefined && isTimeKey(key) && types.some(isNumberType)) return { time: true };
   let plan: TimePlan | undefined;
-  for (const branch of [schema.anyOf, schema.oneOf, schema.allOf].flatMap((b) => (Array.isArray(b) ? b : [])))
-    plan = merge(plan, timePlan(branch, key));
+  for (const branch of [schema.anyOf, schema.oneOf, schema.allOf].flatMap((b) => (Array.isArray(b) ? b : []))) plan = merge(plan, timePlan(branch, key));
   if (isRecord(schema.properties)) {
-    const props = Object.fromEntries(Object.entries(schema.properties).flatMap(([k, s]) => {
-      const p = timePlan(s, k);
-      return p ? [[k, p]] : [];
-    }));
+    const props = Object.fromEntries(
+      Object.entries(schema.properties).flatMap(([k, s]) => {
+        const p = timePlan(s, k);
+        return p ? [[k, p]] : [];
+      }),
+    );
     if (Object.keys(props).length) plan = merge(plan, { props });
   }
   const items = timePlan(schema.items);

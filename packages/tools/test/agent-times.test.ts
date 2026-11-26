@@ -7,10 +7,10 @@ const T = Date.UTC(2026, 10, 26, 9, 30);
 const ISO = '2026-11-26T09:30:00.000Z';
 
 describe('agentOutput', () => {
-  it("makes each declared time ISO 8601, at any depth, and leaves durations, versions and strings as they are", () => {
-    expect(
-      agentOutput('save_playlist', {}, { playlist: { id: 'pls_1', createdAt: T, updatedAt: T, publishedAt: null, version: 3 } }),
-    ).toMatchObject({ playlist: { createdAt: ISO, updatedAt: ISO, publishedAt: null, version: 3 } });
+  it('makes each declared time ISO 8601, at any depth, and leaves durations, versions and strings as they are', () => {
+    expect(agentOutput('save_playlist', {}, { playlist: { id: 'pls_1', createdAt: T, updatedAt: T, publishedAt: null, version: 3 } })).toMatchObject({
+      playlist: { createdAt: ISO, updatedAt: ISO, publishedAt: null, version: 3 },
+    });
     expect(agentOutput('list_publishes', {}, { publishes: [{ id: 'pub_1', createdAt: T, rollBackUntil: T }], next: null })).toMatchObject({
       publishes: [{ createdAt: ISO, rollBackUntil: ISO }],
     });
@@ -24,10 +24,12 @@ describe('agentOutput', () => {
       next: null,
     });
     const snapshot = { id: 'weather', version: T, fetchedAt: ISO, checkedAt: ISO, data: { since: 1987, current: { observedAt: 1e20 } } };
-    expect(agentOutput('read', { type: 'data_source', ids: ['weather'] }, { type: 'data_source', items: [{ id: 'weather', createdAt: T, snapshot }] })).toEqual({
-      type: 'data_source',
-      items: [{ id: 'weather', createdAt: ISO, snapshot }],
-    });
+    expect(agentOutput('read', { type: 'data_source', ids: ['weather'] }, { type: 'data_source', items: [{ id: 'weather', createdAt: T, snapshot }] })).toEqual(
+      {
+        type: 'data_source',
+        items: [{ id: 'weather', createdAt: ISO, snapshot }],
+      },
+    );
   });
 
   it('keeps a number no date can hold as it is, and never throws', () => {
