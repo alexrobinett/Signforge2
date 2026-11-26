@@ -20,6 +20,7 @@ import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
 import { createConnectSlice, type ConnectSlice } from './connect';
 import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
+import { createLabelsSlice, type LabelsSlice } from './labels';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createProposalsSlice, type ProposalsSlice } from './proposals';
@@ -36,6 +37,7 @@ export type AppState = UiSlice &
   SignInSlice &
   OrgsSlice &
   ScreensSlice &
+  LabelsSlice &
   AssetsSlice &
   CommandMenuSlice &
   SettingsSlice &
@@ -72,6 +74,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSignInSlice(set, get, deps),
     ...createOrgsSlice(set, get, deps),
     ...createScreensSlice(set, get, deps),
+    ...createLabelsSlice(set, get, deps),
     ...createAssetsSlice(set, get, deps),
     ...createCommandMenuSlice(set, get, deps),
     ...createSettingsSlice(set, get, deps),

@@ -1,8 +1,9 @@
 /**
- * Claim the code a screen shows: name it, give its time zone, orientation, groups and display
- * hours. `claim_screen` makes the screen; it is then added to its groups with `save_group`, the
+ * Claim the code a screen shows: name it, give its time zone, orientation, labels (#185: typed, or copied from
+ * another screen), groups and display hours. `claim_screen` makes the screen with its labels; it is then added to its groups with `save_group`, the
  * same tools an agent would use (M3-08: no groups in the claim).
  */
+import { useQuery } from '@tanstack/react-query';
 import { getRouteApi } from '@tanstack/react-router';
 import { LoaderCircleIcon } from 'lucide-react';
 import { useId, useSyncExternalStore, type SubmitEvent } from 'react';
@@ -12,7 +13,10 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { isOrientation, type GroupView } from '~/lib/screen-types';
+import { useOrgId } from '~/lib/live';
 import { byName } from '~/lib/targets';
+import { screensQuery } from '~/queries/screens';
+import { LabelEditor } from './labels';
 import { useAppStore } from '~/state/provider';
 import { hoursProblems } from '~/lib/screen-types';
 import { DisplayHoursEditor } from './display-hours-editor';
@@ -56,6 +60,11 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
   const toggleNewScreenGroup = useAppStore((s) => s.toggleNewScreenGroup);
   const setNewScreenHours = useAppStore((s) => s.setNewScreenHours);
   const pairScreen = useAppStore((s) => s.pairScreen);
+  const copyLabelsForPairing = useAppStore((s) => s.copyLabelsForPairing);
+  // The screens with labels to copy, as the Screens page has them: a new store's screens labelled as they are paired.
+  const labelled = (useQuery(screensQuery(useOrgId())).data?.screens ?? [])
+    .filter((s) => s.status !== 'revoked' && Object.keys(s.labels).length)
+    .toSorted(byName);
   const defaults = { timezone: orgDefaults?.timezone ?? browser, locale: orgDefaults?.locale ?? null, hours: orgDefaults?.displayHours ?? null };
   const timezone = chosenZone ?? defaults.timezone;
   const hours = chosenHours === undefined ? defaults.hours : chosenHours;
@@ -128,6 +137,27 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
               </fieldset>
             )}
           </div>
+          {labelled.length > 0 && (
+            <div className="grid gap-1.5 sm:max-w-xs">
+              <Label htmlFor={`${id}-copy`}>Copy labels from…</Label>
+              <NativeSelect
+                id={`${id}-copy`}
+                value=""
+                onChange={(e) => {
+                  const from = labelled.find((s) => s.id === e.target.value);
+                  if (from) copyLabelsForPairing(from.labels);
+                }}
+              >
+                <option value="">Another screen</option>
+                {labelled.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          )}
+          <LabelEditor target="pairing" />
           {!compact && <DisplayHoursEditor value={hours} onChange={setNewScreenHours} headed={false} />}
           <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
             {error}

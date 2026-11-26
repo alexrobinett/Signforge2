@@ -14,7 +14,7 @@ _Avoid_: preview conversion, toSpot.
 **Rollout outcome**: where a screen a publish switched stands on the manifest it gave it (playing, replaced, revoked, or open: waiting, downloading, asleep, unreachable, fell back), and whether the rollout is over (no screen open). One module (`packages/tools/src/rollout.ts`) decides it for `get_publish`, `list_publishes` and the five-minute check that marks a publish finished and sends its alert; `packages/db` reads only the facts it is decided from.
 _Avoid_: rollout status, applied.
 
-**Label**: a `key=value` fact about a screen (`region=north`, `store=0142`, `type=drive-thru`) set with `update_screen_labels`, at most one value per key. The value is stored as typed and matched case-insensitively. A location is just a label key; there is no built-in location. Only `org.screens.labels` in `packages/db` touches the `screen_labels` table. Screens never see labels.
+**Label**: a `key=value` fact about a screen (`region=north`, `store=0142`, `type=drive-thru`) set with `update_screen_labels`, at most one value per key. The value is stored as typed and matched case-insensitively. A location is just a label key; there is no built-in location. Only `org.screens.labels` in `packages/db` touches the `screen_labels` table. Screens never see labels. In the CMS a screen's page shows and edits them, and the pairing form sets them (#185).
 
 **System label**: a label every screen has from its settings, read-only and never stored: `orientation`, `kind` (device or browser), `timezone`, and `locale` when it has one. A selector reads them as labels, so `orientation=portrait` needs no one to type it. Their keys cannot be set as labels.
 

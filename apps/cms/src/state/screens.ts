@@ -7,10 +7,12 @@
  */
 import type { ToolName } from '@signforge/tools/outputs';
 import { toast } from 'sonner';
+import { labelsOf } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
 import { putGroup } from '~/queries/screens';
+import { labelRowsOf } from './labels';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
@@ -247,6 +249,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       pairing((p) => ({ ...p, key, pending: true, error: null }));
       const d = get().screens.pairing;
       const hours = d.hours === undefined ? defaults.hours : d.hours;
+      const labels = labelsOf(labelRowsOf(get().labels, 'pairing'));
       try {
         const screenId = (
           await callTool('claim_screen', {
@@ -256,6 +259,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
             orientation: d.orientation,
             ...(defaults.locale ? { locale: defaults.locale } : {}),
             ...(hours ? { displayHours: hours } : {}),
+            ...(Object.keys(labels).length ? { labels } : {}),
             idempotencyKey: key,
           })
         ).screen.id;
@@ -263,6 +267,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
         await router.invalidate();
         await router.navigate({ to: '/screens/$screenId', params: { screenId } });
         screens((s) => ({ ...s, pairing: newPairing(), page: newPage() }));
+        get().clearPairingLabels();
       } catch (err) {
         pairing((p) => ({ ...p, pending: false, error: toolMessage(err) }));
       }
