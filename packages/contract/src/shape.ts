@@ -41,10 +41,10 @@ export const is = <T>(test: (v: unknown) => v is T, problem: string): Shape<T> =
 export const optional = <T>(shape: Shape<T>): Optional<T> => ({ optional: shape });
 
 type Fields = Record<string, Shape<unknown> | Optional<unknown>>;
-type Required<F extends Fields> = { [K in keyof F as F[K] extends Shape<unknown> ? K : never]: F[K] extends Shape<infer T> ? T : never };
+type RequiredFields<F extends Fields> = { [K in keyof F as F[K] extends Shape<unknown> ? K : never]: F[K] extends Shape<infer T> ? T : never };
 type Optionals<F extends Fields> = { [K in keyof F as F[K] extends Optional<unknown> ? K : never]?: F[K] extends Optional<infer T> ? T : never };
 type Flat<T> = { [K in keyof T]: T[K] };
-export type ObjectOf<F extends Fields> = Flat<Required<F> & Optionals<F>>;
+export type ObjectOf<F extends Fields> = Flat<RequiredFields<F> & Optionals<F>>;
 
 /**
  * An object with these fields, read in their order, each one's problems in turn; a key it does not declare is left out.

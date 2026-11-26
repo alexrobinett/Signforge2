@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./frame": "./src/frame.ts",
     "./row-asset": "./src/row-asset.ts",
-    "./sample": "./src/sample.ts"
+    "./sample": "./src/sample.ts",
+    "./scripts": "./src/scripts.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

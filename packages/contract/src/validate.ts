@@ -1171,14 +1171,15 @@ const dataSnapshotShape = custom<DataSnapshot>((s) => {
 const checkedShape = custom<Record<string, { version: number; checkedAt: string }>>((c) => {
   if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);
   const errors: string[] = [];
-  const value: Record<string, { version: number; checkedAt: string }> = {};
+  const entries: [string, { version: number; checkedAt: string }][] = [];
   for (const [k, v] of Object.entries(c)) {
     const version = own(v, 'version');
     const checkedAt = own(v, 'checkedAt');
     if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt)) errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
-    else value[k] = { version, checkedAt };
+    else entries.push([k, { version, checkedAt }]);
   }
-  return errors.length ? refused(errors) : accepted(value);
+  // fromEntries defines each key as its own, so a `__proto__` key could never set a prototype, whatever an id may be.
+  return errors.length ? refused(errors) : accepted(Object.fromEntries(entries));
 });
 
 /** `POST /v1/device/sync`, as the screen receives it. */
