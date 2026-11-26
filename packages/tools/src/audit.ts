@@ -30,35 +30,40 @@ const saves = (save: string, idKey: string, created: string, changed: string) =>
  * what the tools they replaced did: their rows are found under those tools' names, by the input they recorded (or, for
  * an upload's finish, the kind it checked).
  */
-const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> }> = {
-  set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
-  identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
-  restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
-  set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
-  create_group: { actions: ['save_group'], inputHas: { groupId: false } },
-  rename_group: { actions: ['save_group'], inputHas: { groupId: true, name: true } },
-  set_group_members: { actions: ['save_group'], detailHas: '"membership":"set"', inputHas: { groupId: true } },
-  add_group_members: { actions: ['save_group'], detailHas: '"membership":"add"', inputHas: { groupId: true } },
-  remove_group_members: { actions: ['save_group'], detailHas: '"membership":"remove"', inputHas: { groupId: true } },
-  ...saves('save_spot', 'spotId', 'create_spot', 'update_spot'),
-  ...saves('save_playlist', 'playlistId', 'create_playlist', 'update_playlist'),
-  ...saves('save_schedule_entry', 'scheduleEntryId', 'create_schedule_entry', 'update_schedule_entry'),
-  ...saves('save_brand_kit', 'brandKitId', 'create_brand_kit', 'update_brand_kit'),
-  ...saves('save_data_source', 'dataSourceId', 'create_data_source', 'update_data_source'),
-  set_default_brand_kit: { actions: ['save_brand_kit'], detailHas: '"makeDefault":true' },
-  delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
-  delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
-  delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
-  delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
-  publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
-  end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
-  create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
-  create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
-  finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
-  finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
-  set_slack_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"slack"' },
-  set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
-};
+const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>>; inputHasAny?: readonly string[] }> =
+  {
+    set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
+    identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
+    restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
+    set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
+    // A screen's update (#345 PR 3) that renamed it, or changed a setting: found under each tool it replaced (#507).
+    rename_screen: { actions: ['update_screen'], inputHas: { name: true } },
+    update_screen_settings: { actions: ['update_screen'], inputHasAny: ['timezone', 'locale', 'orientation', 'displayHours'] },
+    create_group: { actions: ['save_group'], inputHas: { groupId: false } },
+    rename_group: { actions: ['save_group'], inputHas: { groupId: true, name: true } },
+    set_group_members: { actions: ['save_group'], detailHas: '"membership":"set"', inputHas: { groupId: true } },
+    add_group_members: { actions: ['save_group'], detailHas: '"membership":"add"', inputHas: { groupId: true } },
+    remove_group_members: { actions: ['save_group'], detailHas: '"membership":"remove"', inputHas: { groupId: true } },
+    ...saves('save_spot', 'spotId', 'create_spot', 'update_spot'),
+    ...saves('save_playlist', 'playlistId', 'create_playlist', 'update_playlist'),
+    ...saves('save_schedule_entry', 'scheduleEntryId', 'create_schedule_entry', 'update_schedule_entry'),
+    ...saves('save_brand_kit', 'brandKitId', 'create_brand_kit', 'update_brand_kit'),
+    ...saves('save_data_source', 'dataSourceId', 'create_data_source', 'update_data_source'),
+    // Its outcome, which the save records (`madeDefault`), not its input: the first kit, and never a kit already the default (#507).
+    set_default_brand_kit: { actions: ['save_brand_kit'], detailHas: '"madeDefault":true' },
+    delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
+    delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
+    delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
+    delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
+    publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
+    end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
+    create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
+    create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
+    finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
+    finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
+    set_slack_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"slack"' },
+    set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
+  };
 
 /** A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler. */
 const instant = z.union([z.number().int().nonnegative(), z.iso.datetime({ offset: true }).transform((t) => Date.parse(t))]);

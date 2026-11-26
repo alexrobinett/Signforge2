@@ -88,9 +88,10 @@ interface AuditPage {
   /**
    * With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the
    * default, for `set_default_playlist`) and whose recorded input has, or lacks, each key of `inputHas` (a save with or
-   * without its id, for the create or update it replaced).
+   * without its id, for the create or update it replaced), and at least one key of `inputHasAny` (a screen's update that
+   * changed a setting, for the tool it replaced).
    */
-  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> };
+  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>>; inputHasAny?: readonly string[] };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -2408,6 +2409,8 @@ export function scoped(d1: D1Database, orgId: string) {
               const value = sql`json_extract(${a.detailJson}, ${`$.input.${key}`})`;
               return has ? sql`${value} is not null` : sql`${value} is null`;
             }),
+            // json_type, not json_extract: a key given as null (hours cleared) is there, and json_extract reads it as absent (#545).
+            ...(also.inputHasAny?.length ? [or(...also.inputHasAny.map((key) => sql`json_type(${a.detailJson}, ${`$.input.${key}`}) is not null`))!] : []),
           ];
           where.push(alsoWhere ? or(eq(a.action, p.action), and(...alsoWhere))! : eq(a.action, p.action));
         }

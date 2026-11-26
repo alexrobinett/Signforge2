@@ -44,13 +44,16 @@ interface VersionGuard {
  * changed it since it was read. `version` is the row's version now; nothing was written.
  */
 export class StaleVersionError extends Error {
+  /** A failed batch guard's: the version its change was made from, to tell a row that moved from one that did not (#545). */
+  readonly staged: number | undefined;
   constructor(
     readonly id: string,
     readonly version: number,
-    options?: ErrorOptions & { message?: string },
+    options?: ErrorOptions & { message?: string; staged?: number },
   ) {
     super(options?.message ?? `${id} has changed since you read it; it is now version ${version}. Read it again and redo the change`, options);
     this.name = 'StaleVersionError';
+    this.staged = options?.staged;
   }
 }
 
@@ -102,7 +105,7 @@ export async function commit(db: Db, writes: readonly Write[]): Promise<number[]
         if (held?.[`g${i}`] === 1) continue;
         const now = await g.stale();
         // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
-        if (now !== undefined) throw new StaleVersionError(g.id, now, { cause: err });
+        if (now !== undefined) throw new StaleVersionError(g.id, now, { cause: err, staged: g.version });
       }
     }
     // A guard aborted it, but every one holds again as it is read (a change made and taken back since): still a

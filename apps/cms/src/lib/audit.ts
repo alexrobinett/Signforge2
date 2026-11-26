@@ -254,7 +254,8 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   if (merged) return capital(ACTIONS[merged.was[text(e.input[merged.by]) ?? ''] ?? e.action]!.words);
   if (save) {
     const words = ACTIONS[e.input[save.id] === undefined ? save.created : save.changed]!.words;
-    return e.action === 'save_brand_kit' && e.input.makeDefault === true ? `${words} · made the default` : words;
+    // As it turned out, which the save records apart from its input (#507): the first kit too, and never one already the default.
+    return e.action === 'save_brand_kit' && e.input.madeDefault === true ? `${words} · made the default` : words;
   }
   switch (e.action) {
     case 'screen_command':
@@ -292,7 +293,7 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
 
 /**
  * The input a tool was given, or a membership change's own fields; a cancel's invitee too, which the tool records apart
- * (#321), and the kind of asset a finished upload checked (#345).
+ * (#321), the kind of asset a finished upload checked (#345), and whether a brand kit's save made it the default (#507).
  */
 const inputOf = (e: AuditEntry): Record<string, unknown> => {
   const input = e.detail.input;
@@ -300,7 +301,8 @@ const inputOf = (e: AuditEntry): Record<string, unknown> => {
   const more = e.detail.detail;
   const invitee = e.action === 'cancel_invitation' && typeof more === 'object' && more !== null && 'email' in more ? { email: more.email } : {};
   const kind = e.action === 'finalize_upload' && typeof more === 'object' && more !== null && 'kind' in more ? { kind: more.kind } : {};
-  return { ...input, ...invitee, ...kind };
+  const made = e.action === 'save_brand_kit' && typeof more === 'object' && more !== null && 'madeDefault' in more ? { madeDefault: more.madeDefault } : {};
+  return { ...input, ...invitee, ...kind, ...made };
 };
 
 /** The playlist a publish made the org's first default (#243), from its row's `detail`. */

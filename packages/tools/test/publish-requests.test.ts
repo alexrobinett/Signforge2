@@ -334,6 +334,50 @@ describe('all or nothing (review of #386)', () => {
   });
 });
 
+describe("an approval past its expiry by the database's clock alone (#530)", () => {
+  it('is refused at once, as expired, with one batch tried: no attempt from a fresh read can pass it', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 13_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    // The database's clock says it expired a second ago; the Worker's, injected, an hour before that.
+    await env.DB.prepare("UPDATE publish_requests SET expires_at = CAST(unixepoch('subsec') * 1000 AS INTEGER) - 1000 WHERE id = ?").bind(request.id).run();
+    const expiresAt = (await scope().publishRequests.get(request.id))!.expiresAt;
+    vi.setSystemTime(expiresAt - 3_600_000);
+    const owner = person('owner');
+    const org = owner.org as OrgScope;
+    let batches = 0;
+    const commit = async (writes: readonly Write[]) => {
+      batches++;
+      return org.commit(writes);
+    };
+    const counted: Caller = { ...owner, org: new Proxy(org, { get: (t, k) => (k === 'commit' ? commit : Reflect.get(t, k)) }) };
+    expect(await approve(counted, request.id)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'expired' } });
+    expect(batches).toBe(1);
+    await pendingStill(request.id);
+  });
+});
+
+describe('an approval whose request is decided while it runs (#545)', () => {
+  const asked = async () => {
+    const version = await editSpot(agent(), o.templateSpot, 13_000);
+    return (await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }])).request.id;
+  };
+
+  it('runs again and approves one declined and put back (Undo) meanwhile: pending, with its time left, is not expired', async () => {
+    const id = await asked();
+    const undone = racing(person('owner'), async () => {
+      await call(person('editor'), 'decline_publish_request', { publishRequestId: id });
+      await call(person('editor'), 'reopen_publish_request', { publishRequestId: id });
+    });
+    expect(await approve(undone, id)).toMatchObject({ ok: true, output: { request: { status: 'approved' } } });
+  });
+
+  it('refuses one declined meanwhile as declined', async () => {
+    const id = await asked();
+    const declined = racing(person('owner'), () => call(person('editor'), 'decline_publish_request', { publishRequestId: id }));
+    expect(await approve(declined, id)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'declined' } });
+  });
+});
+
 describe('expiry at its boundary (review of #386)', () => {
   it('approves a millisecond before, and not at its expiry; the batch refuses a decision staged at or after it', async () => {
     const version = await editSpot(agent(), o.templateSpot, 12_000);

@@ -185,30 +185,55 @@ export const saveDataSourceInput = z.strictObject({
 
 type DataSourceFormat = z.infer<typeof sourceFormat>;
 
+/** Why a source of `format` refuses fields only another format takes. */
+function formatRefusal(input: z.infer<typeof saveDataSourceInput>, format: DataSourceFormat): ToolError | undefined {
+  if (!calendarOnly(format, input.horizonDays)) return invalidFields(HORIZON_ONLY_ICAL, 'horizonDays');
+  if (!jsonTableOnly(format, input.rowsPath)) return invalidFields(ROWS_PATH_ONLY_JSON_TABLE, 'rowsPath');
+  if (!rssOnly(format, input.photos)) return invalidFields(PHOTOS_ONLY_RSS, 'photos');
+  return undefined;
+}
+
+/** The fields a new source of `format` gets wrong for what it reads: those missing for it, and those of the other kind given. */
+const locatorPaths = (input: z.infer<typeof saveDataSourceInput>, format: DataSourceFormat) =>
+  format === 'provider'
+    ? [...(input.feedUrl !== undefined ? ['feedUrl'] : []), ...(['connectionId', 'resource'] as const).filter((k) => input[k] === undefined)]
+    : [...(input.feedUrl === undefined ? ['feedUrl'] : []), ...(['connectionId', 'resource'] as const).filter((k) => input[k] !== undefined)];
+
+/** A new source as save_data_source adds it, its name, format and what it reads; or why not. */
+function newSourceOf(input: z.infer<typeof saveDataSourceInput>): { refused: ToolError } | { name: string; format: DataSourceFormat; locator: string } {
+  if (input.ifVersion !== undefined) return { refused: invalidFields('a new data source has no version yet: ifVersion is for a change', 'ifVersion') };
+  const { name, format } = input;
+  if (name === undefined || format === undefined)
+    return {
+      refused: invalidFields(
+        'a new data source needs a name and a format; give dataSourceId to change one',
+        ...(['name', 'format'] as const).filter((k) => input[k] === undefined),
+      ),
+    };
+  const refused = formatRefusal(input, format);
+  if (refused) return { refused };
+  const locator = locatorOf({ ...input, format });
+  if (!locator) return { refused: invalidFields(PROVIDER_FIELDS, ...locatorPaths(input, format)) };
+  return { name, format, locator };
+}
+
 /**
  * Why save_data_source refuses this input, on what it gives alone and, for a change, the source's format: the agent
  * drawer's card asks it too, so it never offers a press that can only be refused (#507).
  */
 export function sourceRefusal(input: z.infer<typeof saveDataSourceInput>, current?: DataSourceFormat): ToolError | undefined {
-  const created = input.dataSourceId === undefined;
-  if (created && input.ifVersion !== undefined) return invalidFields('a new data source has no version yet: ifVersion is for a change', 'ifVersion');
-  if (created && (input.name === undefined || input.format === undefined))
-    return invalidFields(
-      'a new data source needs a name and a format; give dataSourceId to change one',
-      ...(['name', 'format'] as const).filter((k) => input[k] === undefined),
-    );
-  const fixed = created ? [] : (['id', 'format', 'connectionId'] as const).filter((k) => input[k] !== undefined);
+  if (input.dataSourceId === undefined) {
+    const made = newSourceOf(input);
+    return 'refused' in made ? made.refused : undefined;
+  }
+  const fixed = (['id', 'format', 'connectionId'] as const).filter((k) => input[k] !== undefined);
   if (fixed.length)
     return invalidFields(`a data source's ${fixed.join(', ')} ${fixed.length > 1 ? 'are' : 'is'} fixed once made: add another source for another`, ...fixed);
-  const format = input.format ?? current;
-  if (format === undefined) return undefined;
-  if (!calendarOnly(format, input.horizonDays)) return invalidFields(HORIZON_ONLY_ICAL, 'horizonDays');
-  if (!jsonTableOnly(format, input.rowsPath)) return invalidFields(ROWS_PATH_ONLY_JSON_TABLE, 'rowsPath');
-  if (!rssOnly(format, input.photos)) return invalidFields(PHOTOS_ONLY_RSS, 'photos');
-  const wrongLocator = created
-    ? !locatorOf({ ...input, format })
-    : (format === 'provider' && input.feedUrl !== undefined) || (format !== 'provider' && input.resource !== undefined);
-  if (wrongLocator) return invalidFields(PROVIDER_FIELDS, ...(['feedUrl', 'connectionId', 'resource'] as const).filter((k) => input[k] !== undefined));
+  if (current === undefined) return undefined;
+  const refused = formatRefusal(input, current);
+  if (refused) return refused;
+  if (current === 'provider' && input.feedUrl !== undefined) return invalidFields(PROVIDER_FIELDS, 'feedUrl');
+  if (current !== 'provider' && input.resource !== undefined) return invalidFields(PROVIDER_FIELDS, 'resource');
   return undefined;
 }
 
@@ -236,11 +261,9 @@ const saveDataSource = defineTool({
   handler: async ({ org, input, write, publishRight, services: { feedUrls } }) => {
     const { dataSourceId } = input;
     if (dataSourceId === undefined) {
-      const refused = sourceRefusal(input);
-      if (refused) throw refused;
-      // Given, and a locator with them: sourceRefusal refuses a new source otherwise.
-      const name = input.name!;
-      const format = input.format!;
+      const made = newSourceOf(input);
+      if ('refused' in made) throw made.refused;
+      const { name, format, locator } = made;
       // A provider source reads whatever its resource names through a person's connection, and get_data_source shows what it
       // read: it is added only with the right to publish, by a person or an agent (#122; for people too, owner decision on #424).
       if (format === 'provider')
@@ -250,7 +273,7 @@ const saveDataSource = defineTool({
       if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
       // The URL (or resource) is sealed to the row's id, so the id is chosen first.
       const sourceId = input.id ?? newId('src');
-      const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locatorOf({ ...input, format })!);
+      const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locator);
       const row = write(
         await org.dataSources.stage.insert({
           id: sourceId,

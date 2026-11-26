@@ -83,7 +83,7 @@ Agents read every type with one tool, `read({ type, ids?, filter?, query?, detai
 | `list_fonts` | content:read | viewer | `{ limit?, cursor? }` | `{ fonts: Font[], next }`, by id |
 | `list_brand_kits` | content:read | viewer | `{ limit?, cursor? }` | `{ brandKits: BrandKit[], next }`, by id |
 | `get_brand_kit` | content:read | viewer | `{ brandKitId }` | `{ brandKit }` |
-| `save_brand_kit` | content:draft | editor | without `brandKitId`: `{ name, colors, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, makeDefault?, idempotencyKey? }`; with it: `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, ifVersion?, makeDefault? }` | `{ brandKit }` |
+| `save_brand_kit` | content:draft | editor | without `brandKitId`: `{ name, colors, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, makeDefault?, idempotencyKey? }`; with it: `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, ifVersion?, makeDefault? }` | `{ brandKit, madeDefault }`, `madeDefault` whether this save made it the default (#507) |
 | `assign_brand_kit` | content:draft | editor | `{ brandKitId \| null, screenId? \| groupId? }` | `{ brandKit \| null }` |
 | `list_data_sources` | content:read | viewer | `{ limit?, cursor? }` | `{ dataSources: DataSource[], next }`, by id; each with `lastCheckedAt` (its last good poll, null before one) and the `spots` that bind it, as drafted or as published |
 | `get_data_source` | content:read | viewer | `{ dataSourceId }` | `{ dataSource, snapshot \| null }` |
