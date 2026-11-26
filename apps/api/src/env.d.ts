@@ -35,6 +35,8 @@ interface DataSourceSettings {
   FEED_PHOTOS_ORG_DAILY?: string;
   /** New feed photos one source may queue in a day, 30 when unset. */
   FEED_PHOTOS_SOURCE_DAILY?: string;
+  /** Images transformations the feed photos may ask for a UTC month (src/data/feed-photos.ts `monthlyTransforms`, #500), 4,500 when unset. */
+  IMAGES_MONTHLY_TRANSFORMS?: string;
 }
 /** Connected accounts (src/connectors). */
 interface ConnectorSettings {

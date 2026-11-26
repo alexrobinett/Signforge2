@@ -7,6 +7,7 @@
 import type * as s from './schema';
 
 export { brandStateOf, scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
+export { imagesMonth, imagesTransformsUsed, takeImagesTransforms } from './images-usage';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';

@@ -1558,3 +1558,12 @@ export const agentGrants = sqliteTable(
   },
   (t) => [uniqueIndex('agent_grants_org_id_uq').on(t.orgId, t.id), index('agent_grants_org_user_idx').on(t.orgId, t.userId)],
 );
+
+/**
+ * The Images transformations this environment's feed photos asked for, by UTC month (`YYYY-MM`, #500): no org's, but
+ * the account's allowance (5,000 a month on the Free plan, past which Images fails with 9422 for every environment).
+ */
+export const imagesUsage = sqliteTable('images_usage', {
+  month: text('month').primaryKey(),
+  transforms: integer('transforms').notNull(),
+});

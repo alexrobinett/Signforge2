@@ -10,6 +10,8 @@ import {
   FEED_IMAGE_TTL_MS,
   HOLD_MS,
   DEFAULT_PHOTO_BUDGET,
+  imagesMonth,
+  imagesTransformsUsed,
   NEW_PER_ORG_PER_DAY,
   NEW_PER_SOURCE_PER_DAY,
   PHOTOS_PER_SOURCE,
@@ -27,6 +29,7 @@ import { feedUrlSealer } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import {
   cfPhotoQueue,
+  d1TransformBudget,
   feedBlobKey,
   type FeedImageJob,
   PASS_THROUGH_MAX_BYTES,
@@ -34,6 +37,7 @@ import {
   photoBudget,
   type PhotoDeps,
   type PhotoQueue,
+  monthlyTransforms,
   r2PhotoBlobs,
   sha256Hex,
   storeFeedImages,
@@ -347,7 +351,7 @@ const poll = (opts: Parameters<typeof pollDataSources>[1], customEnv = env) => p
 /** Run the consumer on these jobs at `at`; the messages it acked and retried. */
 async function consume(
   jobs: FeedImageJob[],
-  deps: Omit<PhotoDeps, 'now' | 'blobs'> & { blobs?: PhotoBlobs },
+  deps: Omit<PhotoDeps, 'now' | 'blobs' | 'transforms'> & { blobs?: PhotoBlobs; transforms?: PhotoDeps['transforms'] },
   at = NOW,
   { attempts = 1, db = env.DB }: { attempts?: number; db?: D1Database } = {},
 ) {
@@ -362,7 +366,8 @@ async function consume(
     retry: () => retried.push(body.url),
   }));
   const batch = { queue: 'signforge-feed-images', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<FeedImageJob>;
-  await storeFeedImages(batch, db, { blobs: photoBlobs, ...deps, now: at });
+  // Unless a test counts them, the month's Images transformations never run out.
+  await storeFeedImages(batch, db, { blobs: photoBlobs, transforms: { spent: async () => false, take: async () => true }, ...deps, now: at });
   return { acked, retried };
 }
 
@@ -962,6 +967,68 @@ describe('budgets, resilience and cleanup', () => {
       expect(() => photoBudget({ FEED_PHOTOS_ORG_DAILY: value }), value).toThrow(/FEED_PHOTOS_ORG_DAILY must be a whole number from 1 to 1800/);
     expect(photoBudget({ FEED_PHOTOS_SOURCE_DAILY: '1800' })).toEqual({ ...DEFAULT_PHOTO_BUDGET, perSource: 1800 });
     expect(photoBudget({})).toEqual(DEFAULT_PHOTO_BUDGET);
+  });
+
+  it("asks Images for no more than the month's ceiling: a photo past it, and every photo once it is spent, waits with images-month-budget unfetched (#500)", async () => {
+    const id = await news('https://month.test/rss');
+    // Sizes no other test's photos have: the Images stub draws by size, and a shared thumbnail would be another's too.
+    const [big, mid, small, later] = ['big', 'mid', 'small', 'later'].map((n) => `https://cdn.month.test/${n}.jpg`);
+    const photos = web({
+      [big!]: { body: jpeg(3010, 2000, 'big') },
+      [mid!]: { body: jpeg(812, 600, 'mid') },
+      [small!]: { body: jpeg(322, 180, 'small') },
+      [later!]: { body: jpeg(814, 600, 'later') },
+    });
+    const { images } = imagesStub();
+    // A ceiling of 2, in a month of its own: the big photo takes both (its copy and its thumbnail).
+    const at = Date.UTC(2031, 0, 10);
+    const transforms = d1TransformBudget(env.DB, 2, at);
+    await poll({ now: at, guards: web({ 'https://month.test/rss': { body: feedOf(3, (i) => [big, mid, small][i]!) } }).guards });
+    await consume(take(), { guards: photos.guards, images, transforms }, at);
+    expect((await row(big!))?.fileSha256).toEqual(expect.any(String));
+    // The next needs one, past the ceiling; a small one that passes through needs none.
+    expect(await row(mid!)).toMatchObject({ fileSha256: null, lastError: 'images-month-budget' });
+    expect((await row(small!))?.fileSha256).toEqual(expect.any(String));
+    expect(await imagesTransformsUsed(env.DB, imagesMonth(at))).toBe(2);
+    // Spent: the next batch fetches nothing at all.
+    await o.scope.dataSources.update(id, { nextPollAt: at + 5 * MIN, etag: null });
+    await poll({ now: at + 5 * MIN, guards: web({ 'https://month.test/rss': { body: feedOf(1, () => later!) } }).guards });
+    const fetched = photos.requests.length;
+    await consume(take(), { guards: photos.guards, images, transforms: d1TransformBudget(env.DB, 2, at + 5 * MIN) }, at + 5 * MIN);
+    expect(photos.requests).toHaveLength(fetched);
+    expect(await row(later!)).toMatchObject({ fileSha256: null, lastError: 'images-month-budget' });
+    // A new month starts again.
+    const next = Date.UTC(2031, 1, 1);
+    await o.scope.dataSources.update(id, { nextPollAt: next, etag: null });
+    await poll({ now: next + RETRY_MS * 48, guards: web({ 'https://month.test/rss': { body: feedOf(1, () => later!) } }).guards });
+    await consume(take(), { guards: photos.guards, images, transforms: d1TransformBudget(env.DB, 2, next) }, next + RETRY_MS * 48);
+    expect((await row(later!))?.fileSha256).toEqual(expect.any(String));
+  });
+
+  it('counts the month in one D1 read a batch and one write a photo that needs Images, and reads its ceiling as a whole number', async () => {
+    const [a, b] = ['a', 'b'].map((n) => `https://cdn.month-cost.test/${n}.jpg`);
+    await news('https://month-cost.test/rss');
+    const at = Date.UTC(2031, 5, 10);
+    await poll({ now: at, guards: web({ 'https://month-cost.test/rss': { body: feedOf(2, (i) => [a, b][i]!) } }).guards });
+    const jobs = take();
+    // Sizes no other test's photos have: the Images stub draws by size, and a shared thumbnail would be another's too.
+    const guards = web({ [a!]: { body: jpeg(816, 600, 'cost-a') }, [b!]: { body: jpeg(818, 600, 'cost-b') } }).guards;
+    /** The D1 calls of storing one of the photos, each needing one transformation (its thumbnail). */
+    const calls = async (job: FeedImageJob, transforms?: (db: D1Database) => PhotoDeps['transforms']) => {
+      const counter = countingDb(env.DB);
+      await consume([job], { guards, images: imagesStub().images, ...(transforms && { transforms: transforms(counter.db) }) }, at, { db: counter.db });
+      return counter.counts().apiCalls;
+    };
+    const uncounted = await calls(jobs.find((j) => j.url === a)!);
+    const counted = await calls(jobs.find((j) => j.url === b)!, (db) => d1TransformBudget(db, 100, at));
+    expect(counted - uncounted).toBe(2);
+    expect(await imagesTransformsUsed(env.DB, imagesMonth(at))).toBe(1);
+    for (const value of ['', '0', '4.5e3', '0x10', ' 4500', '1000001'])
+      expect(() => monthlyTransforms({ IMAGES_MONTHLY_TRANSFORMS: value }), value).toThrow(
+        /IMAGES_MONTHLY_TRANSFORMS must be a whole number from 1 to 1000000/,
+      );
+    expect(monthlyTransforms({})).toBe(4500);
+    expect(monthlyTransforms({ IMAGES_MONTHLY_TRANSFORMS: '2000' })).toBe(2000);
   });
 
   it('resumes a day later: the 24 hours since a photo was held are what count', async () => {
