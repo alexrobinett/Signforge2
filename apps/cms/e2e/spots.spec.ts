@@ -727,3 +727,42 @@ test("a save that fails leaves the stage's toggles uncovered on a desktop, its a
   expect(hit).toBe('Landscape');
   await page.unroute('**/api/tools/update_spot');
 });
+
+test('a save that fails beside the agent drawer at 1280 px: the alert sticks at the top, and a field focused above it is clear of it (review of #485)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await signInAs(page, `e2e-spots-alert-drawer-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Harbour Wharf Bagels', ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
+  const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
+  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  // The drawer beside the page leaves the editor narrow on a wide window: its alert sticks, with no top bar above it.
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  await expect(page.getByRole('dialog', { name: 'Agent' })).toBeVisible();
+  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  const duration = page.getByLabel('Duration');
+  await duration.scrollIntoViewIfNeeded();
+  await duration.fill('12');
+  const alert = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(alert).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(async () => Math.round((await alert.boundingBox())?.y ?? -1)).toBe(0);
+  // Greeting, scrolled under the alert, then reached with Shift+Tab from the field below it: it comes out from under.
+  const greeting = page.getByLabel('Greeting (empty for good morning/afternoon/evening)');
+  const message = page.getByLabel('Message');
+  await message.focus();
+  await page.evaluate(() => {
+    const field = document.activeElement as HTMLElement;
+    const cover = document.querySelector('[data-save-alert]')!.getBoundingClientRect();
+    window.scrollBy(0, field.getBoundingClientRect().top - cover.bottom);
+  });
+  await page.keyboard.press('Shift+Tab');
+  await expect(greeting).toBeFocused();
+  const [field, cover] = await Promise.all([greeting.boundingBox(), alert.boundingBox()]);
+  expect(field!.y).toBeGreaterThanOrEqual(cover!.y + cover!.height - 1);
+  await page.unroute('**/api/tools/update_spot');
+});
