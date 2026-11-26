@@ -700,3 +700,30 @@ test('a spot a playlist plays is refused, naming the playlist with a link to it,
   await expect(page).toHaveURL(new RegExp(`/playlists/${playlist.id}$`));
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
+
+test("a save that fails leaves the stage's toggles uncovered on a desktop, its alert in its place above the form (review of #485)", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await signInAs(page, `e2e-spots-alert-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Harbour Wharf Deli', ADDRESS);
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
+  const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
+  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  await page.goto(`/spots/${spot.id}`);
+  await hydrated(page);
+  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  const duration = page.getByLabel('Duration');
+  await duration.scrollIntoViewIfNeeded();
+  await duration.fill('12');
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' })).toBeAttached();
+  await duration.scrollIntoViewIfNeeded();
+  // What is drawn at the middle of Landscape is Landscape, not the alert over it.
+  const landscape = page.getByRole('region', { name: 'Live preview' }).getByRole('button', { name: 'Landscape' });
+  const box = (await landscape.boundingBox())!;
+  const hit = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x!, y!)?.closest('button')?.textContent ?? null,
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  expect(hit).toBe('Landscape');
+  await page.unroute('**/api/tools/update_spot');
+});

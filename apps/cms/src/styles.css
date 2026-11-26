@@ -286,6 +286,13 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+  /* Under a phone's top bar and an editor's save alert stuck below it (#479), a field focused by Tab or Shift+Tab
+     scrolls clear of both: the bar's 3.5rem and room for an alert of three lines (WCAG 2.4.11, review of #485). */
+  @media (width < 64rem) {
+    html:has([data-save-alert]) {
+      scroll-padding-top: 12rem;
+    }
+  }
   /* A fieldset shrinks like any box (browsers default it to its content's width), so a row of chips can wrap. */
   fieldset {
     min-width: 0;

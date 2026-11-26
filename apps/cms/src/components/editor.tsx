@@ -83,8 +83,9 @@ export function SaveAlert({ error, stale, onReload, onRetry }: { error: string |
   if (!stale && !error) return null;
   return (
     // Announced as it appears (#479), and kept in view under a phone's top bar while the form below it scrolls: a failure
-    // there was off screen while the field that failed was being edited.
-    <Alert variant="destructive" role="alert" className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 lg:top-0">
+    // there was off screen while the field that failed was being edited. Only in a narrow editor: a wide one fits the
+    // viewport, and its stage is sticky at the top, where the alert would cover its toggles (review of #485).
+    <Alert variant="destructive" role="alert" data-save-alert className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 @3xl:static">
       <AlertDescription className="flex flex-wrap items-center gap-3">
         {error}
         {stale ? (
