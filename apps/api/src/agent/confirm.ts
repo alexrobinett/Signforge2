@@ -22,6 +22,7 @@ import {
   entryToDelete,
   type Grant,
   OVERRIDE_LIMIT_MS,
+  orgGroups,
   permits,
   dryPublish,
   reachesScreens,
@@ -101,7 +102,8 @@ async function reachOf(org: OrgScope, v: Row): Promise<{ words: string; screens:
   if (v.target === 'group') {
     const group = await org.screenGroups.get(str(v.groupId));
     if (!group) throw new CardProblem(`no group ${str(v.groupId)}`);
-    const screens = (await org.screenGroups.members(group.id)).sort();
+    // A smart group's are the screens its rule matches now (#186), as the takeover will reach them.
+    const screens = (await orgGroups(org)).screensIn(group.id);
     return { words: `on the ${group.name} group (${screensWord(screens.length)})`, screens };
   }
   if (v.target === 'screen') {

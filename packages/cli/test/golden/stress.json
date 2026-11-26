@@ -32,10 +32,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33": {
-      "size": 78184,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -71,6 +67,10 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3": {
+      "size": 77944,
+      "type": "text/html"
     },
     "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
       "size": 395766,
@@ -337,10 +337,10 @@
       },
       "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
     },
-    "base/clock@1.3.0": {
+    "base/clock@1.4.0": {
       "manifest": {
         "id": "clock",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "name": "Clock",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
         "fields": {
@@ -385,7 +385,7 @@
         "background": "#05070d",
         "protocol": 2
       },
-      "html": "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33"
+      "html": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3"
     },
     "base/countdown@1.1.1": {
       "manifest": {
@@ -1544,7 +1544,7 @@
       "id": "clock",
       "name": "Clock",
       "kind": "template",
-      "template": "base/clock@1.3.0",
+      "template": "base/clock@1.4.0",
       "data": {
         "greeting": "",
         "message": "Welcome to SignForge",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "aef7805d47a2c4101ffc35241a2d8e500725e557e1b3a767da3f59637005b5d6"
+  "id": "64d06809aa99d1fab312f91ed965edb9c1364e091050b44002e7f9825a1ca407"
 }

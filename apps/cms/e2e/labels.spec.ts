@@ -188,8 +188,8 @@ test('#185 done when: label 3 selected screens in bulk, filter by a chip and kee
   const bar = page.getByRole('region', { name: 'Selected screens' });
   await bar.getByRole('button', { name: 'Labels…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Labels on 3 screens' });
-  // What the selection has now, by key: the store's own section is what the fix is made from.
-  await expect(dialog.getByText('north (2), south (1)')).toBeVisible();
+  // What the selection has now, by key, with the case exactly as shown: "north" and "North" are counted as one value.
+  await expect(dialog.getByText('North (2), south (1)', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Takes effect at the next publish.')).toBeVisible();
   await dialog.getByLabel('Label', { exact: true }).fill('store');
   await dialog.getByLabel('Value').fill('0142');
