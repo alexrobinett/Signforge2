@@ -71,6 +71,11 @@ interface ScreensState {
   selection: { orgId: string | null; ids: string[] };
   /** Adding the selection to a group, or removing it from one, is on its way: another is ignored. */
   bulkPending: boolean;
+  /**
+   * The Screens page's search as typed, the box's own value while the URL catches up (review of #601): `writes` counts
+   * the URL changes on their way. With none on the way, the URL's `q` is the box's, so a Back or a link shows its own.
+   */
+  search: { text: string; writes: number };
 }
 
 /** A command or change sent from a screen's page, with what to say when it worked. */
@@ -117,6 +122,8 @@ export interface ScreensSlice {
   addScreensToGroup: (orgId: string, group: GroupView, screenIds: string[]) => Promise<void>;
   /** Takes the screens out of the group, in one call. */
   removeScreensFromGroup: (orgId: string, group: GroupView, screenIds: string[]) => Promise<void>;
+  /** The Screens page's search as typed: the box shows it at once, and the URL's `q` follows. */
+  searchScreens: (text: string) => Promise<void>;
 }
 
 const newPairing = (): PairingDraft => ({
@@ -139,7 +146,17 @@ const newPage = (): ScreenPageState => ({
   revoking: false,
 });
 
-const initialScreens: ScreensState = { pairing: newPairing(), page: newPage(), drafts: {}, selection: { orgId: null, ids: [] }, bulkPending: false };
+const initialScreens: ScreensState = {
+  pairing: newPairing(),
+  page: newPage(),
+  drafts: {},
+  selection: { orgId: null, ids: [] },
+  bulkPending: false,
+  search: { text: '', writes: 0 },
+};
+
+/** What the Screens page's search box shows: as typed while its URL writes are on their way, else the URL's `q`. */
+export const searchText = (s: ScreensState, q: string | undefined) => (s.search.writes > 0 ? s.search.text : (q ?? ''));
 
 const NONE: string[] = [];
 
@@ -340,6 +357,14 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
         return { ...s, selection: { orgId, ids: selected ? [...new Set([...ids, ...screenIds])] : ids.filter((id) => !screenIds.includes(id)) } };
       }),
     clearScreenSelection: () => screens((s) => ({ ...s, selection: { orgId: null, ids: [] } })),
+    async searchScreens(text) {
+      screens((s) => ({ ...s, search: { text, writes: s.search.writes + 1 } }));
+      try {
+        await router.navigate({ to: '/screens', search: (prev: Record<string, unknown>) => ({ ...prev, q: text || undefined }), replace: true });
+      } finally {
+        screens((s) => ({ ...s, search: { ...s.search, writes: s.search.writes - 1 } }));
+      }
+    },
     addScreensToGroup: (orgId, group, screenIds) => changeMembers(orgId, group, screenIds, true),
     removeScreensFromGroup: (orgId, group, screenIds) => changeMembers(orgId, group, screenIds, false),
   };

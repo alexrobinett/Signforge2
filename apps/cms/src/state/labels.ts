@@ -3,6 +3,7 @@
  * A label edit is a merge (`update_screen_labels`), never a versioned draft: it changes only the keys it names, so two
  * people labelling one screen never refuse each other. Suggestions come from `list_label_keys` (`labelKeysQuery`).
  */
+import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
 import { labelChange, labelRows, labelsReady, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
@@ -23,6 +24,8 @@ interface LabelsState {
   editor: { screenId: string; pending: boolean; error: string | null } | null;
   /** The screen the pairing form would copy labels from, chosen but not copied until asked (review of #597). */
   copyFrom: string;
+  /** The Screens page's "+ Filter" dialog, while open: the key chosen and the values ticked. Applying it puts a chip in the URL. */
+  filter: { key: string; values: string[] } | null;
 }
 
 export interface LabelsSlice {
@@ -40,6 +43,11 @@ export interface LabelsSlice {
   copyLabelsForPairing: (labels: Readonly<Record<string, string>>) => void;
   /** Empties the pairing form's labels, once its screen is paired. */
   clearPairingLabels: () => void;
+  /** Opens the "+ Filter" dialog, on `key` and its values in the URL's chip when it has one. */
+  openLabelFilter: (key?: string, values?: string[]) => void;
+  chooseFilterKey: (key: string) => void;
+  tickFilterValue: (value: string, ticked: boolean) => void;
+  closeLabelFilter: () => void;
   /** Saves the editor's rows as one merge into the screen's labels, and closes it. */
   saveScreenLabels: (orgId: string, screen: ScreenView) => Promise<void>;
 }
@@ -55,7 +63,17 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
-    labels: { rows: {}, editor: null, copyFrom: '' },
+    labels: { rows: {}, editor: null, copyFrom: '', filter: null },
+    openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
+    chooseFilterKey: (key) => labels((l) => ({ ...l, filter: { key, values: [] } })),
+    // Values compare as selectors fold them: a chip's `North` is the list's `north`, ticked and unticked as one (review of #601).
+    tickFilterValue: (value, ticked) =>
+      labels((l) => {
+        if (!l.filter) return l;
+        const others = l.filter.values.filter((v) => foldValue(v) !== foldValue(value));
+        return { ...l, filter: { ...l.filter, values: ticked ? [...others, value] : others } };
+      }),
+    closeLabelFilter: () => labels((l) => ({ ...l, filter: null })),
     editScreenLabels: (screen) =>
       labels((l) => ({
         ...l,

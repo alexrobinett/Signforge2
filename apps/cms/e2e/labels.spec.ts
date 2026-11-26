@@ -96,3 +96,77 @@ test('label a screen on its page, see a lonely value flagged, and pair a new scr
   await expect(paired.getByText('region: north')).toBeVisible();
   await expect(paired.getByText('store: 0142')).toBeVisible();
 });
+
+test('find screens by label: a typed chip kept in the URL across a reload, "+ Filter", and group by store', async ({ page, request }) => {
+  await signInAs(page, `e2e-label-filters-${Date.now()}@example.com`, '192.0.2.187');
+  await createOrg(page, 'Harbor Fleet', '192.0.2.187');
+  const claim = async (name: string, labels: Record<string, string>) =>
+    tool(page, 'claim_screen', { code: await pairingCode(request), name, timezone: 'Europe/London', orientation: 'landscape', labels });
+  await claim('Drive North 1', { region: 'north', type: 'drive-thru', store: '0142' });
+  await claim('Drive North 2', { region: 'North', type: 'drive-thru', store: '0142' });
+  await claim('Kiosk North', { region: 'north', type: 'kiosk', store: '0009' });
+  await claim('Drive South', { region: 'south', type: 'drive-thru' });
+
+  await page.goto('/screens?view=table');
+  await hydrated(page);
+  const rows = page.getByRole('row').filter({ has: page.getByRole('rowheader') });
+  await expect(rows).toHaveCount(4);
+  // The search finds label values too; a typed key=value becomes a chip.
+  await page.getByLabel('Search screens').fill('region=north');
+  await page.getByLabel('Search screens').press('Enter');
+  const chips = page.getByRole('list', { name: 'Label filters' });
+  await expect(chips.getByText('region: north')).toBeVisible();
+  await expect(page.getByLabel('Search screens')).toHaveValue('');
+  await expect(rows).toHaveCount(3);
+  await expect(page).toHaveURL(/l=region%3Anorth/);
+
+  // Kept in the URL: a reload shows the same chip and the same screens.
+  await page.reload();
+  await hydrated(page);
+  await expect(chips.getByText('region: north')).toBeVisible();
+  await expect(rows).toHaveCount(3);
+
+  // Typing in the middle of the search keeps the caret where it is (review of #601).
+  const box = page.getByLabel('Search screens');
+  await box.fill('drive north');
+  await box.press('Home');
+  for (let i = 0; i < 'drive'.length; i++) await box.press('ArrowRight');
+  await box.pressSequentially('XY');
+  await expect(box).toHaveValue('driveXY north');
+  await box.fill('');
+
+  // "+ Filter" adds a chip from the keys and values the screens have.
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  const filter = page.getByRole('dialog', { name: 'Filter by a label' });
+  await filter.getByLabel('Label', { exact: true }).selectOption('type');
+  await filter.getByLabel('drive-thru').check();
+  await axe(page);
+  await filter.getByRole('button', { name: 'Apply' }).click();
+  await expect(chips.getByText('type: drive-thru')).toBeVisible();
+  await expect(rows).toHaveCount(2);
+
+  // Group by store: a section per store, and one for the screens without it.
+  await page.getByRole('button', { name: 'Remove filter type' }).click();
+  await page.getByLabel('Group by').selectOption('store');
+  await expect(page.getByRole('rowheader', { name: 'store: 0009 · 1 screen' })).toBeVisible();
+  await expect(page.getByRole('rowheader', { name: 'store: 0142 · 2 screens' })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove filter region' }).click();
+  await expect(page.getByRole('rowheader', { name: 'No store · 1 screen' })).toBeVisible();
+  await expect(page).toHaveURL(/by=store/);
+  await shotsBoth(page, '185-table-grouped');
+  await axe(page);
+
+  // A key every object has on its prototype groups like any other (review of #601).
+  await claim('Odd one', { constructor: 'x' });
+  await page.goto('/screens?view=table&by=constructor');
+  await hydrated(page);
+  await expect(page.getByRole('rowheader', { name: 'constructor: x · 1 screen' })).toBeVisible();
+  await expect(page.getByRole('rowheader', { name: 'No constructor · 4 screens' })).toBeVisible();
+
+  // Tiles, grouped the same way, with each screen's labels under its name.
+  await page.goto('/screens?by=store&l=type:drive-thru');
+  await hydrated(page);
+  await expect(page.getByRole('heading', { name: 'store: 0142 · 2 screens' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No store · 1 screen' })).toBeVisible();
+  await shotsBoth(page, '185-tiles-grouped');
+});
