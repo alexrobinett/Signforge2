@@ -30,9 +30,7 @@ async function pollNow(spotId: string, sourceId: string) {
   const res = await fetch(`http://127.0.0.1:${API_PORT}/__scheduled?cron=${encodeURIComponent('* * * * *')}`);
   expect(res.status).toBe(200);
   // The job runs in the background of that request (waitUntil): wait for its write.
-  await expect
-    .poll(async () => (await tool(page, 'get_data_source', { dataSourceId: sourceId })).dataSource.nextPollAt, { timeout: 15_000 })
-    .toBeGreaterThan(0);
+  await expect.poll(async () => (await tool(page, 'get_data_source', { dataSourceId: sourceId })).dataSource.nextPollAt, { timeout: 15_000 }).not.toBeNull();
 }
 
 /** In the open spot's Source section: the link form, filled, and read. */

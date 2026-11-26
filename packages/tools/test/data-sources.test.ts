@@ -145,9 +145,11 @@ describe('data sources', () => {
   it('allows 10 sources per org', async () => {
     const have = (await owner.org.dataSources.list()).length;
     for (let i = have; i < 10; i++) await call('save_data_source', { name: `Feed ${i}`, format: 'json', feedUrl: `https://a.example.com/${i}` });
+    // With the cap in its details, which the spot editor tells from another conflict by (review of #546).
     expect(await refusal('save_data_source', { name: 'Eleventh', format: 'json', feedUrl: 'https://a.example.com/11' })).toMatchObject({
       ok: false,
       error: 'conflict',
+      details: { max: 10 },
     });
   });
 

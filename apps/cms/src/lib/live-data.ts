@@ -178,6 +178,17 @@ const WEATHER_SOURCE_ID = /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/;
 /** Whether two of `weatherSource`'s ids are for the same place and units, whatever variables each asks for. */
 export const sameWeather = (a: string, b: string) => madeByEditor(a) && madeByEditor(b) && a.slice(0, a.lastIndexOf('-')) === b.slice(0, b.lastIndexOf('-'));
 
+/** A `weatherSource` id without its wind unit. */
+const windless = (id: string) => id.replace(/-(?:mph|kmh)-(?=[0-9a-f]{6}$)/, '-');
+
+/**
+ * A source the org has that the spot can read instead of making `wanted`: `wanted` itself, or, for a template with no
+ * wind unit (Info frame), one for the same place, temperature and variables in either wind unit, such as a °C and mph
+ * org's Weather made, or an Info frame source made before wind followed temperature (review of #546).
+ */
+export const weatherToReuse = (live: LiveSourceDef, wanted: string, existing: readonly string[]) =>
+  existing.includes(wanted) ? wanted : live.units?.wind ? undefined : existing.find((id) => madeByEditor(id) && windless(id) === windless(wanted));
+
 /**
  * The source a spot stays on when `wanted` cannot be made (the org at its ten, #541): one it binds now (`bound`), that
  * the editor made for the same place and units and the org still has (`existing`). Its variables are fewer, the
