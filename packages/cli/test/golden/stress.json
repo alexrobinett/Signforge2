@@ -32,17 +32,9 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33": {
-      "size": 78184,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
-    },
-    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
-      "size": 395144,
-      "type": "text/html"
     },
     "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f": {
       "size": 44306,
@@ -75,6 +67,14 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3": {
+      "size": 77944,
+      "type": "text/html"
+    },
+    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
+      "size": 395766,
+      "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
@@ -206,10 +206,10 @@
       },
       "html": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f"
     },
-    "base/announcement@1.2.0": {
+    "base/announcement@1.1.2": {
       "manifest": {
         "id": "announcement",
-        "version": "1.2.0",
+        "version": "1.1.2",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -251,6 +251,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -263,7 +264,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -335,12 +335,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
+      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
     },
-    "base/clock@1.3.0": {
+    "base/clock@1.4.0": {
       "manifest": {
         "id": "clock",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "name": "Clock",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
         "fields": {
@@ -385,7 +385,7 @@
         "background": "#05070d",
         "protocol": 2
       },
-      "html": "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33"
+      "html": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3"
     },
     "base/countdown@1.1.1": {
       "manifest": {
@@ -459,6 +459,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -471,7 +472,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,6 +626,8 @@
           "events": {
             "type": "list",
             "label": "Events",
+            "maxItems": 25,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -651,9 +653,7 @@
                 "label": "Location",
                 "default": ""
               }
-            },
-            "maxItems": 25,
-            "default": []
+            }
           },
           "rows": {
             "type": "number",
@@ -685,13 +685,13 @@
         ],
         "uses": [],
         "background": "#0d1117",
-        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
@@ -833,6 +833,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -849,9 +851,7 @@
                 "label": "Source",
                 "default": ""
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
+              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,18 +970,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              },
-              "label": "Weather"
+              }
             },
             "headlines": {
+              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              },
-              "label": "Headlines"
+              }
             }
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -1007,6 +1007,7 @@
           "items": {
             "type": "list",
             "label": "Items",
+            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1037,8 +1038,7 @@
                 ],
                 "default": ""
               }
-            },
-            "maxItems": 12
+            }
           },
           "footnote": {
             "type": "text",
@@ -1072,13 +1072,13 @@
         ],
         "uses": [],
         "background": "#14110f",
-        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
     },
@@ -1104,6 +1104,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1130,9 +1132,7 @@
                 "type": "image",
                 "label": "Photo"
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "language": {
             "type": "text",
@@ -1190,14 +1190,14 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1298,6 +1298,8 @@
           "events": {
             "type": "list",
             "label": "Bookings",
+            "maxItems": 25,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1322,9 +1324,7 @@
                 "label": "Organiser",
                 "default": ""
               }
-            },
-            "maxItems": 25,
-            "default": []
+            }
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,13 +1368,13 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
@@ -1468,7 +1468,6 @@
           "canvas"
         ],
         "background": "#0b1a33",
-        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1487,7 +1486,8 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
     }
@@ -1517,7 +1517,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.2.0",
+      "template": "base/announcement@1.1.2",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -1544,7 +1544,7 @@
       "id": "clock",
       "name": "Clock",
       "kind": "template",
-      "template": "base/clock@1.3.0",
+      "template": "base/clock@1.4.0",
       "data": {
         "greeting": "",
         "message": "Welcome to SignForge",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "61ef6fcac0cae73ca2fae24cc6582a466ac72221c4d33e83ce1faef80ca052a9"
+  "id": "829f0a4be0ed8f1ffa2065d64f58958f1084bf0b98837ae40fdf89b2167a6547"
 }

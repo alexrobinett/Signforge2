@@ -1,0 +1,1 @@
+screen 1920x1080 dpr 1  frames 300  fps 60.00  median 16.700 ms  p1 16.600  p99 16.800  max 16.800  >25ms 0

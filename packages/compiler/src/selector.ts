@@ -25,6 +25,25 @@ type Facts = Readonly<Record<string, string>>;
 /** What two values are compared as. */
 export const foldValue = (v: string) => v.trim().toLowerCase();
 
+/** A label key: 1 to 63 lowercase letters, digits, `-`, `_` or `.`, starting and ending with a letter or digit. */
+export const LABEL_KEY = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
+/** A label value's characters: printable, spaces allowed (`\p{Cs}`: a lone surrogate, which D1 reads back as U+FFFD). */
+export const LABEL_VALUE = /^[^\p{Cc}\p{Zl}\p{Zp}\p{Cs}]*$/u;
+/** The longest label value, trimmed. */
+export const MAX_LABEL_VALUE = 63;
+/** A screen's name, id and live status are not labels, so no label or selector names them; `sf.` keys are SignForge's. */
+export const REFUSED_LABEL_KEYS: readonly string[] = ['name', 'id', 'status'];
+
+/** Why the tools refuse a label, in their words: the one place they are written (packages/tools fields.ts uses them). */
+export const LABEL_WORDS = {
+  key: 'a label key is 1 to 63 lowercase letters, digits, - _ or ., starting and ending with a letter or digit',
+  refused: 'name, id and status are not labels',
+  reserved: 'keys starting sf. are reserved',
+  empty: 'a label value cannot be empty',
+  long: `a label value is at most ${MAX_LABEL_VALUE} characters`,
+  printable: 'a label value is printable characters, spaces allowed',
+};
+
 /** The keys of `systemLabels`: no label may have one. */
 export const SYSTEM_KEYS = ['orientation', 'kind', 'timezone', 'locale'] as const;
 
@@ -70,4 +89,51 @@ export function format(selector: Selector): string {
       }
     })
     .join(', ');
+}
+
+/**
+ * Why a label `key: value` would be refused, as the tools say it, or undefined: for a check made before a call, a CSV
+ * import's preview (#188). A system key is the caller's to refuse: it is a column, not a label, to them.
+ */
+export function labelProblem(key: string, value: string): string | undefined {
+  if (!LABEL_KEY.test(key)) return LABEL_WORDS.key;
+  if (REFUSED_LABEL_KEYS.includes(key)) return LABEL_WORDS.refused;
+  if (key.startsWith('sf.')) return LABEL_WORDS.reserved;
+  const v = value.trim();
+  if (!v) return LABEL_WORDS.empty;
+  if (v.length > MAX_LABEL_VALUE) return LABEL_WORDS.long;
+  if (!LABEL_VALUE.test(v)) return LABEL_WORDS.printable;
+  return undefined;
+}
+
+/** A screen as a smart group's rule reads it: its id, its labels and the settings its system labels come from. */
+export interface GroupedScreen {
+  id: string;
+  labels: Readonly<Record<string, string>>;
+  orientation: Orientation;
+  kind: ScreenKind;
+  timezone: string;
+  locale: string | null;
+}
+
+/**
+ * Which groups each screen is in (#186): a group of listed screens by its rows, a smart group (one of `rules`) by its
+ * selector over each screen's labels and system labels; a row under a smart group counts for nothing. The publish,
+ * the takeover tool, publish requests, the takeover card and the brand kits all ask this, so a group means the same
+ * screens everywhere. Screens in no group are absent.
+ */
+export function groupsOf(
+  screens: readonly GroupedScreen[],
+  rules: readonly { id: string; selector: Selector }[],
+  members: readonly { groupId: string; screenId: string }[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (screenId: string, groupId: string) => out.set(screenId, [...(out.get(screenId) ?? []), groupId]);
+  const ruled = new Set(rules.map((g) => g.id));
+  for (const m of members) if (!ruled.has(m.groupId)) add(m.screenId, m.groupId);
+  for (const s of screens) {
+    const facts = { ...systemLabels(s), ...s.labels };
+    for (const g of rules) if (matches(g.selector, facts)) add(s.id, g.id);
+  }
+  return out;
 }
