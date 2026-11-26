@@ -398,7 +398,7 @@ function ScreenPage() {
             title="Labels"
             action={
               canManage && !revoked ? (
-                <Button variant="link" size="sm" className="h-auto px-0 underline" onClick={() => editScreenLabels(screen)}>
+                <Button variant="link" size="sm" className="h-auto px-0 underline" aria-label="Edit labels" onClick={() => editScreenLabels(screen)}>
                   Edit
                 </Button>
               ) : undefined

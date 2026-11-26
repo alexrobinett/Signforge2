@@ -44,7 +44,7 @@ test('label a screen on its page, see a lonely value flagged, and pair a new scr
   await expect(labels.getByText('No labels yet.')).toBeVisible();
   // System labels are shown, read-only, from its settings.
   await expect(labels.getByText('orientation: landscape')).toBeVisible();
-  await labels.getByRole('button', { name: 'Edit' }).click();
+  await labels.getByRole('button', { name: 'Edit labels' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Labels' });
   await dialog.getByLabel('Label 1 key').fill('region');
