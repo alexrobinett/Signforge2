@@ -120,7 +120,7 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `create_schedule_entry` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, idempotencyKey? }` | `{ entry }` |
 | `start_takeover` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, startsAt?, endsAt, idempotencyKey? }` | `{ entry }` |
 | `update_schedule_entry` | content:draft | editor | `{ scheduleEntryId, playlistId?, target?, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, startsAt?, endsAt?, ifVersion? }` | `{ entry }` |
-| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId, ifVersion? }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version` |
+| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId, ifVersion? }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version`. With `ifVersion`, one changed since is refused (`conflict`), published or not, so a delete that races an edit never goes through |
 | `end_takeover` | content:publish | editor | `{ scheduleEntryId }` | as `publish`: the takeover deleted and published alone, in one batch |
 | `publish_takeover` | content:publish | editor | `{ playlistId, target?, groupId?, screenId?, startsAt?, endsAt, with? }` | as `publish`, and `entry`: a takeover made and published, with the drafts in `with` pinned at their versions, in one batch; one it cannot publish writes nothing (`conflict`), not even a draft |
 | `get_org_settings` | content:read | viewer | `{}` | `{ settings }` |

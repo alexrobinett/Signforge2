@@ -26,6 +26,7 @@ const appStore = () =>
     forgetOrgSettings: () => {},
     forgetAgentDrawer,
     cancelPublishAll,
+    dropSampleCheck: () => {},
   }));
 
 describe('orgCommands', () => {

@@ -54,7 +54,7 @@ import {
   type ToolCard,
 } from './chat-shapes';
 import { CardProblem, canonical, CONFIRM_MS, CONFIRMABLE, pressable, whyNot } from './confirm';
-import { draftTools, MAX_DRAFTS, propose, SAVE_STATEMENTS, saveStatements } from './drafts';
+import { draftTools, join, MAX_DRAFTS, propose, SAVE_STATEMENTS, saveStatements } from './drafts';
 import { type AgentDeps, dayIn, fenced, readBody } from './inline';
 import { type ModelReach, turnWith } from './provider';
 
@@ -462,9 +462,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
               // A second change to the same thing joins the first, on the same read, so the save writes them as one and conflicts with neither.
               const at = made.target ? drafts.findIndex((d) => d.target?.kind === made.target?.kind && d.target?.id === made.target?.id) : -1;
               const earlier = drafts[at];
-              const next = earlier
-                ? drafts.with(at, { ...earlier, input: { ...earlier.input, ...made.input, ifVersion: earlier.input.ifVersion } })
-                : [...drafts, made];
+              const next = earlier ? drafts.with(at, join(earlier, made)) : [...drafts, made];
               if (saveStatements(next) > SAVE_STATEMENTS) problem = 'more than one save holds: draft fewer changes, or a shorter play order';
               else {
                 drafts.splice(0, drafts.length, ...next);

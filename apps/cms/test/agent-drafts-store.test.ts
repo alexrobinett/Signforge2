@@ -4,14 +4,17 @@
 // and carrying on from where one that failed stopped. The API, the pages' reads and the tools are
 // stubs; nothing waits on a clock.
 import { type AnswerCard, CHAT_EVENTS } from '@signforge/api/agent-chat';
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { type AgentDrawerSlice, createAgentDrawerSlice } from '../src/state/agent-drawer';
 import { initialOrgs } from '../src/state/orgs';
 
-vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
-vi.mock('~/lib/live', () => ({ orgOnScreen: () => 'org_1' }));
+// The org the tab shows, which a test changes as a switch does; each request names one, as the tab's headers would.
+const active = vi.hoisted(() => ({ org: 'org_1' }));
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({ [TAB_ORG_HEADER]: active.org }) }));
+vi.mock('~/lib/live', () => ({ orgOnScreen: () => active.org }));
 // The pages' reads, for the summaries: an empty org whose card template has a headline; each read
 // fails while `fail`, and the templates are read without the card's version while `stale` is above 0.
 const reads = vi.hoisted(() => ({ fail: false, stale: 0, templatesRead: 0, hold: undefined as Promise<void> | undefined }));
@@ -36,23 +39,24 @@ vi.mock('~/queries/spots', () => ({
 }));
 // The tools Undo calls: each answers with `answer`, or throws while `failing` names it.
 const tools = vi.hoisted(() => ({
-  calls: [] as { name: string; input: unknown }[],
+  calls: [] as { name: string; input: unknown; org: string | undefined }[],
   failing: new Set<string>(),
   answer: (_name: string, _input: any): unknown => ({}),
 }));
 vi.mock('~/lib/tools', async (actual) => ({
   ...(await actual<object>()),
-  callToolByName: async (name: string, input: unknown) => {
-    tools.calls.push({ name, input });
+  callToolByName: async (name: string, input: unknown, org?: string) => {
+    tools.calls.push({ name, input, org: org ?? active.org });
     if (tools.failing.has(name)) throw new Error(`${name} failed`);
     return tools.answer(name, input);
   },
 }));
 
-const sent: { path: string; body: any }[] = [];
+const sent: { path: string; body: any; org?: string }[] = [];
 /** The API's answers, in order: a turn's events are made for its request, which names its run. */
-const answers: (Response | ((body: any) => Response))[] = [];
+const answers: (Response | ((body: any) => Response | Promise<Response>))[] = [];
 beforeEach(() => {
+  active.org = 'org_1';
   sent.length = 0;
   answers.length = 0;
   tools.calls.length = 0;
@@ -60,7 +64,7 @@ beforeEach(() => {
   tools.answer = () => ({});
   Object.assign(reads, { fail: false, stale: 0, templatesRead: 0, hold: undefined });
   vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
-    sent.push({ path, body: JSON.parse(String(init.body)) });
+    sent.push({ path, body: JSON.parse(String(init.body)), org: new Headers(init.headers).get(TAB_ORG_HEADER) ?? undefined });
     const res = answers.shift();
     if (!res) throw new Error(`no answer for ${path}`);
     return typeof res === 'function' ? res(sent.at(-1)?.body) : res;
@@ -203,7 +207,7 @@ describe("the drawer's drafts, in the store", () => {
 
     answers.push(savedBoth());
     await store.getState().saveDrafts(1);
-    expect(sent.at(-1)).toEqual({ path: '/api/agent/apply', body: { calls: CARD.drafts.map(({ tool, input }) => ({ tool, input })) } });
+    expect(sent.at(-1)).toEqual({ path: '/api/agent/apply', body: { calls: CARD.drafts.map(({ tool, input }) => ({ tool, input })) }, org: 'org_1' });
     expect(at().drafts).toMatchObject({ status: 'saved', error: null });
     expect(reloaded).toEqual(['spt_1']);
     expect(store.getState().agent.filled.spt_1).toMatchObject({
@@ -214,11 +218,52 @@ describe("the drawer's drafts, in the store", () => {
 
     await store.getState().undoDrafts(1);
     expect(tools.calls).toEqual([
-      { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new', ifVersion: 1 } },
-      { name: 'update_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 } },
+      { name: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_new', ifVersion: 1 }, org: 'org_1' },
+      { name: 'update_spot', input: { spotId: 'spt_1', data: { headline: 'Breakfast served' }, ifVersion: 4 }, org: 'org_1' },
     ]);
     expect(at().drafts.status).toBe('undone');
     expect(store.getState().agent.filled.spt_1).toBeUndefined();
+  });
+
+  it("a save answered after the org switched changes nothing in the next org's card at its place (#344)", async () => {
+    const { store, at } = draftsStore();
+    answers.push(turn());
+    await store.getState().askAgent('Punchier');
+    let answerSave: (r: Response) => void = () => {};
+    answers.push(() => new Promise<Response>((r) => (answerSave = r)));
+    const saving = store.getState().saveDrafts(1);
+    await vi.waitFor(() => expect(sent.at(-1)?.path).toBe('/api/agent/apply'));
+    // Named for the org it was saved in.
+    expect(sent.at(-1)?.org).toBe('org_1');
+    // The org switches while the save is on its way, and the next org's question has its own drafts, at the same place.
+    active.org = 'org_2';
+    store.getState().forgetAgentDrawer();
+    answers.push(turn());
+    await store.getState().askAgent('Punchier, here');
+    answerSave(savedBoth());
+    await saving;
+    expect(at().drafts).toMatchObject({ status: 'proposed', error: null });
+    // Nor did it mark the spot in the next org's editor (review of #472).
+    expect(store.getState().agent.filled).toEqual({});
+  });
+
+  it('puts nothing more back once the org changes during an Undo, and names the org it was saved in for each call (review of #472)', async () => {
+    const { store } = draftsStore();
+    answers.push(turn());
+    await store.getState().askAgent('Make the headline punchier');
+    answers.push(savedBoth());
+    await store.getState().saveDrafts(1);
+    // The first call Undo makes, held on its way.
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    tools.answer = (name) => (name === 'delete_schedule_entry' ? held.then(() => ({})) : {});
+    const undoing = store.getState().undoDrafts(1);
+    await vi.waitFor(() => expect(tools.calls).toHaveLength(1));
+    active.org = 'org_2';
+    store.getState().forgetAgentDrawer();
+    release();
+    await undoing;
+    expect(tools.calls.map((c) => [c.name, c.org])).toEqual([['delete_schedule_entry', 'org_1']]);
   });
 
   it('shows a refused save as the refused call, overwriting nothing: someone saved the spot since', async () => {
@@ -308,7 +353,7 @@ describe("the drawer's drafts, in the store", () => {
       [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, target: 'group', groupId: 'grp_dt', version: 5 } } }],
     );
     await toGroup.store.getState().undoDrafts(1);
-    expect(tools.calls).toEqual([
+    expect(tools.calls).toMatchObject([
       {
         name: 'update_schedule_entry',
         input: {
@@ -340,7 +385,7 @@ describe("the drawer's drafts, in the store", () => {
       [{ tool: 'update_schedule_entry', ok: true, output: { entry: { ...ENTRY, version: 5 } } }],
     );
     await toOrg.store.getState().undoDrafts(1);
-    expect(tools.calls).toEqual([
+    expect(tools.calls).toMatchObject([
       {
         name: 'update_schedule_entry',
         input: {
