@@ -2,13 +2,13 @@
   "base/agenda@1.4.0": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b",
   "base/alert@1.3.0": "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e",
   "base/announcement@1.1.2": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27",
-  "base/clock@1.3.0": "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33",
+  "base/clock@1.4.0": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3",
   "base/countdown@1.1.1": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9",
   "base/cstore-promo@1.3.1": "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080",
   "base/info-frame@1.2.0": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2",
   "base/menu-board@1.4.0": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e",
   "base/news@2.1.2": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5",
-  "base/photo-promo@1.5.0": "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46",
+  "base/photo-promo@1.6.0": "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660",
   "base/room-status@1.1.1": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973",
-  "base/weather@1.6.0": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
+  "base/weather@1.7.0": "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08"
 }

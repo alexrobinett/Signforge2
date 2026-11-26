@@ -4,6 +4,7 @@
  * an edit reaches screens with the next publish. Each kit view says which screens that will be
  * (`reach`), and which screens cannot get a kit because their groups disagree (`conflicts`).
  */
+import { orgGroups } from './memberships';
 import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } from '@signforge/compiler';
 import { unverified } from '@signforge/compiler/draft';
 import type { BrandColors } from '@signforge/contract';
@@ -67,16 +68,18 @@ interface Pending {
 
 /** Everything the kit views need beyond the kit itself: who chose what, and each screen's resulting kit. */
 async function brandContext(org: OrgScope, pending: Pending = {}) {
-  const [assignments, screens, members] = await Promise.all([org.brandKits.assignments.list(), org.screens.list(), org.screenGroups.allMembers()]);
-  const groupsOf = Map.groupBy(members, (m) => m.screenId);
+  const assignments = await org.brandKits.assignments.list();
   const of = (target: BrandAssignment['target']) => assignments.filter((a) => a.target === target);
+  // Groups matter only to a kit a group chose (or is choosing): then their members, a smart group's resolved (#186).
+  const { screens, groupsOf } =
+    of('group').length || pending.group ? await orgGroups(org) : { screens: await org.screens.list(), groupsOf: new Map<string, string[]>() };
   const byGroup = new Map(of('group').map((a) => [a.groupId!, a.brandKitId]));
   const byScreen = new Map(of('screen').map((a) => [a.screenId!, a.brandKitId]));
   if (pending.group) byGroup.set(...pending.group);
   if (pending.screen) byScreen.set(...pending.screen);
   const defaultKit = pending.defaultKit ?? of('org')[0]?.brandKitId;
   const choices = screens.map((s) => {
-    const groups = Object.fromEntries((groupsOf.get(s.id) ?? []).flatMap((m) => (byGroup.has(m.groupId) ? [[m.groupId, byGroup.get(m.groupId)!]] : [])));
+    const groups = Object.fromEntries((groupsOf.get(s.id) ?? []).flatMap((g) => (byGroup.has(g) ? [[g, byGroup.get(g)!]] : [])));
     return { screenId: s.id, groups, ...chooseBrandKit({ screen: byScreen.get(s.id), groups, default: defaultKit }) };
   });
   return { byGroup, byScreen, defaultKit, choices };
@@ -177,9 +180,9 @@ const listBrandKits = defineTool({
   input: z.object({ ...pageInput }),
   output: outputs.list_brand_kits,
   example: {},
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, memo }) => {
     const { rows, next } = page(await org.brandKits.list(), (k) => [k.id], input);
-    const ctx = await brandContext(org);
+    const ctx = await memo('brandContext', () => brandContext(org));
     return { brandKits: rows.map((r) => kitView(r, ctx)), next };
   },
 });
@@ -194,7 +197,10 @@ const getBrandKit = defineTool({
   input: z.object({ brandKitId: id('brand kit') }),
   output: outputs.get_brand_kit,
   example: { brandKitId: 'bk_example' },
-  handler: async ({ org, input }) => ({ brandKit: kitView(await requireKit(org, input.brandKitId), await brandContext(org)) }),
+  // Once per read: a read of several kits by id shares one context (review of #608).
+  handler: async ({ org, input, memo }) => ({
+    brandKit: kitView(await requireKit(org, input.brandKitId), await memo('brandContext', () => brandContext(org))),
+  }),
 });
 
 /** The colours a new kit must give; onPrimary and onAccent are derived when left out. */

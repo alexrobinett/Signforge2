@@ -98,6 +98,15 @@ describe('a template that misbehaves', () => {
     expect(long).toHaveLength(200);
   });
 
+  it('is refused: ready before init', async () => {
+    // A bundle that says ready as it loads, before it is told anything: the SDK never does.
+    const manifest = inMode('ok');
+    const early = `<!doctype html><body><script>"use strict";parent.postMessage({ sf: ${manifest.protocol}, type: "ready" }, "*");</script></body>`;
+    const result = await checkTemplate(browser, manifest, early);
+    expect(result.problems).toEqual(['reported ready before init']);
+    expect(result.renders.map((r) => r.readyMs)).toEqual([null, null]);
+  });
+
   it('reports no ready time when it never got ready, and no frames when it never played', async () => {
     const result = await checkTemplate(browser, inMode('no-ready'), hostile.html);
     expect(result.renders.map((r) => [r.readyMs, r.frames])).toEqual([

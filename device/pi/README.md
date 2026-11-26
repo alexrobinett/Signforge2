@@ -39,4 +39,4 @@ Left as Raspberry Pi OS ships them, each for a measured reason given in RESULTS.
   - Copy the player with `rsync --checksum`.
   - Clear the HTTP cache and bypass the service worker before measuring a new build (`bench.py` does both).
   - Stop `signforge-soak` while measuring, because it zeroes the frame counters every minute.
-- One user at a time: `sh pi-lock.sh take|status|release`. The N100 test rig (Proxmox `pve`, LXC 105, a virtual 4K60 display) takes the same lock: `SF_PI=signforge-n100 sh pi-lock.sh …`; whoever holds it restarts its kiosk when done.
+- One user at a time: `sh pi-lock.sh take|status|release`. The N100 test rig takes the same lock: `SF_PI=signforge-n100 sh pi-lock.sh …`. How to use it is in [`device/n100/README.md`](../n100/README.md).

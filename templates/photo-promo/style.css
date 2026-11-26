@@ -119,7 +119,6 @@ body {
 :root {
   --bg: var(--sf-bg, #000);
   --text: var(--sf-text, #fff);
-  --accent: var(--sf-accent, #ffd84a);
 }
 body {
   font-family: var(--sf-font-body, 'Inter'), sans-serif;
@@ -176,12 +175,11 @@ body {
     rise-in 0.65s var(--d-in) both,
     fade-out 0.3s var(--d-out) forwards;
 }
+/* The eyebrow in the text colour, not a second accent: the price tag is the one colour. */
 .eyebrow {
-  font-size: calc(var(--u) * 3.4);
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-text, var(--accent));
+  font-size: calc(var(--u) * 3.6);
+  font-weight: 600;
+  color: var(--eyebrow-ink, var(--text));
   animation-delay: 0.3s, var(--out);
 }
 /* Where nothing reads over the photo under the eyebrow (main.ts), it gets a fill of the background.
@@ -207,21 +205,19 @@ body {
   margin-top: calc(var(--u) * 2);
   animation-delay: 0.52s, var(--out);
 }
+/* The price, a flat tag in the primary colour beside the copy's foot: no disc, no shadow. */
 .tag {
   position: absolute;
   right: calc(var(--u) * 8);
   bottom: calc(var(--u) * 9);
-  width: calc(var(--u) * 30);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
+  padding: calc(var(--u) * 1.4) calc(var(--u) * 2.6);
+  border-radius: min(var(--sf-radius, calc(var(--u) * 1)), calc(var(--u) * 2));
   background: var(--sf-primary, #c8102e);
   color: var(--sf-on-primary, #fff);
-  font-size: calc(var(--u) * 8.4);
+  font-size: calc(var(--u) * 7.2);
   font-weight: 900;
+  line-height: 1;
   letter-spacing: -0.03em;
-  box-shadow: 0 2vmin 6vmin color-mix(in srgb, var(--bg) 50%, transparent);
   will-change: transform, opacity;
   animation:
     tag-in 0.65s var(--d-in) both,

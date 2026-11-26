@@ -198,7 +198,8 @@ describe('brand in the SDK', () => {
     await page.addScriptTag({ content: inject('frameHostJs') });
     await page.evaluate(
       async ({ frames, sf, theme }) => {
-        const w = window as unknown as { SFFrameHost: { openFrameHost: typeof openFrameHost }; sfHost: FrameHost };
+        const w = window as unknown as { SFFrameHost: { openFrameHost: typeof openFrameHost }; sfHost: FrameHost; msgs: string[] };
+        w.msgs = [];
         const t = {
           ...theme,
           fonts: { display: { ...theme.fonts.display, files: theme.fonts.display.files.map((f) => ({ ...f, data: new Blob([new Uint8Array(f.data)]) })) } },
@@ -227,12 +228,19 @@ describe('brand in the SDK', () => {
           signal: new AbortController().signal,
           onNavigatedAway: () => {},
         });
+        // What the template says, in order: its `parent` is the wrapper the host wrote, so it arrives there.
+        const wrapper = document.querySelector('iframe')!.contentWindow!;
+        wrapper.addEventListener('message', (e) => {
+          if (e.source === wrapper.document.querySelector('iframe')?.contentWindow && e.data?.sf === sf) w.msgs.push(e.data.type);
+        });
         await w.sfHost.start();
       },
       { frames: containedFrames(h.brandTemplateHtml), sf: PROTOCOL_VERSION, theme },
     );
     // The template's frame, inside the wrapper the host wrote.
     const frame = page.frames().find((f) => f.parentFrame()?.parentFrame() === page.mainFrame())!;
+    const msgs = () => page.evaluate(() => (window as unknown as { msgs: string[] }).msgs);
+    expect(await msgs()).toEqual(['loaded', 'ready']);
     const themed = await drawn(frame);
     expect(themed.tokens.primary).toBe(rgb(colors.primary));
     expect(themed.radius).toBe('12px');
@@ -242,6 +250,7 @@ describe('brand in the SDK', () => {
     expect(rootStyle.filter(Boolean)).toHaveLength(10); // all but the body font, which the theme left out
 
     await page.evaluate(() => (window as unknown as { sfHost: FrameHost }).sfHost.reset());
+    expect(await msgs()).toEqual(['loaded', 'ready', 'loaded', 'ready']);
     const plain = await drawn(frame);
     expect(plain.tokens).toEqual(BRAND_FALLBACKS);
     expect(plain.radius).toBe('3px');

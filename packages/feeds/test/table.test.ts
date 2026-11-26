@@ -1,6 +1,6 @@
 import { type FieldDef, tableItems, validateTableFeed } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { LIMITS, normaliseFeed, parseCsv, parseJsonTable } from '../src/index';
+import { LIMITS, normaliseFeed, parseCsv, parseJsonTable, readCsv } from '../src/index';
 import menu from './fixtures/menu.csv?raw';
 import { code, inLinearTime } from './linear';
 
@@ -72,11 +72,27 @@ describe('CSV (RFC 4180, header row)', () => {
     // 1 MB of one-character lines: refused by the row cap itself, once there are more rows than any snapshot can hold.
     const lines = `a\n${'x\n'.repeat(499_000)}`;
     expect(timed(lines)).toEqual({ result: 'too-large', fast: true });
-    expect(() => parseCsv(lines)).toThrow(/^more than \d+ rows cannot fit a snapshot$/);
+    expect(() => parseCsv(lines)).toThrow(/^the file has more than \d+ rows$/);
   });
 
   it('refuses a body over the size limit before reading it', () => {
     expect(code(() => parseCsv(`Item\n${'x'.repeat(50)}`, { maxBytes: 40 }))).toBe('too-large');
+  });
+
+  it('takes a cell limit of its own for a file that is no table spot, as the label import does (review of #612)', () => {
+    const body = `a,b\n${'1,2\n'.repeat(20_000)}`;
+    expect(() => parseCsv(body)).toThrow('2 columns by 20000 rows is more than the 32768 cells a table may have');
+    expect(parseCsv(body, { maxCells: 40_000 }).rows).toHaveLength(20_000);
+  });
+
+  it('numbers each row as a spreadsheet shows the file: blank lines counted, a quoted line break not (review of #612)', () => {
+    const read = readCsv('a,b\r\n1,"two\r\nlines"\r\n\r\n3,4\r\n');
+    expect(read.rows).toEqual([
+      ['1', 'two\r\nlines'],
+      ['3', '4'],
+    ]);
+    expect(read.rowAt).toEqual([2, 4]);
+    expect(() => parseCsv('a\n\n1\n2,3\n')).toThrow('row 4 has 2 cells and the header 1');
   });
 });
 

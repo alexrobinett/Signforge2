@@ -44,4 +44,20 @@ describe('screens.labels', () => {
     await expect(org.commit(second.writes)).rejects.toThrow();
     expect(await org.screens.labels.list(o.screen)).toEqual(before);
   });
+
+  it("fails an import's batch past a limit a change landed meanwhile, writing none of its screens (review of #612)", async () => {
+    const a = await org.screens.insert({ name: 'Import full', timezone: 'Europe/London', orientation: 'landscape' });
+    const b = await org.screens.insert({ name: 'Import other', timezone: 'Europe/London', orientation: 'landscape' });
+    const keys = (from: number, n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`m${from + i}`, 'v']));
+    const free = LABEL_LIMITS.perScreen;
+    // The import, checked from a read with room on each screen; then another change fills a first.
+    const imported = await org.screens.labels.stage.each([
+      { screenId: b.id, set: { store: '0142' }, remove: [] },
+      { screenId: a.id, set: keys(free, 1), remove: [] },
+    ]);
+    await update([a.id], keys(0, free));
+    await expect(org.commit(imported.writes)).rejects.toThrow();
+    expect(await org.screens.labels.list(a.id)).toHaveLength(free);
+    expect(await org.screens.labels.list(b.id)).toEqual([]);
+  });
 });
