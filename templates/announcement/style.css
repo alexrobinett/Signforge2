@@ -430,7 +430,7 @@ body {
 }
 
 /* Night: a dark console. A mono header over a rule, the photo in a rounded panel across the
-   screen, then the headline in lime with the code beside it in a lime frame. */
+   screen, then the headline in amber with the code beside it in an amber frame. */
 [data-look='night'] .stage {
   display: grid;
   align-items: start;

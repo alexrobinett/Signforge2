@@ -23,7 +23,7 @@ ol {
 :root[data-schedule='off'] {
   --lk-scale: var(--lk-step);
 }
-/* Free is the look's accent (Night: its lime), busy the text colour (Night: its lilac). */
+/* Free is the look's accent (Night: its amber), busy the text colour. */
 .stage {
   --tone: var(--lk-accent-ink-large);
   --tone-fill: var(--lk-accent);
