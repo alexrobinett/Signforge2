@@ -1,7 +1,7 @@
 /**
- * The harness every template's browser tests use: one headless Chromium per test file, a small host
- * page that speaks the frame protocol as the player does, and the checks the templates share (painted
- * contrast, text on a brand colour, layout and motion). Each template is built by the real `sf build`
+ * The harness every template's browser tests use: one headless Chromium per test file, a host page
+ * whose frames the player's Frame host opens and speaks the frame protocol with, and the checks the
+ * templates share (painted contrast, text on a brand colour, layout and motion). Each template is built by the real `sf build`
  * path. Time comes from the `clock` in `init`, fixed here, so every frame draws the same thing.
  */
 import { createRequire } from 'node:module';
@@ -9,7 +9,19 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, sampleAsset, type BrandColors, type FieldDef, type FrameTheme, type Orientation, type TemplateManifest } from '@signforge/contract';
+import {
+  PROTOCOL_VERSION,
+  sampleAsset,
+  TEMPLATE_SCRIPT_START,
+  type BrandColors,
+  type FieldDef,
+  type FrameTheme,
+  type InitPayload,
+  type Orientation,
+  type TemplateManifest,
+} from '@signforge/contract';
+import { containedFrames } from '@signforge/player-core';
+import type { FrameHost, openFrameHost } from '@signforge/player-core/frame-host';
 import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
 
 /** The time every frame is told it is: a Tuesday afternoon in UTC. */
@@ -63,6 +75,8 @@ let browser: Browser;
 const contexts: BrowserContext[] = [];
 /** `imageSample` from @signforge/media, as a script for the host page: an image's sample, made as the CMS makes it. */
 let sampler = '';
+/** player-core's Frame host, as a script for the host page: `SFFrameHost.openFrameHost`, the screen's side of the frame protocol. */
+let frameHost = '';
 
 /**
  * Register the hooks for one test file: Chromium, and the template in `dir` built as `sf build`
@@ -78,9 +92,18 @@ export function useTemplate(dir: URL, update: Update): () => BuiltTemplate {
   beforeAll(async () => {
     browser = await chromium.launch();
     built = await buildTemplate(fileURLToPath(dir));
-    const entry = createRequire(import.meta.url).resolve('@signforge/media/sample');
-    sampler = (await build({ entryPoints: [entry], bundle: true, write: false, format: 'iife', globalName: 'SFSample', logLevel: 'silent' })).outputFiles[0]!
-      .text;
+    const script = async (entry: string, globalName: string) =>
+      (
+        await build({
+          entryPoints: [createRequire(import.meta.url).resolve(entry)],
+          bundle: true,
+          write: false,
+          format: 'iife',
+          globalName,
+          logLevel: 'silent',
+        })
+      ).outputFiles[0]!.text;
+    [sampler, frameHost] = await Promise.all([script('@signforge/media/sample', 'SFSample'), script('@signforge/player-core/frame-host', 'SFFrameHost')]);
   }, 60_000);
   afterEach(async () => {
     await Promise.all(contexts.splice(0).map((c) => c.close()));
@@ -108,8 +131,15 @@ export function spotData(manifest: TemplateManifest, over: Data): Data {
 
 export interface Host {
   page: Page;
-  open(frame: string, html: string): Promise<void>;
   /**
+   * Open a Frame host for `frame` on `html`'s contained frames, as a screen does: the wrapper frame, with the template's
+   * frame added at the first `init`. `before` runs in the template's document ahead of its own scripts, and leaves no
+   * element behind: a test that holds the first prepare sets its trap there.
+   */
+  open(frame: string, html: string, before?: () => void): Promise<void>;
+  /**
+   * Give the frame its spot through the host, as a screen does: the first starts it, each after resets it, and the
+   * template's next `loaded` gets this one. Does not wait for `ready`: `waitFor` does.
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
    * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
    * An asset under `$brand.logo`, or `logo` (a 4x1 logo of that colour), is the kit's logo, sent in `theme`. An asset `'broken'` is a
@@ -126,11 +156,26 @@ export interface Host {
     timezone?: string,
     logo?: string,
   ): Promise<void>;
-  post(frame: string, type: 'play' | 'reset' | 'stop'): Promise<void>;
+  /** `init` as no screen sends it: straight to the started frame, with no `reset` or `loaded` before it. For the SDK's own handling of a second init. */
+  initAgain(...args: Parameters<Host['init']>): Promise<void>;
+  /** `play` through the host; `stop`, which no screen sends, straight to the frame. */
+  post(frame: string, type: 'play' | 'stop'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
+  /** The template's frame, inside its wrapper, once started. */
+  frame(frame: string): Frame;
   /** The frame's whole document, with object URLs (which differ per load) made equal. */
   dom(frame: string): Promise<string>;
+}
+
+/** What the harness keeps on the host page for each frame: its box, its host, the wrapper and the spot `init` sends. */
+interface Hosted {
+  box: HTMLElement;
+  host: FrameHost;
+  wrapper: Window;
+  started: boolean;
+  /** As Playwright carries it into the page, which types a Blob by its members: the host sends it as `InitPayload`. */
+  spot?: { now: number } & Record<string, unknown>;
 }
 
 /** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size. */
@@ -142,18 +187,16 @@ export async function host(orientation: Orientation = 'landscape', full = false)
   const size = orientation === 'landscape' ? { width: long, height: short } : { width: short, height: long };
   await page.setViewportSize(size);
   await page.addScriptTag({ content: sampler });
+  await page.addScriptTag({ content: frameHost });
+  await page.addStyleTag({ content: 'iframe{display:block;border:0}' });
   await page.evaluate(() => {
-    const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]>; onMsg: Array<() => void> };
-    w.frames_ = {};
+    const w = window as unknown as { hosts: Record<string, Hosted>; msgs: Record<string, string[]>; onMsg: Array<() => void> };
+    w.hosts = {};
     w.msgs = {};
     w.onMsg = [];
-    addEventListener('message', (e) => {
-      const name = Object.keys(w.frames_).find((k) => w.frames_[k]!.contentWindow === e.source);
-      if (!name) return;
-      w.msgs[name]!.push(e.data?.type === 'error' ? `error:${e.data.message}` : String(e.data?.type));
-      for (const fn of [...w.onMsg]) fn();
-    });
   });
+  /** Frames in the order opened: the page's child frames, each a wrapper. */
+  const opened: string[] = [];
   const sf = PROTOCOL_VERSION;
   const waitFor = async (frame: string, type: string, count: number) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -191,137 +234,199 @@ export async function host(orientation: Orientation = 'landscape', full = false)
       clearTimeout(timer);
     }
   };
+  const deliver = async (
+    how: 'host' | 'raw',
+    frame: string,
+    data: Data,
+    assets: Record<string, string> = {},
+    now = NOW,
+    theme?: FrameTheme,
+    sampled: boolean | 'broken' = false,
+    durationMs = 8000,
+    timezone = 'UTC',
+    logo?: string,
+  ) => {
+    const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
+    const broken = sampled === 'broken';
+    await page.evaluate(
+      async ({ how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo }) => {
+        const w = window as unknown as {
+          hosts: Record<string, Hosted>;
+          msgs: Record<string, string[]>;
+          onMsg: Array<() => void>;
+          SFSample: typeof import('@signforge/media/sample');
+          blobCache?: Map<string, Blob>;
+        };
+        const cache = (w.blobCache ??= new Map());
+        const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+        const blobs: Record<string, Blob> = {};
+        for (const [field, spec] of Object.entries(assets)) {
+          // A file the browser cannot decode: a PNG header and nothing after it.
+          if (spec === 'broken') {
+            blobs[field] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
+            continue;
+          }
+          const key = samples[field];
+          const cached = cache.get(spec);
+          if (cached && !key) {
+            blobs[field] = cached;
+            continue;
+          }
+          const [, width = '8', height = '8', drawn = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
+          const [colours = '', block] = drawn.split('; ');
+          const c = document.createElement('canvas');
+          c.width = Number(width);
+          c.height = Number(height);
+          const g = c.getContext('2d')!;
+          const stripes = colours.split(' ');
+          for (let x = 0; x < c.width; x++) {
+            g.fillStyle = stripes[x % stripes.length]!;
+            g.fillRect(x, 0, 1, c.height);
+          }
+          if (block) {
+            const [colour, rect = ''] = block.split(' ');
+            const [x = 0, y = 0, bw = 0, bh = 0] = rect.split(',').map(Number);
+            g.fillStyle = colour!;
+            g.fillRect(x, y, bw, bh);
+          }
+          const blob = cached ?? (await png(c));
+          cache.set(spec, blob);
+          blobs[field] = blob;
+          if (!key) continue;
+          if (broken) {
+            blobs[key] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
+            continue;
+          }
+          const sample = w.SFSample.imageSample(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height)!;
+          const sc = document.createElement('canvas');
+          sc.width = sample.width;
+          sc.height = sample.height;
+          sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
+          blobs[key] = await png(sc);
+        }
+        const { '$brand.logo': assetLogo, ...images } = blobs;
+        let logoPng: Blob | undefined = assetLogo;
+        if (logo) {
+          const logoKey = `logo:${logo}`;
+          logoPng = cache.get(logoKey);
+          if (!logoPng) {
+            const c = document.createElement('canvas');
+            [c.width, c.height] = [4, 1];
+            const g = c.getContext('2d')!;
+            g.fillStyle = logo;
+            g.fillRect(0, 0, 4, 1);
+            logoPng = await png(c);
+            cache.set(logoKey, logoPng);
+          }
+        }
+        const h = w.hosts[frame]!;
+        h.spot = {
+          data,
+          assets: images,
+          durationMs,
+          orientation,
+          viewport: size,
+          timezone,
+          locale: 'en-US',
+          now,
+          theme: theme && logoPng ? { ...theme, logo: { onDark: logoPng } } : theme,
+        };
+        if (how === 'raw') {
+          const { now: told, ...spot } = h.spot;
+          const relay = Reflect.get(h.wrapper, 'relay') as (to: Window, m: unknown) => void;
+          relay(h.wrapper.document.querySelector('iframe')!.contentWindow!, { sf, type: 'init', ...spot, clock: { now: told, offsetMs: told - Date.now() } });
+          return;
+        }
+        // The wait's failures that are not the template's own message: a timeout, a navigation. A wait the next
+        // `init` replaced is the test's doing.
+        const failed = (err: Error) => {
+          if (err.message === 'superseded' || err.message.startsWith('template error:')) return;
+          w.msgs[frame]!.push(`error:${err.message}`);
+          for (const fn of [...w.onMsg]) fn();
+        };
+        const wait = h.started ? h.host.reset() : h.host.start();
+        h.started = true;
+        wait.catch(failed);
+      },
+      { how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo },
+    );
+  };
+  const frameOf = (frame: string) => page.mainFrame().childFrames()[opened.indexOf(frame)]!.childFrames()[0]!;
   return {
     page,
-    async open(frame, html) {
+    async open(frame, html, before) {
+      let bundle = html;
+      if (before) {
+        const head = /<head[^>]*>/i.exec(bundle);
+        if (!head) throw new Error('open: the bundle has no <head> to run `before` in');
+        const at = head.index + head[0].length;
+        bundle = `${bundle.slice(0, at)}<script>${TEMPLATE_SCRIPT_START}(${String(before)})();document.currentScript.remove()</script>${bundle.slice(at)}`;
+      }
+      opened.push(frame);
       await page.evaluate(
-        ({ frame, html, size }) => {
-          const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
-          const f = document.createElement('iframe');
-          f.setAttribute('sandbox', 'allow-scripts');
-          // Every frame on screen: Chromium throttles animation frames in an off-screen frame.
-          f.style.cssText = `position:absolute;left:0;top:0;width:${size.width}px;height:${size.height}px;border:0`;
-          w.frames_[frame] = f;
-          w.msgs[frame] = [];
-          f.srcdoc = html;
-          document.body.appendChild(f);
-        },
-        { frame, html, size },
-      );
-      await waitFor(frame, 'loaded', 1);
-    },
-    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000, timezone = 'UTC', logo) {
-      const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
-      const broken = sampled === 'broken';
-      await page.evaluate(
-        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo }) => {
+        async ({ frame, frames, size, sf }) => {
           const w = window as unknown as {
-            frames_: Record<string, HTMLIFrameElement>;
-            SFSample: typeof import('@signforge/media/sample');
-            blobCache?: Map<string, Blob>;
+            hosts: Record<string, Hosted>;
+            msgs: Record<string, string[]>;
+            onMsg: Array<() => void>;
+            SFFrameHost: { openFrameHost: typeof openFrameHost };
           };
-          const cache = (w.blobCache ??= new Map());
-          const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
-          const blobs: Record<string, Blob> = {};
-          for (const [field, spec] of Object.entries(assets)) {
-            // A file the browser cannot decode: a PNG header and nothing after it.
-            if (spec === 'broken') {
-              blobs[field] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
-              continue;
-            }
-            const key = samples[field];
-            const cached = cache.get(spec);
-            if (cached && !key) {
-              blobs[field] = cached;
-              continue;
-            }
-            const [, width = '8', height = '8', drawn = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
-            const [colours = '', block] = drawn.split('; ');
-            const c = document.createElement('canvas');
-            c.width = Number(width);
-            c.height = Number(height);
-            const g = c.getContext('2d')!;
-            const stripes = colours.split(' ');
-            for (let x = 0; x < c.width; x++) {
-              g.fillStyle = stripes[x % stripes.length]!;
-              g.fillRect(x, 0, 1, c.height);
-            }
-            if (block) {
-              const [colour, rect = ''] = block.split(' ');
-              const [x = 0, y = 0, bw = 0, bh = 0] = rect.split(',').map(Number);
-              g.fillStyle = colour!;
-              g.fillRect(x, y, bw, bh);
-            }
-            const blob = cached ?? (await png(c));
-            cache.set(spec, blob);
-            blobs[field] = blob;
-            if (!key) continue;
-            if (broken) {
-              blobs[key] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
-              continue;
-            }
-            const sample = w.SFSample.imageSample(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height)!;
-            const sc = document.createElement('canvas');
-            sc.width = sample.width;
-            sc.height = sample.height;
-            sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
-            blobs[key] = await png(sc);
-          }
-          const { '$brand.logo': assetLogo, ...images } = blobs;
-          let logoPng: Blob | undefined = assetLogo;
-          if (logo) {
-            const logoKey = `logo:${logo}`;
-            logoPng = cache.get(logoKey);
-            if (!logoPng) {
-              const c = document.createElement('canvas');
-              [c.width, c.height] = [4, 1];
-              const g = c.getContext('2d')!;
-              g.fillStyle = logo;
-              g.fillRect(0, 0, 4, 1);
-              logoPng = await png(c);
-              cache.set(logoKey, logoPng);
-            }
-          }
-          const init = {
-            sf,
-            type: 'init',
-            data,
-            assets: images,
-            durationMs,
-            orientation,
-            viewport: size,
-            timezone,
-            locale: 'en-US',
-            clock: { now, offsetMs: now - Date.now() },
-            theme: theme && logoPng ? { ...theme, logo: { onDark: logoPng } } : theme,
+          // Every frame on screen, one over the other: Chromium throttles animation frames in an off-screen frame.
+          const box = document.createElement('div');
+          box.style.cssText = 'position:absolute;left:0;top:0';
+          document.body.appendChild(box);
+          w.msgs[frame] = [];
+          const hosted: Hosted = {
+            box,
+            started: false,
+            wrapper: window,
+            host: await w.SFFrameHost.openFrameHost({
+              container: box,
+              frames,
+              protocol: sf,
+              title: frame,
+              size,
+              init: () => {
+                const { now, ...spot } = hosted.spot!;
+                return { ...spot, clock: { now, offsetMs: now - Date.now() } } as unknown as InitPayload;
+              },
+              label: frame,
+              signal: new AbortController().signal,
+              onNavigatedAway: () => w.msgs[frame]!.push('error:navigated away'),
+            }),
           };
-          w.frames_[frame]!.contentWindow!.postMessage(init, '*');
+          hosted.wrapper = box.querySelector('iframe')!.contentWindow!;
+          // The template's `parent` is the wrapper: what it says arrives there, as the host hears it.
+          hosted.wrapper.addEventListener('message', (e) => {
+            if (e.source !== hosted.wrapper.document.querySelector('iframe')?.contentWindow) return;
+            w.msgs[frame]!.push(e.data?.type === 'error' ? `error:${e.data.message}` : String(e.data?.type));
+            for (const fn of [...w.onMsg]) fn();
+          });
+          w.hosts[frame] = hosted;
         },
-        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo },
+        { frame, frames: containedFrames(bundle), size, sf },
       );
     },
+    init: (...args) => deliver('host', ...args),
+    initAgain: (...args) => deliver('raw', ...args),
     post: (frame, type) =>
       page.evaluate(
         ({ frame, type, sf }) => {
-          (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.contentWindow!.postMessage({ sf, type }, '*');
+          const h = (window as unknown as { hosts: Record<string, Hosted> }).hosts[frame]!;
+          if (type === 'play') return h.host.play();
+          const relay = Reflect.get(h.wrapper, 'relay') as (to: Window, m: unknown) => void;
+          relay(h.wrapper.document.querySelector('iframe')!.contentWindow!, { sf, type });
         },
         { frame, type, sf },
       ),
     waitFor,
+    frame: frameOf,
     dom: async (frame) => {
-      const f = page.mainFrame().childFrames()[frameOrder.get(frame)!]!;
-      const html = await f.evaluate(() => document.documentElement.outerHTML);
+      const html = await frameOf(frame).evaluate(() => document.documentElement.outerHTML);
       return html.replace(/blob:[^"')\s]+/g, 'blob:');
     },
   };
 }
-
-// Frames are created in a known order per page; map each name to its position among child frames.
-const frameOrder = new Map<string, number>([
-  ['fresh', 0],
-  ['reset', 1],
-  ['again', 2],
-]);
 
 /**
  * Each text in `scope` (weather's forecast card, the whole of the look kit's test template) that
@@ -416,12 +521,7 @@ async function expectSameAsFresh(hst: Host, html: string, a: Data, b: Data, asse
   await hst.waitFor('reset', 'ready', 1);
   await hst.post('reset', 'play');
   // The reset must undo a play under way: wait until the frame has drawn some of it.
-  await hst.page
-    .mainFrame()
-    .childFrames()
-    [frameOrder.get('reset')!]!.waitForFunction(() => document.getAnimations().some((a) => a.playState === 'running' && Number(a.currentTime) > 0));
-  await hst.post('reset', 'reset');
-  await hst.waitFor('reset', 'loaded', 2);
+  await hst.frame('reset').waitForFunction(() => document.getAnimations().some((a) => a.playState === 'running' && Number(a.currentTime) > 0));
   await hst.init('reset', b, assetsB);
   await hst.waitFor('reset', 'ready', 2);
   expect(await hst.dom('reset')).toBe(fresh);
@@ -431,7 +531,7 @@ async function expectSameAsFresh(hst: Host, html: string, a: Data, b: Data, asse
   await hst.init('again', a, assetsA);
   await hst.waitFor('again', 'ready', 1);
   await hst.post('again', 'play');
-  await hst.init('again', b, assetsB);
+  await hst.initAgain('again', b, assetsB);
   await hst.waitFor('again', 'ready', 2);
   expect(await hst.dom('again')).toBe(fresh);
 }
@@ -488,8 +588,8 @@ export function brandColourTests(
   // on the demo kit's dark background (3.66:1).
   const green: BrandColors = { ...light, accent: '#16a34a', surface: '#f8fafc' };
   const blue: BrandColors = { ...demo, accent: '#2563eb', onAccent: '#ffffff' };
-  // An accent just over 3:1 on its background (3.05:1), which clock's glow, the accent itself,
-  // pulls under 3:1 behind the greeting.
+  // An accent just over 3:1 on its background (3.05:1): anything that tints the ground with the
+  // accent pulls text drawn in it under 3:1.
   const teal: BrandColors = { ...demo, accent: '#0f685b', onAccent: '#ffffff', background: '#0e020c' };
   // A mid-tone background, on which black and white both just reach 4.5:1: over a photo with light
   // and dark under the text, a shade of it leaves neither reading (#124).
@@ -523,10 +623,10 @@ export function brandColourTests(
       await hst.init(frame, spotData(manifest, data), photo ? { photo } : {}, NOW, theme, sampled);
       await hst.waitFor(frame, 'ready', 1);
       const label = `${manifest.id}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo}${sampled === 'broken' ? ', broken sample' : sampled ? ', sampled' : ''})` : ''}`;
-      await check(label, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      await check(label, hst.frame(frame), hst.page);
       // The frames overlap: the next one is measured on top.
       await hst.page.evaluate((frame) => {
-        (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
+        (window as unknown as { hosts: Record<string, Hosted> }).hosts[frame]!.box.style.visibility = 'hidden';
       }, frame);
     }
   }
@@ -636,7 +736,7 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
   const hst = await host(orientation, true);
   await hst.open('fresh', t.html);
   let inits = 0;
-  const frame = () => hst.page.mainFrame().childFrames()[0]!;
+  const frame = () => hst.frame('fresh');
   return {
     hst,
     frame,

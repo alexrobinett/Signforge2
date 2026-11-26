@@ -24,27 +24,24 @@ function blockPhotos(orientation: Orientation): Promise<string[]> {
       await hst.open('fresh', t().html);
       await hst.init('fresh', spotData(t().manifest, {}), { photo: '960x540: #808080' });
       await hst.waitFor('fresh', 'ready', 1);
-      const [x, y, x1, y1] = await hst.page
-        .mainFrame()
-        .childFrames()[0]!
-        .evaluate(() => {
-          const eyebrow = document.querySelector<HTMLElement>('.eyebrow')!;
-          const text = document.createRange();
-          text.selectNodeContents(eyebrow);
-          const { left, width } = text.getBoundingClientRect();
-          const top = document.querySelector('.copy')!.getBoundingClientRect().top + eyebrow.offsetTop;
-          const height = eyebrow.offsetHeight;
-          const push = Number(getComputedStyle(document.querySelector('.photo')!).getPropertyValue('--push'));
-          const [vw, vh, nw, nh] = [innerWidth, innerHeight, 960, 540];
-          const scale = Math.max(vw / nw, vh / nh);
-          const at = (p: number, size: number, natural: number, s: number) => (size / 2 + (p - size / 2) / s - (size - natural * scale) / 2) / scale;
-          return [
-            Math.min(at(left, vw, nw, 1), at(left, vw, nw, push)),
-            Math.min(at(top, vh, nh, 1), at(top, vh, nh, push)),
-            Math.max(at(left + width, vw, nw, 1), at(left + width, vw, nw, push)),
-            Math.max(at(top + height, vh, nh, 1), at(top + height, vh, nh, push)),
-          ];
-        });
+      const [x, y, x1, y1] = await hst.frame('fresh').evaluate(() => {
+        const eyebrow = document.querySelector<HTMLElement>('.eyebrow')!;
+        const text = document.createRange();
+        text.selectNodeContents(eyebrow);
+        const { left, width } = text.getBoundingClientRect();
+        const top = document.querySelector('.copy')!.getBoundingClientRect().top + eyebrow.offsetTop;
+        const height = eyebrow.offsetHeight;
+        const push = Number(getComputedStyle(document.querySelector('.photo')!).getPropertyValue('--push'));
+        const [vw, vh, nw, nh] = [innerWidth, innerHeight, 960, 540];
+        const scale = Math.max(vw / nw, vh / nh);
+        const at = (p: number, size: number, natural: number, s: number) => (size / 2 + (p - size / 2) / s - (size - natural * scale) / 2) / scale;
+        return [
+          Math.min(at(left, vw, nw, 1), at(left, vw, nw, push)),
+          Math.min(at(top, vh, nh, 1), at(top, vh, nh, push)),
+          Math.max(at(left + width, vw, nw, 1), at(left + width, vw, nw, push)),
+          Math.max(at(top + height, vh, nh, 1), at(top + height, vh, nh, push)),
+        ];
+      });
       const m = 3 * IMAGE_SAMPLE_CELL;
       const rect = [Math.floor(x!) - m, Math.floor(y!) - m, Math.ceil(x1! - x!) + 2 * m, Math.ceil(y1! - y!) + 2 * m].join(',');
       return [`960x540: #ffffff; #000000 ${rect}`, `960x540: #000000; #ffffff ${rect}`];
@@ -93,15 +90,10 @@ describe('photo-promo (#308)', () => {
     await hst.init('fresh', b, { photo: '#000000' }, undefined, undefined, true);
     await hst.waitFor('fresh', 'ready', 1);
     const fresh = await hst.dom('fresh');
-    for (const [name, index] of [
-      ['reset', 1],
-      ['again', 2],
-    ] as const) {
-      await hst.open(name, t().html);
-      const f = hst.page.mainFrame().childFrames()[index]!;
+    for (const name of ['reset', 'again'] as const) {
       // The first read of `document.fonts.ready` is the first prepare's: it waits there until the
       // test lets it go, and says when it has got there. The backdrop's last step is a canvas read.
-      await f.evaluate(() => {
+      await hst.open(name, t().html, () => {
         const w = window as unknown as { held: Promise<void>; release: () => void; read: () => Promise<void> };
         const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
         const gate = new Promise<void>((r) => (w.release = r));
@@ -124,12 +116,11 @@ describe('photo-promo (#308)', () => {
         };
       });
       await hst.init(name, a, { photo: '#ffffff' }, undefined, green, true);
+      await hst.waitFor(name, 'loaded', 1);
+      const f = hst.frame(name);
       await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
-      if (name === 'reset') {
-        await hst.post(name, 'reset');
-        await hst.waitFor(name, 'loaded', 2);
-      }
-      await hst.init(name, b, { photo: '#000000' }, undefined, undefined, true);
+      // With a reset between, as the editor sends new data; and with none, which the SDK takes the same way.
+      await (name === 'reset' ? hst.init : hst.initAgain)(name, b, { photo: '#000000' }, undefined, undefined, true);
       await hst.waitFor(name, 'ready', 1);
       // Let the first prepare go until its backdrop's canvas read, then wait a task: what it does
       // next runs in microtasks before it.

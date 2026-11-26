@@ -180,7 +180,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByRole('status').filter({ hasText: 'shows its name for 10 seconds' })).toBeVisible();
 
   // Display hours, checked as the player checks them.
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   const hours = page.getByRole('dialog', { name: 'Display hours for Lobby' });
   await hours.getByText('Set hours', { exact: true }).click();
   // Each window is a named group, so its times say whose they are (#377).
@@ -200,7 +200,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await shots(page, '13-screen-detail');
 
   // A date with morning and evening hours keeps both through a save, and through an edit of one.
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await hours.getByRole('button', { name: 'Add a date' }).click();
   await hours.getByLabel('Date', { exact: true }).fill('2026-12-24');
   await hours.getByLabel('Off all day').uncheck();
@@ -218,7 +218,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   const reopen = async () => {
     await page.reload();
     await hydrated(page);
-    await page.getByRole('button', { name: 'Edit' }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
     const values = async (label: string) => Promise.all((await eve.getByLabel(label).all()).map((f) => f.inputValue()));
     return [await values('On at'), await values('Off at')];
   };

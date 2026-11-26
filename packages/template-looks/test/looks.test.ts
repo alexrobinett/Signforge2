@@ -364,15 +364,10 @@ describe('the look kit (#190)', () => {
     await hst.init('fresh', b, photo);
     await hst.waitFor('fresh', 'ready', 1);
     const fresh = await hst.dom('fresh');
-    for (const [name, index] of [
-      ['reset', 1],
-      ['again', 2],
-    ] as const) {
-      await hst.open(name, t().html);
-      const f = hst.page.mainFrame().childFrames()[index]!;
+    for (const name of ['reset', 'again'] as const) {
       // The first read of `document.fonts.ready` is applyLook's, in the first prepare: it waits
       // there until the test lets it go, and says when it has got there.
-      await f.evaluate(() => {
+      await hst.open(name, t().html, () => {
         const w = window as unknown as { held: Promise<void>; release: () => void };
         const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
         const gate = new Promise<void>((r) => (w.release = r));
@@ -388,12 +383,11 @@ describe('the look kit (#190)', () => {
         });
       });
       await hst.init(name, a, photo);
+      await hst.waitFor(name, 'loaded', 1);
+      const f = hst.frame(name);
       await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
-      if (name === 'reset') {
-        await hst.post(name, 'reset');
-        await hst.waitFor(name, 'loaded', 2);
-      }
-      await hst.init(name, b, photo);
+      // With a reset between, as the editor sends new data; and with none, which the SDK takes the same way.
+      await (name === 'reset' ? hst.init : hst.initAgain)(name, b, photo);
       await hst.waitFor(name, 'ready', 1);
       // Let the first prepare go, then wait a task: what it does next runs in microtasks before it.
       await f.evaluate(async () => {

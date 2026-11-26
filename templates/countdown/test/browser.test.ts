@@ -33,7 +33,7 @@ describe('countdown (#198)', () => {
       async show(data: Data, now = NOW, theme?: FrameTheme, durationMs = 8000) {
         await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, durationMs, timezone);
         await hst.waitFor('fresh', 'ready', ++inits);
-        return hst.page.mainFrame().childFrames()[0]!;
+        return hst.frame('fresh');
       },
     };
   }
@@ -166,8 +166,8 @@ describe('countdown (#198)', () => {
     await hst.waitFor('reset', 'ready', 1);
     // Night's faces are not loaded in this document yet: its prepare waits for them, and the
     // second init, already queued, replaces the document meanwhile. Its ready is the only one sent.
-    await hst.init('reset', spotData(t().manifest, { look: 'night', target: '2026-11-29T18:00' }));
-    await hst.init('reset', spotData(t().manifest, passed));
+    await hst.initAgain('reset', spotData(t().manifest, { look: 'night', target: '2026-11-29T18:00' }));
+    await hst.initAgain('reset', spotData(t().manifest, passed));
     await hst.waitFor('reset', 'ready', 2);
     expect(await hst.dom('reset')).toBe(fresh);
   });
@@ -241,7 +241,7 @@ describe('countdown (#198)', () => {
     // 2 days, 3 hours and 0 minutes to go.
     await hst.init('fresh', spotData(t().manifest, { look: 'night', target: '2026-11-19T18:00', units: minutes }));
     await hst.waitFor('fresh', 'ready', 1);
-    const f = hst.page.mainFrame().childFrames()[0]!;
+    const f = hst.frame('fresh');
     await hst.page.clock.pauseAt(NOW + 10_000);
     await f.evaluate(() => {
       const w = window as unknown as { seen: string[] };

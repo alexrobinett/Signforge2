@@ -89,7 +89,7 @@ describe('news 2.1 (design D, #476)', () => {
     await hst.init('fresh', spotData(t().manifest, data), assets, NOW, demo, false, durationMs);
     const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
     for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
-    return { hst, f: hst.page.mainFrame().childFrames()[0]! };
+    return { hst, f: hst.frame('fresh') };
   }
 
   /** One frame at a screen's own size; `show` inits it and waits for ready. One turn per play unless `rotate`. */
@@ -102,7 +102,7 @@ describe('news 2.1 (design D, #476)', () => {
       async show(data: Data, assets: Record<string, string> = photos(30), theme: FrameTheme | null = demo, durationMs = 15_000) {
         await hst.init('fresh', spotData(t().manifest, { rotationSeconds: 30, ...data }), assets, NOW, theme ?? undefined, false, durationMs);
         await hst.waitFor('fresh', 'ready', ++inits);
-        return hst.page.mainFrame().childFrames()[0]!;
+        return hst.frame('fresh');
       },
     };
   }

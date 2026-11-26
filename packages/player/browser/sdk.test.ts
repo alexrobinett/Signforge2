@@ -2,6 +2,9 @@
  * The template SDK on its own: the fixture template in a sandboxed frame, driven by a tiny host
  * that speaks the frame protocol the way the player does and records what the template says.
  * (Protocol 1 has no `done` message: a spot ends when the player moves on.)
+ *
+ * Raw messages, not the Frame host (#331): these tests send what the host never does, an `init` held
+ * back after `loaded` and a `stop`, to test the SDK's own handling of them.
  */
 import type { Frame, Page } from 'playwright';
 import { describe, expect, it } from 'vitest';

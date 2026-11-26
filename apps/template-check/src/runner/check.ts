@@ -15,8 +15,12 @@
  */
 import { DEFAULT_BRAND_COLORS, isBrandColor, tokenName } from '@signforge/compiler';
 import type { FieldDef, InitPayload, Orientation, ScalarFieldDef, TemplateManifest, TemplateRender } from '@signforge/contract';
-import { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { containedFrames, READY_TIMEOUT_MS } from '@signforge/player-core';
+import type { FrameHost } from '@signforge/player-core/frame-host';
 import type { Browser, Frame, Page } from 'playwright-core';
+
+/** player-core's Frame host as a script for the host page (frame-host-script.ts): the host the player's slots drive. */
+declare const __SF_FRAME_HOST__: string;
 
 /** The page around the template, on an origin of its own that nothing else answers. */
 const HOST = 'https://template-check.invalid/';
@@ -117,9 +121,7 @@ export function exampleData(fields: Record<string, FieldDef>): { data: Record<st
 }
 
 interface RenderArgs {
-  wrapperHtml: string;
-  sandbox: string;
-  html: string;
+  frames: { wrapper: string; template: string };
   protocol: number;
   init: Omit<InitPayload, 'assets' | 'clock' | 'theme'>;
   images: string[];
@@ -127,53 +129,46 @@ interface RenderArgs {
 }
 
 /**
- * Runs in the host page: the player's slot, reduced to one template spot. Resolves with the time
- * from `init` to `ready`, or the template's error, or neither when the player would have given up
- * on it: it navigated away (its frame loaded again) or the ready timeout passed. Leaves `__sfPlay`
- * on the window to send `play`.
+ * Runs in the host page: the screen's Frame host (`window.SFFrameHost`, #331) on one template spot, as
+ * a slot drives it. Resolves with the time from `init` to `ready`, or the template's error, or neither
+ * when the player would have given up on it: it navigated away (its frame loaded again), or the ready
+ * timeout passed. `beforeInit`: it said ready before it had `init`, which the host gives no time.
+ * Leaves `__sfPlay` on the window to send `play`.
  */
-async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; error: string | null }> {
-  const wrapperFrame = document.createElement('iframe');
-  wrapperFrame.title = 'template';
-  wrapperFrame.style.cssText = `display:block;border:0;width:${a.init.viewport.width}px;height:${a.init.viewport.height}px`;
-  wrapperFrame.srcdoc = a.wrapperHtml;
-  const wrapped = new Promise((resolve) => wrapperFrame.addEventListener('load', resolve, { once: true }));
-  document.body.appendChild(wrapperFrame);
-  await wrapped;
-  const wrapper = wrapperFrame.contentWindow;
-  const relay: unknown = wrapper && Reflect.get(wrapper, 'relay');
-  if (!wrapper || typeof relay !== 'function') throw new Error('the wrapper frame has no relay');
-  const frame = wrapper.document.createElement('iframe');
-  frame.setAttribute('sandbox', a.sandbox);
-  frame.title = 'template';
-  frame.srcdoc = a.html;
-
+async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; error: string | null; beforeInit: boolean }> {
+  const open: unknown = Reflect.get(Reflect.get(window, 'SFFrameHost') ?? {}, 'openFrameHost');
+  if (typeof open !== 'function') throw new Error('the host page has no Frame host');
   // One small PNG for every image field: the template gets a real image to decode.
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 8;
   const pixel = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
   const assets = Object.fromEntries(a.images.map((name) => [name, pixel]));
-  const post = (m: object) => relay(frame.contentWindow, { sf: a.protocol, ...m });
-  Reflect.set(window, '__sfPlay', () => post({ type: 'play' }));
-
-  let sentAt = 0;
-  let loads = 0;
-  const outcome = new Promise<{ readyMs: number | null; error: string | null }>((resolve) => {
+  const host: FrameHost = await open({
+    container: document.body,
+    frames: a.frames,
+    protocol: a.protocol,
+    title: 'template',
+    size: a.init.viewport,
+    init: () => ({ ...a.init, assets, clock: { now: Date.now(), offsetMs: 0 } }),
+    label: 'template',
+    signal: new AbortController().signal,
+    // A navigation once ready is seen by the check itself (`framenavigated`).
+    onNavigatedAway: () => {},
+  });
+  Reflect.set(window, '__sfPlay', () => host.play());
+  return new Promise((resolve) => {
     // Counted from when the template's frame is added. The player counts from the start of the
     // spot's prepare, a few ms earlier, so this is no stricter than a screen.
-    setTimeout(() => resolve({ readyMs: null, error: null }), a.readyTimeoutMs);
-    frame.addEventListener('load', () => ++loads > 1 && resolve({ readyMs: null, error: null }));
-    wrapper.addEventListener('message', (e) => {
-      if (e.source !== frame.contentWindow || e.data?.sf !== a.protocol) return;
-      if (e.data.type === 'loaded' && !sentAt) {
-        sentAt = performance.now();
-        post({ type: 'init', ...a.init, assets, clock: { now: Date.now(), offsetMs: 0 } });
-      } else if (e.data.type === 'ready' && sentAt) resolve({ readyMs: Math.round((performance.now() - sentAt) * 10) / 10, error: null });
-      else if (e.data.type === 'error') resolve({ readyMs: null, error: String(e.data.message) });
-    });
+    setTimeout(() => resolve({ readyMs: null, error: null, beforeInit: false }), a.readyTimeoutMs);
+    host.start().then(
+      (readyMs) => resolve({ readyMs, error: null, beforeInit: readyMs === null }),
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const prefix = 'template error: ';
+        resolve({ readyMs: null, error: message.startsWith(prefix) ? message.slice(prefix.length) : null, beforeInit: false });
+      },
+    );
   });
-  wrapper.document.body.appendChild(frame);
-  return outcome;
 }
 
 /** Runs in the template's frame, so the template could skew it: frame intervals for `ms`. */
@@ -211,7 +206,12 @@ async function render(
     // Nothing but the host page is answered. A request that gets this far got past the policy.
     await context.route('**/*', (route) => {
       const url = route.request().url();
-      if (url === HOST) return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Template check</title><body style="margin:0">' });
+      if (url === HOST)
+        return route.fulfill({
+          contentType: 'text/html',
+          // As a slot shows its frames: no border, a block of its own.
+          body: '<!doctype html><title>Template check</title><style>iframe{display:block;border:0}</style><body style="margin:0">',
+        });
       problems.add(`requested ${url} (blocked)`);
       return route.abort('blockedbyclient');
     });
@@ -230,21 +230,21 @@ async function render(
       problems.add('navigated its own frame (blocked)');
     });
     await page.goto(HOST);
+    // Inline: nothing is requested, so the rule above, that nothing but the host page is answered, stands.
+    await page.addScriptTag({ content: __SF_FRAME_HOST__ });
 
     const { data, images } = exampleData(manifest.fields);
-    const contained = containedFrames(html);
     const args: RenderArgs = {
-      wrapperHtml: contained.wrapper,
-      sandbox: TEMPLATE_SANDBOX,
-      html: contained.template,
+      frames: containedFrames(html),
       protocol: manifest.protocol ?? 1,
       init: { data, durationMs: manifest.duration.defaultMs, orientation, viewport, timezone: 'UTC', locale: 'en-US' },
       images,
       readyTimeoutMs: READY_TIMEOUT_MS,
     };
-    const { readyMs, error } = await page.evaluate(renderInHost, args);
+    const { readyMs, error, beforeInit } = await page.evaluate(renderInHost, args);
     // The SDK forwards an uncaught error as `Uncaught <name>: <message>`; Chromium's own report of it is the problem.
     if (error !== null && !error.startsWith('Uncaught ')) problems.add(`failed to prepare: ${error}`);
+    if (beforeInit) problems.add('reported ready before init');
 
     let frames: TemplateRender['frames'] = null;
     if (readyMs !== null) {
