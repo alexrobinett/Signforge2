@@ -507,7 +507,7 @@ function NewGroupDialog({ orgId, screens }: { orgId: string; screens: ScreenView
   const id = useId();
   const dialog = useAppStore((s) => s.groups.dialog);
   const { keys } = useSuspenseQuery(labelKeysQuery(orgId)).data;
-  const name = useAppStore((s) => s.nameNewGroup);
+  const name = useAppStore((s) => s.typeNewGroupName);
   const choose = useAppStore((s) => s.chooseNewGroupKind);
   const create = useAppStore((s) => s.createGroup);
   const close = useAppStore((s) => s.cancelGroupDialog);
@@ -568,44 +568,44 @@ function ScreenChecklist({ group, screens }: { group: Pick<GroupView, 'screenIds
   const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted(byName);
   return (
     <>
-          <div className="relative">
-            <Label htmlFor={id} className="sr-only">
-              Search screens
-            </Label>
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              id={id}
-              type="search"
-              placeholder="Search by name"
-              value={dialog.query}
-              onChange={(e) => search(e.target.value)}
-              className="pl-9"
-              aria-describedby={`${id}-count`}
-            />
-          </div>
-          <p id={`${id}-count`} className="text-meta text-muted-foreground" aria-live="polite">
-            {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
-          </p>
-          <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
-            <legend className="sr-only">Screens</legend>
-            {listed.length === 0 ? (
-              <p className="p-3 text-sm text-muted-foreground">No screen matches.</p>
-            ) : (
-              listed.map((s) => (
-                <label key={s.id} className="flex min-h-11 items-center gap-3 border-b px-3 text-sm last:border-b-0 hover:bg-muted/50">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={memberChecked(dialog, group, s.id)}
-                    onChange={(e) => choose(s.id, e.target.checked)}
-                    // While Save runs the store takes no change; the boxes say so.
-                    aria-disabled={pending || undefined}
-                  />
-                  {s.name}
-                </label>
-              ))
-            )}
-          </fieldset>
+      <div className="relative">
+        <Label htmlFor={id} className="sr-only">
+          Search screens
+        </Label>
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
+          id={id}
+          type="search"
+          placeholder="Search by name"
+          value={dialog.query}
+          onChange={(e) => search(e.target.value)}
+          className="pl-9"
+          aria-describedby={`${id}-count`}
+        />
+      </div>
+      <p id={`${id}-count`} className="text-meta text-muted-foreground" aria-live="polite">
+        {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
+      </p>
+      <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
+        <legend className="sr-only">Screens</legend>
+        {listed.length === 0 ? (
+          <p className="p-3 text-sm text-muted-foreground">No screen matches.</p>
+        ) : (
+          listed.map((s) => (
+            <label key={s.id} className="flex min-h-11 items-center gap-3 border-b px-3 text-sm last:border-b-0 hover:bg-muted/50">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={memberChecked(dialog, group, s.id)}
+                onChange={(e) => choose(s.id, e.target.checked)}
+                // While Save runs the store takes no change; the boxes say so.
+                aria-disabled={pending || undefined}
+              />
+              {s.name}
+            </label>
+          ))
+        )}
+      </fieldset>
     </>
   );
 }

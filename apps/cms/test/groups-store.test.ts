@@ -354,7 +354,7 @@ describe('a group made here, and a smart group’s rule (#186)', () => {
     const { store } = groupsStore();
     const s = () => store.getState();
     s().openNewGroup(ORG);
-    s().nameNewGroup(' North ');
+    s().typeNewGroupName(' North ');
     s().chooseNewGroupKind('rule');
     s().changeRuleTerm(0, { key: 'region', op: 'eq', values: [' north '] });
     const key = s().groups.dialog?.id;
@@ -368,7 +368,7 @@ describe('a group made here, and a smart group’s rule (#186)', () => {
     const { store } = groupsStore();
     const s = () => store.getState();
     s().openNewGroup(ORG);
-    s().nameNewGroup('Front of house');
+    s().typeNewGroupName('Front of house');
     s().chooseNewGroupKind('rule');
     await s().createGroup(ORG);
     expect(calls()).toEqual([]);
@@ -390,7 +390,12 @@ describe('a group made here, and a smart group’s rule (#186)', () => {
     s().changeRuleTerm(1, { key: 'store', op: 'exists', values: [] });
     refuse('conflict', 'stale', { version: 3 });
     await s().saveGroupRule(ORG, smart);
-    expect(s().groups.dialog).toMatchObject({ kind: 'rule', error: 'stale', pending: false, terms: [north.all[0], { key: 'store', op: 'exists', values: [] }] });
+    expect(s().groups.dialog).toMatchObject({
+      kind: 'rule',
+      error: 'stale',
+      pending: false,
+      terms: [north.all[0], { key: 'store', op: 'exists', values: [] }],
+    });
     s().removeRuleTerm(1);
     answer({ group: { ...smart, version: 3 } });
     await s().saveGroupRule(ORG, smart);

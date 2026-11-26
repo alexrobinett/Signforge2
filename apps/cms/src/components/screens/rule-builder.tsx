@@ -95,9 +95,7 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
                           type="checkbox"
                           className="size-4 accent-primary"
                           checked={t.values.includes(v.value)}
-                          onChange={(e) =>
-                            change(i, { ...t, values: e.target.checked ? [...t.values, v.value] : t.values.filter((x) => x !== v.value) })
-                          }
+                          onChange={(e) => change(i, { ...t, values: e.target.checked ? [...t.values, v.value] : t.values.filter((x) => x !== v.value) })}
                           aria-disabled={pending || undefined}
                         />
                         {v.value}
@@ -108,7 +106,14 @@ export function RuleBuilder({ screens, keys }: { screens: ScreenView[]; keys: La
                   <p className="py-2 text-sm text-muted-foreground">{t.key ? `No screen has ${t.key} yet.` : 'Choose a label first.'}</p>
                 ))}
               {kind === 'none' && <span className="hidden sm:block" />}
-              <Button type="button" variant="ghost" size="icon" aria-label={`Remove condition ${i + 1}`} onClick={() => remove(i)} disabled={terms.length === 1}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove condition ${i + 1}`}
+                onClick={() => remove(i)}
+                disabled={terms.length === 1}
+              >
                 <XIcon aria-hidden />
               </Button>
             </fieldset>

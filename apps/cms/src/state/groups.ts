@@ -70,7 +70,7 @@ export interface GroupsSlice {
   saveGroupMembers: (orgId: string, group: GroupView) => Promise<void>;
   /** "New group…": a group of listed screens or a smart group, made in one `save_group` (#186). */
   openNewGroup: (orgId: string) => void;
-  nameNewGroup: (name: string) => void;
+  typeNewGroupName: (name: string) => void;
   chooseNewGroupKind: (how: 'list' | 'rule') => void;
   createGroup: (orgId: string) => Promise<void>;
   /** "Rule…": a smart group's conditions, saved at the version the page read. */
@@ -221,7 +221,7 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     },
 
     openNewGroup: (orgId) => open(orgId, '', { kind: 'new', name: '', how: 'list', edits: {}, query: '', terms: [BLANK] }),
-    nameNewGroup: (name) => patch((s) => (s.dialog?.kind === 'new' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, name, error: null } } : s)),
+    typeNewGroupName: (name) => patch((s) => (s.dialog?.kind === 'new' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, name, error: null } } : s)),
     chooseNewGroupKind: (how) => patch((s) => (s.dialog?.kind === 'new' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, how, error: null } } : s)),
     async createGroup(orgId) {
       const d = dialog();
@@ -238,7 +238,8 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
       });
     },
 
-    openGroupRule: (orgId, group) => open(orgId, group.id, { kind: 'rule', terms: group.selector ? group.selector.all.map((t) => ({ ...t, values: [...t.values] })) : [BLANK] }),
+    openGroupRule: (orgId, group) =>
+      open(orgId, group.id, { kind: 'rule', terms: group.selector ? group.selector.all.map((t) => ({ ...t, values: [...t.values] })) : [BLANK] }),
     addRuleTerm: () => patch((s) => (s.dialog && !s.dialog.pending ? { ...s, dialog: withTerms(s.dialog, (t) => [...t, BLANK]) } : s)),
     changeRuleTerm: (index, term) =>
       patch((s) => (s.dialog && !s.dialog.pending ? { ...s, dialog: withTerms(s.dialog, (t) => t.map((x, i) => (i === index ? term : x))) } : s)),

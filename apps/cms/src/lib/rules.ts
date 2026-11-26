@@ -54,4 +54,3 @@ export const matching = <S extends Pick<ScreenView, 'labels' | 'systemLabels'>>(
 /** The conditions no screen meets on its own, so the rule matches nothing while they are in it. */
 export const unmet = (screens: readonly Pick<ScreenView, 'labels' | 'systemLabels'>[], terms: readonly RuleTerm[]): RuleTerm[] =>
   ruleProblem(terms) === undefined ? ruleOf(terms).all.filter((t) => !screens.some((s) => matches({ all: [t] }, factsOf(s)))) : [];
-
