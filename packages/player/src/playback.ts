@@ -34,7 +34,7 @@ export type SlotIndex = 0 | 1;
 export interface PlaybackSlots {
   /** Load `spot` into `slot`, under the one on screen and fully drawn. Resolves once it can be shown complete; rejects if it cannot. */
   prepare(slot: SlotIndex, spot: Spot, manifest: ScreenManifest): Promise<void>;
-  /** Reveal `slot` over `prev` with `transition`. `started`: its spot plays (rejects if a video's `play()` is refused); `done`: the transition is over and `prev` is cleared. */
+  /** Reveal `slot` over `prev` with `transition`. `started`: its spot plays (rejects if a video's `play()` is refused, or a refit of its template failed); `done`: the transition is over and `prev` is cleared. */
   show(slot: SlotIndex, prev: SlotIndex | undefined, transition: Transition): { started: Promise<void>; done: Promise<void> };
   /** Empty `slot` and hide it. */
   clear(slot: SlotIndex): void;

@@ -109,4 +109,39 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
     await p.page.setViewportSize(PORTRAIT);
     await expect.poll(p.onScreen).toMatchObject({ label: '540x960', playing: true });
   });
+
+  it('coalesces resizes during a refit into one more init, with the last size', async () => {
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])));
+    await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', playing: '1' });
+    const frame = (await visibleFrame(p.page, 'label'))!;
+    await frame.evaluate(() => {
+      const w = window as unknown as { sfHold?: Promise<void>; sfRelease?: () => void };
+      w.sfHold = new Promise((r) => (w.sfRelease = r));
+    });
+
+    await p.page.setViewportSize(PORTRAIT);
+    // The refit is under way, held in the template's prepare.
+    await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '2', viewport: '540x960 portrait' });
+    await p.page.setViewportSize(LANDSCAPE);
+    await p.page.setViewportSize(PORTRAIT);
+    await p.page.setViewportSize({ width: 960, height: 600 });
+    // Resize events are dispatched before animation frame callbacks: after two frames all three have been.
+    await p.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await frame.evaluate(() => (window as unknown as { sfRelease: () => void }).sfRelease());
+
+    await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '3', viewport: '960x600 landscape', playing: '1', wrapper: '960x600' });
+  });
+
+  it('blanks a template on screen whose refit fails, rather than leave its markup without data', async () => {
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])));
+    await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', playing: '1' });
+    await (await visibleFrame(p.page, 'label'))!.evaluate(() => {
+      (window as unknown as { sfFailNext: boolean }).sfFailNext = true;
+    });
+
+    await p.page.setViewportSize(PORTRAIT);
+    await expect.poll(() => p.console).toContainEqual('warning: [sf] refit a: template error: fixture refit failed');
+    expect(await fitted(p.page)).toBeUndefined();
+    expect(await p.page.locator('.slot iframe').count()).toBe(0);
+  });
 });

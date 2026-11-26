@@ -232,7 +232,7 @@ export class Slot {
   private loading: Promise<void> = Promise.resolve();
   /**
    * Settles when the load and every refit queued are done; rejects if the last refit failed.
-   * `play` waits for it, so a spot never starts drawn for a size it no longer has.
+   * `play` waits for it, so a spot is never played drawn for a size it no longer has.
    */
   private fitted: Promise<void> = Promise.resolve();
   /** A refit is queued and has not started: later resizes join it. */
@@ -246,27 +246,34 @@ export class Slot {
     addEventListener('resize', () => this.refit());
   }
 
-  /** Load a spot and resolve once it can be shown complete. Rejects on error or timeout. */
-  async prepare(spot: Spot, manifest: ScreenManifest): Promise<void> {
+  /**
+   * Load a spot and resolve once it can be shown complete. Rejects on error or timeout, and a
+   * timeout cancels the load, so it always settles. `report: false` (a protocol 1 refit, the
+   * same play loaded again) leaves out the data refused, which its first load counted.
+   */
+  async prepare(spot: Spot, manifest: ScreenManifest, report = true): Promise<void> {
     this.clear();
     this.spot = spot;
-    this.abort = new AbortController();
+    const abort = (this.abort = new AbortController());
     const work =
       spot.kind === 'template'
-        ? this.template(spot, manifest, this.abort.signal)
+        ? this.template(spot, manifest, this.abort.signal, report)
         : spot.kind === 'image'
           ? this.image(spot, this.abort.signal)
           : spot.kind === 'video'
             ? this.playVideo(spot, this.abort.signal)
             : this.url(spot, this.abort.signal);
-    // If the timeout wins, the load is cancelled and rejects later; that is expected, not an error.
+    // If the timeout wins, the load is cancelled and rejects; that is expected, not an error.
     work.catch(() => undefined);
     this.loading = work.catch(() => undefined);
     // A refit queued for the spot this replaced still runs, after this load: see `refit`.
     this.fitted = Promise.all([this.fitted.catch(() => undefined), this.loading]).then(() => undefined);
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => {
-      timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
+      timer = window.setTimeout(() => {
+        abort.abort();
+        reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`));
+      }, READY_TIMEOUT_MS);
     });
     try {
       await Promise.race([work, timeout]);
@@ -276,8 +283,9 @@ export class Slot {
   }
 
   /**
-   * Start the prepared spot. Resolves once it plays: at once for a template (it reported ready),
-   * an image or a URL spot, and when its `play()` does for a video. Rejects if the video's is refused.
+   * Start the prepared spot, after any refit queued for it. Resolves once it plays: then for a
+   * template, an image or a URL spot, and when its `play()` does for a video. Rejects if the
+   * video's is refused, or if the refit failed.
    */
   play(): Promise<void> {
     return this.fitted.then(() => {
@@ -292,6 +300,8 @@ export class Slot {
    * reloads its frame), as playing if it was. Image, video and URL spots fill the slot, so they
    * need nothing. A refit waits for the load and the refit before it, and later resizes join the
    * one waiting, so a burst of resizes costs at most two inits, and the last one has the last size.
+   * A refit that fails blanks the slot, as a template that navigates away does: the frame has
+   * been reset by then, and shows its markup without data.
    */
   private refit(): void {
     if (this.refitQueued) return;
@@ -308,7 +318,7 @@ export class Slot {
         return this.fitAgain();
       });
     this.fitted = run;
-    run.catch((err: unknown) => console.warn(`[sf] refit ${this.spot?.id}: ${err instanceof Error ? err.message : String(err)}`));
+    run.catch(() => undefined);
   }
 
   private async fitAgain(): Promise<void> {
@@ -317,14 +327,23 @@ export class Slot {
     const fit = fitTo(live.template);
     if (fit.orientation === live.orientation && fit.viewport.width === live.viewport.width && fit.viewport.height === live.viewport.height) return;
     const replay = this.started;
-    if (live.protocol < 2) {
-      await this.prepare(live.spot, live.manifest);
-    } else {
-      const signal = this.abort.signal;
-      this.size(live.wrapperFrame, fit);
-      live.orientation = fit.orientation;
-      live.viewport = fit.viewport;
-      await this.resetToReady(live, signal);
+    try {
+      if (live.protocol < 2) {
+        await this.prepare(live.spot, live.manifest, false);
+      } else {
+        const signal = this.abort.signal;
+        this.size(live.wrapperFrame, fit);
+        live.orientation = fit.orientation;
+        live.viewport = fit.viewport;
+        await this.resetToReady(live, signal);
+      }
+    } catch (err) {
+      // Cleared or given another spot meanwhile: nothing of this refit is on screen.
+      if (this.spot !== live.spot) throw err;
+      console.warn(`[sf] refit ${live.spot.id}: ${err instanceof Error ? err.message : String(err)}`);
+      this.abort?.abort();
+      this.el.replaceChildren();
+      throw err;
     }
     if (replay) {
       this.started = true;
@@ -401,7 +420,7 @@ export class Slot {
     });
   }
 
-  private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
+  private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal, report: boolean): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
     // Speak the protocol the bundle was built against: published bundles never change.
@@ -409,7 +428,7 @@ export class Slot {
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const locale = screenLocale(manifest);
     const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
-    reportRejected(rejected);
+    if (report) reportRejected(rejected);
     const [{ wrapper: wrapperHtml, template: templateHtml }, baseAssets, rowImages, theme] = await Promise.all([
       framesFor(manifest, t.html),
       spotAssets(spot, manifest),
@@ -435,7 +454,11 @@ export class Slot {
     wrapperFrame.title = spot.name;
     this.size(wrapperFrame, fit);
     wrapperFrame.srcdoc = wrapperHtml;
-    const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
+    // Rejects on abort, so a load cleared here settles: `play` waits for it (`fitted`).
+    const wrapped = new Promise<void>((resolve, reject) => {
+      wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal });
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    });
     this.el.appendChild(wrapperFrame);
     await wrapped;
     alive(signal);
@@ -588,7 +611,11 @@ export class Slot {
     frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
     frame.title = spot.name;
     frame.style.cssText = 'width:100%;height:100%';
-    const loaded = new Promise<void>((resolve) => frame.addEventListener('load', () => resolve(), { once: true, signal }));
+    // Rejects on abort, so a page that never loads settles once skipped: `play` waits for it (`fitted`).
+    const loaded = new Promise<void>((resolve, reject) => {
+      frame.addEventListener('load', () => resolve(), { once: true, signal });
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    });
     frame.src = target.href;
     this.el.appendChild(frame);
     await loaded;

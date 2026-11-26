@@ -9,7 +9,7 @@
  * It shows `label` and lists the titles of `items` in `#box` the way a news template would, trusting
  * the shape (so `items: {}` throws), marks whether it received asset `file` and the size of the
  * sample beside it, runs a CSS animation the SDK must hold until play, and marks `play`, how many
- * inits the frame took and the viewport the last one gave.
+ * inits the frame took and the viewport the last one gave; a test can hold or fail its next init.
  */
 import { Sha256 } from '@signforge/player-core/sha256';
 import { defineTemplate } from '@signforge/template-sdk';
@@ -120,10 +120,16 @@ const navigates = new Set(['navigate', 'navigate-data', 'navigate-top', 'refresh
 defineTemplate({
   async prepare(ctx) {
     document.body.dataset.prepared = '1';
-    // The window outlives a reset, so this counts every init the frame took.
-    const w = window as unknown as { sfInits?: number };
+    // The window outlives a reset, so this counts every init the frame took, and a test sets
+    // `sfHold` (a promise this prepare waits on) or `sfFailNext` (throw once) on it between inits.
+    const w = window as unknown as { sfInits?: number; sfHold?: Promise<void>; sfFailNext?: boolean };
     document.body.dataset.inits = String((w.sfInits = (w.sfInits ?? 0) + 1));
     document.body.dataset.viewport = `${ctx.viewport.width}x${ctx.viewport.height} ${ctx.orientation}`;
+    if (w.sfFailNext) {
+      w.sfFailNext = false;
+      throw new Error('fixture refit failed');
+    }
+    await w.sfHold;
     document.body.dataset.visibleInPrepare = getComputedStyle(document.getElementById('label')!).visibility;
     document.body.dataset.asset = ctx.assets.file ? '1' : '';
     const sample = ctx.assets[sampleAsset('file')];
