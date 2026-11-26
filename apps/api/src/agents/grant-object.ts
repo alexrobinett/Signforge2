@@ -30,11 +30,29 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 const REFUSALS_TO_ALERT = 3;
 /** The most `agent.refused` alerts an org is sent in a clock hour, however many of its agents are refused. */
 const ORG_ALERTS_PER_HOUR = 5;
+/**
+ * The most of them for the agents one member granted: one member's many grants cannot use up the org's hour, so another
+ * member's misbehaving agent still alerts (#347). Of the org's five, three are always left for the others.
+ */
+const MEMBER_ALERTS_PER_HOUR = 2;
 
-/** A count in the open clock hour: a grant's `forbidden` refusals, or an org's alerts. */
+/**
+ * A count in the open clock hour: a grant's `forbidden` refusals. `alerted`: its alert is claimed this hour.
+ * `handedBack`: a failed org check has given the claim back once this hour, which happens at most once (review of #554).
+ */
 interface HourCount {
   start: number;
   count: number;
+  alerted?: boolean;
+  handedBack?: boolean;
+}
+
+/** An org's alerts sent in the open clock hour, in all and by the member who granted each agent. */
+interface OrgAlerts {
+  start: number;
+  count: number;
+  /** Absent in a record from before #347. */
+  byMember?: Record<string, number>;
 }
 const REFUSALS_KEY = 'refusals';
 const ORG_ALERTS_KEY = 'org_alerts';
@@ -81,32 +99,53 @@ export class AgentGrantObject extends DurableObject<Env> {
 
   /**
    * A call refused `forbidden` (M4-08), counted in the open hour by the object's clock. `alert` is
-   * true for exactly one refusal an hour, the `REFUSALS_TO_ALERT`th, however many race: the alert
-   * goes at most once per grant a clock hour. Only a forbidden refusal reaches the object, and only until the alert (`refusalAlertDue`).
+   * true for one refusal an hour, the first from the `REFUSALS_TO_ALERT`th, however many race: it claims the grant's
+   * alert for the hour, which goes at most once a clock hour. Only a forbidden refusal reaches the object, and only
+   * until the alert (`refusalAlertDue`).
    */
   refused(): { alert: boolean; refusals: number; hour: number } {
-    const hour = this.counted(REFUSALS_KEY);
-    return { alert: hour.count === REFUSALS_TO_ALERT, refusals: hour.count, hour: hour.start };
+    const now = Date.now();
+    const start = now - (now % HOUR_MS);
+    const stored = this.ctx.storage.kv.get<HourCount>(REFUSALS_KEY);
+    const hour = stored?.start === start ? stored : { start, count: 0 };
+    // A record from before #347 has no flag: it alerted at its third refusal.
+    const alerted = hour.alerted ?? hour.count >= REFUSALS_TO_ALERT;
+    hour.count++;
+    const alert = hour.count >= REFUSALS_TO_ALERT && !alerted;
+    if (alert) hour.alerted = true;
+    this.ctx.storage.kv.put(REFUSALS_KEY, hour);
+    return { alert, refusals: hour.count, hour: hour.start };
   }
 
   /**
-   * Whether an org may be sent one more `agent.refused` alert this clock hour (in the object named
-   * `org:<id>`): its first `ORG_ALERTS_PER_HOUR`, so a member with many grants
-   * cannot flood the owners. Asked only when a grant's alert is due (`refusalAlertDue`), at most once per grant a clock hour.
+   * The alert `refused` claimed for `hour` was never asked of the org (its check failed): the next refusal claims it
+   * again (#347). Once an hour: an org check that keeps failing then costs no more requests (review of #554). Whether
+   * it was given back.
    */
-  orgAlertDue(): boolean {
-    return this.counted(ORG_ALERTS_KEY).count <= ORG_ALERTS_PER_HOUR;
+  unclaimed(hour: number): boolean {
+    const stored = this.ctx.storage.kv.get<HourCount>(REFUSALS_KEY);
+    if (stored?.start !== hour || !stored.alerted || stored.handedBack) return false;
+    this.ctx.storage.kv.put(REFUSALS_KEY, { ...stored, alerted: false, handedBack: true });
+    return true;
   }
 
-  /** One more in the count stored at `key`, for the open clock hour by the object's clock. */
-  private counted(key: string): HourCount {
+  /**
+   * Whether an org may be sent one more `agent.refused` alert this clock hour (in the object named `org:<id>`), for an
+   * agent `member` granted: within the org's first `ORG_ALERTS_PER_HOUR` and the member's first `MEMBER_ALERTS_PER_HOUR`,
+   * so no member's grants flood the owners or hide another member's (#347). Counted only when due. Asked only when a
+   * grant's alert is due (`refusalAlertDue`), at most once per grant a clock hour.
+   */
+  orgAlertDue(member: string): boolean {
     const now = Date.now();
     const start = now - (now % HOUR_MS);
-    const stored = this.ctx.storage.kv.get<HourCount>(key);
-    const hour = stored?.start === start ? stored : { start, count: 0 };
-    hour.count++;
-    this.ctx.storage.kv.put(key, hour);
-    return hour;
+    const stored = this.ctx.storage.kv.get<OrgAlerts>(ORG_ALERTS_KEY);
+    const hour: OrgAlerts = stored?.start === start ? stored : { start, count: 0, byMember: {} };
+    // A record from before #347 counted the org alone: its hour has no members yet.
+    const byMember = hour.byMember ?? {};
+    const mine = byMember[member] ?? 0;
+    if (hour.count >= ORG_ALERTS_PER_HOUR || mine >= MEMBER_ALERTS_PER_HOUR) return false;
+    this.ctx.storage.kv.put(ORG_ALERTS_KEY, { start, count: hour.count + 1, byMember: { ...byMember, [member]: mine + 1 } });
+    return true;
   }
 
   /** The open windows at `now`, as stored. */
@@ -148,27 +187,41 @@ export function agentLimiter(env: Pick<Env, 'AGENT_GRANTS' | 'AGENT_CALL_LIMIT'>
 /**
  * The clock hour in which this isolate saw a grant's refusals reach the alert, by grant: its later
  * `forbidden` refusals that hour reach no object, so a runaway agent's refusals cost at most
- * `REFUSALS_TO_ALERT` object requests per isolate an hour (more only while some are in flight at
- * once), as `recordedMinute` bounds the call limit's. One entry a grant.
+ * `REFUSALS_TO_ALERT` grant-object requests and one org-object request per isolate an hour (more only while some are
+ * in flight at once), as `recordedMinute` bounds the call limit's; while the org's object fails, at most 6 and 2, as
+ * the claim is given back once (`unclaimed`). One entry a grant.
  */
 const refusalsDone = new Map<string, number>();
 
 /**
- * Counts a `forbidden` refusal of `grantId` (M4-08) and says whether to alert: the grant's object
- * answers yes once a clock hour, at its `REFUSALS_TO_ALERT`th, and then the org's object, for its
- * hourly cap. Null when no alert is due.
+ * Counts a `forbidden` refusal of `grantId`, granted by `member` (M4-08), and says whether to alert: the grant's object
+ * answers yes once a clock hour, from its `REFUSALS_TO_ALERT`th, and then the org's object, for its hourly caps. Null
+ * when no alert is due. The grant's alert and this isolate's memo are spent only once the org's object has answered:
+ * a check that fails gives the alert back, for the next refusal to claim (#347).
  */
 export async function refusalAlertDue(
   env: Pick<Env, 'AGENT_GRANTS'>,
-  orgId: string,
-  grantId: string,
+  { orgId, grantId, member }: { orgId: string; grantId: string; member: string },
   now: number,
 ): Promise<{ refusals: number; hour: number } | null> {
   if (refusalsDone.get(grantId) === now - (now % HOUR_MS)) return null;
-  const counted = await env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(grantId)).refused();
-  if (counted.refusals >= REFUSALS_TO_ALERT) refusalsDone.set(grantId, counted.hour);
-  if (!counted.alert) return null;
-  if (!(await env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`org:${orgId}`)).orgAlertDue())) {
+  const grant = env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(grantId));
+  const counted = await grant.refused();
+  if (!counted.alert) {
+    // Claimed already this hour: this isolate need not ask again.
+    if (counted.refusals >= REFUSALS_TO_ALERT) refusalsDone.set(grantId, counted.hour);
+    return null;
+  }
+  let due: boolean;
+  try {
+    due = await env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`org:${orgId}`)).orgAlertDue(member);
+  } catch (err) {
+    // Given back once an hour; after that this isolate asks no more this hour, so a failing org object costs a bounded few.
+    if (!(await grant.unclaimed(counted.hour))) refusalsDone.set(grantId, counted.hour);
+    throw err;
+  }
+  refusalsDone.set(grantId, counted.hour);
+  if (!due) {
     console.warn(JSON.stringify({ event: 'agent_refused_alert_capped', org: orgId, grant: grantId }));
     return null;
   }
