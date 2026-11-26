@@ -7,10 +7,6 @@
     "orientation": "landscape"
   },
   "files": {
-    "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c": {
-      "size": 78652,
-      "type": "text/html"
-    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg",
@@ -20,12 +16,8 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08": {
-      "size": 90063,
-      "type": "text/html"
-    },
-    "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660": {
-      "size": 81033,
+    "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c": {
+      "size": 78652,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -36,6 +28,10 @@
       "size": 360551,
       "type": "image/jpeg"
     },
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
+      "type": "text/html"
+    },
     "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f": {
       "size": 44306,
       "type": "image/png"
@@ -44,9 +40,25 @@
       "size": 400856,
       "type": "text/html"
     },
+    "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08": {
+      "size": 90063,
+      "type": "text/html"
+    },
+    "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660": {
+      "size": 81033,
+      "type": "text/html"
+    },
+    "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62": {
+      "size": 80559,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79": {
+      "size": 80420,
+      "type": "text/html"
     },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
@@ -56,12 +68,16 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "9a4882a75d9a35b7896a888b31dc04cdf95ef6ffae95d4efe59250b3530967f0": {
+      "size": 383676,
+      "type": "text/html"
+    },
     "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
-      "size": 399498,
+    "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e": {
+      "size": 125382,
       "type": "text/html"
     },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
@@ -72,18 +88,10 @@
       "size": 77944,
       "type": "text/html"
     },
-    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
-      "size": 395144,
-      "type": "text/html"
-    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
-    },
-    "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62": {
-      "size": 80559,
-      "type": "text/html"
     },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
       "size": 43425,
@@ -102,16 +110,8 @@
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
     },
-    "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e": {
-      "size": 125382,
-      "type": "text/html"
-    },
-    "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79": {
-      "size": 80420,
-      "type": "text/html"
-    },
-    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
-      "size": 383288,
+    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
+      "size": 399498,
       "type": "text/html"
     }
   },
@@ -251,7 +251,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -264,6 +263,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -459,7 +459,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -472,6 +471,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,8 +626,6 @@
           "events": {
             "type": "list",
             "label": "Events",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -653,7 +651,9 @@
                 "label": "Location",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "rows": {
             "type": "number",
@@ -685,13 +685,13 @@
         ],
         "uses": [],
         "background": "#0d1117",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62"
     },
@@ -833,8 +833,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -851,7 +849,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,18 +970,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -1007,7 +1007,6 @@
           "items": {
             "type": "list",
             "label": "Items",
-            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1038,7 +1037,8 @@
                 ],
                 "default": ""
               }
-            }
+            },
+            "maxItems": 12
           },
           "footnote": {
             "type": "text",
@@ -1072,20 +1072,20 @@
         ],
         "uses": [],
         "background": "#14110f",
+        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c"
     },
-    "base/news@2.1.2": {
+    "base/news@2.2.0": {
       "manifest": {
         "id": "news",
-        "version": "2.1.2",
+        "version": "2.2.0",
         "name": "News",
         "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1104,8 +1104,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1132,7 +1130,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1190,16 +1190,16 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
+      "html": "9a4882a75d9a35b7896a888b31dc04cdf95ef6ffae95d4efe59250b3530967f0"
     },
     "base/photo-promo@1.6.0": {
       "manifest": {
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,13 +1368,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1"
     },
@@ -1872,7 +1872,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.1.2",
+      "template": "base/news@2.2.0",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "876a59d34f161c16be92afed2ebc9681aef026f830671ea7a4f6c3437bd4935c"
+  "id": "a82a00a4b94215687e97fd82625b53fc11f9906886c3654b8486f67cf7fb6030"
 }

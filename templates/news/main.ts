@@ -39,7 +39,8 @@ const MAX_UPSCALE = 1.25;
 /**
  * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
- * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
+ * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared in `stop`, as the spec's lifecycle asks (#477):
+ * a tool that seeks a play's time without running its timers then finds no timer of an earlier play waiting.
  */
 let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number }[] = [];
 let timers: number[] = [];
@@ -65,8 +66,6 @@ function clone(id: string): HTMLElement {
 defineTemplate({
   async prepare(ctx) {
     const { data } = ctx;
-    for (const t of timers) clearTimeout(t);
-    timers = [];
     later = [];
     // Unpainted until play: a frame that paints a photo while prepare runs has it decoded for the
     // screen first, and the SDK's decode before ready waits behind that one (photo-promo, #168).
@@ -182,6 +181,10 @@ defineTemplate({
         }, at),
       );
   },
+  stop() {
+    for (const t of timers) clearTimeout(t);
+    timers = [];
+  },
 });
 
 /** Resolves once `img` has loaded, or failed to. */
@@ -222,12 +225,21 @@ function fitHeadlines(stories: HTMLElement[]): void {
     const text = h.closest<HTMLElement>('.text')!;
     return text.offsetTop + text.offsetHeight > h.closest<HTMLElement>('.story')!.clientHeight + 1;
   };
-  let long = heads.filter(over);
+  /**
+   * Over, or a word broken across two lines: `overflow-wrap: anywhere` breaks one wider than the line, and Night's large
+   * steps would show "Thanksgivin / g" (review of #502). A step smaller holds it whole; past the last, the cut below
+   * takes what still will not fit, as it does a word wider than any line, such as a URL.
+   */
+  const unfit = (h: HTMLElement) => over(h) || splitsAWord(h);
+  let long = heads.filter(unfit);
   for (const step of HEADLINE_STEPS.slice(1)) {
     if (!long.length) return;
     for (const h of long) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(step));
-    long = long.filter(over);
+    long = long.filter(unfit);
   }
+  // At the last step a word may still break only because it is wider than the line: left so, as long as it fits.
+  long = long.filter(over);
+  if (!long.length) return;
   // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
   // each word's line ends is read from the one layout there is; the cut is checked with one more.
   const full = long.map((h) => h.textContent!);
@@ -268,6 +280,21 @@ function fitHeadlines(stories: HTMLElement[]): void {
     }
     return n;
   }
+}
+
+/** Whether a word of `h`'s text is drawn on more than one line (its only child is its text). */
+function splitsAWord(h: HTMLElement): boolean {
+  const text = h.firstChild;
+  if (!text) return false;
+  const range = document.createRange();
+  for (const word of h.textContent!.matchAll(/\S+/g)) {
+    range.setStart(text, word.index);
+    range.setEnd(text, word.index + word[0].length);
+    const rects = [...range.getClientRects()];
+    // Lines by their tops: a word on one line may still give more than one box (a font change, a kerning pair).
+    if (rects.some((r) => Math.abs(r.top - rects[0]!.top) > r.height / 2)) return true;
+  }
+  return false;
 }
 
 /** The longest start of `text`, with "…", that `fits`: a search over its characters. */

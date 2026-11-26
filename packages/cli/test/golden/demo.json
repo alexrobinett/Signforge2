@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
+      "onPrimary": "#ffffff",
       "accent": "#f97316",
+      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb",
-      "onPrimary": "#ffffff",
-      "onAccent": "#000000"
+      "muted": "#a5b4cb"
     },
     "shape": "soft",
     "fonts": {
@@ -117,6 +117,10 @@
       "size": 12704,
       "type": "font/woff2"
     },
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
+      "type": "text/html"
+    },
     "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
       "size": 400856,
       "type": "text/html"
@@ -124,6 +128,10 @@
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79": {
+      "size": 80420,
+      "type": "text/html"
     },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
@@ -133,6 +141,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "9a4882a75d9a35b7896a888b31dc04cdf95ef6ffae95d4efe59250b3530967f0": {
+      "size": 383676,
+      "type": "text/html"
+    },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
       "type": "font/woff2"
@@ -141,40 +153,28 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
-      "size": 399498,
-      "type": "text/html"
-    },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
       "size": 12672,
       "type": "font/woff2"
-    },
-    "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
-      "size": 639,
-      "type": "image/svg+xml"
-    },
-    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
-      "size": 395144,
-      "type": "text/html"
-    },
-    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
-      "size": 393916,
-      "type": "text/html"
     },
     "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e": {
       "size": 125382,
       "type": "text/html"
     },
-    "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79": {
-      "size": 80420,
+    "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
+      "size": 393916,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
     },
-    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
-      "size": 383288,
+    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
+      "size": 399498,
       "type": "text/html"
     }
   },
@@ -224,7 +224,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -237,6 +236,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -382,7 +382,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -395,6 +394,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -755,8 +755,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -773,7 +771,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -864,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -892,25 +892,25 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/news@2.1.2": {
+    "base/news@2.2.0": {
       "manifest": {
         "id": "news",
-        "version": "2.1.2",
+        "version": "2.2.0",
         "name": "News",
         "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
@@ -929,8 +929,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -957,7 +955,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1015,16 +1015,16 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
+      "html": "9a4882a75d9a35b7896a888b31dc04cdf95ef6ffae95d4efe59250b3530967f0"
     },
     "base/room-status@1.2.0": {
       "manifest": {
@@ -1072,8 +1072,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1098,7 +1096,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,13 +1142,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1"
     }
@@ -1325,7 +1325,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.1.2",
+      "template": "base/news@2.2.0",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1355,7 +1355,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.1.2",
+      "template": "base/news@2.2.0",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1385,7 +1385,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.1.2",
+      "template": "base/news@2.2.0",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "fdfc57417a13beca51cbb6b7ae2e4f2419a11cf7f473f6457dd50e4db073d1de"
+  "id": "89bbbe79202ee6efbe1cf1b5b6a5e57be405650e98cb78ef120d2f0c69e8f8ca"
 }
