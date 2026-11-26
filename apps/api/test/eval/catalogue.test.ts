@@ -38,13 +38,14 @@ const DISCOVERY: Record<Role, Size> = {
 
 /**
  * The words each arm's first request carries beside its tools (review of #470): /mcp's server instructions with the
- * eval's own lines; the drawer's system prompt and its first message's context around the question (the role, what it
- * may not do, the page). Text moved out of a tool's description into either is counted here, so the catalogue pins
+ * eval's own lines; the drawer's system prompt, its first message's context around the question (the role, what it
+ * may not do, the page) and its answer's schema (`output_config`, review of #566). Text moved out of a tool's description
+ * into any of them is counted here, so the catalogue pins
  * cannot shrink by moving words out of their sight.
  */
 const PROMPT: Record<Arm, Record<Role, { bytes: number; tokens: number }>> = {
   mcp: { owner: { bytes: 1415, tokens: 329 }, editor: { bytes: 1415, tokens: 329 }, viewer: { bytes: 1415, tokens: 329 } },
-  drawer: { owner: { bytes: 2301, tokens: 540 }, editor: { bytes: 2425, tokens: 570 }, viewer: { bytes: 2713, tokens: 634 } },
+  drawer: { owner: { bytes: 3452, tokens: 846 }, editor: { bytes: 3576, tokens: 876 }, viewer: { bytes: 3864, tokens: 940 } },
 };
 
 const ROLES = ['owner', 'editor', 'viewer'] as const;

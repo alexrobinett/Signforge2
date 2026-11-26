@@ -19,7 +19,7 @@ Every attempt gives a record, including one where the model failed or the harnes
 - **success**: the check passed and the run completed with no execution error. A read whose tools answered, followed by a model that failed, is a check pass but not a success.
 - **checked**: whether the check passed.
 - **why**: why the check failed.
-- **errors**: the model's failures, the drawer's run errors, /mcp's protocol errors or its loop running out of turns, and the harness's own. The model's failures are `model_503` and other statuses, `model_unreachable`, `model_unreadable`, a reply that did not finish its turn (`model_max_tokens`, `model_model_context_window_exceeded`, `model_refusal`: any stop but `end_turn`, `tool_use` or `stop_sequence`), and `model_timeout` once a live /mcp run's model calls pass 300 s. A 200 whose body does not read as a message (`{}`, an error object), or breaks off while it is read, is `model_unreadable`, never a harness failure.
+- **errors**: the model's failures, the drawer's run errors, /mcp's protocol errors or its loop running out of turns, and the harness's own. The model's failures are `model_503` and other statuses, `model_unreachable`, `model_unreadable`, a reply that did not finish its turn (`model_max_tokens`, `model_model_context_window_exceeded`, `model_refusal`: any stop but `end_turn`, `tool_use` or `stop_sequence`), and `model_timeout` once a live /mcp run's model calls pass 300 s. A 200 whose body does not read as a message (`{}`, an error object, content with no `stop_reason`), or breaks off while it is read, is `model_unreadable`, never a harness failure.
 - tool calls, refused calls, model calls, input and output tokens, and catalogue size.
 
 All of it is measured from the model's side, so both arms count the same way:
@@ -53,7 +53,7 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 ## The catalogue budget
 
-`catalogue.test.ts` pins the catalogue's size per role. The budget is the `tools` array in the model's first request in each arm, counted as `{ tools }` JSON in o200k tokens, the tool audit's method. /mcp's `tools/list`, what a client receives before it builds the model's tools, is pinned apart as discovery. A PR that grows either fails there. A PR that shrinks one updates the pin in the same diff. Beside them it pins the words each first request carries with the tools: /mcp's server instructions with the eval's own lines (329 tokens for every role), and the drawer's system prompt with its first message's context around the question (540 / 570 / 634), so text moved out of a tool's description is still counted.
+`catalogue.test.ts` pins the catalogue's size per role. The budget is the `tools` array in the model's first request in each arm, counted as `{ tools }` JSON in o200k tokens, the tool audit's method. /mcp's `tools/list`, what a client receives before it builds the model's tools, is pinned apart as discovery. A PR that grows either fails there. A PR that shrinks one updates the pin in the same diff. Beside them it pins the words each first request carries with the tools: /mcp's server instructions with the eval's own lines (329 tokens for every role), and the drawer's system prompt with its first message's context around the question and its answer's schema, `output_config` (846 / 876 / 940), so text moved out of a tool's description is still counted.
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
