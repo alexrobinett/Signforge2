@@ -117,8 +117,17 @@ describe('announcement (#197)', () => {
           for (const a of document.getAnimations()) a.currentTime = 3000;
           const style = (el: Element, pseudo?: string) => getComputedStyle(el, pseudo);
           const facts = [...document.querySelectorAll<HTMLElement>('.fact')];
-          const accent = style(document.documentElement).getPropertyValue('--lk-accent-ink').trim();
-          const inAccent = [...document.querySelectorAll('.copy *')].filter((el) => el.children.length === 0 && el.textContent && style(el).color === accent);
+          // As computed, like the colours it is compared with: the custom property holds what the kit wrote (hex).
+          const accents = ['--lk-accent-ink', '--lk-accent-ink-large'].map((name) => {
+            const probe = document.body.appendChild(document.createElement('i'));
+            probe.style.color = `var(${name})`;
+            const color = style(probe).color;
+            probe.remove();
+            return color;
+          });
+          const inAccent = [...document.querySelectorAll('.copy *')].filter(
+            (el) => el.children.length === 0 && el.textContent && accents.includes(style(el).color),
+          );
           return {
             rows: facts.every((el) => style(el).flexDirection === 'row'),
             // Cut: the clamp hides at least half a line (glyphs overhang a tight leading by a few pixels, as main.ts allows).
@@ -252,7 +261,8 @@ describe('announcement (#197)', () => {
       const k = await screenFrame(t(), orientation, photo);
       for (const [kit, theme] of kits)
         for (const look of looks) {
-          const f = await k.play({ look, qrUrl: long.qrUrl }, theme);
+          // With every field at its limit: long copy gives way, never the code (#603's review).
+          const f = await k.play({ look, ...long }, theme);
           const { fills, clip, vmin } = await f.evaluate(() => {
             for (const a of document.getAnimations()) a.currentTime = 3000;
             const svg = document.querySelector('#qr svg')!;
