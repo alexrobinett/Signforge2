@@ -141,7 +141,7 @@ describe('the Cron Triggers', () => {
   it('expire idempotency keys after 7 days, on the first five-minute run of each UTC day', async () => {
     const { org } = await orgWithTeam();
     const scope = testScope(env.DB, org.id);
-    await scope.commit(scope.idempotency.stage({ key: 'k-retention', action: 'create_group', inputSha256: '0', outputJson: '{}' }).writes);
+    await scope.commit(scope.idempotency.stage({ key: 'k-retention', action: 'save_group', inputSha256: '0', outputJson: '{}' }).writes);
     const midnight = (days: number) => Math.ceil(Date.now() / DAY) * DAY + days * DAY;
 
     await runCron('*/5 * * * *', midnight(6));

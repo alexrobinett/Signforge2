@@ -64,7 +64,7 @@ const as = (actor: Caller['actor'], limiter = limiterAt()): Caller => ({
 const agent = (grantId: string, limiter = limiterAt()) => as({ kind: 'agent', id: grantId, clientId: 'agent-app' }, limiter);
 
 const read = (c: Caller) => dispatch(registry, 'get_org_settings', {}, c);
-const write = (c: Caller, name = 'Lobby') => dispatch(registry, 'rename_group', { groupId: o.group, name }, c);
+const write = (c: Caller, name = 'Lobby') => dispatch(registry, 'save_group', { groupId: o.group, name }, c);
 
 describe('the call limit binding', () => {
   it("allows AGENT_LIMITS' calls a minute, in the dev environment's binding", () => {

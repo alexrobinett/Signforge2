@@ -84,8 +84,8 @@ describe('list_screens and get_screen', () => {
   });
 
   it("list a screen's recent events, newest first", async () => {
-    await call('rename_screen', { screenId: o.screen, name: 'Lobby' });
-    await call('rename_screen', { screenId: o.screen, name: 'Front lobby' });
+    await call('update_screen', { screenId: o.screen, name: 'Lobby' });
+    await call('update_screen', { screenId: o.screen, name: 'Front lobby' });
     const { events } = await call('get_screen', { screenId: o.screen });
     expect(
       events
@@ -95,14 +95,14 @@ describe('list_screens and get_screen', () => {
     ).toEqual(['Front lobby', 'Lobby']);
     expect(events[0]).toEqual({
       at: expect.any(Number),
-      action: 'rename_screen',
+      action: 'update_screen',
       actor: { kind: 'user', id: 'user-1' },
       input: { screenId: o.screen, name: expect.any(String) },
     });
   });
 });
 
-describe('set_display_override', () => {
+describe('screen_command: the display', () => {
   afterEach(() => vi.setSystemTime(NOW));
 
   // Weekdays 07:00 to 19:00 in London. A wake lasts until the next change, and at most 12 hours.
@@ -119,36 +119,41 @@ describe('set_display_override', () => {
     ['the Sunday clocks go back, until Monday 07:00 GMT', '2026-10-25T20:00:00Z', '2026-10-26T07:00:00.000Z'],
   ])('wakes a screen on %s, persists it and sends it', async (_, now, until) => {
     vi.setSystemTime(now);
-    await call('update_screen_settings', { screenId: o.screen, displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' }] } });
+    await call('update_screen', { screenId: o.screen, displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' }] } });
     sent.length = 0;
-    const { screen } = await call('set_display_override', { screenId: o.screen, state: 'on' });
-    expect(screen.displayOverride).toEqual({ state: 'on', until });
-    expect(sent).toEqual([{ screenId: o.screen, command: { type: 'display', override: screen.displayOverride } }]);
-    expect((await call('get_screen', { screenId: o.screen })).screen.displayOverride).toEqual(screen.displayOverride);
+    const { displayOverride } = await call('screen_command', { screenId: o.screen, command: 'display_on' });
+    expect(displayOverride).toEqual({ state: 'on', until });
+    expect(sent).toEqual([{ screenId: o.screen, command: { type: 'display', override: displayOverride } }]);
+    expect((await call('get_screen', { screenId: o.screen })).screen.displayOverride).toEqual(displayOverride);
   });
 
   it('lasts a fixed time on a screen with no display hours, and clears back to the schedule', async () => {
     vi.setSystemTime('2026-11-20T19:52:00Z');
-    await call('update_screen_settings', { screenId: o.screen, displayHours: null });
-    const { screen } = await call('set_display_override', { screenId: o.screen, state: 'off' });
-    expect(screen.displayOverride).toEqual({ state: 'off', until: '2026-11-21T07:52:00.000Z' });
+    await call('update_screen', { screenId: o.screen, displayHours: null });
+    const { displayOverride } = await call('screen_command', { screenId: o.screen, command: 'display_off' });
+    expect(displayOverride).toEqual({ state: 'off', until: '2026-11-21T07:52:00.000Z' });
     sent.length = 0;
-    const cleared = await call('set_display_override', { screenId: o.screen, state: null });
-    expect(cleared.screen.displayOverride).toBeNull();
+    const cleared = await call('screen_command', { screenId: o.screen, command: 'display_auto' });
+    expect(cleared.displayOverride).toBeNull();
+    expect((await call('get_screen', { screenId: o.screen })).screen.displayOverride).toBeNull();
     expect(sent).toEqual([{ screenId: o.screen, command: { type: 'display', override: null } }]);
   });
 
   it('is refused to a viewer', async () => {
-    const r = await dispatch(registry, 'set_display_override', { screenId: o.screen, state: 'on' }, { ...owner, role: 'viewer' });
+    const r = await dispatch(registry, 'screen_command', { screenId: o.screen, command: 'display_on' }, { ...owner, role: 'viewer' });
     expect(r).toMatchObject({ ok: false, error: 'forbidden' });
   });
 });
 
-describe('identify_screen and restart_screen', () => {
+describe('screen_command: identify and restart', () => {
   it('send the command and record it, though nothing in the database changes', async () => {
     sent.length = 0;
-    expect(await call('identify_screen', { screenId: o.screen })).toEqual({ screenId: o.screen, seconds: 10 });
-    expect(await call('restart_screen', { screenId: o.screen })).toEqual({ screenId: o.screen });
+    expect(await call('screen_command', { screenId: o.screen, command: 'identify' })).toEqual({
+      screenId: o.screen,
+      command: 'identify',
+      displayOverride: null,
+    });
+    expect(await call('screen_command', { screenId: o.screen, command: 'restart' })).toEqual({ screenId: o.screen, command: 'restart', displayOverride: null });
     expect(sent).toEqual([
       { screenId: o.screen, command: { type: 'identify', name: 'Front lobby', seconds: 10 } },
       { screenId: o.screen, command: { type: 'restart' } },
@@ -158,9 +163,9 @@ describe('identify_screen and restart_screen', () => {
     expect(
       events
         .slice(0, 2)
-        .map((e: { action: string }) => e.action)
+        .map((e: { action: string; input: { command?: string } }) => `${e.action}:${e.input.command}`)
         .sort(),
-    ).toEqual(['identify_screen', 'restart_screen']);
+    ).toEqual(['screen_command:identify', 'screen_command:restart']);
   });
 });
 
@@ -180,8 +185,8 @@ describe('a revoked screen', () => {
     // Revoked here too, so the case stands alone: revoking a revoked credential changes nothing.
     await call('revoke_screen_credential', { screenId: o.screen, credentialId: o.credential });
     sent.length = 0;
-    for (const name of ['identify_screen', 'restart_screen']) {
-      const r = await dispatch(registry, name, { screenId: o.screen }, owner);
+    for (const command of ['identify', 'restart']) {
+      const r = await dispatch(registry, 'screen_command', { screenId: o.screen, command }, owner);
       expect(r).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('revoked') });
     }
     expect(sent).toEqual([]);

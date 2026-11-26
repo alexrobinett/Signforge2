@@ -139,12 +139,6 @@ function oneForeignId(tool: AnyTool, fields: IdField[], field: IdField, s: Seede
 }
 
 /**
- * Fields whose tool ignores an id it does not find, as its description says, the same for org A's
- * row as for one that does not exist: the call works on org B's rows and says nothing of A's.
- */
-const IGNORES_UNKNOWN = new Set(['remove_group_members.screenIds']);
-
-/**
  * Tools that list what org B's own calls were given, which this test fills with org A's ids: the
  * audit log. Each must list exactly org B's own rows instead.
  */
@@ -259,7 +253,7 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
       unique(idFields(z.toJSONSchema(registry.get(name)!.input, { io: 'input', unrepresentable: 'any' }))).map((f) => f.path.join('.'));
     expect(paths('assign_brand_kit')).toEqual(['brandKitId', 'screenId', 'groupId']);
     expect(paths('create_brand_kit')).toEqual(['logoOnDarkAssetId', 'logoOnLightAssetId']);
-    expect(paths('create_group')).toEqual(['screenIds']);
+    expect(paths('save_group')).toEqual(['groupId', 'screenIds']);
     expect(paths('update_spot')).toContain('bindings.*.dataSourceId');
   });
 
@@ -300,14 +294,9 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
         const name = `${tool.name}.${field.path.join('.')}`;
         const input = REACHED_BY[name]?.(s) ?? oneForeignId(tool, fields, field, s);
         const result = await dispatch(registry, tool.name, input, callerB);
-        if (IGNORES_UNKNOWN.has(name)) {
-          expect(result.ok, JSON.stringify(result)).toBe(true);
-          expect(JSON.stringify(result)).not.toContain(ORG_IDS[field.kind]!(s.a));
-        } else {
-          // Refused for org A's id, not for another field.
-          const named = REFUSED_BY_ANOTHER.has(name) ? expect.any(String) : expect.stringContaining(ORG_IDS[field.kind]!(s.a));
-          expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: named });
-        }
+        // Refused for org A's id, not for another field.
+        const named = REFUSED_BY_ANOTHER.has(name) ? expect.any(String) : expect.stringContaining(ORG_IDS[field.kind]!(s.a));
+        expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: named });
       });
     }
   }

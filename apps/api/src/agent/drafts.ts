@@ -9,6 +9,7 @@
  *    takes over, deletes, revokes, reaches an address or acts on live screens at once;
  *  - no spot's `url`, kind, media or bindings, and no web page spot at all (its address is one the
  *    stage and screens open; #269's card will show it);
+ *  - a screen's name only (`update_screen`), never its settings, which change what it plays when;
  *  - no takeover: an entry that cuts in at once is #269's to confirm.
  * A viewer's drawer drafts too, as a request to copy for someone who may save it: the dispatcher
  * refuses a viewer's save, as it refuses any of theirs.
@@ -33,6 +34,8 @@ interface Target {
   read: string | null;
   id: string;
   out: string;
+  /** The only fields the drawer drafts, where its tool takes more: the model is shown these alone, and refused the rest. */
+  fields?: readonly string[];
 }
 
 /** The writes the drawer drafts, and their targets; a creation has none. Each has its undo in the CMS (src/state/agent-drawer.ts). */
@@ -41,7 +44,8 @@ const DRAFTS: Record<string, Target | null> = {
   update_playlist: { kind: 'playlist', read: 'get_playlist', id: 'playlistId', out: 'playlist' },
   update_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry' },
   create_schedule_entry: null,
-  rename_screen: { kind: 'screen', read: 'get_screen', id: 'screenId', out: 'screen' },
+  // A screen's settings change what it plays when, so the drawer drafts its name alone (#345).
+  update_screen: { kind: 'screen', read: 'get_screen', id: 'screenId', out: 'screen', fields: ['name'] },
 };
 
 /** At most this many drafts in a turn, and in one save. */
@@ -68,7 +72,7 @@ const STATEMENTS: Record<string, number> = {
   // An entry's aim is read again too: one more for a group or a screen, which an update reads whatever its input.
   update_schedule_entry: 8,
   create_schedule_entry: 8,
-  rename_screen: 16,
+  update_screen: 16,
 };
 /**
  * The session's reads, before any draft, with its cookie cache warm. A cold session whose cache is refreshed
@@ -88,9 +92,14 @@ export function saveStatements(calls: readonly { tool: string; input: Row }[]): 
  */
 export function draftTools(grant: Grant) {
   const asked = grant.role === 'viewer' ? { ...grant, role: 'editor' as const } : grant;
-  return Object.keys(DRAFTS).flatMap((name) => {
+  return Object.entries(DRAFTS).flatMap(([name, target]) => {
     const tool = registry.get(name);
-    return tool?.mutates && !tool.people && permits(asked, tool) ? [tool] : [];
+    if (!tool?.mutates || tool.people || !permits(asked, tool)) return [];
+    const fields = target?.fields;
+    if (!fields || !(tool.input instanceof z.ZodObject)) return [{ name, description: tool.description, input: tool.input }];
+    // The target and these fields, each required: the version is the drawer's to add, from its read.
+    const shape: Record<string, z.ZodType> = tool.input.shape;
+    return [{ name, description: tool.description, input: z.object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!]))).required() }];
   });
 }
 
@@ -119,6 +128,11 @@ function draftRefusal(name: string, input: Row, target: Row | null): string | un
     for (const key of ['url', 'kind', 'assetId', 'fit', 'bindings', 'assets'])
       if (input[key] !== undefined) return `the agent changes a spot's name, length and fields, not its ${key}`;
   }
+  const t = DRAFTS[name];
+  if (t?.fields)
+    for (const key of Object.keys(input))
+      if (![t.id, 'ifVersion', ...t.fields].includes(key))
+        return `the agent drafts a ${t.kind}'s ${t.fields.join(', ')} alone, not its ${key}: change that in its settings`;
   if (name === 'update_schedule_entry' && (target?.takeover === true || input.startsAt !== undefined || input.endsAt !== undefined))
     return 'a takeover cuts in on screens at once: start or change it yourself, on the Schedule page';
   return undefined;

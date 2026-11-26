@@ -69,8 +69,8 @@ async function seed(owner: Client): Promise<World> {
   };
   const tool = async (name: string, input: Record<string, unknown>) => owner.ok<Record<string, { id: string; version: number }>>(`/api/tools/${name}`, input);
   const groups = {
-    bayside: (await tool('create_group', { name: 'Bayside', screenIds: [screens.baysideDoor, screens.baysideTill] })).group!.id,
-    cafe: (await tool('create_group', { name: 'Cafe', screenIds: [screens.cafe] })).group!.id,
+    bayside: (await tool('save_group', { name: 'Bayside', screenIds: [screens.baysideDoor, screens.baysideTill] })).group!.id,
+    cafe: (await tool('save_group', { name: 'Cafe', screenIds: [screens.cafe] })).group!.id,
   };
   const builds: { dir: string; manifest: { name: string; version: string } }[] = JSON.parse(env.TEMPLATE_BUILDS);
   const template = async (dir: string) => {

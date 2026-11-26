@@ -190,18 +190,9 @@ export type ReadType = keyof typeof READ_TYPES;
 
 /** The tools that change each type, as describe names them: explicit, so a tool named alike is never one of them. */
 const CHANGED_BY = {
-  screen: [
-    'rename_screen',
-    'update_screen_settings',
-    'set_display_override',
-    'identify_screen',
-    'restart_screen',
-    'revoke_screen_credential',
-    'update_screen_labels',
-    'assign_brand_kit',
-  ],
-  screen_status: ['restart_screen', 'set_display_override', 'revoke_screen_credential'],
-  group: ['create_group', 'rename_group', 'delete_group', 'set_group_members', 'add_group_members', 'remove_group_members'],
+  screen: ['update_screen', 'screen_command', 'revoke_screen_credential', 'update_screen_labels', 'assign_brand_kit'],
+  screen_status: ['screen_command', 'revoke_screen_credential'],
+  group: ['save_group', 'delete_group'],
   label_key: ['update_screen_labels'],
   publish: ['publish', 'roll_back_publish', 'publish_takeover', 'end_takeover'],
   publish_request: ['request_publish'],

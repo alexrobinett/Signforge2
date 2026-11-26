@@ -55,11 +55,11 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 52 tools · 17,444 tokens | 49 · 16,008 | 6 · 1,726 |
-| Drawer request | 24 · 8,211 | 22 · 7,909 | 11 · 4,384 |
-| /mcp `tools/list` (discovery) | 52 · 18,824 | 49 · 17,307 | 6 · 1,882 |
+| /mcp request | 45 tools · 16,871 tokens | 42 · 15,435 | 6 · 1,726 |
+| Drawer request | 22 · 8,034 | 20 · 7,732 | 11 · 4,376 |
+| /mcp `tools/list` (discovery) | 45 · 18,064 | 42 · 16,547 | 6 · 1,882 |
 
-The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489.
+The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882.
 
 ## Adding a task
 

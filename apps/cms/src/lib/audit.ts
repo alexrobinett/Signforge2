@@ -92,6 +92,9 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
 export const ACTIONS: Record<string, { group: string; words: string }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
+  update_screen: { group: 'Screens', words: 'Changed' },
+  screen_command: { group: 'Screens', words: 'Command sent' },
+  // Recorded before #345 merged them into update_screen, screen_command and save_group: their rows keep these names.
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
   set_display_override: { group: 'Screens', words: 'Woken or put to sleep' },
@@ -99,6 +102,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   restart_screen: { group: 'Screens', words: 'Player restarted' },
   revoke_screen_credential: { group: 'Screens', words: 'Credential revoked' },
   publish_manifest_to_screen: { group: 'Screens', words: 'Published' },
+  save_group: { group: 'Groups', words: 'Saved' },
   create_group: { group: 'Groups', words: 'Created' },
   rename_group: { group: 'Groups', words: 'Renamed' },
   delete_group: { group: 'Groups', words: 'Deleted' },
@@ -189,6 +193,16 @@ const SETTINGS: [string, string][] = [
   ['locale', 'language'],
 ];
 
+/** What each of `screen_command`'s commands did, as the tools it replaced said it. */
+const SCREEN_COMMANDS: Record<string, string> = {
+  identify: 'Identified',
+  restart: 'Player restarted',
+  display_on: 'Woken from the CMS',
+  display_off: 'Put to sleep from the CMS',
+  display_auto: 'Back to its display hours',
+};
+const MEMBERSHIP: Record<string, string> = { add: 'Screens added', remove: 'Screens removed', set: 'Screens set' };
+
 const capital = (s: string) => `${s[0]!.toUpperCase()}${s.slice(1)}`;
 const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -197,15 +211,26 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   const name = text(e.input.name);
   const role = text(e.input.role);
   switch (e.action) {
+    case 'screen_command':
+      return SCREEN_COMMANDS[text(e.input.command) ?? ''] ?? ACTIONS.screen_command!.words;
     case 'set_display_override':
       return e.input.state === 'on' ? 'Woken from the CMS' : e.input.state === 'off' ? 'Put to sleep from the CMS' : 'Back to its display hours';
+    case 'save_group': {
+      const membership = text(e.input.membership);
+      const screens = MEMBERSHIP[membership ?? ''];
+      if (e.input.groupId === undefined) return name ? `Created ${name}` : 'Created';
+      if (name && screens) return `Renamed to ${name} · ${screens.toLowerCase()}`;
+      return name ? `Renamed to ${name}` : (screens ?? ACTIONS.save_group!.words);
+    }
     case 'rename_screen':
     case 'rename_group':
     case 'update_organization':
       return name ? `Renamed to ${name}` : (ACTIONS[e.action]?.words ?? 'Renamed');
+    case 'update_screen':
     case 'update_screen_settings': {
       const changed = SETTINGS.filter(([key]) => key in e.input).map(([, word]) => word);
-      if (!changed.length) return 'Settings changed';
+      if (!changed.length) return name ? `Renamed to ${name}` : 'Settings changed';
+      if (name) changed.unshift('name');
       const list = changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]!;
       return `${capital(list)} changed`;
     }
