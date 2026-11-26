@@ -37,7 +37,7 @@ describe('room status (#199)', () => {
       async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC') {
         await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone);
         await hst.waitFor('fresh', 'ready', ++inits);
-        return hst.page.mainFrame().childFrames()[0]!;
+        return hst.frame('fresh');
       },
     };
   }
@@ -332,7 +332,7 @@ describe('room status (#199)', () => {
     for (const look of looks) {
       await r.hst.init('fresh', spotData(t().manifest, { look, ...full }), {}, NOW, undefined, false, durationMs);
       await r.hst.waitFor('fresh', 'ready', looks.indexOf(look) + 1);
-      const f = r.hst.page.mainFrame().childFrames()[0]!;
+      const f = r.hst.frame('fresh');
       expect(await motion(f, durationMs), look).toEqual({
         props: ['opacity', 'transform'],
         withinCap: true,

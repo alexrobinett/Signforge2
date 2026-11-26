@@ -909,6 +909,9 @@ importers:
       '@signforge/media':
         specifier: workspace:*
         version: link:../media
+      '@signforge/player-core':
+        specifier: workspace:*
+        version: link:../player-core
       '@signforge/template-build':
         specifier: workspace:*
         version: link:../template-build
