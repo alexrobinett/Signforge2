@@ -8,14 +8,21 @@
  * it is ready is parsed on the page, as the page's first prepare is. Where the worker cannot be made,
  * or fails to load, the page parses as before, for the rest of the page's life. A worker that does not
  * answer within HUNG_MS is ended; every read waiting on it is parsed on the page, and the next read
- * starts another.
+ * starts another, until MAX_HANGS have hung: then the page parses for the rest of its life (#570).
+ * A message from a worker already ended is ignored.
  */
 import { containedFrames } from '@signforge/player-core';
 
 export type Frames = ReturnType<typeof containedFrames>;
 
-/** Far past a parse on a Pi 4 (65 to 250 ms), and short of the 2 s a template has to be ready, so a parse on the page still fits. */
-export const HUNG_MS = 1500;
+/**
+ * Three times a parse on a Pi 4 (65 to 250 ms), and well short of the 2 s a template has to be ready: a prepare that
+ * meets a hung worker still has over a second for the parse on the page and the template's own prepare (#570).
+ */
+export const HUNG_MS = 750;
+
+/** Hangs in a page's life after which no worker is started again: one that hangs this often would cost a spot each time. */
+export const MAX_HANGS = 3;
 
 interface Waiting {
   resolve: (frames: Frames) => void;
@@ -31,6 +38,7 @@ let worker: Worker | null | undefined;
 let ready = false;
 const waiting = new Map<number, Waiting>();
 let nextId = 0;
+let hangs = 0;
 
 /** End the worker and parse what waited on it on the page; `forGood`, and parse there from now on. */
 function drop(forGood: boolean): void {
@@ -48,6 +56,8 @@ function start(): Worker | null {
   try {
     const w = new Worker(new URL('./bundle-worker.ts', import.meta.url), { type: 'module', name: 'sf-bundles' });
     w.onmessage = (e: MessageEvent<{ ready?: true; id: number; frames?: Frames; error?: string }>) => {
+      // A worker ended at a hang may still deliver what it had sent: it speaks for none waiting now.
+      if (worker !== w) return;
       if (e.data.ready) {
         ready = true;
         return;
@@ -62,7 +72,7 @@ function start(): Worker | null {
     // The worker answers every message itself, so an error here is its script failing to load or run.
     w.onerror = (e) => {
       e.preventDefault();
-      drop(true);
+      if (worker === w) drop(true);
     };
     return w;
   } catch {
@@ -79,7 +89,7 @@ export function parseBundle(bundle: Blob): Promise<Frames> {
   return new Promise<Frames>((resolve, reject) => {
     const id = nextId++;
     const fallBack = () => void onPage().then(resolve, reject);
-    waiting.set(id, { resolve, reject, fallBack, timer: setTimeout(() => drop(false), HUNG_MS) });
+    waiting.set(id, { resolve, reject, fallBack, timer: setTimeout(() => drop(++hangs >= MAX_HANGS), HUNG_MS) });
     w.postMessage({ id, bundle });
   });
 }
