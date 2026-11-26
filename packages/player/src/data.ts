@@ -122,9 +122,12 @@ export async function offerSnapshots(list: readonly DataSnapshot[], playing: () 
 
 /** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */
 export async function offerPending(manifest: ScreenManifest): Promise<void> {
-  const waiting = [...pending];
-  pending.clear();
-  for (const [id, p] of waiting) await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  // Each stays waiting until its own offer is done: a sync between offers prunes photos by `namedImages`, which reads
+  // the waiting ones too.
+  for (const [id, p] of [...pending]) {
+    await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+    if (pending.get(id) === p) pending.delete(id);
+  }
 }
 
 /**

@@ -18,6 +18,8 @@ export interface DeviceScreen {
   previousManifestId: string | null;
   /** The last manifest that played a spot, as the screen's last sync reported it (`manifest.lastGood`). */
   lastGoodManifestId: string | null;
+  /** The feed photos the screen's last sync held, and whether its reply asked for more (`ScreenHeartbeat.photos`). */
+  lastPhotos: { held: number; asked: boolean; after?: string } | null;
   /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
   displayOverrideJson: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
@@ -40,6 +42,9 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       desiredManifestId: sc.desiredManifestId,
       previousManifestId: sc.previousManifestId,
       lastGoodManifestId: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.manifest.lastGood')`,
+      photosHeld: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.held')`,
+      photosAsked: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.asked')`,
+      photosAfter: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.after')`,
       displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
@@ -57,6 +62,11 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
     lastGoodManifestId: first.lastGoodManifestId,
+    // SQLite's json_extract reads a JSON boolean as 1 or 0.
+    lastPhotos:
+      first.photosHeld === null
+        ? null
+        : { held: first.photosHeld, asked: first.photosAsked === 1, ...(first.photosAfter !== null && { after: first.photosAfter }) },
     displayOverrideJson: first.displayOverrideJson,
     credentials:
       first.status === 'active'

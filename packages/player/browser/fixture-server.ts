@@ -334,19 +334,16 @@ export class FixtureServer {
             all.filter((snap) => snap.version === held[snap.id]).map((snap) => [snap.id, { version: snap.version, checkedAt: snap.checkedAt }]),
           );
           const haveBlobs = new Set(sync.blobs ?? []);
+          // As the API does: one missing photo from each source in turn.
           const missingBlobs = new Set<string>();
           if (c) {
             const bySource = manifestBoundFields(c.manifest);
-            for (const snap of all) {
+            const lists = all.flatMap((snap) => {
               const bound = bySource.get(snap.id) ?? [];
-              if (!hasBoundListImage(bound)) continue;
-              for (const sha of boundImageHashes(bound, snap.data)) {
-                if (haveBlobs.has(sha)) continue;
-                missingBlobs.add(sha);
-                if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
-              }
-              if (missingBlobs.size >= MAX_SYNC_RESPONSE_BLOBS) break;
-            }
+              return hasBoundListImage(bound) ? [boundImageHashes(bound, snap.data).filter((sha) => !haveBlobs.has(sha))] : [];
+            });
+            for (let i = 0; missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS && lists.some((l) => i < l.length); i++)
+              for (const l of lists) if (i < l.length && missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS) missingBlobs.add(l[i]!);
           }
           const reply = {
             serverTime: new Date(Date.now() + this.serverOffsetMs).toISOString(),
