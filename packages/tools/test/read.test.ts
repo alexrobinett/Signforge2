@@ -1,5 +1,6 @@
 // read and describe (#345): one read for every type, through each type's own read tool, so it reads exactly what that
 // tool reads, as the caller, in its org, for one count against an agent's limits; and a description of each type.
+import { publishSummary } from '../src/read';
 import { scoped } from '@signforge/db';
 import { seedOrg, seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
@@ -65,6 +66,15 @@ describe('read', () => {
     const latest = await call(as('viewer'), 'get_publish', {});
     const [read] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'], detail: 'full' })).items;
     expect(read).toMatchObject({ id: latest.publish.id, rollout: latest.screens });
+    // At summary detail too, each screen it has not reached with where it stands and its state now (#541); playing ones
+    // are counted only (review of #569).
+    const [summary] = (await call(as('viewer'), 'read', { type: 'publish', ids: ['latest'] })).items;
+    const waiting = latest.screens.filter((s: Record<string, unknown>) => s.outcome !== 'playing');
+    expect(waiting.length).toBeGreaterThan(0);
+    expect(summary.rollout).toEqual(waiting.map((s: Record<string, unknown>) => ({ screenId: s.screenId, name: s.name, outcome: s.outcome, state: s.state })));
+    // A listed publish has no rollout field at all.
+    const [listed] = (await call(as('viewer'), 'read', { type: 'publish' })).items;
+    expect(listed).not.toHaveProperty('rollout');
     // Its version on screens: published, then drafted again, so the two differ.
     const mine = await seedOrg(env.DB, 'read-tool-published');
     const owner = member(mine.orgId, 'owner');
@@ -74,6 +84,37 @@ describe('read', () => {
     const [onScreens] = (await call(owner, 'read', { type: 'spot', ids: [mine.imageSpot], filter: { published: true }, detail: 'full' })).items;
     expect(onScreens).toEqual(own.spot);
     expect(onScreens.durationMs).not.toBe(9_000);
+  });
+
+  it("keeps a 100-screen publish's summary small: the screens it reached are counted, not listed (review of #569)", () => {
+    const screen = (i: number, outcome: string) => ({
+      screenId: `scr_${String(i).padStart(24, '0')}`,
+      name: `Bayside store ${String(i).padStart(3, '0')} front counter`,
+      manifestId: 'm'.repeat(64),
+      outcome,
+      filesMissing: null,
+      wakesAt: null,
+      lastSeenAt: 1,
+      state: { kind: 'online', reason: null },
+    });
+    const row = (rollout: unknown[]) => ({
+      id: 'pub_1',
+      revision: 15,
+      by: { kind: 'user', id: 'usr_1' },
+      createdAt: 1,
+      reached: null,
+      screens: 100,
+      playing: 97,
+      changes: null,
+      rollout,
+    });
+    const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
+    const allPlaying = publishSummary(row(Array.from({ length: 100 }, (_, i) => screen(i, 'playing'))));
+    expect(allPlaying.rollout).toEqual([]);
+    expect(bytes(allPlaying)).toBeLessThan(250);
+    const three = publishSummary(row(Array.from({ length: 100 }, (_, i) => screen(i, i < 97 ? 'playing' : 'unreachable'))));
+    expect((three.rollout as unknown[]).length).toBe(3);
+    expect(bytes(three)).toBeLessThan(250 + 3 * 160);
   });
 
   it("reads no newest publish for an org that has never published, as get_publish's null", async () => {

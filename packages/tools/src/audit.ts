@@ -67,20 +67,28 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
 
 const isoTime = z.iso.datetime({ offset: true });
 /**
+ * The earliest time a filter takes, 2000-01-01: no log goes back further, and a number below it is seconds since the
+ * epoch, which as ms would mean January 1970 (#543). An ISO time before it is refused alike, never a negative ms.
+ */
+const EARLIEST = Date.UTC(2000, 0, 1);
+/**
  * A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler.
  * Checked by refine, so its schema says date-time rather than carry zod's regex (#543).
  */
-const instant = z.union(
-  [
-    z.number().int().nonnegative(),
-    z
-      .string()
-      .refine((t) => isoTime.safeParse(t).success)
-      .meta({ format: 'date-time' })
-      .transform((t) => Date.parse(t)),
-  ],
-  { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
-);
+const instant = z
+  .union(
+    [
+      z.number().int().min(EARLIEST, 'ms since the epoch, from 2000 on: a number this small is seconds, so multiply it by 1000'),
+      z
+        .string()
+        .refine((t) => isoTime.safeParse(t).success)
+        .meta({ format: 'date-time' })
+        .transform((t) => Date.parse(t)),
+    ],
+    { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
+  )
+  // Only an ISO time reaches this below the floor: a number is refused above, as seconds.
+  .refine((ms) => ms >= EARLIEST, 'a time from 2000 on');
 
 const listAuditLog = defineTool({
   name: 'list_audit_log',
@@ -107,8 +115,8 @@ const listAuditLog = defineTool({
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()
       .describe('Only what was done to this kind of thing, or this one thing, even one since deleted'),
-    from: instant.optional().describe('Only entries at or after this time: ISO 8601, or ms since the epoch'),
-    to: instant.optional().describe('Only entries before this time: ISO 8601, or ms since the epoch'),
+    from: instant.optional().describe('Only entries at or after this time, from 2000 on: ISO 8601, or ms since the epoch'),
+    to: instant.optional().describe('Only entries before this time, from 2000 on: ISO 8601, or ms since the epoch'),
     query: z.string().trim().min(1).max(100).optional().describe('Only entries whose action, actor, target or recorded input contains this text'),
   }),
   output: outputs.list_audit_log,
