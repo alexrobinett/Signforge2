@@ -33,12 +33,17 @@ const MARKER_MS = 600;
 /** How long before its turn a later story's photo starts to load. */
 const LOAD_AHEAD_MS = 3000;
 
+/** The most a lead photo is drawn above its own size: past it, a feed's small photo looks soft (owner decision on #476). */
+const MAX_UPSCALE = 1.25;
+/** A smaller frame's share of the lead: its width beside the text in landscape, its height above it in portrait. */
+const SMALL_SHARE = { landscape: 0.42, portrait: 0.55 } as const;
+
 /**
  * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
  * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
  */
-let later: { img: HTMLImageElement; row: number; at: number }[] = [];
+let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number }[] = [];
 let timers: number[] = [];
 
 /** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
@@ -131,7 +136,7 @@ defineTemplate({
           bare();
         });
         watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
-        if (i > 0) later.push({ img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+        if (i > 0) later.push({ story: el, img: photo, row, at: i * slot - LOAD_AHEAD_MS });
       }
       const meta = el.querySelector('.meta');
       if (meta) {
@@ -155,8 +160,11 @@ defineTemplate({
         // Never an empty frame: the story's source, or the feed's, by its first letter.
         thumb.classList.add('none');
         thumb.querySelector('img')!.remove();
-        const name = [story.source, credit, story.title].map((s) => s.trim()).find(Boolean)!;
-        thumb.querySelector('.initial')!.textContent = [...name][0]!.toUpperCase();
+        // The publisher's (the spot's source), not the story's: a feed's sections ("World news | The Guardian") would give
+        // every row the same wrong letter.
+        const name = [String(data.source), story.source, story.title].map((s) => s.trim()).find(Boolean)!;
+        // The name's own letter: "The Guardian" is G.
+        thumb.querySelector('.initial')!.textContent = [...name.replace(/^the\s+(?=\S)/i, '')][0]!.toUpperCase();
       }
     });
 
@@ -166,20 +174,60 @@ defineTemplate({
       crawl(strip, ctx);
     }
 
+    // The first story's photo has its size once loaded: a small one gets a smaller frame before its headline is fitted.
+    const first = stories[0]!.querySelector<HTMLImageElement>('.photo[src]');
+    if (first) {
+      const body = document.body;
+      await loaded(first);
+      // New data while it loaded: the SDK put a fresh document in place, which the next prepare fills.
+      if (document.body !== body) throw new Error('new data replaced this prepare');
+      frame(stories[0]!, first, ctx.orientation);
+    }
     fitHeadlines(stories);
     if (rows.isConnected && listRows.length) mark(ctx, listRows, stories.length, slot);
   },
   play(ctx) {
     document.getElementById('leads')!.style.visibility = '';
-    for (const { img, row, at } of later)
+    for (const { story, img, row, at } of later)
       timers.push(
         window.setTimeout(() => {
           img.dataset.sfSrc = 'image';
           bindRow(img, ctx, 'items', row);
+          void loaded(img).then(() => {
+            if (!frame(story, img, ctx.orientation)) return;
+            story.style.removeProperty('--fit');
+            fitHeadlines([story]);
+          });
         }, at),
       );
   },
 });
+
+/** Resolves once `img` has loaded, or failed to. */
+const loaded = (img: HTMLImageElement) =>
+  img.complete
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        img.addEventListener('load', () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+      });
+
+/**
+ * A photo the lead would draw more than MAX_UPSCALE times its own size: framed at that or less, beside the text in
+ * landscape and above it in portrait, the text taking the rest (`.small`). Returns whether it did.
+ */
+function frame(story: HTMLElement, img: HTMLImageElement, orientation: 'landscape' | 'portrait'): boolean {
+  const { naturalWidth: w, naturalHeight: h } = img;
+  const lead = story.getBoundingClientRect();
+  if (!w || !h || Math.max(lead.width / w, lead.height / h) <= MAX_UPSCALE) return false;
+  const room =
+    orientation === 'portrait' ? { w: lead.width, h: lead.height * SMALL_SHARE.portrait } : { w: lead.width * SMALL_SHARE.landscape, h: lead.height };
+  const scale = Math.min(MAX_UPSCALE, room.w / w, room.h / h);
+  story.classList.add('small');
+  story.style.setProperty('--nw-photo-w', `${Math.floor(w * scale)}px`);
+  story.style.setProperty('--nw-photo-h', `${Math.floor(h * scale)}px`);
+  return true;
+}
 
 /**
  * Each lead headline at the largest step whose lines (the look's `--nw-lines`) hold it, cut on a word only at the

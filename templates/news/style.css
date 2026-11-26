@@ -314,6 +314,7 @@ ol {
 /* ---------------------------------------------------------------- Each look's sizes and marks */
 :root {
   --nw-lines: 3;
+  --nw-small-lines: 6;
   --nw-bare-lines: 4;
   --nw-summary-lines: 2;
   --nw-bare-step: 1.25;
@@ -327,6 +328,7 @@ ol {
 }
 :root[data-orientation='portrait'] {
   --nw-lines: 4;
+  --nw-small-lines: 3;
   --nw-bare-lines: 6;
   --nw-summary-lines: 3;
   --nw-card-w: 100%;
@@ -435,4 +437,42 @@ ol {
   --nw-ticker-h: 7.4vmin;
   --nw-ticker-pad: 2.6vmin;
   --nw-ticker-text: 2.6vmin;
+}
+
+/* A photo the lead would draw more than 1.25 times its size, as some feeds' are (700 px wide): framed at that or less,
+   beside the text in landscape and above it in portrait, the headline taking the space it leaves (owner decision on
+   #476). main.ts sets the frame's size. */
+.story.small {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--nw-gap);
+}
+.story.small .media {
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 2;
+  width: var(--nw-photo-w);
+  height: var(--nw-photo-h);
+}
+.story.small .card {
+  --nw-card-rule: 0;
+  grid-area: 1 / 1;
+  max-width: none;
+  margin: 0;
+}
+.story.small .headline {
+  --nw-lines: var(--nw-small-lines);
+}
+:root[data-orientation='portrait'] .story.small {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: start;
+}
+:root[data-orientation='portrait'] .story.small .media {
+  grid-area: 1 / 1;
+  justify-self: center;
+}
+:root[data-orientation='portrait'] .story.small .card {
+  grid-area: 2 / 1;
 }

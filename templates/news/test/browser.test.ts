@@ -44,14 +44,14 @@ describe('news 2.0 (#202)', () => {
     image: img,
     ...over,
   });
-  /** Each story's photo and thumbnail, but for the indices in `missing`: their blobs never arrived. */
-  const photos = (n: number, missing: number[] = []) =>
+  /** Each story's photo (`lead` wide, as the server stores a large one) and thumbnail, but for the indices in `missing`: their blobs never arrived. */
+  const photos = (n: number, missing: number[] = [], lead = '1920x1080') =>
     Object.fromEntries(
       Array.from({ length: n }, (_, i) => i)
         .filter((i) => !missing.includes(i))
         .flatMap((i) => [
-          [rowAsset('items', i, 'image'), '64x36: #4b86b4; #1b2a3a 0,22,64,14'],
-          [rowAsset('items', i, 'image', 'thumb'), '32x18: #a0522d; #1b2a3a 0,11,32,7'],
+          [rowAsset('items', i, 'image'), `${lead}: #4b86b4`],
+          [rowAsset('items', i, 'image', 'thumb'), '480x270: #a0522d'],
         ]),
     );
   /** Every text at its longest: 30 stories, each headline at 200 characters and summary at 240. */
@@ -89,13 +89,16 @@ describe('news 2.0 (#202)', () => {
 
   for (const orientation of ['landscape', 'portrait'] as const)
     for (const look of looks)
-      it(`${look}, ${orientation}: in every toggle setting, at the longest copy, with and without a lead photo, nothing overflows, overlaps or runs off`, async () => {
+      it(`${look}, ${orientation}: in every toggle setting, at the longest copy, with a large, a small and no lead photo, nothing overflows, overlaps or runs off`, async () => {
         const r = await frame(orientation);
         const found: string[] = [];
-        for (const bare of [false, true])
+        for (const lead of ['large', 'small', 'none'] as const)
           for (const set of settings) {
-            const f = await r.show({ look, items: longest(bare), ...set }, photos(30, bare ? [0] : []));
-            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${bare ? 'no lead photo' : 'lead photo'}, ${named(set)}: ${fault}`);
+            const f = await r.show(
+              { look, items: longest(lead === 'none'), ...set },
+              photos(30, lead === 'none' ? [0] : [], lead === 'small' ? '700x560' : '1920x1080'),
+            );
+            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${lead} lead photo, ${named(set)}: ${fault}`);
           }
         expect(found).toEqual([]);
       }, 300_000);
@@ -201,8 +204,9 @@ describe('news 2.0 (#202)', () => {
     expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', 'W', 'photo', 'photo'] });
     expect(all.sizes[1]).toBeGreaterThan(all.sizes[0]!);
     // A photo whose blob never arrived plays as a story without one; with no source, the feed's credit gives the initial.
-    const missing = await read(await r.show({ items, source: 'Harbor Times', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
-    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', 'W', 'photo', 'H'] });
+    // The publisher's initial (the spot's source) over the story's, which a feed may give a section: "The Guardian" is G.
+    const missing = await read(await r.show({ items, source: 'The Guardian', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
+    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', 'G', 'photo', 'G'] });
     expect(await read(await r.show({ items, rotationSeconds: 8 }, {}, demo, 32_000))).toMatchObject({
       images: 'off',
       bare: [true, true, true, true],
@@ -305,6 +309,57 @@ describe('news 2.0 (#202)', () => {
         }
       expect(found).toEqual([]);
     }, 120_000);
+
+  // A feed's small photo (some send 700 px) drawn across the lead looks soft: it is framed at most 1.25 times its size,
+  // and the headline takes the space (owner decision on #476).
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`frames a small lead photo at most 1.25 times its size, and fills the lead with a large one, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const read = (f: Frame) =>
+        f.evaluate(() => {
+          for (const a of document.getAnimations()) {
+            a.pause();
+            a.currentTime = 3000;
+          }
+          const story = document.querySelector('.story')!;
+          const media = story.querySelector('.media')!.getBoundingClientRect();
+          const card = story.querySelector('.card')!.getBoundingClientRect();
+          const overlap =
+            Math.min(media.right, card.right) - Math.max(media.left, card.left) > 1 && Math.min(media.bottom, card.bottom) - Math.max(media.top, card.top) > 1;
+          return { small: story.classList.contains('small'), width: Math.round(media.width), overlap };
+        });
+      for (const look of looks) {
+        expect(await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3, [], '700x560'))), look).toMatchObject({
+          small: true,
+          overlap: false,
+        });
+        expect((await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3, [], '700x560')))).width, look).toBeLessThanOrEqual(875);
+        expect(await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3))), look).toMatchObject({ small: false });
+      }
+    });
+
+  it("frames a later story's small photo when it loads, in play", async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    await hst.init(
+      'fresh',
+      spotData(t().manifest, { items: [0, 1].map((i) => story(i)), rotationSeconds: 8 }),
+      photos(2, [], '700x560'),
+      NOW,
+      demo,
+      false,
+      16_000,
+    );
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    await hst.post('fresh', 'play');
+    // The second story's photo loads 3 s before its turn at 8 s.
+    for (let i = 0; i < 60; i++) await hst.page.clock.runFor(100);
+    await f.waitForFunction(() => document.querySelectorAll('.story')[1]!.classList.contains('small'));
+  });
 
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
     const r = await frame();
