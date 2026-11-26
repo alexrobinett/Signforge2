@@ -471,7 +471,7 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * pass (an approval's request decided, or expired by the database's clock, #530). Its refusal is reported at once,
    * where a lost race would run again. Undefined: a race, run again as any.
    */
-  refuseStale?: (ctx: { org: D; input: z.output<S>; failed: { id: string; version: number } }) => Promise<ToolError | undefined>;
+  refuseStale?: (ctx: { org: D; input: z.output<S>; failed: { id: string; version: number; staged: number | undefined } }) => Promise<ToolError | undefined>;
 }
 
 /** Declare a tool, keeping its input and output types. */

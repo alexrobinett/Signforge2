@@ -346,6 +346,7 @@ describe('list_audit_log, every replaced tool by the rows of the one that does i
     await run('save_group', { groupId: group!.id, screenIds: [mine.screen], membership: 'remove' });
     await run('update_screen', { screenId: mine.screen, name: 'Lobby 2' });
     await run('update_screen', { screenId: mine.screen, timezone: 'Europe/London' });
+    await run('update_screen', { screenId: mine.screen, displayHours: null });
     const found = async (action: string) => {
       const r = await dispatch(registry, 'list_audit_log', { action }, owner);
       if (!r.ok) throw new Error(JSON.stringify(r));
@@ -365,6 +366,10 @@ describe('list_audit_log, every replaced tool by the rows of the one that does i
     expect(await found('set_group_members')).toEqual([expect.stringContaining('"membership":"set"')]);
     expect(await found('remove_group_members')).toEqual([expect.stringContaining('"membership":"remove"')]);
     expect(await found('rename_screen')).toEqual([expect.stringContaining('"name":"Lobby 2"')]);
-    expect(await found('update_screen_settings')).toEqual([expect.stringContaining('"timezone":"Europe/London"')]);
+    // A setting cleared, given as null, is a setting changed (#545).
+    expect(await found('update_screen_settings')).toEqual([
+      expect.stringContaining('"displayHours":null'),
+      expect.stringContaining('"timezone":"Europe/London"'),
+    ]);
   });
 });

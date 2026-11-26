@@ -2409,7 +2409,8 @@ export function scoped(d1: D1Database, orgId: string) {
               const value = sql`json_extract(${a.detailJson}, ${`$.input.${key}`})`;
               return has ? sql`${value} is not null` : sql`${value} is null`;
             }),
-            ...(also.inputHasAny?.length ? [or(...also.inputHasAny.map((key) => sql`json_extract(${a.detailJson}, ${`$.input.${key}`}) is not null`))!] : []),
+            // json_type, not json_extract: a key given as null (hours cleared) is there, and json_extract reads it as absent (#545).
+            ...(also.inputHasAny?.length ? [or(...also.inputHasAny.map((key) => sql`json_type(${a.detailJson}, ${`$.input.${key}`}) is not null`))!] : []),
           ];
           where.push(alsoWhere ? or(eq(a.action, p.action), and(...alsoWhere))! : eq(a.action, p.action));
         }

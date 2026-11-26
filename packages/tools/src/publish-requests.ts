@@ -343,13 +343,15 @@ const approvePublishRequest = defineTool({
     return { request: view(decided, now, await namesOf(org, [decided])), published };
   },
   // The request's own guard (`decide`) failed: decided since, or expired by the database's clock though not by the
-  // Worker's. Another attempt would read it pending again and fail the same, so it is refused at once (#530).
+  // Worker's. Another attempt would read it pending again and fail the same, so it is refused at once (#530). One
+  // pending at another version than the guard's was decided and put back (Undo) meanwhile: a race, run again (#545).
   refuseStale: async ({ org, input, failed }) => {
     if (failed.id !== input.publishRequestId) return undefined;
     const row = await org.publishRequests.get(input.publishRequestId);
     if (!row) return notFound('publish request', input.publishRequestId);
     const now = statusOf(row, Date.now());
-    const status = row.rowVersion === failed.version && now === 'pending' ? 'expired' : now;
+    if (now === 'pending' && row.rowVersion !== failed.staged) return undefined;
+    const status = now === 'pending' ? 'expired' : now;
     return new ToolError('conflict', `publish request ${row.id} is ${status}`, { status });
   },
 });

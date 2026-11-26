@@ -492,7 +492,7 @@ async function dispatchCall<D extends DataScope>(
         // The role guard, on any attempt: the right is gone, not a race to run again (#419).
         if (err.id === 'member') return lostRight();
         // A guard of the tool's own that no fresh read passes: said at once, not after every attempt (#530).
-        const final = await tool.refuseStale?.({ org: caller.org, input: parsed.data, failed: { id: err.id, version: err.version } });
+        const final = await tool.refuseStale?.({ org: caller.org, input: parsed.data, failed: { id: err.id, version: err.version, staged: err.staged } });
         if (final) return fail(final.code, final.message, final.details);
         if (attempt === PUBLISH_ATTEMPTS) return stale(err);
       }

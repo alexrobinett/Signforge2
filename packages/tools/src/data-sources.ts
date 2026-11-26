@@ -185,10 +185,6 @@ export const saveDataSourceInput = z.strictObject({
 
 type DataSourceFormat = z.infer<typeof sourceFormat>;
 
-/**
- * Why save_data_source refuses this input, on what it gives alone and, for a change, the source's format: the agent
- * drawer's card asks it too, so it never offers a press that can only be refused (#507).
- */
 /** Why a source of `format` refuses fields only another format takes. */
 function formatRefusal(input: z.infer<typeof saveDataSourceInput>, format: DataSourceFormat): ToolError | undefined {
   if (!calendarOnly(format, input.horizonDays)) return invalidFields(HORIZON_ONLY_ICAL, 'horizonDays');

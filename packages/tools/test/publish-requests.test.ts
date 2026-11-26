@@ -356,6 +356,28 @@ describe("an approval past its expiry by the database's clock alone (#530)", () 
   });
 });
 
+describe('an approval whose request is decided while it runs (#545)', () => {
+  const asked = async () => {
+    const version = await editSpot(agent(), o.templateSpot, 13_000);
+    return (await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }])).request.id;
+  };
+
+  it('runs again and approves one declined and put back (Undo) meanwhile: pending, with its time left, is not expired', async () => {
+    const id = await asked();
+    const undone = racing(person('owner'), async () => {
+      await call(person('editor'), 'decline_publish_request', { publishRequestId: id });
+      await call(person('editor'), 'reopen_publish_request', { publishRequestId: id });
+    });
+    expect(await approve(undone, id)).toMatchObject({ ok: true, output: { request: { status: 'approved' } } });
+  });
+
+  it('refuses one declined meanwhile as declined', async () => {
+    const id = await asked();
+    const declined = racing(person('owner'), () => call(person('editor'), 'decline_publish_request', { publishRequestId: id }));
+    expect(await approve(declined, id)).toMatchObject({ ok: false, error: 'conflict', details: { status: 'declined' } });
+  });
+});
+
 describe('expiry at its boundary (review of #386)', () => {
   it('approves a millisecond before, and not at its expiry; the batch refuses a decision staged at or after it', async () => {
     const version = await editSpot(agent(), o.templateSpot, 12_000);
