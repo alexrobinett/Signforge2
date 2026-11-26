@@ -20,8 +20,8 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8": {
-      "size": 90089,
+    "53cf715dbc3aa710c776e0abc75ab7d3e7a5b1f09799e5307936bb34e024ca3d": {
+      "size": 89841,
       "type": "text/html"
     },
     "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
@@ -1378,10 +1378,10 @@
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.6.0": {
+    "base/weather@1.7.0": {
       "manifest": {
         "id": "weather",
-        "version": "1.6.0",
+        "version": "1.7.0",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1489,7 +1489,7 @@
         },
         "protocol": 2
       },
-      "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
+      "html": "53cf715dbc3aa710c776e0abc75ab7d3e7a5b1f09799e5307936bb34e024ca3d"
     }
   },
   "spots": {
@@ -2023,7 +2023,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2083,7 +2083,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2105,7 +2105,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.6.0",
+      "template": "base/weather@1.7.0",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "829f0a4be0ed8f1ffa2065d64f58958f1084bf0b98837ae40fdf89b2167a6547"
+  "id": "32f0ffa5bc4420b3f3b26d468c6efe103e6d7d3b5e7a43a4c7a4f886365dc168"
 }
