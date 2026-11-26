@@ -2146,6 +2146,7 @@ export function scoped(d1: D1Database, orgId: string) {
           queries.push(db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, photos?.current)));
         }
         const holdAt = photos?.hold ? queries.push(photos.hold) - 1 : undefined;
+        if (photos?.counted) queries.push(photos.counted);
         if (photos) queries.push(photos.reread);
         try {
           const [first, ...rest] = queries;

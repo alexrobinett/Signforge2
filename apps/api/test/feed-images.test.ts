@@ -1008,7 +1008,8 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db, BLOBS: r2.bucket });
     // Measured: pollInit is one batch, the screens' desired manifests and their recorded photo sources a statement in it
     // (#486), as before it, when the manifests themselves were R2 reads. 12 calls is what D1 counts against an invocation's 50.
-    expect(counter.counts()).toEqual({ apiCalls: 12, statements: 36 });
+    // Each poll's save batch counts its queue messages too (#339): one statement more a source, no call more.
+    expect(counter.counts()).toEqual({ apiCalls: 12, statements: 41 });
     expect(r2.reads()).toBe(0);
     // Ten each, within each source's share of the org's day (60 / 5).
     expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(50);
@@ -1070,6 +1071,8 @@ describe('budgets, resilience and cleanup', () => {
       expect(() => photoBudget({ FEED_PHOTOS_ORG_DAILY: value }), value).toThrow(/FEED_PHOTOS_ORG_DAILY must be a whole number from 1 to 1800/);
     expect(photoBudget({ FEED_PHOTOS_SOURCE_DAILY: '1800' })).toEqual({ ...DEFAULT_PHOTO_BUDGET, perSource: 1800 });
     expect(photoBudget({})).toEqual(DEFAULT_PHOTO_BUDGET);
+    expect(photoBudget({ FEED_PHOTOS_QUEUE_DAILY: '2000' })).toEqual({ ...DEFAULT_PHOTO_BUDGET, queuedPerDay: 2000 });
+    expect(() => photoBudget({ FEED_PHOTOS_QUEUE_DAILY: '3334' })).toThrow(/FEED_PHOTOS_QUEUE_DAILY must be a whole number from 1 to 3333/);
   });
 
   it("asks Images for no more than the month's ceiling: a photo past it, and every photo once it is spent, waits with images-month-budget unfetched (#500)", async () => {
@@ -1162,6 +1165,8 @@ describe('budgets, resilience and cleanup', () => {
       expect(() => monthlyTransforms(v), name).not.toThrow();
     }
     expect(monthlyTransforms(vars.demo!) + monthlyTransforms(vars.prod!)).toBeLessThan(5000);
+    // Three Queues operations a message; publish notices keep at least 2,500 of the account's 10,000 a day (#339).
+    expect(3 * (photoBudget(vars.demo!).queuedPerDay + photoBudget(vars.prod!).queuedPerDay)).toBeLessThanOrEqual(7500);
   });
 
   it('resumes a day later: the 24 hours since a photo was held are what count', async () => {
@@ -1526,7 +1531,8 @@ describe('budgets, resilience and cleanup', () => {
     await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db });
     const pollCounts = counter.counts();
     expect(pollCounts.apiCalls).toBeLessThan(25);
-    expect(pollCounts.statements).toBeLessThan(40);
+    // One statement a source more since the save counts its queue messages (#339); D1 counts a batch as one query.
+    expect(pollCounts.statements).toBeLessThan(45);
     // All 5 sources saved their snapshots and queued their ten, each within its share of the org's day (60 / 5).
     expect(take()).toHaveLength(50);
 

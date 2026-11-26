@@ -34,6 +34,7 @@ const fi = s.feedImages;
 const fid = s.feedImageDeletes;
 const ds = s.dataSources;
 const snap = s.dataSnapshots;
+const qu = s.feedPhotoQueueUsage;
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -52,12 +53,24 @@ export const PHOTOS_PER_SOURCE = 10;
 export const NEW_PER_SOURCE_PER_DAY = 30;
 export const NEW_PER_ORG_PER_DAY = 60;
 
-/** The day's caps a poll's hold applies: today's 60/30 unless the environment sets others (apps/api `photoBudget`). */
+/**
+ * Queue messages the environment's feed photos may send in a UTC day, across every org, new photos, rechecks and retries
+ * alike (#339), unless it sets its own: about 1,500 of the 10,000 Queues operations a day the Free plan gives the whole
+ * account (three a message), so publish notices (`PUBLISH_NOTICES`) always have theirs. A photo past it waits for a poll
+ * the next day.
+ */
+const QUEUED_PER_DAY = 500;
+
+/** The day's caps a poll's hold applies: today's 60/30 and 500 unless the environment sets others (apps/api `photoBudget`). */
 export interface PhotoBudget {
   perOrg: number;
   perSource: number;
+  queuedPerDay: number;
 }
-export const DEFAULT_PHOTO_BUDGET: PhotoBudget = { perOrg: NEW_PER_ORG_PER_DAY, perSource: NEW_PER_SOURCE_PER_DAY };
+export const DEFAULT_PHOTO_BUDGET: PhotoBudget = { perOrg: NEW_PER_ORG_PER_DAY, perSource: NEW_PER_SOURCE_PER_DAY, queuedPerDay: QUEUED_PER_DAY };
+/** The UTC day `now` is in, as the queue's count keys it: Cloudflare resets the day's operations at 00:00 UTC. */
+const queueDay = (now: number) => new Date(now).toISOString().slice(0, 10);
+
 /** How long a queued URL is held: past the consumer's tries, so polls meanwhile do not queue it again. */
 export const HOLD_MS = 15 * MINUTE_MS;
 /** How long a fetched photo is kept as it is before a poll that still names it queues a conditional fetch. */
@@ -229,15 +242,19 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               FROM ${fi}
               WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
             )
-            SELECT jobs.value AS url FROM json_each(${JSON.stringify([...hold.again, ...hold.fresh])}) AS jobs WHERE ${alreadyKnown}
-            UNION ALL
-            SELECT value FROM (
-              SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
-              WHERE NOT ${alreadyKnown}
-              ORDER BY jobs.key
-              -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
-              LIMIT (SELECT CAST(MAX(0, MIN(MIN(${hold.budget.perSource}, ${hold.budget.perOrg} / MAX(1, sources)) - src_n, ${hold.budget.perOrg} - org_n)) AS INTEGER) FROM counts)
+            SELECT url FROM (
+              SELECT jobs.value AS url FROM json_each(${JSON.stringify([...hold.again, ...hold.fresh])}) AS jobs WHERE ${alreadyKnown}
+              UNION ALL
+              SELECT value FROM (
+                SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
+                WHERE NOT ${alreadyKnown}
+                ORDER BY jobs.key
+                -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
+                LIMIT (SELECT CAST(MAX(0, MIN(MIN(${hold.budget.perSource}, ${hold.budget.perOrg} / MAX(1, sources)) - src_n, ${hold.budget.perOrg} - org_n)) AS INTEGER) FROM counts)
+              )
             )
+            -- What the environment's day of queue messages has left, rechecks and retries first (#339).
+            LIMIT (SELECT CAST(MAX(0, ${hold.budget.queuedPerDay} - coalesce((SELECT ${qu.messages} FROM ${qu} WHERE ${qu.day} = ${queueDay(read.now)}), 0)) AS INTEGER))
           ) AS held`)
               .where(current),
           )
@@ -248,11 +265,19 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
           })
           .returning({ url: fi.url })
       : undefined;
+  // Right after the hold in the save's batch: changes() is what the hold wrote, each a message the poller sends.
+  const counted = holdWrite
+    ? db
+        .insert(qu)
+        .select(sql`SELECT ${queueDay(read.now)}, changes() WHERE changes() > 0`)
+        .onConflictDoUpdate({ target: qu.day, set: { messages: sql`${qu.messages} + excluded.messages` } })
+    : undefined;
   return {
     patch: stories === undefined ? {} : { photoUrlsJson: stories ? JSON.stringify({ version: stories.version, stories: stories.urls }) : null },
     sameVersion,
     current,
     hold: holdWrite,
+    counted,
     reread: db
       .update(ds)
       .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${read.now})` })
