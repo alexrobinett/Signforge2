@@ -26,6 +26,7 @@ import {
   MAX_SYNC_RESPONSE_BLOBS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
+  MAX_IMAGE_BOX,
   MAX_URL_BYTES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
@@ -210,6 +211,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
   }
 }
 
+const isBoxSide = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= MAX_IMAGE_BOX;
+
 /** What is wrong with one field definition. List items may hold scalars or an optional image (`NewsImage`). */
 function fieldDefProblems(name: string, def: unknown, inList = false): string[] {
   const where = `field "${name}"`;
@@ -253,6 +256,11 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
       if (!Array.isArray(def.options) || !def.options.length || !def.options.every(isStr)) out.push(`${where}: options must be a list of text`);
       break;
     case 'image':
+      if (!has('portraitBox')) return out;
+      // A list row's image is a feed's photo, which has no renditions to choose from.
+      if (inList) return [...out, `${where}: a list row's image cannot have a portraitBox`];
+      if (!isObj(def.portraitBox) || !['w', 'h'].every((k) => isBoxSide(own(def.portraitBox, k))))
+        out.push(`${where}: portraitBox must be { w, h }, each a whole number from 1 to ${MAX_IMAGE_BOX}`);
       return out;
     case 'list':
       if (inList) return [...out, `${where}: a list row cannot hold a list`];
