@@ -1,5 +1,5 @@
 import { dayKey, defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
-import { painted, readableOn } from '@signforge/template-sdk/contrast';
+import { readableOn } from '@signforge/template-sdk/contrast';
 
 interface Event {
   title: string;
@@ -17,14 +17,9 @@ defineTemplate({
     const root = document.documentElement;
     const accent = String(ctx.data.accent);
     root.style.setProperty('--accent', accent);
-    // Accent text must read where it sits (amber, for one, does not on a light kit): the date on
-    // the background and on the surface its gradient starts from.
-    // The date (3.2vmin) and the day labels (2.2vmin, bold) are large text at 1080p, where 3:1 reads.
-    const large = { large: true };
-    const style = getComputedStyle(root);
-    const bg = style.getPropertyValue('--bg');
-    const surface = style.getPropertyValue('--surface');
-    root.style.setProperty('--accent-text', readableOn(surface, readableOn(bg, accent, large), large));
+    // The accent marks only what is on now: its time, on the background, must read (amber, for one, does not on a
+    // light kit). It is large text at 1080p (3vmin, 32 px), where 3:1 reads.
+    root.style.setProperty('--accent-text', readableOn(getComputedStyle(root).getPropertyValue('--bg'), accent, { large: true }));
     const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
@@ -42,6 +37,7 @@ defineTemplate({
     const time = formatter(ctx, { hour: 'numeric', minute: '2-digit' });
     // All-day dates are formatted in UTC to keep them on the date they name.
     const utc = { ...ctx, timezone: 'UTC' };
+    let lastDay = '';
     rows.forEach((e, i) => {
       const li = tpl.content.firstElementChild!.cloneNode(true) as HTMLElement;
       li.style.setProperty('--i', String(i));
@@ -59,18 +55,12 @@ defineTemplate({
       q('.name').textContent = e.title;
       q('.where').textContent = e.location;
       if (happening || (e.allDay && key === today)) li.classList.add('now');
+      // One heading a day: a second event on the same day leaves the date to the one above.
+      if (key === lastDay) li.classList.add('same-day');
+      lastDay = key;
       list.appendChild(li);
     });
     // Show only whole rows: drop from the end until the list fits its space.
     while (list.children.length > 1 && list.scrollHeight > list.clientHeight + 1) list.lastElementChild!.remove();
-    // A row's day is the accent on its card, which mixes the surface with the text (or, happening
-    // now, is the accent over the stage): a translucent card is measured over both ends of the
-    // stage's gradient. Rows share two kinds of card, so each is read once.
-    const days = new Map<string, string>();
-    for (const li of list.children) {
-      const card = getComputedStyle(li).backgroundColor;
-      if (!days.has(card)) days.set(card, readableOn(painted(surface, card), readableOn(painted(bg, card), accent, large), large));
-      (li as HTMLElement).style.setProperty('--day-text', days.get(card)!);
-    }
   },
 });
