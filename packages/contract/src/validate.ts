@@ -1065,7 +1065,11 @@ const playlistShape = object(
   {
     id: text('id'),
     name: text('name'),
-    transition: variant('type', { cut: object({ type: literal('cut', '') }, ''), fade: ms('fade'), crossfade: ms('crossfade') }, 'transition must be cut, fade or crossfade'),
+    transition: variant(
+      'type',
+      { cut: object({ type: literal('cut', '') }, ''), fade: ms('fade'), crossfade: ms('crossfade') },
+      'transition must be cut, fade or crossfade',
+    ),
     items: listOf('item', object({ spot: text('spot') }, 'is not an object')),
   },
   'is not an object',
@@ -1122,7 +1126,11 @@ export const manifestShape = object(
     ),
     spots: record(spotShape, (k) => `spot "${k}"`, 'spots must be an object'),
     playlists: record(playlistShape, (k) => `playlist "${k}"`, 'playlists must be an object'),
-    dataSources: record(object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'), (k) => `data source "${k}"`, 'dataSources must be an object'),
+    dataSources: record(
+      object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'),
+      (k) => `data source "${k}"`,
+      'dataSources must be an object',
+    ),
     schedule: listOf('schedule entry', scheduleEntryShape),
     defaultPlaylist: text('defaultPlaylist'),
     brand: optional(asItIs<BrandKit>('brand must be an object')),
@@ -1155,7 +1163,11 @@ export const dataSnapshotShape = object(
     fetchedAt: is(isInstant, 'snapshot fetchedAt must be an ISO 8601 time'),
     checkedAt: is(isInstant, 'snapshot checkedAt must be an ISO 8601 time'),
     data: custom((v) =>
-      v === undefined ? refused(['snapshot has no data']) : snapshotBytes(v) > MAX_SNAPSHOT_BYTES ? refused([`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`]) : accepted(v),
+      v === undefined
+        ? refused(['snapshot has no data'])
+        : snapshotBytes(v) > MAX_SNAPSHOT_BYTES
+          ? refused([`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`])
+          : accepted(v),
     ),
   },
   'snapshot is not an object',
@@ -1167,7 +1179,6 @@ export const validateDataSnapshot = (s: unknown) => problemsOf(dataSnapshotShape
 
 // Each message declared once (./shape.ts, #156): read in its fields' order, in the words these checks always used, it
 // gives back exactly the shape. `assertSame` holds each to its interface in shapes.ts at compile time.
-
 
 /** `POST /v1/device/pair/start`, as the server receives it. */
 export const pairStartRequestShape = object(
