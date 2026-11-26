@@ -1332,3 +1332,16 @@ The read-ahead of #232 parsed each bundle (`containedFrames`) as one 65 to 250 m
 **A kit template's first prepare when `clock` plays first** (fresh page loads): the same, as the read-ahead had already done the parse: room-status 265-283 ms in both builds, announcement 362-392 before and 362-379 after; `clock`, the page's first prepare, 282-322 before and 308-349 after.
 
 **From 10 s in** (`isolate.py 60 cut`, the same four): the same in both builds, as the read-ahead is done by then. Overall 1.17, 0.39% before, 0.47, 0.39% after; loading next 11.3, 11.7% against 12.8, 13.1%; playing 0.86, 0.03% against 0.09, 0.00%.
+
+## A parse inside the bundle worker (issue #577, 2026-11-26)
+
+The worker's hang limit (`HUNG_MS`, 750 ms in `packages/player/src/bundles.ts`) was set from the page's main-thread parse (65 to 250 ms). This times the worker itself. Master `b820dd9e`'s player, with a measuring build's timing hooks, served beside the deployed one with the supervisor and soak logger stopped. Each run: a fresh page load playing `clock` (the static content, its twelve templates), 20 s to settle, then the two largest bundles (Info frame, 403,207 bytes, and Room status, 401,771) read from the file cache and parsed through `parseBundle`: ten times one alone, then ten pairs posted together, one of each pair waiting on the other (the worker reads each Blob before it parses, so either may be answered first). Times are from the post to the answer, on the page's clock. Three runs as the player runs (the read-ahead had already used the worker), three with the read-ahead off (`requestIdleCallback` removed), so the first parse is the worker's first.
+
+| | Alone | A pair: answered first | A pair: answered second |
+| --- | --- | --- | --- |
+| worker warmed by the read-ahead | 40-87 ms (the first of a run 76-83) | 41-49 ms | 79-103 ms |
+| worker's first parses | 41-75 ms (the first of a run 72-75) | 41-52 ms | 87-103 ms |
+
+- **Every read was answered by the worker, and none hung** (180 reads, `__sf.bundleHangs` 0).
+- **750 ms has the margin**: the slowest answer, a read queued behind another, took 103 ms, about a seventh of it. A read would need six or seven 400 kB parses ahead of it to reach the limit; the player has at most two in flight (a prepare and the read-ahead's one).
+- **The worker parses a 400 kB bundle in about 45 ms**, against 65 to 250 ms for the page's main thread at a prepare (#232): it parses with nothing else on its thread.

@@ -57,13 +57,29 @@ afterEach(() => {
 });
 
 const bundle = () => new Blob([BUNDLE], { type: 'text/html' });
+
+/**
+ * `p`'s value once the work pending now has run (a read on the page settles within a few microtasks): a read that
+ * never settles fails here, as an assertion, rather than as the test's timeout.
+ */
+async function soon<T>(p: Promise<T>): Promise<T> {
+  let out: { value: T } | { error: unknown } | undefined;
+  p.then(
+    (value) => (out = { value }),
+    (error: unknown) => (out = { error }),
+  );
+  for (let i = 0; i < 100 && !out; i++) await Promise.resolve();
+  if (!out) expect.fail('the read never settled');
+  if ('error' in out) throw out.error;
+  return out.value;
+}
 const expected = containedFrames(BUNDLE);
 
 describe('parseBundle', () => {
   it('contains a bundle in the one worker, as the page would', async () => {
     const { parseBundle } = await load();
-    expect(await parseBundle(bundle())).toEqual({ ...expected, via: 'worker' });
-    expect(await parseBundle(bundle())).toEqual({ ...expected, via: 'worker' });
+    expect(await soon(parseBundle(bundle()))).toEqual({ ...expected, via: 'worker' });
+    expect(await soon(parseBundle(bundle()))).toEqual({ ...expected, via: 'worker' });
     expect(FakeWorker.made).toHaveLength(1);
     expect(FakeWorker.made[0]!.received).toHaveLength(2);
   });
@@ -71,23 +87,23 @@ describe('parseBundle', () => {
   it('contains it on the page where no worker can be made (Safari with workers blocked)', async () => {
     FakeWorker.refuse = true;
     const { parseBundle } = await load();
-    expect(await parseBundle(bundle())).toEqual(expected);
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
   });
 
   it('contains a bundle read before the worker has loaded on the page, as the page did before it', async () => {
     FakeWorker.behaviour = 'loading';
     const { parseBundle } = await load();
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made[0]!.received).toEqual([]);
   });
 
   it('contains it on the page, and from then on, once the worker fails to load', async () => {
     FakeWorker.behaviour = 'error';
     const { parseBundle } = await load();
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made[0]!.terminated).toBe(true);
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made).toHaveLength(1);
   });
 
@@ -99,14 +115,14 @@ describe('parseBundle', () => {
     await vi.advanceTimersByTimeAsync(HUNG_MS - 1);
     expect(FakeWorker.made[0]!.terminated).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await read).toEqual(expected);
+    expect(await soon(read)).toEqual(expected);
     expect(FakeWorker.made[0]!.terminated).toBe(true);
     FakeWorker.behaviour = 'answer';
     // The next read starts another, contained on the page while it loads; the one after, in it.
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made).toHaveLength(2);
     await Promise.resolve();
-    expect(await parseBundle(bundle())).toEqual({ ...expected, via: 'worker' });
+    expect(await soon(parseBundle(bundle()))).toEqual({ ...expected, via: 'worker' });
   });
 
   it('contains on the page every read waiting when the worker fails, and from then on', async () => {
@@ -116,24 +132,33 @@ describe('parseBundle', () => {
     const w = FakeWorker.made[0]!;
     expect(w.received).toHaveLength(2);
     w.onerror?.({ preventDefault: () => {} } as ErrorEvent);
-    expect(await Promise.all(reads)).toEqual([expected, expected]);
+    expect(await soon(Promise.all(reads))).toEqual([expected, expected]);
     expect(w.terminated).toBe(true);
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made).toHaveLength(1);
   });
 
   it('contains on the page both reads waiting at a hang, ending the worker once', async () => {
     FakeWorker.behaviour = 'hang';
-    const { parseBundle, HUNG_MS } = await load();
+    const { parseBundle, HUNG_MS, bundleHangs } = await load();
     vi.useFakeTimers();
     const first = parseBundle(bundle());
     await vi.advanceTimersByTimeAsync(HUNG_MS / 2);
     const second = parseBundle(bundle());
     // The first read's time is up: the second, waiting on the same worker, is contained on the page with it.
     await vi.advanceTimersByTimeAsync(HUNG_MS / 2);
-    expect(await Promise.all([first, second])).toEqual([expected, expected]);
+    expect(await soon(Promise.all([first, second]))).toEqual([expected, expected]);
     expect(FakeWorker.made).toHaveLength(1);
     expect(FakeWorker.made[0]!.terminated).toBe(true);
+    // Once: the second read's own time, which would have been up now, is not another hang that ends the next worker.
+    FakeWorker.behaviour = 'answer';
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(HUNG_MS);
+    expect(FakeWorker.made).toHaveLength(2);
+    expect(FakeWorker.made[1]!.terminated).toBe(false);
+    expect(bundleHangs()).toBe(1);
+    expect(await soon(parseBundle(bundle()))).toEqual({ ...expected, via: 'worker' });
   });
 
   it('ignores what a worker ended at a hang still delivers', async () => {
@@ -142,17 +167,17 @@ describe('parseBundle', () => {
     vi.useFakeTimers();
     const read = parseBundle(bundle());
     await vi.advanceTimersByTimeAsync(HUNG_MS);
-    expect(await read).toEqual(expected);
+    expect(await soon(read)).toEqual(expected);
     const old = FakeWorker.made[0]!;
     // The next worker is still loading when the old one's answer, its ready and an error come in late.
     FakeWorker.behaviour = 'loading';
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     const next = FakeWorker.made[1]!;
     old.onmessage?.({ data: { id: old.received[0]!.id, frames: { ...expected, via: 'worker' } } } as MessageEvent);
     old.onmessage?.({ data: { ready: true } } as MessageEvent);
     old.onerror?.({ preventDefault: () => {} } as ErrorEvent);
     // Not taken for the next one's ready, nor its failure: it loads, and then contains.
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(next.received).toEqual([]);
     expect(next.terminated).toBe(false);
     next.onmessage?.({ data: { ready: true } } as MessageEvent);
@@ -160,7 +185,7 @@ describe('parseBundle', () => {
     const inWorker = parseBundle(bundle());
     expect(next.received).toHaveLength(1);
     next.onmessage?.({ data: { id: next.received[0]!.id, frames: { ...expected, via: 'worker' } } } as MessageEvent);
-    expect(await inWorker).toEqual({ ...expected, via: 'worker' });
+    expect(await soon(inWorker)).toEqual({ ...expected, via: 'worker' });
   });
 
   it('starts no worker again after MAX_HANGS have hung, and contains on the page from then on', async () => {
@@ -169,15 +194,15 @@ describe('parseBundle', () => {
     vi.useFakeTimers();
     for (let i = 1; i <= MAX_HANGS; i++) {
       // Each worker after the first is ready a microtask after the read that starts it, which is contained on the page.
-      if (i > 1) expect(await parseBundle(bundle())).toEqual(expected);
+      if (i > 1) expect(await soon(parseBundle(bundle()))).toEqual(expected);
       await Promise.resolve();
       const read = parseBundle(bundle());
       await vi.advanceTimersByTimeAsync(HUNG_MS);
-      expect(await read).toEqual(expected);
+      expect(await soon(read)).toEqual(expected);
       expect(FakeWorker.made).toHaveLength(i);
     }
-    expect(await parseBundle(bundle())).toEqual(expected);
-    expect(await parseBundle(bundle())).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
+    expect(await soon(parseBundle(bundle()))).toEqual(expected);
     expect(FakeWorker.made).toHaveLength(MAX_HANGS);
     expect(FakeWorker.made.every((w) => w.terminated)).toBe(true);
   });
@@ -188,6 +213,6 @@ describe('parseBundle', () => {
     const w = FakeWorker.made[0]!;
     // Answered before the fake's own answer: a parse that threw.
     w.onmessage?.({ data: { id: w.received[0]!.id, error: 'bad bundle' } } as MessageEvent);
-    await expect(read).rejects.toThrow('bad bundle');
+    await expect(soon(read)).rejects.toThrow('bad bundle');
   });
 });
