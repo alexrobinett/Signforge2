@@ -878,9 +878,11 @@ export function scoped(d1: D1Database, orgId: string) {
         const update = d1
           .prepare(
             // The SET's right sides read the row as it was: the stored heartbeat is the last sync's.
+            // A screen that said the same at the last sync had fallen back by then: a row from before
+            // migration 0046 has no `fallback_since`, and takes that heartbeat's time, not this one's (#474).
             `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
                fallback_since = CASE WHEN ? IS NULL THEN NULL
-                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, ?) ELSE ? END${report.sql}
+                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, json_extract(heartbeat_json, '$.at'), ?) ELSE ? END${report.sql}
              WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
           .bind(v.at, v.playerVersion, v.heartbeatJson, v.fallbackFrom, v.fallbackFrom, v.at, v.at, ...report.args, orgId, screenId, ...markArgs);

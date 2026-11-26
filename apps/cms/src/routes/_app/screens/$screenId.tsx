@@ -40,6 +40,7 @@ import type { PlaylistView } from '~/lib/playlists';
 import { describeWhen, howItReaches, runsAfter, stateWord, timeWord, type ScheduleEntryView } from '~/lib/schedule';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
+import { cn } from '~/lib/utils';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
@@ -167,6 +168,8 @@ function ScreenPage() {
   const spinner = (label: string, icon: ReactNode) => (busy === label ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : icon);
   const override = screen.displayOverride;
   const playIsTheFix = screen.state.kind === 'needs_you' && screen.state.reason === 'nothing_published' && playlists.length > 0;
+  // Drawn only with a button in it: an editor who cannot publish, where Play is the fix, has none (#474).
+  const playsGroup = !playIsTheFix || canPublish;
 
   return (
     <div className="space-y-5">
@@ -205,30 +208,34 @@ function ScreenPage() {
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               <EditorFields>
                 {/* What it plays, apart from what is done to the screen now (#367). */}
-                <fieldset className="flex flex-wrap gap-2">
-                  <legend className="sr-only">What it plays</legend>
-                  {/* When it is the fix, beside why, it is not drawn twice. */}
-                  {!playIsTheFix && (
-                    <Button variant="outline" onClick={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}>
-                      Play on this screen…
-                    </Button>
-                  )}
-                  {canPublish && (
-                    // Disruptive, and marked so: it cuts in at once over whatever the screen plays.
-                    <Button
-                      variant="outline"
-                      className="border-status-updating text-status-updating-foreground hover:bg-status-updating-muted"
-                      aria-describedby="takeover-hint"
-                      onClick={() => openTakeover(orgId, { target: 'screen', screenId: screen.id })}
-                    >
-                      <ZapIcon aria-hidden /> Take over this screen…
-                    </Button>
-                  )}
-                  <span id="takeover-hint" className="sr-only">
-                    Cuts in at once over whatever the screen plays.
-                  </span>
-                </fieldset>
-                <fieldset className="flex flex-wrap gap-2 sm:border-l sm:pl-2">
+                {playsGroup && (
+                  <fieldset className="flex flex-wrap gap-2">
+                    <legend className="sr-only">What it plays</legend>
+                    {/* When it is the fix, beside why, it is not drawn twice. */}
+                    {!playIsTheFix && (
+                      <Button variant="outline" onClick={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}>
+                        Play on this screen…
+                      </Button>
+                    )}
+                    {canPublish && (
+                      <>
+                        {/* Disruptive, and marked so: it cuts in at once over whatever the screen plays. */}
+                        <Button
+                          variant="outline"
+                          className="border-status-updating text-status-updating-foreground hover:bg-status-updating-muted"
+                          aria-describedby="takeover-hint"
+                          onClick={() => openTakeover(orgId, { target: 'screen', screenId: screen.id })}
+                        >
+                          <ZapIcon aria-hidden /> Take over this screen…
+                        </Button>
+                        <span id="takeover-hint" className="sr-only">
+                          Cuts in at once over whatever the screen plays.
+                        </span>
+                      </>
+                    )}
+                  </fieldset>
+                )}
+                <fieldset className={cn('flex flex-wrap gap-2', playsGroup && 'sm:border-l sm:pl-2')}>
                   <legend className="sr-only">The screen now</legend>
                   <Button
                     variant="outline"
