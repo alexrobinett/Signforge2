@@ -31,7 +31,7 @@ test.beforeAll(async ({ browser }) => {
   const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.133' } });
   const { code } = await start.json();
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Coffee bar', timezone: 'UTC', orientation: 'landscape' });
-  await tool(page, 'create_group', { name: 'Café screens', screenIds: [screen.id] });
+  await tool(page, 'save_group', { name: 'Café screens', screenIds: [screen.id] });
 });
 
 test.afterAll(() => page.context().close());

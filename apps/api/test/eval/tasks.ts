@@ -228,11 +228,11 @@ export const TASKS: Task[] = [
     role: 'owner',
     script: both((w) => [
       [{ name: 'read', input: { type: 'screen' } }],
-      [{ name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }],
+      [{ name: 'update_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } }],
     ]),
     async check(o) {
       if (o.arm === 'drawer')
-        return draftOf(o, 'rename_screen', o.world.screens.harbor)?.input.name === 'Harbor entrance' ? undefined : 'no draft renaming Harbor lobby';
+        return draftOf(o, 'update_screen', o.world.screens.harbor)?.input.name === 'Harbor entrance' ? undefined : 'no draft renaming Harbor lobby';
       const name = (await o.scope.screens.get(o.world.screens.harbor))?.name;
       return name === 'Harbor entrance' ? undefined : `Harbor lobby is named ${name}`;
     },
@@ -429,13 +429,13 @@ export const TASKS: Task[] = [
           { name: 'read', input: { type: 'spot' } },
         ],
         [
-          { name: 'rename_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
+          { name: 'update_screen', input: { screenId: w.screens.harbor, name: 'Harbor entrance' } },
           { name: 'update_spot', input: { spotId: w.spots.weather, durationMs: 15_000 } },
         ],
       ],
     },
     check(o) {
-      if (draftOf(o, 'rename_screen', o.world.screens.harbor)?.input.name !== 'Harbor entrance') return 'no draft renaming Harbor lobby';
+      if (draftOf(o, 'update_screen', o.world.screens.harbor)?.input.name !== 'Harbor entrance') return 'no draft renaming Harbor lobby';
       return draftOf(o, 'update_spot', o.world.spots.weather)?.input.durationMs === 15_000 ? undefined : 'no draft of Weather at 15 s';
     },
   },

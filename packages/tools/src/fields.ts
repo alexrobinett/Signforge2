@@ -87,7 +87,7 @@ const SYSTEM = new Set<string>(SYSTEM_KEYS);
 
 /** A key a label may have: not a system label's, which the screen's settings give. */
 export const labelKey = anyKey
-  .refine((k) => !SYSTEM.has(k), `${SYSTEM_KEYS.join(', ')} are system labels, from the screen's settings: change them with update_screen_settings`)
+  .refine((k) => !SYSTEM.has(k), `${SYSTEM_KEYS.join(', ')} are system labels, from the screen's settings: change them with update_screen`)
   .describe('A label key, such as region or store: lowercase letters, digits, - _ and .');
 
 /** Stored as typed, less the spaces around it; compared case-insensitively. */

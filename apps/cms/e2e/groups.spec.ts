@@ -28,8 +28,8 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await pairScreen(page, 'Drive-thru R', '192.0.2.73');
   await pairScreen(page, 'Menu board', '192.0.2.74');
   const lobby = await pairScreen(page, 'Lobby', '192.0.2.75');
-  const { group: drive } = (await tool(page, 'create_group', { name: 'Drive' })) as { group: { id: string } };
-  const { group: north } = (await tool(page, 'create_group', { name: 'North', screenIds: [lobby.id] })) as { group: { id: string } };
+  const { group: drive } = (await tool(page, 'save_group', { name: 'Drive' })) as { group: { id: string } };
+  const { group: north } = (await tool(page, 'save_group', { name: 'North', screenIds: [lobby.id] })) as { group: { id: string } };
   // Drive-thru L syncs with nothing published to it: it needs you.
   const synced = await page.request.post(`${DEVICE}/sync`, {
     headers: { authorization: `Bearer ${left.credential}` },
@@ -52,7 +52,7 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await hydrated(page);
   const adds: string[] = [];
   page.on('request', (r) => {
-    if (r.url().endsWith('/api/tools/add_group_members')) adds.push(r.postData() ?? '');
+    if (r.url().endsWith('/api/tools/save_group')) adds.push(r.postData() ?? '');
   });
   for (const name of ['Drive-thru L', 'Drive-thru R', 'Menu board']) await page.getByLabel(`Select ${name}`).check();
   const bar = page.getByRole('region', { name: 'Selected screens' });
@@ -166,13 +166,13 @@ test('groups and screens in name order wherever they are listed, though their id
   // Names given after the ids are known, so each list's id order is the reverse of its name order, and plain string
   // order puts Screen 10 before Screen 2.
   const pairs = [await pairScreen(page, 'First', '192.0.2.77'), await pairScreen(page, 'Second', '192.0.2.78')].map((s) => s.id).sort();
-  await tool(page, 'rename_screen', { screenId: pairs[0], name: 'Screen 10' });
-  await tool(page, 'rename_screen', { screenId: pairs[1], name: 'Screen 2' });
+  await tool(page, 'update_screen', { screenId: pairs[0], name: 'Screen 10' });
+  await tool(page, 'update_screen', { screenId: pairs[1], name: 'Screen 2' });
   const made = [];
-  for (const name of ['One', 'Two']) made.push(((await tool(page, 'create_group', { name, screenIds: pairs })) as { group: { id: string } }).group.id);
+  for (const name of ['One', 'Two']) made.push(((await tool(page, 'save_group', { name, screenIds: pairs })) as { group: { id: string } }).group.id);
   const [zeta, alpha] = made.sort();
-  await tool(page, 'rename_group', { groupId: zeta, name: 'Zeta' });
-  await tool(page, 'rename_group', { groupId: alpha, name: 'Alpha' });
+  await tool(page, 'save_group', { groupId: zeta, name: 'Zeta' });
+  await tool(page, 'save_group', { groupId: alpha, name: 'Alpha' });
   const colors = { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
   const kits = [];
   for (const name of ['Kit A', 'Kit B'])

@@ -206,12 +206,12 @@ describe('requests', () => {
     }
 
     writes.length = 0;
-    expect((await owner.tool('rename_screen', { screenId, name: 'Renamed' })).status).toBe(200);
+    expect((await owner.tool('update_screen', { screenId, name: 'Renamed' })).status).toBe(200);
     expect(ours()).toEqual(['screens', 'audit_log']);
 
     // A change that finds nothing (its UPDATE matched no row) is not audited.
     writes.length = 0;
-    expect((await owner.tool('rename_screen', { screenId: 'scr_nobody', name: 'x' })).status).toBe(404);
+    expect((await owner.tool('update_screen', { screenId: 'scr_nobody', name: 'x' })).status).toBe(404);
     expect(ours()).not.toContain('audit_log');
   });
 
@@ -305,9 +305,9 @@ describe('POST /api/tools/:name', () => {
   it('maps refusals to HTTP statuses', async () => {
     const cases: [Client, string, unknown, number, string][] = [
       [owner, 'no_such_tool', {}, 404, 'unknown_tool'],
-      [owner, 'rename_screen', { screenId, name: '' }, 400, 'invalid_input'],
-      [owner, 'rename_screen', { screenId: 'scr_nobody', name: 'x' }, 404, 'not_found'],
-      [viewer, 'rename_screen', { screenId, name: 'x' }, 403, 'forbidden'],
+      [owner, 'update_screen', { screenId, name: '' }, 400, 'invalid_input'],
+      [owner, 'update_screen', { screenId: 'scr_nobody', name: 'x' }, 404, 'not_found'],
+      [viewer, 'update_screen', { screenId, name: 'x' }, 403, 'forbidden'],
     ];
     for (const [who, name, input, status, error] of cases) {
       const res = await who.tool(name, input);
@@ -317,15 +317,15 @@ describe('POST /api/tools/:name', () => {
   });
 
   it('records the session user as the actor, through the cms client', async () => {
-    const res = await owner.tool('rename_screen', { screenId, name: 'Front desk' });
+    const res = await owner.tool('update_screen', { screenId, name: 'Front desk' });
     expect(await res.json()).toMatchObject({ screen: { id: screenId, name: 'Front desk' } });
     const { user, organization } = (await owner.session()).body;
     const [entry] = await testScope(env.DB, organization.id).auditLog.list({ limit: 1 });
-    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms', action: 'rename_screen', targetKind: 'screen', targetId: screenId });
+    expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms', action: 'update_screen', targetKind: 'screen', targetId: screenId });
   });
 
   it('takes JSON only', async () => {
-    const form = await owner.request('POST', '/api/tools/rename_screen', undefined, { 'content-type': 'text/plain' });
+    const form = await owner.request('POST', '/api/tools/update_screen', undefined, { 'content-type': 'text/plain' });
     expect(form.status).toBe(415);
     const broken = await owner.request('POST', '/api/tools/list_screens', undefined, { 'content-type': 'application/json' });
     expect(broken.status).toBe(200); // an empty body is an empty input

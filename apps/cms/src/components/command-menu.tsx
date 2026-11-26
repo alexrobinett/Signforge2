@@ -94,7 +94,7 @@ function TargetView({
   const actions = screen ? targetActions({ kind: 'screen', screen }, tools, checked) : group ? targetActions({ kind: 'group', group }, tools, checked) : [];
   const name = screen?.name ?? group?.name ?? (checking ? 'Checking…' : 'Not found');
   // Said only where the role has commands and the screen is not known to be revoked: only the check is missing.
-  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'identify_screen' || t.name === 'restart_screen');
+  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'screen_command');
 
   return (
     <>
@@ -130,7 +130,7 @@ function TargetView({
               ? `Checking ${name} before Identify and Restart…`
               : waiting && failed
                 ? `Couldn’t check ${name}, so Identify and Restart are off. Close ⌘K and open it again to retry.`
-                : screen && checked && screen.status !== 'revoked' && !reachable(screen) && tools.some((t) => t.name === 'restart_screen')
+                : screen && checked && screen.status !== 'revoked' && !reachable(screen) && tools.some((t) => t.name === 'screen_command')
                   ? `Restart is off: ${name} cannot be reached now, and a restart only reaches a screen in touch.`
                   : ''}
         </p>

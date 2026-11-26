@@ -8,6 +8,7 @@ import { describeTools, grantOf, READ_TOOLS, registry, toolsOf } from '@signforg
 import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { drawerReadTypes, drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
 import { CLIENT_SAYS, plant, reads, SAYS } from './planted';
 import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
@@ -71,7 +72,7 @@ function model(steps: Step[] | ((asked: any) => Step)) {
 }
 
 /** The writes the drawer drafts (#268), for a member who may make them. */
-const DRAFTING = ['create_schedule_entry', 'rename_screen', 'update_playlist', 'update_schedule_entry', 'update_spot'];
+const DRAFTING = ['create_schedule_entry', 'update_playlist', 'update_schedule_entry', 'update_screen', 'update_spot'];
 
 const CARD = {
   text: 'Both Bayside screens went quiet at 09:14: the store, not the players.',
@@ -198,7 +199,7 @@ describe('the tools the drawer offers', () => {
         'get_alert_channels',
         'list_connections',
         'claim_screen',
-        'rename_screen',
+        'update_screen',
         'publish',
         'list_agent_grants',
         'get_agent_grant',
@@ -999,7 +1000,7 @@ describe('confirmation cards (#269)', () => {
       callId: expect.any(String),
     });
     const [screen] = await s.scope.screens.list();
-    steps.splice(0, steps.length, { calls: [{ name: 'restart_screen', input: { screenId: screen?.id } }] });
+    steps.splice(0, steps.length, { calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'restart' } }] });
     s.model.asked.length = 0;
     const restart = pressOf(await raw(await s.ask('q')), 'q').card;
     expect(restart).toMatchObject({
@@ -1007,7 +1008,7 @@ describe('confirmation cards (#269)', () => {
       lines: [`${screen?.name} restarts now: it goes blank for a moment, then plays again.`],
       when: 'Now, on the live screen',
     });
-    steps.splice(0, steps.length, { calls: [{ name: 'set_display_override', input: { screenId: screen?.id, state: 'off' } }] });
+    steps.splice(0, steps.length, { calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'display_off' } }] });
     const off = pressOf(await raw(await s.ask('q')), 'q').card;
     expect(off).toMatchObject({
       title: 'Turn the display off',
@@ -1393,9 +1394,7 @@ describe('the drafting tools the drawer offers (#268)', () => {
     'set_template_version_status',
     'create_data_source',
     'update_data_source',
-    'set_display_override',
-    'restart_screen',
-    'identify_screen',
+    'screen_command',
     'revoke_screen_credential',
     'claim_screen',
     'create_spot',
@@ -1420,8 +1419,7 @@ describe('the drafting tools the drawer offers (#268)', () => {
       ).toEqual(DRAFTING);
     }
     // An editor may call them: they are left out, not out of reach.
-    for (const name of ['start_takeover', 'delete_schedule_entry', 'publish', 'set_display_override', 'restart_screen', 'identify_screen'])
-      expect(registry.get(name)?.minRole, name).toBe('editor');
+    for (const name of ['start_takeover', 'delete_schedule_entry', 'publish', 'screen_command']) expect(registry.get(name)?.minRole, name).toBe('editor');
   });
 });
 
@@ -1480,7 +1478,7 @@ describe('the drawer drafting changes (#268)', () => {
             { name: 'update_spot', input: { spotId: web, name: 'Evil' } },
             { name: 'update_spot', input: { spotId: spot, bindings: {} } },
             { name: 'update_schedule_entry', input: { scheduleEntryId: 'sch_x', startsAt: '2026-11-23T12:00:00Z' } },
-            { name: 'set_display_override', input: { screenId: 'scr_x', mode: 'off' } },
+            { name: 'screen_command', input: { screenId: 'scr_x', command: 'off' } },
           ],
         },
         ANSWER,
@@ -1501,6 +1499,23 @@ describe('the drawer drafting changes (#268)', () => {
     }
     // Not offered at all: refused unrun.
     expect(results[4][0]).toBe(true);
+  });
+
+  it("drafts a screen's name alone: offered no setting, and refused one at save (#345)", async () => {
+    const offered = draftTools(await grantOf({ org: { orgId: 'org_x' } as never, role: 'editor', scopes: undefined })).find((t) => t.name === 'update_screen');
+    expect(Object.keys(z.toJSONSchema(offered!.input).properties ?? {})).toEqual(['screenId', 'name']);
+    const d = await drafting({ script: () => [ANSWER] });
+    const [screen] = await d.scope.screens.list();
+    const res = await d.apply([
+      { tool: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo', ifVersion: screen!.rowVersion } },
+    ]);
+    expect(res.status).toBe(403);
+    expect((await res.json<any>()).results.at(-1)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: expect.stringMatching(/name alone, not its timezone/),
+    });
+    expect(await d.scope.screens.get(screen!.id)).toMatchObject({ name: screen!.name, timezone: screen!.timezone });
   });
 
   it('refuses at save what it refuses in the turn, and a tool it does not draft, writing nothing', async () => {
@@ -1653,7 +1668,7 @@ describe('the drawer drafting changes (#268)', () => {
         { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds, ifVersion: playlist.rowVersion } },
         { tool: 'update_schedule_entry', input: { scheduleEntryId: entry.id, priority: 3, ifVersion: entry.rowVersion } },
         { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'org', idempotencyKey: 'budget-create-1' } },
-        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
         // Aimed at a group or a screen, the save reads it too (review of #341, #344).
         { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'group', groupId: group.id, idempotencyKey: 'budget-create-2' } },
         { tool: 'create_schedule_entry', input: { playlistId: playlist.id, target: 'screen', screenId: screen.id, idempotencyKey: 'budget-create-3' } },
@@ -1671,8 +1686,8 @@ describe('the drawer drafting changes (#268)', () => {
       const { playlist, screen } = await content(d, 0);
       const other = await d.scope.screens.insert({ name: 'Drive-thru', timezone: 'UTC', orientation: 'landscape' });
       const calls = [
-        { tool: 'rename_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
-        { tool: 'rename_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
+        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
+        { tool: 'update_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
         { tool: 'update_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
       ];
       expect(saveStatements(calls)).toBe(SAVE_STATEMENTS);

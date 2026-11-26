@@ -198,12 +198,12 @@ describe('who may call', () => {
     const { t, owner, org, editor } = await team();
     const { access_token } = await agentToken(t, editor, org.id, ['content:read', 'content:draft', 'screens:manage']);
     const { grantId } = (await check(access_token))!;
-    expect(await toolNames(access_token)).toContain('rename_screen');
+    expect(await toolNames(access_token)).toContain('update_screen');
     // The member turns screens:manage off: the next call has it no more.
     const { grant } = await editor.ok<{ grant: { version: number } }>('/api/tools/get_agent_grant', { grantId });
     await editor.ok('/api/tools/update_agent_grant_scopes', { grantId, scopes: ['content:read', 'content:draft'], ifVersion: grant.version });
-    expect(await toolNames(access_token)).not.toContain('rename_screen');
-    expect(await call(access_token, 'rename_screen', { screenId: 'scr_any', name: 'x' })).toMatchObject({
+    expect(await toolNames(access_token)).not.toContain('update_screen');
+    expect(await call(access_token, 'update_screen', { screenId: 'scr_any', name: 'x' })).toMatchObject({
       isError: true,
       structuredContent: { error: 'forbidden' },
     });
@@ -259,14 +259,14 @@ describe('tools', () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'screens:manage']);
     const listed = (await rpc<{ tools: { name: string; inputSchema: object }[] }>(access_token, 'tools/list')).result!.tools;
-    const schema = JSON.stringify(listed.find((tool) => tool.name === 'rename_screen')?.inputSchema);
+    const schema = JSON.stringify(listed.find((tool) => tool.name === 'update_screen')?.inputSchema);
     expect(schema).not.toContain('pattern');
     expect(schema).not.toContain(String(Number.MAX_SAFE_INTEGER));
     for (const input of [
       { screenId: 'not an id!', name: 'Lobby' },
       { screenId: 'scr_1', name: 'Lobby', ifVersion: Number.MAX_SAFE_INTEGER + 2 },
     ]) {
-      const refused = await call(access_token, 'rename_screen', input);
+      const refused = await call(access_token, 'update_screen', input);
       expect(refused?.isError, JSON.stringify(input)).toBe(true);
       expect(refused?.structuredContent, JSON.stringify(input)).toMatchObject({ error: 'invalid_input' });
     }

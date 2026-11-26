@@ -1,4 +1,4 @@
-/** Screen tools: read screens, rename them, change their settings, wake or sleep them, identify, restart, revoke a credential. */
+/** Screen tools: read screens, rename them or change their settings, send them a command (wake, sleep, identify, restart), revoke a credential. */
 import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
@@ -16,7 +16,7 @@ import { outputs, type CredentialView, type ScreenView } from './outputs';
 
 /** How long a display override lasts at most: on a screen without display hours, and over a closed weekend. */
 export const OVERRIDE_LIMIT_MS = 12 * 3_600_000;
-/** How long `identify_screen` shows the screen's name. */
+/** How long `screen_command`'s identify shows the screen's name. */
 export const IDENTIFY_SECONDS = 10;
 
 /** Manifests are immutable (their id is their hash), so a parsed one is kept for the life of the isolate. */
@@ -245,33 +245,17 @@ const getScreen = defineTool({
   },
 });
 
-const renameScreen = defineTool({
-  name: 'rename_screen',
+const updateScreen = defineTool({
+  name: 'update_screen',
   description:
-    'Rename a screen. The name is what people see in the CMS; screens do not show it. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { screen }.',
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ screenId: id('screen'), name: name('screen'), ifVersion }),
-  output: outputs.rename_screen,
-  example: { screenId: 'scr_example', name: 'Lobby' },
-  target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input, write, blobs }) => {
-    const screen = await requireScreen(org, input.screenId);
-    return { screen: await screenView(org, write(org.screens.stage.update(screen, { name: input.name }, input.ifVersion)), blobs) };
-  },
-});
-
-const updateScreenSettings = defineTool({
-  name: 'update_screen_settings',
-  description:
-    "Change a screen's time zone, locale, orientation or display hours. Give only the fields to change; null clears locale (the player's default) or display hours (always on). Display hours are checked as the player checks them. The screen picks the change up with the next publish to it. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { screen }.",
+    'Change a screen: its name, which people see in the CMS and screens do not show, or its time zone, locale, orientation or display hours, which reach it with the next publish. Give only what changes; null clears locale or display hours. Pass the version you read as ifVersion. Returns { screen }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
   input: z
     .object({
       screenId: id('screen'),
+      name: name('screen').optional(),
       timezone: timezone.optional(),
       locale: locale.nullable().optional(),
       orientation: orientation.optional(),
@@ -279,11 +263,11 @@ const updateScreenSettings = defineTool({
       ifVersion,
     })
     .refine(
-      (v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
-      'give at least one setting to change',
+      (v) => v.name !== undefined || v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
+      'give at least one of name, timezone, locale, orientation or displayHours to change',
     ),
-  output: outputs.update_screen_settings,
-  example: { screenId: 'scr_example', timezone: 'Europe/London', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
+  output: outputs.update_screen,
+  example: { screenId: 'scr_example', name: 'Lobby', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, blobs }) => {
     const screen = await requireScreen(org, input.screenId);
@@ -291,6 +275,7 @@ const updateScreenSettings = defineTool({
       org.screens.stage.update(
         screen,
         {
+          name: input.name,
           timezone: input.timezone,
           locale: input.locale,
           orientation: input.orientation,
@@ -303,65 +288,41 @@ const updateScreenSettings = defineTool({
   },
 });
 
-const setDisplayOverride = defineTool({
-  name: 'set_display_override',
-  description: `Wake a screen's display now ('on'), put it to sleep now ('off'), or go back to its display hours (null), for someone standing at the screen. The override lasts until the screen's next scheduled display change, and at most ${OVERRIDE_LIMIT_MS / 3_600_000} hours (the limit alone on a screen without display hours), then ends by itself. The screen gets it at once over its socket, or at its next sync. Returns { screen }.`,
+/** What `screen_command` sends: a display override (on, off, or back to the display hours), identify, or restart. */
+const SCREEN_COMMANDS = ['identify', 'restart', 'display_on', 'display_off', 'display_auto'] as const;
+
+const screenCommand = defineTool({
+  name: 'screen_command',
+  description: `Act on a live screen now, for someone standing at it. identify shows its name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. restart reloads its player, which plays from its cache at once and syncs: use it when a screen looks stuck (rebooting the device is not available yet). display_on wakes its display and display_off puts it to sleep, until its next scheduled display change and at most ${OVERRIDE_LIMIT_MS / 3_600_000} hours (the limit alone on a screen without display hours), then it follows its hours again; display_auto goes back to its display hours now. The screen gets it at once over its socket; an unreachable one misses identify and restart and gets a display change at its next sync. A revoked screen is refused identify and restart (conflict). Returns { screenId, command, displayOverride }.`,
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ screenId: id('screen'), state: z.enum(['on', 'off']).nullable().describe('on, off, or null to follow the display hours again') }),
-  output: outputs.set_display_override,
-  example: { screenId: 'scr_example', state: 'on' },
+  // Identify and restart act on the screen, not the database: audited though they stage nothing.
+  alwaysAudited: true,
+  input: z.object({ screenId: id('screen'), command: z.enum(SCREEN_COMMANDS).describe('identify, restart, display_on, display_off or display_auto') }),
+  output: outputs.screen_command,
+  example: { screenId: 'scr_example', command: 'identify' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input, write, notify, blobs }) => {
-    const screen = await requireScreen(org, input.screenId);
+  handler: async ({ org, input, write, notify }) => {
+    const { command } = input;
     const now = Date.now();
+    if (command === 'identify' || command === 'restart') {
+      const screen = await requireActiveScreen(org, input.screenId);
+      notify((screens) =>
+        screens.command(screen.id, command === 'identify' ? { type: 'identify', name: screen.name, seconds: IDENTIFY_SECONDS } : { type: 'restart' }),
+      );
+      return { screenId: screen.id, command, displayOverride: liveOverride(screen.displayOverrideJson ?? null, now) };
+    }
+    const screen = await requireScreen(org, input.screenId);
     let override: DisplayOverride | null = null;
-    if (input.state) {
+    if (command !== 'display_auto') {
       const change = nextDisplayChange(hoursOf(screen) ?? undefined, screen.timezone, new Date(now));
       const until = Math.min(change?.getTime() ?? Number.POSITIVE_INFINITY, now + OVERRIDE_LIMIT_MS);
-      override = { state: input.state, until: new Date(until).toISOString() };
+      override = { state: command === 'display_on' ? 'on' : 'off', until: new Date(until).toISOString() };
     }
-    const row = write(org.screens.stage.update(screen, { displayOverrideJson: override ? JSON.stringify(override) : null }));
+    write(org.screens.stage.update(screen, { displayOverrideJson: override ? JSON.stringify(override) : null }));
     notify((screens) => screens.command(screen.id, { type: 'display', override }));
-    return { screen: await screenView(org, row, blobs, now) };
-  },
-});
-
-const identifyScreen = defineTool({
-  name: 'identify_screen',
-  description: `Show the screen's name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. Reaches a screen whose socket is open; one that is unreachable does not get it, and a revoked one is refused (conflict). Returns { screenId, seconds }.`,
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  alwaysAudited: true,
-  input: z.object({ screenId: id('screen') }),
-  output: outputs.identify_screen,
-  example: { screenId: 'scr_example' },
-  target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input, notify }) => {
-    const screen = await requireActiveScreen(org, input.screenId);
-    notify((screens) => screens.command(screen.id, { type: 'identify', name: screen.name, seconds: IDENTIFY_SECONDS }));
-    return { screenId: screen.id, seconds: IDENTIFY_SECONDS };
-  },
-});
-
-const restartScreen = defineTool({
-  name: 'restart_screen',
-  description:
-    "Restart the screen's player now: it reloads, plays from its cache at once and syncs. Use it when a screen looks stuck. Reaches a screen whose socket is open; a revoked one is refused (conflict). Rebooting the device is not available yet. Returns { screenId }.",
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  alwaysAudited: true,
-  input: z.object({ screenId: id('screen') }),
-  output: outputs.restart_screen,
-  example: { screenId: 'scr_example' },
-  target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input, notify }) => {
-    const screen = await requireActiveScreen(org, input.screenId);
-    notify((screens) => screens.command(screen.id, { type: 'restart' }));
-    return { screenId: screen.id };
+    return { screenId: screen.id, command, displayOverride: override };
   },
 });
 
@@ -389,14 +350,4 @@ const revokeScreenCredential = defineTool({
   },
 });
 
-export const screenTools = [
-  listScreens,
-  listScreenStatus,
-  getScreen,
-  renameScreen,
-  updateScreenSettings,
-  setDisplayOverride,
-  identifyScreen,
-  restartScreen,
-  revokeScreenCredential,
-];
+export const screenTools = [listScreens, listScreenStatus, getScreen, updateScreen, screenCommand, revokeScreenCredential];

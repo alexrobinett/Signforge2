@@ -400,7 +400,7 @@ describe('alerts to Slack and webhooks', () => {
     const cms = { ...env, CMS_ORIGIN: 'https://cms.test' };
     const start = Date.now();
     const hour = start - (start % HOUR);
-    const refused = { orgId: org.id, grantId, tool: 'rename_screen', needs: 'screens:manage', refusals: 3, hour };
+    const refused = { orgId: org.id, grantId, tool: 'update_screen', needs: 'screens:manage', refusals: 3, hour };
     // Twice in one hour, as two calls racing past the object might: one event.
     await alertAgentRefused(cms, outbox, refused, start);
     await alertAgentRefused(cms, outbox, refused, start + MIN);
@@ -414,7 +414,7 @@ describe('alerts to Slack and webhooks', () => {
       data: {
         grant: { id: grantId, url: `https://cms.test/settings/api/${grantId}`, client: { id: clientId, name: 'Test agent' } },
         refusals: 3,
-        tool: 'rename_screen',
+        tool: 'update_screen',
         needs: 'screens:manage',
       },
     });

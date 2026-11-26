@@ -31,7 +31,7 @@ const listAuditLog = defineTool({
       .object({ kind: z.enum(ACTOR_KINDS).optional(), id: z.string().min(1).max(200).optional().describe('One actor, as an entry names it') })
       .optional()
       .describe('Only what this kind of actor, or this one actor, did'),
-    action: z.string().min(1).max(64).optional().describe('Only this action, such as rename_screen'),
+    action: z.string().min(1).max(64).optional().describe('Only this action, such as update_screen'),
     target: z
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()
