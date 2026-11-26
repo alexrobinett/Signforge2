@@ -7,6 +7,7 @@ import type { CommandEntry, TargetAction } from '../src/lib/command-menu';
 import { createCommandMenuSlice, type CommandMenuSlice } from '../src/state/command-menu';
 import { toast } from 'sonner';
 import { initialOrgs, type OrgsState } from '../src/state/orgs';
+import { getNavCounts } from '~/server/nav-counts.functions';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -33,6 +34,25 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
     return new Response(JSON.stringify(reply.body), { status: reply.status });
+  });
+});
+
+describe('opening the menu (#454)', () => {
+  /** The menu's store on a page of org_1, its shell listing these tools for the member. */
+  const onPage = (tools: string[]) => {
+    const { store, router } = menuStore();
+    router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_1' }, tools: tools.map((name) => ({ name })) } }] as never;
+    return store;
+  };
+
+  it('reads the count of unpublished changes for a member who may publish, and not for one who may not', () => {
+    vi.mocked(getNavCounts).mockClear();
+    onPage(['read', 'publish']).getState().openCommandMenu();
+    expect(getNavCounts).toHaveBeenCalledOnce();
+    vi.mocked(getNavCounts).mockClear();
+    // A viewer, or an editor where only owners publish: Publish all is never offered, so nothing is read.
+    onPage(['read', 'save_spot']).getState().openCommandMenu();
+    expect(getNavCounts).not.toHaveBeenCalled();
   });
 });
 

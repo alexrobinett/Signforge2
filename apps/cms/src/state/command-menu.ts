@@ -6,7 +6,7 @@
  */
 import { toast } from 'sonner';
 import type { CommandEntry, CommandTarget, PeopleAction, Selection, TargetAction } from '~/lib/command-menu';
-import { orgOnScreen } from '~/lib/live';
+import { orgOnScreen, publishesOnScreen } from '~/lib/live';
 import { callTool, toolMessage } from '~/lib/tools';
 import { getNavCounts } from '~/server/nav-counts.functions';
 import { changingOrg } from './orgs';
@@ -155,7 +155,8 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
         commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 },
         ui: { ...s.ui, drawerOpen: false },
       }));
-      if (orgOnScreen(router)) void readDrafts(get().commandMenu.opening);
+      // Publish all is offered only to a member who may publish: for anyone else the count is not read (#454).
+      if (orgOnScreen(router) && publishesOnScreen(router)) void readDrafts(get().commandMenu.opening);
     },
     menuFocusBack(e) {
       e.preventDefault();
