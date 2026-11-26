@@ -37,6 +37,20 @@ import {
   type BrandKit,
   type DisplayHours,
   type DisplayOutput,
+  type SyncResponse,
+  type SyncRequest,
+  type Sha256,
+  type ServerSocketMessage,
+  type ScreenKind,
+  type PlayCount,
+  type PairStartResponse,
+  type PairStartRequest,
+  type PairPollResponse,
+  type DisplayStatus,
+  type DisplayOverride,
+  type DeviceSocketMessage,
+  type DeviceCommand,
+  type DataSnapshot,
   type FieldDef,
   type NewsImage,
   type ScalarFieldDef,
@@ -47,6 +61,7 @@ import {
   type TemplateManifest,
 } from './shapes.ts';
 import { playsProtocol, playsSchema, THIS_PLAYER } from './playable.ts';
+import { accepted, assertSame, custom, type Infer, is, listOf, object, optional, refused, said, type Same, type Shape, within } from './shape.ts';
 import { bundleScripts } from './scripts.ts';
 
 // ------------------------------------------------------------------ helpers
@@ -82,6 +97,12 @@ export function show(v: unknown): string {
   s ??= typeof v;
   return s.length > 60 ? `${s.slice(0, 57)}...` : s;
 }
+
+/** The problems `shape` finds in `v`: none when it reads. */
+const problemsOf = <T>(shape: Shape<T>, v: unknown): string[] => {
+  const r = shape.read(v);
+  return r.ok ? [] : r.problems;
+};
 
 const prefix = (where: string, problems: string[]) => problems.map((p) => `${where}: ${p}`);
 /** Check each item of a list; problems are prefixed with the 1-based position. */
@@ -977,71 +998,73 @@ export function validateDataSnapshot(s: unknown): string[] {
 
 // ------------------------------------------------------------------ device API
 
+// Each message declared once (./shape.ts, #156): read in its fields' order, in the words these checks always used, it
+// gives back exactly the shape. `assertSame` holds each to its interface in shapes.ts at compile time.
+
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+// Array.from reads a hole as undefined, which `every` would skip: JSON has none, but a value passed in by hand may.
+const versions = (v: unknown): v is readonly number[] => Array.isArray(v) && Array.from(v).every((n) => Number.isSafeInteger(n));
+
 /** `POST /v1/device/pair/start`, as the server receives it. */
-export function validatePairStartRequest(r: unknown): string[] {
-  if (!isObj(r)) return ['request is not an object'];
-  if (r.kind !== undefined && !SCREEN_KINDS.some((k) => k === r.kind)) return [`kind must be one of ${SCREEN_KINDS.join(', ')}`];
-  return [];
-}
+export const pairStartRequestShape = object(
+  { kind: optional(is((v): v is ScreenKind => SCREEN_KINDS.some((k) => k === v), `kind must be one of ${SCREEN_KINDS.join(', ')}`)) },
+  'request is not an object',
+);
+assertSame<Same<Infer<typeof pairStartRequestShape>, PairStartRequest>>();
+export const validatePairStartRequest = (r: unknown) => problemsOf(pairStartRequestShape, r);
 
 /** `POST /v1/device/pair/start`, as the screen receives it. */
-export function validatePairStartResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  const errors: string[] = [];
-  if (!isText(r.code)) errors.push('code is missing');
-  if (!isText(r.pollToken)) errors.push('pollToken is missing');
-  if (!isInstant(r.expiresAt)) errors.push('expiresAt must be an ISO 8601 time');
-  return errors;
-}
+export const pairStartResponseShape = object(
+  {
+    code: is(isText, 'code is missing'),
+    pollToken: is(isText, 'pollToken is missing'),
+    expiresAt: is(isInstant, 'expiresAt must be an ISO 8601 time'),
+  },
+  'response is not an object',
+);
+assertSame<Same<Infer<typeof pairStartResponseShape>, PairStartResponse>>();
+export const validatePairStartResponse = (r: unknown) => problemsOf(pairStartResponseShape, r);
 
 /** `POST /v1/device/pair/poll`, as the screen receives it. */
-export function validatePairPollResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  if (r.status === 'waiting' || r.status === 'expired') return [];
-  if (r.status !== 'paired') return ['status must be waiting, expired or paired'];
-  const errors: string[] = [];
-  if (!isIdValue(r.screenId)) errors.push('screenId is not a valid id');
-  else if (!isStr(r.credential) || !r.credential.startsWith(`sfd_${r.screenId}.`) || r.credential.length <= `sfd_${r.screenId}.`.length) {
-    errors.push('credential must be sfd_<screenId>.<secret>');
-  }
-  return errors;
-}
+export const pairPollResponseShape = custom<PairPollResponse>((r) => {
+  if (!isObj(r)) return refused(['response is not an object']);
+  if (r.status === 'waiting' || r.status === 'expired') return accepted({ status: r.status });
+  if (r.status !== 'paired') return refused(['status must be waiting, expired or paired']);
+  if (!isIdValue(r.screenId)) return refused(['screenId is not a valid id']);
+  if (!isStr(r.credential) || !r.credential.startsWith(`sfd_${r.screenId}.`) || r.credential.length <= `sfd_${r.screenId}.`.length)
+    return refused(['credential must be sfd_<screenId>.<secret>']);
+  return accepted({ status: 'paired', screenId: r.screenId, credential: r.credential });
+});
+export const validatePairPollResponse = (r: unknown) => problemsOf(pairPollResponseShape, r);
 
-function overrideProblems(o: unknown): string[] {
-  if (!isObj(o)) return ['override must be an object'];
-  const errors: string[] = [];
-  if (o.state !== 'on' && o.state !== 'off') errors.push('override state must be on or off');
-  if (!isInstant(o.until)) errors.push('override until must be an ISO 8601 time');
-  return errors;
-}
+const displayOverrideShape = object(
+  {
+    state: is((v): v is DisplayOverride['state'] => v === 'on' || v === 'off', 'override state must be on or off'),
+    until: is(isInstant, 'override until must be an ISO 8601 time'),
+  },
+  'override must be an object',
+);
+assertSame<Same<Infer<typeof displayOverrideShape>, DisplayOverride>>();
 
 /** One command from the server, in a sync response or over the socket. */
-export function validateDeviceCommand(c: unknown): string[] {
-  if (!isObj(c)) return ['command is not an object'];
-  if (c.type === 'reload' || c.type === 'restart' || c.type === 'reboot') return [];
-  if (c.type === 'display') return c.override === null ? [] : overrideProblems(c.override);
+export const deviceCommandShape = custom<DeviceCommand>((c) => {
+  if (!isObj(c)) return refused(['command is not an object']);
+  if (c.type === 'reload' || c.type === 'restart' || c.type === 'reboot') return accepted({ type: c.type });
+  if (c.type === 'display') {
+    if (c.override === null) return accepted({ type: 'display', override: null });
+    const override = displayOverrideShape.read(c.override);
+    return override.ok ? accepted({ type: 'display', override: override.value }) : override;
+  }
   if (c.type === 'identify') {
     const errors: string[] = [];
     if (!isStr(c.name) || !c.name.trim() || c.name.length > 100) errors.push('identify needs the name to show, 1 to 100 characters');
     if (!Number.isInteger(c.seconds) || (c.seconds as number) < 1 || (c.seconds as number) > MAX_IDENTIFY_SECONDS)
       errors.push(`identify seconds must be a whole number from 1 to ${MAX_IDENTIFY_SECONDS}`);
-    return errors;
+    return errors.length ? refused(errors) : accepted({ type: 'identify', name: c.name as string, seconds: c.seconds as number });
   }
-  return ['command type must be reload, restart, display, identify or reboot'];
-}
-
-function displayStatusProblems(d: unknown): string[] {
-  if (!isObj(d)) return ['display must be an object'];
-  const errors: string[] = [];
-  if (typeof d.on !== 'boolean') errors.push('display on must be true or false');
-  if (d.methods !== undefined && !(isObj(d.methods) && Object.values(d.methods).every(isStr))) errors.push('display methods must map names to text');
-  if (d.override !== undefined) errors.push(...prefix('display', overrideProblems(d.override)));
-  if (d.output !== undefined) {
-    if (!isObj(d.output) || !isStr(d.output.mode) || !OUTPUT_MODE.test(d.output.mode)) errors.push('display output mode must be <width>x<height>@<Hz>');
-    else if (!Number.isSafeInteger(d.output.resets) || Number(d.output.resets) < 0) errors.push('display output resets must be a whole number from 0');
-  }
-  return errors;
-}
+  return refused(['command type must be reload, restart, display, identify or reboot']);
+});
+export const validateDeviceCommand = (c: unknown) => problemsOf(deviceCommandShape, c);
 
 /** A video mode as the supervisor writes it: `1920x1080@60`. */
 const OUTPUT_MODE = /^\d{1,5}x\d{1,5}@\d{1,3}$/;
@@ -1051,116 +1074,161 @@ export function isDisplayOutput(v: unknown): v is DisplayOutput {
   return isObj(v) && isStr(v.mode) && OUTPUT_MODE.test(v.mode) && Number.isSafeInteger(v.resets) && Number(v.resets) >= 0;
 }
 
+const displayOutputShape = custom<DisplayOutput>((o) => {
+  if (!isObj(o) || !isStr(o.mode) || !OUTPUT_MODE.test(o.mode)) return refused(['display output mode must be <width>x<height>@<Hz>']);
+  if (!Number.isSafeInteger(o.resets) || Number(o.resets) < 0) return refused(['display output resets must be a whole number from 0']);
+  return accepted({ mode: o.mode, resets: o.resets as number });
+});
+
+const displayStatusShape = object(
+  {
+    on: is(isBool, 'display on must be true or false'),
+    methods: optional(is((v): v is Record<string, string> => isObj(v) && Object.values(v).every(isStr), 'display methods must map names to text')),
+    override: optional(within('display', displayOverrideShape)),
+    output: optional(displayOutputShape),
+  },
+  'display must be an object',
+);
+assertSame<Same<Infer<typeof displayStatusShape>, DisplayStatus>>();
+
 /** The start of an hour in UTC, as play counts are keyed: `2026-11-17T13:00Z`. */
 const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}:00(?::00(?:\.000)?)?Z$/;
 
-function playCountProblems(p: unknown): string[] {
-  if (!isObj(p)) return ['is not an object'];
-  const errors: string[] = [];
-  if (!isStr(p.hour) || !HOUR.test(p.hour) || Number.isNaN(Date.parse(p.hour))) errors.push('hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z');
-  if (!isIdValue(p.spot)) errors.push('spot is not a valid id');
-  if (!isCount(p.plays)) errors.push('plays must be a whole number, 0 or more');
-  if (!isNum(p.ms) || p.ms < 0) errors.push('ms must be 0 or more');
-  return errors;
-}
+const playCountShape = object(
+  {
+    hour: is((v): v is string => isStr(v) && HOUR.test(v) && !Number.isNaN(Date.parse(v)), 'hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z'),
+    spot: is(isIdValue, 'spot is not a valid id'),
+    plays: is(isCount, 'plays must be a whole number, 0 or more'),
+    ms: is((v): v is number => isNum(v) && v >= 0, 'ms must be 0 or more'),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof playCountShape>, PlayCount>>();
 
 /**
  * A sync's map of source id to a count, checked entry by entry but reported as one problem at
  * most: a player before gh-45 sends every source it has seen, so one cause must not make a
  * problem per entry. The size of the work is bounded by `MAX_SYNC_REQUEST_BYTES`.
  */
-function sourceMapProblems(name: string, map: Obj, what: string): string[] {
-  const bad = Object.keys(map).filter((k) => !isIdValue(k) || !isCount(own(map, k)));
-  if (!bad.length) return [];
-  return [`${name}: "${show(bad[0])}" must be a source id with ${what}${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''}`];
-}
+const sourceMap = (name: string, notMap: string, what: string) =>
+  custom<Record<string, number>>((map) => {
+    if (!isObj(map)) return refused([notMap]);
+    const bad = Object.keys(map).filter((k) => !isIdValue(k) || !isCount(own(map, k)));
+    if (bad.length) return refused([`${name}: "${show(bad[0])}" must be a source id with ${what}${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''}`]);
+    return accepted(Object.fromEntries(Object.keys(map).map((k) => [k, own(map, k) as number])));
+  });
 
-const versions = (v: unknown) => Array.isArray(v) && v.every((n) => Number.isSafeInteger(n));
+/** A list of feed image hashes, at most `max`. */
+const blobList = (max: number) =>
+  custom<Sha256[]>((v) => {
+    if (!Array.isArray(v)) return refused(['blobs must be a list of sha256 hashes']);
+    if (v.length > max) return refused([`blobs holds at most ${max} hashes`]);
+    if (!Array.from(v).every(isSha256)) return refused(['blobs must contain sha256 hashes']);
+    return accepted([...v]);
+  });
 
 /** `POST /v1/device/sync`, as the server receives it. */
-export function validateSyncRequest(r: unknown): string[] {
-  if (!isObj(r)) return ['request is not an object'];
+export const syncRequestShape = object(
+  {
+    seq: is(isCount, 'seq must be a whole number, 0 or more'),
+    epoch: is(isIdValue, 'epoch must be a valid id'),
+    player: said(
+      'player needs a version and the manifest schemas and protocols it supports',
+      object({ version: is(isText, ''), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
+    ),
+    manifest: said(
+      'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
+      object(
+        {
+          active: optional(is(isManifestId, '')),
+          filesMissing: is(isCount, ''),
+          fallbackFrom: optional(is(isManifestId, '')),
+          lastGood: optional(is(isManifestId, '')),
+        },
+        '',
+      ),
+    ),
+    display: displayStatusShape,
+    deviceTime: is(isInstant, 'deviceTime must be an ISO 8601 time'),
+    clock: said('clock needs offsetMs and whether the screen trusts it', object({ offsetMs: is(isNum, ''), trusted: is(isBool, '') }, '')),
+    // The bound first: a list over it is refused whole, without a problem per entry (bounded work, gh-45).
+    playCounts: listOf('play count', playCountShape, { max: MAX_SYNC_PLAY_COUNTS, tooLong: `playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts` }),
+    snapshots: sourceMap('snapshots', 'snapshots must map source ids to versions', 'a version number'),
+    dataRejected: optional(sourceMap('dataRejected', 'dataRejected must map source ids to counts', 'a count')),
+    blobs: optional(blobList(MAX_SYNC_BLOBS)),
+  },
+  'request is not an object',
+);
+assertSame<Same<Infer<typeof syncRequestShape>, SyncRequest>>();
+export const validateSyncRequest = (r: unknown) => problemsOf(syncRequestShape, r);
+
+/** A data snapshot, as a sync response carries it: its own check (`validateDataSnapshot`), the value as it is until #156's next step. */
+const dataSnapshotShape = custom<DataSnapshot>((s) => {
+  const problems = validateDataSnapshot(s);
+  return problems.length ? refused(problems) : accepted(s as DataSnapshot);
+});
+
+const checkedShape = custom<Record<string, { version: number; checkedAt: string }>>((c) => {
+  if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);
   const errors: string[] = [];
-  if (!isCount(r.seq)) errors.push('seq must be a whole number, 0 or more');
-  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
-  const p = r.player;
-  if (!isObj(p) || !isText(p.version) || !versions(p.manifestSchemas) || !versions(p.protocols)) {
-    errors.push('player needs a version and the manifest schemas and protocols it supports');
+  const entries: [string, { version: number; checkedAt: string }][] = [];
+  for (const [k, v] of Object.entries(c)) {
+    const version = own(v, 'version');
+    const checkedAt = own(v, 'checkedAt');
+    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt)) errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
+    else entries.push([k, { version, checkedAt }]);
   }
-  const m = r.manifest;
-  const optionalId = (k: string) => own(m, k) === undefined || isManifestId(own(m, k));
-  if (!isObj(m) || !optionalId('active') || !optionalId('fallbackFrom') || !optionalId('lastGood') || !isCount(m.filesMissing))
-    errors.push('manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids');
-  errors.push(...displayStatusProblems(r.display));
-  if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
-  if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
-  // The bound first: a list over it is refused whole, without a problem per entry (bounded work, gh-45).
-  if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
-  else errors.push(...list('play count', r.playCounts, playCountProblems));
-  if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else errors.push(...sourceMapProblems('snapshots', r.snapshots, 'a version number'));
-  if (r.dataRejected !== undefined) {
-    if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
-    else errors.push(...sourceMapProblems('dataRejected', r.dataRejected, 'a count'));
-  }
-  if (r.blobs !== undefined) {
-    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
-    else if (r.blobs.length > MAX_SYNC_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_BLOBS} hashes`);
-    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
-  }
-  return errors;
-}
+  // fromEntries defines each key as its own, so a `__proto__` key could never set a prototype, whatever an id may be.
+  return errors.length ? refused(errors) : accepted(Object.fromEntries(entries));
+});
 
 /** `POST /v1/device/sync`, as the screen receives it. */
-export function validateSyncResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  const errors: string[] = [];
-  if (!isInstant(r.serverTime)) errors.push('serverTime must be an ISO 8601 time');
-  if (!isNum(r.nextSyncS) || r.nextSyncS <= 0) errors.push('nextSyncS must be above 0');
-  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
-  if (!isCount(r.ackSeq)) errors.push('ackSeq must be a whole number, 0 or more');
-  if (r.desiredManifest !== undefined && !isText(r.desiredManifest)) errors.push('desiredManifest must be a manifest id when present');
-  errors.push(...list('snapshot', r.snapshots, validateDataSnapshot));
-  if (r.checked !== undefined) {
-    if (!isObj(r.checked)) errors.push('checked must map source ids to a version and checkedAt');
-    else
-      for (const [k, v] of Object.entries(r.checked))
-        if (!isIdValue(k) || !isCount(own(v, 'version')) || !isInstant(own(v, 'checkedAt')))
-          errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
-  }
-  if (r.blobs !== undefined) {
-    if (!Array.isArray(r.blobs)) errors.push('blobs must be a list of sha256 hashes');
-    else if (r.blobs.length > MAX_SYNC_RESPONSE_BLOBS) errors.push(`blobs holds at most ${MAX_SYNC_RESPONSE_BLOBS} hashes`);
-    else if (!r.blobs.every(isSha256)) errors.push('blobs must contain sha256 hashes');
-  }
-  if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
-  errors.push(...list('command', r.commands, validateDeviceCommand));
-  return errors;
-}
+export const syncResponseShape = object(
+  {
+    serverTime: is(isInstant, 'serverTime must be an ISO 8601 time'),
+    nextSyncS: is((v): v is number => isNum(v) && v > 0, 'nextSyncS must be above 0'),
+    epoch: is(isIdValue, 'epoch must be a valid id'),
+    ackSeq: is(isCount, 'ackSeq must be a whole number, 0 or more'),
+    desiredManifest: optional(is(isText, 'desiredManifest must be a manifest id when present')),
+    snapshots: listOf('snapshot', dataSnapshotShape),
+    checked: optional(checkedShape),
+    blobs: optional(blobList(MAX_SYNC_RESPONSE_BLOBS)),
+    socketTicket: is(isText, 'socketTicket is missing'),
+    commands: listOf('command', deviceCommandShape),
+  },
+  'response is not an object',
+);
+assertSame<Same<Infer<typeof syncResponseShape>, SyncResponse>>();
+export const validateSyncResponse = (r: unknown) => problemsOf(syncResponseShape, r);
 
 /** A socket message from the server, as the screen receives it. */
-export function validateServerSocketMessage(msg: unknown): string[] {
-  if (!isObj(msg)) return ['message is not an object'];
+export const serverSocketMessageShape = custom<ServerSocketMessage>((msg) => {
+  if (!isObj(msg)) return refused(['message is not an object']);
   switch (msg.type) {
     case 'manifest':
-      return isText(msg.id) ? [] : ['manifest message needs an id'];
-    case 'command':
-      return validateDeviceCommand(msg.command);
+      return isText(msg.id) ? accepted({ type: 'manifest', id: msg.id }) : refused(['manifest message needs an id']);
+    case 'command': {
+      const command = deviceCommandShape.read(msg.command);
+      return command.ok ? accepted({ type: 'command', command: command.value }) : command;
+    }
     case 'revoked':
-      return [];
+      return accepted({ type: 'revoked' });
     default:
-      return ['message type must be manifest, command or revoked'];
+      return refused(['message type must be manifest, command or revoked']);
   }
-}
+});
+export const validateServerSocketMessage = (msg: unknown) => problemsOf(serverSocketMessageShape, msg);
 
 /** A socket message from a screen, as the server receives it. */
-export function validateDeviceSocketMessage(msg: unknown): string[] {
-  if (!isObj(msg)) return ['message is not an object'];
-  if (msg.type !== 'applied') return ['message type must be applied'];
+export const deviceSocketMessageShape = custom<DeviceSocketMessage>((msg) => {
+  if (!isObj(msg)) return refused(['message is not an object']);
+  if (msg.type !== 'applied') return refused(['message type must be applied']);
   const errors = isManifestId(msg.manifest) ? [] : ['applied message needs a sha256 manifest id'];
   if (msg.observedAt !== undefined && !isInstant(msg.observedAt)) errors.push('applied message observedAt must be an ISO 8601 time when present');
-  return errors;
-}
+  if (errors.length) return refused(errors);
+  return accepted({ type: 'applied', manifest: msg.manifest as string, ...(msg.observedAt !== undefined && { observedAt: msg.observedAt as string }) });
+});
+export const validateDeviceSocketMessage = (msg: unknown) => problemsOf(deviceSocketMessageShape, msg);
 
 // ------------------------------------------------------------- preview channel
 

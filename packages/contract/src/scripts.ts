@@ -16,6 +16,9 @@
 import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
 
+// Here too, so the player's bundle worker imports this module alone (`@signforge/contract/scripts`) and not the validators.
+export { TEMPLATE_SCRIPT_START };
+
 /** A script element, or a `<select>`, which a template may not hold. */
 export interface BundleScript {
   /** Where the script's text (or the whole `<select>`) is in the returned `html`, from `start` to `end`. */

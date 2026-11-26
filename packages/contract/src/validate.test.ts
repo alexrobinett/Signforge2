@@ -491,7 +491,7 @@ describe('every validator is total', () => {
   );
 });
 
-const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
+const parsers: [string, (v: unknown) => { ok: true; value: unknown } | { ok: false; problems: string[] }, (v: unknown) => string[]][] = [
   ['parseManifest', parseManifest, validateManifest],
   ['parseTemplateManifest', parseTemplateManifest, validateTemplateManifest],
   ['parseDataSnapshot', parseDataSnapshot, validateDataSnapshot],
@@ -509,20 +509,57 @@ const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
   ['parseTemplateRuntimeReport', parseTemplateRuntimeReport, validateTemplateRuntimeReport],
 ];
 
+/** Read by a declared shape (#156): the value is the input's declared fields, not the input itself. */
+const READ = new Set<unknown>([
+  parsePairStartRequest,
+  parsePairStartResponse,
+  parsePairPollResponse,
+  parseSyncRequest,
+  parseSyncResponse,
+  parseDeviceCommand,
+  parseServerSocketMessage,
+  parseDeviceSocketMessage,
+]);
+
+/** Whether `part` is `whole` with some object keys left out, at any depth. */
+const keptFrom = (part: unknown, whole: unknown): boolean =>
+  Array.isArray(part)
+    ? Array.isArray(whole) && part.length === whole.length && part.every((x, i) => keptFrom(x, whole[i]))
+    : typeof part === 'object' && part !== null
+      ? typeof whole === 'object' &&
+        whole !== null &&
+        !Array.isArray(whole) &&
+        Object.entries(part).every(([k, v]) => Object.hasOwn(whole, k) && keptFrom(v, (whole as Record<string, unknown>)[k]))
+      : Object.is(part, whole);
+
 describe('every parser gives back what its validator accepts', () => {
   for (const [name, parse, validate] of parsers) {
     const fixture = validators.find(([v]) => v === validate.name)?.[2];
-    it(`${name} returns the value itself when valid, or the validator's problems`, () => {
+    const read = READ.has(parse);
+    it(`${name} returns ${read ? 'its declared fields of the value' : 'the value itself'} when valid, or the validator's problems`, () => {
       fc.assert(
         fc.property(fixture ? fc.oneof(json, mutated(fixture)) : json, (v) => {
           const problems = validate(v);
-          expect(parse(v)).toEqual(problems.length ? { ok: false, problems } : { ok: true, value: v });
-          if (!problems.length) expect((parse(v) as { value: unknown }).value).toBe(v);
+          const parsed = parse(v);
+          if (problems.length) expect(parsed).toEqual({ ok: false, problems });
+          else if (!parsed.ok) throw new Error(`${name} refused what its validator accepts: ${parsed.problems}`);
+          else if (!read) expect(parsed.value).toBe(v);
+          else {
+            expect(keptFrom(parsed.value, v)).toBe(true);
+            // What it keeps reads back as itself: nothing it needs was left out.
+            expect(parse(parsed.value)).toEqual(parsed);
+          }
         }),
         { numRuns: 300 },
       );
     });
   }
+
+  it('parseSyncRequest leaves out the keys the contract does not declare, at any depth', () => {
+    const r = validSyncRequest();
+    const parsed = parseSyncRequest({ ...r, extra: 1, player: { ...r.player, extra: { deep: [1] } }, display: { ...r.display, extra: true } });
+    expect(parsed).toEqual({ ok: true, value: r });
+  });
 
   it('parseSyncRequest hands back the request, typed', () => {
     const r = validSyncRequest();

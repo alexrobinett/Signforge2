@@ -11,7 +11,7 @@
  * before anything else in it runs. Inline modules, external scripts, inline event handlers and
  * `javascript:` URLs do not run at all.
  */
-import { bundleScripts, TEMPLATE_SCRIPT_START } from '@signforge/contract';
+import { bundleScripts, TEMPLATE_SCRIPT_START } from '@signforge/contract/scripts';
 import { Sha256 } from './sha256';
 
 /** A spot that has not reported ready by this point is skipped. */
