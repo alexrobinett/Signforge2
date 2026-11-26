@@ -166,9 +166,23 @@ describe('spotFromDraft', () => {
       expect(portraitFile(boxed({ w: 1120, h: 910 }))).toBe(sha('b'));
     });
 
-    it('is the landscape one drawn at most 1.25 times its size, as Announcement draws it with elements off', () => {
+    it('is the landscape one drawn at most 1.25 times its size', () => {
       expect(portraitFile(boxed({ w: 1120, h: 1230 }))).toBe(sha('b'));
       expect(portraitFile(boxed({ w: 1120, h: 1350 }))).toBe(sha('b'));
+    });
+
+    // Announcement 1.1.2's box: Night grows the photo into what the rest leaves (review of #537).
+    it("is Announcement's: the portrait one for a 16:9 photo, the landscape one for a 4:3", () => {
+      const box = boxed({ w: 1120, h: 1750 });
+      expect(portraitFile(box)).toBe(sha('c'));
+      const fourThree: DraftAsset = {
+        ...photo,
+        renditions: [
+          { ...photo.renditions[0]!, width: 1920, height: 1440 },
+          { ...photo.renditions[1]!, width: 2560, height: 1920 },
+        ],
+      };
+      expect(portraitFile(box, fourThree)).toBe(sha('b'));
     });
 
     it('is the portrait one with no box, or a box the landscape one covers only past 1.25 times', () => {

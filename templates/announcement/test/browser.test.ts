@@ -106,14 +106,21 @@ describe('announcement (#197)', () => {
     const def = manifest.fields.photo;
     const box = def?.type === 'image' ? def.portraitBox : undefined;
     const k = await screenFrame(t(), 'portrait', photo);
+    // The photo grows into what the rest leaves (Night's row is `minmax(34%, 1fr)`), so with everything on, with the
+    // template's own defaults (no QR address, no facts), and alone with long and short headlines (review of #537).
+    const photoOnly: Data = { ...allOff, showPhoto: true };
+    const shapes: Data[] = [
+      ...variants.filter(([, data]) => data.showPhoto !== false).map(([, data]) => ({ ...everything, ...data })),
+      {},
+      photoOnly,
+      { ...photoOnly, headline: 'Hi' },
+      { ...photoOnly, headline: '' },
+      { ...photoOnly, headline: long.headline },
+    ];
     let drawn = { w: 0, h: 0 };
     for (const look of looks)
-      for (const [, data] of variants) {
-        const b = await largestImageBox(
-          await k.play({ look, ...everything, ...data }, demo, undefined, logo),
-          '[data-sf-src="photo"]',
-          manifest.duration.defaultMs,
-        );
+      for (const data of shapes) {
+        const b = await largestImageBox(await k.play({ look, ...data }, demo, undefined, logo), '[data-sf-src="photo"]', manifest.duration.defaultMs);
         drawn = { w: Math.max(drawn.w, b.w), h: Math.max(drawn.h, b.h) };
       }
     expect(box && drawn.w <= box.w && drawn.h <= box.h, `drawn up to ${drawn.w}x${drawn.h}`).toBe(true);

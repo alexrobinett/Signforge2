@@ -650,6 +650,7 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
 export const largestImageBox = (f: Frame, selector: string, durationMs: number) =>
   f.evaluate(
     ([sel, d]) => {
+      if (!document.querySelector(sel)) throw new Error(`largestImageBox: no image matches ${sel}`);
       let w = 0;
       let h = 0;
       for (let at = 0; at <= d; at += 100) {

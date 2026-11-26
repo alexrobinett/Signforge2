@@ -271,7 +271,7 @@
             "label": "Photo",
             "portraitBox": {
               "w": 1120,
-              "h": 1230
+              "h": 1750
             }
           },
           "qrUrl": {
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "a7fc23afce9aceca9e323737bc81c5729307df2f6d87c9ee38538448f33dca7b"
+  "id": "a43f2ecfdd4c190cd833c1302e1829c0b660212e8a8dced1d12e8bfe39f9e0e4"
 }

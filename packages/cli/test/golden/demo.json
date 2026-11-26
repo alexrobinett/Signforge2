@@ -244,7 +244,7 @@
             "label": "Photo",
             "portraitBox": {
               "w": 1120,
-              "h": 1230
+              "h": 1750
             }
           },
           "qrUrl": {
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "1c719f28a5c42afd6821625e44f855226ec18df61194fd954f70081dcc510bc5"
+  "id": "d784608a41d2841f3f352e492b590bec86276cf9c920f1c7b2721fef8c772cee"
 }
