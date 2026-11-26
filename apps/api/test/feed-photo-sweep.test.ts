@@ -10,7 +10,10 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const T0 = Date.UTC(2027, 0, 1);
 
-const count = async (sql: string, ...binds: number[]) => (await env.DB.prepare(sql).bind(...binds).first<{ n: number }>())!.n;
+const count = async (sql: string, ...binds: number[]) =>
+  (await env.DB.prepare(sql)
+    .bind(...binds)
+    .first<{ n: number }>())!.n;
 
 it('keeps up with three orgs at the cap for 30 days: what is left after each sweep stays the same, not growing', async () => {
   const orgs = await Promise.all([0, 1, 2].map(async (i) => testScope(env.DB, (await seedOrg(env.DB, `sweep-${i}`)).orgId)));
@@ -23,7 +26,14 @@ it('keeps up with three orgs at the cap for 30 days: what is left after each swe
     for (const org of orgs)
       for (let k = 0; k < NEW_PER_ORG_PER_DAY; k++) {
         const key = `${org.orgId}-${day}-${k}`;
-        await org.feedPhotos.put({ url: `https://p.example/${key}.jpg`, sourceId: 'src', fileSha256: `f-${key}`, thumbSha256: `t-${key}`, nextCheckAt: made + RECHECK_MS, createdAt: made });
+        await org.feedPhotos.put({
+          url: `https://p.example/${key}.jpg`,
+          sourceId: 'src',
+          fileSha256: `f-${key}`,
+          thumbSha256: `t-${key}`,
+          nextCheckAt: made + RECHECK_MS,
+          createdAt: made,
+        });
       }
     const sweepAt = T0 + (day + 1) * DAY + HOUR;
     await sweepFeedPhotos(env.DB, blobs, sweepAt);
