@@ -465,11 +465,6 @@ body {
   inset: 0;
   overflow: hidden;
 }
-/* Rain falls at an angle: rotate the whole field and oversize it so the corners stay covered. */
-#fx.slant {
-  inset: -25%;
-  transform: rotate(14deg);
-}
 #fx .fall {
   position: absolute;
   left: 0;
@@ -479,6 +474,14 @@ body {
   background-size: var(--tile) var(--tile);
   will-change: transform;
   animation: fall 1s linear infinite;
+}
+/* Rain's slant is in its tile (main.ts): it slides a tile left and a tile down, so it starts a tile
+   up and reaches a tile past the right edge. */
+#fx .rain {
+  top: calc(var(--tile-h) * -1);
+  right: calc(var(--tile) * -1);
+  background-size: var(--tile) var(--tile-h);
+  animation-name: rain;
 }
 #fx .snow {
   animation-name: fall, sway;
@@ -641,6 +644,11 @@ body {
 @keyframes fall {
   to {
     transform: translateY(var(--tile));
+  }
+}
+@keyframes rain {
+  to {
+    transform: translate(calc(var(--tile) * -1), var(--tile-h));
   }
 }
 @keyframes sway {
