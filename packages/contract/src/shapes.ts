@@ -1046,7 +1046,11 @@ export interface SyncRequest {
    * is never ignored as a repeat. Never derived from the clock, which may be wrong.
    */
   epoch: string;
-  player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
+  /**
+   * `release`: the player release this build is (`PlayerReleaseManifest.version`, #628), which the build's own
+   * `version` string does not say. Absent from a build before #628, or one not made by the release workflow.
+   */
+  player: { version: string; release?: number; manifestSchemas: readonly number[]; protocols: readonly number[] };
   /**
    * `active`: the manifest playing. `filesMissing`: files not yet held, of the manifest being synced and, while
    * falling back, of the last good one.
@@ -1068,7 +1072,10 @@ export interface SyncRequest {
   dataRejected?: Record<string, number>;
   /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
   blobs?: Sha256[];
-  /** A player release the device supervisor rolled back since the last sync (#628), as its `/alive` reply said. */
+  /**
+   * The player release the device supervisor last rolled back (#628), as its `/alive` reply says: sent on each sync
+   * until a newer release passes.
+   */
   failedRelease?: FailedPlayerRelease;
 }
 
@@ -1123,13 +1130,36 @@ export const MAX_IDENTIFY_SECONDS = 60;
 // release (`GET /v1/device/player-release`), and installs it only when the signature verifies
 // against the public key it ships with, the version is above the one installed, the release plays
 // the schema the server compiles, the tarball's hash matches and every file's does. It switches to
-// it, and rolls back when the new player does not beat `/alive` with its version.
+// it, and rolls back when the new player does not beat `/alive` with its release.
+//
+// The signature is Ed25519 over the UTF-8 bytes of `PlayerReleaseOffer.release.manifest` exactly, with no trailing
+// newline, in standard base64 with padding. A fixed test vector, with a key pair for tests only, is in
+// packages/contract/test/player-release/.
 
 /** A release's channel: canary screens (the demo Pi, the N100) get it first; every other screen follows `stable`. */
 export const PLAYER_CHANNELS = ['canary', 'stable'] as const;
 export type PlayerChannel = (typeof PLAYER_CHANNELS)[number];
 
-/** One file of a release: its path inside the tarball, relative, and its sha256. */
+/** The release manifest's format. A supervisor refuses a format it does not know. */
+export const PLAYER_RELEASE_FORMAT = 1;
+/** The most bytes a release manifest's text may be, as UTF-8. */
+export const MAX_RELEASE_MANIFEST_BYTES = 1_048_576;
+/** The most files a release may hold. */
+export const MAX_RELEASE_FILES = 1000;
+/** The most bytes a release's tarball may be, and the most its files may add up to. */
+export const MAX_RELEASE_BYTES = 64 * 1_048_576;
+/** The longest a path inside a release may be. */
+export const MAX_RELEASE_PATH_LENGTH = 1024;
+/** One segment of a path inside a release: letters, digits, `.`, `_` and `-`, never `.` or `..` alone. */
+export const RELEASE_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
+/** An Ed25519 signature, 64 bytes, in standard base64 with padding: 88 characters. */
+export const RELEASE_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
+
+/**
+ * One file of a release: its path inside the tarball, relative, `/`-separated `RELEASE_PATH_SEGMENT`s, at most
+ * `MAX_RELEASE_PATH_LENGTH` long; and its sha256. No two files share a path, and no file's path is a directory of
+ * another's (`a` beside `a/b`).
+ */
 export interface PlayerReleaseFile {
   path: string;
   sha256: Sha256;
@@ -1140,11 +1170,18 @@ export interface PlayerReleaseFile {
  * as a player reports them (`PlayerPlays`), so `canPlay` reads a release as it reads a player.
  */
 export interface PlayerReleaseManifest {
+  /** `PLAYER_RELEASE_FORMAT`. */
+  format: typeof PLAYER_RELEASE_FORMAT;
+  /**
+   * The least supervisor that may install it: each supervisor knows its own level (a whole number, from 1), and refuses
+   * a release that asks for more. Supervisors update by hand, so a release that needs a newer one says so here.
+   */
+  minSupervisor: number;
   /** A build number that only goes up: a screen never installs one at or below the one it runs. */
   version: number;
   /** The tarball's sha256, which `GET /v1/device/player-release/:sha256` serves. */
   sha256: Sha256;
-  /** The tarball's size in bytes. */
+  /** The tarball's size in bytes, from 1 to `MAX_RELEASE_BYTES`. */
   size: number;
   files: PlayerReleaseFile[];
   manifestSchemas: readonly number[];
@@ -1154,7 +1191,8 @@ export interface PlayerReleaseManifest {
 
 /**
  * `GET /v1/device/player-release`: the release on the screen's channel, or none. `manifest` is the exact JSON text CI
- * signed, `signature` its Ed25519 signature in base64: the supervisor verifies those bytes before it parses them.
+ * signed, at most `MAX_RELEASE_MANIFEST_BYTES`; `signature` its Ed25519 signature (`RELEASE_SIGNATURE`): the
+ * supervisor verifies those bytes before it parses them.
  */
 export interface PlayerReleaseOffer {
   /** The manifest schema this server compiles (`MANIFEST_SCHEMA`): a release that does not play it is not installed. */
@@ -1164,9 +1202,13 @@ export interface PlayerReleaseOffer {
   release: { manifest: string; signature: string } | null;
 }
 
-/** `POST /alive` on the device supervisor: the player's beat, with its version, which the health gate after an install waits for. */
+/**
+ * `POST /alive` on the device supervisor: the player's beat, with its version and, from a build the release workflow
+ * made, its release number, which the health gate after an install waits for. A build rolled back to may predate it.
+ */
 export interface SupervisorAliveRequest {
   version: string;
+  release?: number;
 }
 
 /**

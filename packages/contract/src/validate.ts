@@ -23,6 +23,13 @@ import {
   MAX_SNAPSHOT_BYTES,
   SNAPSHOT_STALE_MS,
   FAILED_RELEASE_REASONS,
+  MAX_RELEASE_BYTES,
+  MAX_RELEASE_FILES,
+  MAX_RELEASE_MANIFEST_BYTES,
+  MAX_RELEASE_PATH_LENGTH,
+  PLAYER_RELEASE_FORMAT,
+  RELEASE_PATH_SEGMENT,
+  RELEASE_SIGNATURE,
   PLAYER_CHANNELS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
@@ -44,6 +51,7 @@ import {
   type SyncRequest,
   type FailedPlayerRelease,
   type PlayerReleaseManifest,
+  type PlayerReleaseFile,
   type PlayerReleaseOffer,
   type PlayerChannel,
   type SupervisorAliveResponse,
@@ -1465,32 +1473,52 @@ const blobList = (max: number) =>
     return accepted([...v]);
   });
 
-/** `POST /v1/device/sync`, as the server receives it. */
 // ------------------------------------------------------------ player releases (#628)
 
 const isReleaseVersion = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
 const isFailedReason = (v: unknown): v is FailedPlayerRelease['reason'] => FAILED_RELEASE_REASONS.some((r) => r === v);
-/** A path inside a release's tarball: relative, `/`-separated, with no `..`, `.` or empty segment and no backslash. */
 const isReleasePath = (v: unknown): v is string =>
-  typeof v === 'string' && v.length > 0 && v.length <= 512 && !v.includes('\\') && v.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+  typeof v === 'string' && v.length <= MAX_RELEASE_PATH_LENGTH && v.split('/').every((seg) => RELEASE_PATH_SEGMENT.test(seg) && seg !== '.' && seg !== '..');
 
 const failedReleaseShape = said(
   `failedRelease needs a version (a whole number from 1) and a reason (${FAILED_RELEASE_REASONS.join(', ')})`,
   object({ version: is(isReleaseVersion, ''), reason: is(isFailedReason, '') }, ''),
 );
 
+/** A release's files: at most MAX_RELEASE_FILES, each at a path of its own that is no directory of another's. */
+const releaseFiles = custom<PlayerReleaseFile[]>((v) => {
+  if (!Array.isArray(v)) return refused(['files must be a list']);
+  if (v.length > MAX_RELEASE_FILES) return refused([`files holds at most ${MAX_RELEASE_FILES} files`]);
+  const files: PlayerReleaseFile[] = [];
+  for (const f of v) {
+    const path = own(f, 'path');
+    const sha256 = own(f, 'sha256');
+    if (!isReleasePath(path))
+      return refused([`a file's path must be relative, of segments ${RELEASE_PATH_SEGMENT.source}, at most ${MAX_RELEASE_PATH_LENGTH} long`]);
+    if (!isSha256(sha256)) return refused([`file "${path}": sha256 must be a lowercase hex sha256`]);
+    files.push({ path, sha256 });
+  }
+  const paths = new Set(files.map((f) => f.path));
+  if (paths.size !== files.length) return refused(['files lists a path twice']);
+  for (const { path } of files) {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++)
+      if (paths.has(parts.slice(0, i).join('/'))) return refused([`file "${parts.slice(0, i).join('/')}" is also a directory of "${path}"`]);
+  }
+  return accepted(files);
+});
+
 export const playerReleaseManifestShape = object(
   {
+    format: is((v): v is typeof PLAYER_RELEASE_FORMAT => v === PLAYER_RELEASE_FORMAT, `format must be ${PLAYER_RELEASE_FORMAT}`),
+    minSupervisor: is(isReleaseVersion, 'minSupervisor must be a whole number from 1'),
     version: is(isReleaseVersion, 'version must be a whole number from 1'),
     sha256: is(isSha256, 'sha256 must be a lowercase hex sha256'),
-    size: is(isCount, 'size must be a whole number, 0 or more'),
-    files: listOf(
-      'file',
-      object(
-        { path: is(isReleasePath, 'path must be relative, with no "..", "." or empty segment'), sha256: is(isSha256, 'sha256 must be a lowercase hex sha256') },
-        'is not an object',
-      ),
+    size: is(
+      (v): v is number => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= MAX_RELEASE_BYTES,
+      `size must be a whole number from 1 to ${MAX_RELEASE_BYTES}`,
     ),
+    files: releaseFiles,
     manifestSchemas: is(versions, 'manifestSchemas must list the schemas it plays'),
     protocols: is(versions, 'protocols must list the protocols it plays'),
     createdAt: is(isInstant, 'createdAt must be an ISO 8601 time'),
@@ -1507,9 +1535,10 @@ export const playerReleaseOfferShape = object(
       if (r === null) return accepted(null);
       const manifest = own(r, 'manifest');
       const signature = own(r, 'signature');
-      return isText(manifest) && isText(signature)
-        ? accepted({ manifest, signature })
-        : refused(['release needs the manifest text and its signature, or is null']);
+      if (!isText(manifest) || new TextEncoder().encode(manifest).length > MAX_RELEASE_MANIFEST_BYTES)
+        return refused([`release needs the manifest text, at most ${MAX_RELEASE_MANIFEST_BYTES} bytes, or is null`]);
+      if (typeof signature !== 'string' || !RELEASE_SIGNATURE.test(signature)) return refused(['release needs an Ed25519 signature in base64, 88 characters']);
+      return accepted({ manifest, signature });
     }),
   },
   'offer is not an object',
@@ -1519,13 +1548,14 @@ assertSame<Same<Infer<typeof playerReleaseOfferShape>, PlayerReleaseOffer>>();
 export const supervisorAliveResponseShape = object({ failedRelease: optional(failedReleaseShape) }, 'reply is not an object');
 assertSame<Same<Infer<typeof supervisorAliveResponseShape>, SupervisorAliveResponse>>();
 
+/** `POST /v1/device/sync`, as the server receives it. */
 export const syncRequestShape = object(
   {
     seq: is(isCount, 'seq must be a whole number, 0 or more'),
     epoch: is(isIdValue, 'epoch must be a valid id'),
     player: said(
       'player needs a version and the manifest schemas and protocols it supports',
-      object({ version: is(isText, ''), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
+      object({ version: is(isText, ''), release: optional(is(isReleaseVersion, '')), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
     ),
     manifest: said(
       'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',

@@ -1,0 +1,5 @@
+{
+  "publicKey": "MCowBQYDK2VwAyEAE2z9q2IHuZImrWNK3+j95fk1Ed8+M9JHiCvuMpgShSI=",
+  "manifest": "{\"format\":1,\"minSupervisor\":1,\"version\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":1024,\"files\":[{\"path\":\"index.html\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"path\":\"assets/index-abc.js\",\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}],\"manifestSchemas\":[8,9],\"protocols\":[1,2],\"createdAt\":\"2026-11-26T12:00:00.000Z\"}",
+  "signature": "7Fln07OtrrvucaO89fghDCUdMKSCXqhG+lIpK6jEqleG4yaPZ+3y4+U77+FujRdYoZCT3jaPD2tB5Gm7nmvzBQ=="
+}

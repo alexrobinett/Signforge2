@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import vector from '../test/player-release/vector.json';
 import { describe, expect, it } from 'vitest';
 import {
   bundleScripts,
@@ -10,6 +11,10 @@ import {
   isNewsImage,
   MANIFEST_SCHEMA,
   MAX_SYNC_BLOBS,
+  MAX_RELEASE_BYTES,
+  MAX_RELEASE_FILES,
+  MAX_RELEASE_MANIFEST_BYTES,
+  MAX_RELEASE_PATH_LENGTH,
   MAX_SYNC_RESPONSE_BLOBS,
   MAX_URL_BYTES,
   rowAsset,
@@ -1189,7 +1194,10 @@ describe("a snapshot's stale age (#624)", () => {
 
 describe('player releases (#628)', () => {
   const sha = (c: string) => c.repeat(64);
+  const SIGNATURE = `${'A'.repeat(86)}==`;
   const release = () => ({
+    format: 1 as const,
+    minSupervisor: 1,
     version: 42,
     sha256: sha('a'),
     size: 123_456,
@@ -1201,32 +1209,77 @@ describe('player releases (#628)', () => {
     protocols: [1, 2],
     createdAt: '2026-11-26T12:00:00.000Z',
   });
+  const files = (paths: string[]) => ({ ...release(), files: paths.map((path) => ({ path, sha256: sha('b') })) });
 
-  it('reads a release manifest, and refuses a version below 1 and a path that leaves the tarball', () => {
+  it('reads a release manifest of the format it knows, with the least supervisor it needs', () => {
     expect(parsePlayerReleaseManifest(release())).toEqual({ ok: true, value: release() });
+    expect(parsePlayerReleaseManifest({ ...release(), format: 2 }).ok).toBe(false);
+    expect(parsePlayerReleaseManifest({ ...release(), minSupervisor: 0 }).ok).toBe(false);
     expect(parsePlayerReleaseManifest({ ...release(), version: 0 })).toMatchObject({ ok: false, problems: ['version must be a whole number from 1'] });
-    for (const path of ['/etc/passwd', '../outside', 'assets/../../x', 'a//b', './a', 'a\\b', '']) {
-      const r = parsePlayerReleaseManifest({ ...release(), files: [{ path, sha256: sha('b') }] });
-      expect(r.ok, path).toBe(false);
-    }
   });
 
-  it("reads the release endpoint's offer: the signed text and its signature, or none", () => {
-    const offer = { manifestSchema: 9, channel: 'canary', release: { manifest: JSON.stringify(release()), signature: 'c2lnbmF0dXJl' } };
+  // Each row is refused: a bound CI, the server and the supervisor share.
+  const refusedManifests: [string, unknown][] = [
+    ['size 0', { ...release(), size: 0 }],
+    ['a tarball over MAX_RELEASE_BYTES', { ...release(), size: MAX_RELEASE_BYTES + 1 }],
+    ['200,000 files', files(Array.from({ length: 200_000 }, (_, i) => `f${i}`))],
+    ['one file over MAX_RELEASE_FILES', files(Array.from({ length: MAX_RELEASE_FILES + 1 }, (_, i) => `f${i}`))],
+    ['an absolute path', files(['/etc/passwd'])],
+    ['a path up and out', files(['../outside'])],
+    ['a path up and out inside', files(['assets/../../x'])],
+    ['an empty segment', files(['a//b'])],
+    ['a dot segment', files(['./a'])],
+    ['a backslash', files(['a\\b'])],
+    ['an empty path', files([''])],
+    ['a NUL', files(['index\u0000.html'])],
+    ['a newline', files(['index\n.html'])],
+    ['a space', files(['my file.js'])],
+    ['a 300-character segment', files(['a'.repeat(300)])],
+    [`a path over ${MAX_RELEASE_PATH_LENGTH}`, files([Array.from({ length: 5 }, () => 'a'.repeat(250)).join('/')])],
+    ['a path twice', files(['index.html', 'index.html'])],
+    ['a file that is also a directory', files(['assets', 'assets/index.js'])],
+  ];
+  for (const [why, manifest] of refusedManifests)
+    it(`refuses a release manifest with ${why}`, () => expect(parsePlayerReleaseManifest(manifest).ok).toBe(false));
+
+  it("reads the release endpoint's offer: the channel, the signed text and its signature, or none", () => {
+    const offer = { manifestSchema: 9, channel: 'canary', release: { manifest: JSON.stringify(release()), signature: SIGNATURE } };
     expect(parsePlayerReleaseOffer(offer)).toEqual({ ok: true, value: offer });
     const none = { manifestSchema: 9, channel: 'stable', release: null };
     expect(parsePlayerReleaseOffer(none)).toEqual({ ok: true, value: none });
-    expect(parsePlayerReleaseOffer({ ...none, release: { manifest: '{}' } }).ok).toBe(false);
     expect(parsePlayerReleaseOffer({ ...none, channel: 'beta' }).ok).toBe(false);
+    const refusedReleases: [string, unknown][] = [
+      ['no signature', { manifest: '{}' }],
+      ['a signature not base64', { manifest: '{}', signature: `${'!'.repeat(86)}==` }],
+      ['a signature too short', { manifest: '{}', signature: 'c2lnbmF0dXJl' }],
+      ['a manifest text over MAX_RELEASE_MANIFEST_BYTES', { manifest: 'x'.repeat(MAX_RELEASE_MANIFEST_BYTES + 1), signature: SIGNATURE }],
+    ];
+    for (const [why, r] of refusedReleases) expect(parsePlayerReleaseOffer({ ...none, release: r }).ok, why).toBe(false);
   });
 
-  it("reads the supervisor's /alive reply, and a sync carries the release it rolled back", () => {
+  it('verifies the fixed test vector with the test-only key, over the UTF-8 bytes of the manifest text', async () => {
+    const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey('spki', bytes(vector.publicKey), { name: 'Ed25519' }, false, ['verify']);
+    const verify = (text: string) => crypto.subtle.verify({ name: 'Ed25519' }, key, bytes(vector.signature), new TextEncoder().encode(text));
+    expect(parsePlayerReleaseOffer({ manifestSchema: 9, channel: 'canary', release: { manifest: vector.manifest, signature: vector.signature } }).ok).toBe(
+      true,
+    );
+    expect(await verify(vector.manifest)).toBe(true);
+    // A trailing newline is other bytes.
+    expect(await verify(`${vector.manifest}\n`)).toBe(false);
+    expect(parsePlayerReleaseManifest(JSON.parse(vector.manifest)).ok).toBe(true);
+  });
+
+  it("reads the supervisor's /alive reply, and a sync carries the release it rolled back and the release the player is", () => {
     expect(parseSupervisorAliveResponse({})).toEqual({ ok: true, value: {} });
     const failedRelease = { version: 42, reason: 'not-alive' } as const;
     expect(parseSupervisorAliveResponse({ failedRelease })).toEqual({ ok: true, value: { failedRelease } });
     expect(parseSupervisorAliveResponse({ failedRelease: { version: 42, reason: 'bored' } }).ok).toBe(false);
     expect(parseSyncRequest({ ...validSyncRequest(), failedRelease })).toEqual({ ok: true, value: { ...validSyncRequest(), failedRelease } });
     expect(parseSyncRequest({ ...validSyncRequest(), failedRelease: { version: 0, reason: 'stopped' } }).ok).toBe(false);
+    const player = { ...validSyncRequest().player, release: 42 };
+    expect(parseSyncRequest({ ...validSyncRequest(), player })).toEqual({ ok: true, value: { ...validSyncRequest(), player } });
+    expect(parseSyncRequest({ ...validSyncRequest(), player: { ...player, release: 0 } }).ok).toBe(false);
   });
 });
 
