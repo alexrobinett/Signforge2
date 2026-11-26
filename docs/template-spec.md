@@ -174,12 +174,13 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - Each element with `lk-text`, `lk-fade`, `lk-badge`, `lk-photo` or `lk-draw` gets its look's intro, staggered by `lk-d1` to `lk-d8`. Its outro ends as the spot ends (`calc(var(--sf-duration) - var(--lk-out))`): text, fades and badges fade as they lift 0.6vmin (`lk-leave`), photos and rules fade (`lk-fade-out`).
 - `motionContract(frame, durationMs, { loops, progress, exits })` in `@signforge/template-test` checks a play against all of this, and every template's browser tests run it in both orientations. It seeks each animation alone (CSS, transition or script, on an element or its `::before` or `::after`) through its whole active time, against its element at rest:
   - to rest from unseen, or from anywhere in the first 2 s (`INTRO_WINDOW_MS`), is an entrance;
-  - from rest to unseen is an exit, which ends with the spot, or, inside `exits`, by when its element hides (a news story);
-  - on an element `progress` selects (a bar or ring that shows time, or a marker that moves to the current item), progress: linear or the standard curve, one way each run, any reach, as often as it needs;
-  - a loop is allowed only where `loops` selects (the crawl, a live ping, a clock's colon, Night's minute bar, the clock's 90 s drift against burn-in, drifting clouds and falling rain or snow, the alert's 0.5 Hz pulse);
-  - half the play or more is ambient: any curve, 1.5vmin at most, and a full-bleed photo's push-in up to 1.12 (photo-promo's);
+  - from rest to unseen is an exit, which ends with the spot, or, inside `exits`, no later than that ancestor hides (a news story);
+  - on an element `progress` selects (a bar or ring that shows time, or a marker that moves to the current item), progress: linear or the standard curve, along one axis (across, down, a turn, or a fill no larger than full size), one way each run, never back and forth, any reach, as often as it needs;
+  - a loop is allowed only where `loops` selects (the crawl, a live ping, a clock's colon, Night's minute bar, the clock's 90 s drift against burn-in, drifting clouds and falling rain or snow, the alert's 0.5 Hz pulse). A loop that changes opacity cycles 3 times a second at most and swings opacity by 0.75 at most, so nothing flashes (WCAG 2.3.1);
+  - half the play or more is ambient: any curve, 1.5vmin at most, and, for an element that covers the screen, a push-in up to 1.12 (photo-promo's photo);
   - a change in a millisecond or none is a cut (a story shown, a seam lit), not motion;
-  - anything else is a move mid-play, which takes the standard curve (`cubic-bezier(0.2, 0, 0, 1)`).
+  - anything else is a move mid-play, which takes the standard curve (`cubic-bezier(0.2, 0, 0, 1)`) and travels 1.5vmin at most; a marker that moves further is progress.
+  Each is read with its element's ancestors at rest, so neither their motion nor the wall clock moves what it reads.
   It fails on a clip-path or mask animation, a rotation outside progress, a finite animation that runs more than once, a value that turns back on its way (an overshoot), through any number of keyframes, a curve that changes between them, an element that rests on screen leaving it, and a keyframes name no stylesheet defines.
 - Templates without the kit (agenda, alert, clock, cstore-promo, menu-board, photo-promo, weather) write the same motion into their own keyframes: `--d-in` and `--d-out` hold the two curves, and `--out` starts the 300 ms exit before `--sf-duration`.
 - An ambient class goes on an element inside one that has an intro, so the outer element's outro takes it away.
