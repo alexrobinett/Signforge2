@@ -1,0 +1,1463 @@
+{
+  "schema": 8,
+  "screen": {
+    "id": "demo-counter",
+    "name": "Demo counter screen",
+    "timezone": "America/New_York",
+    "orientation": "landscape",
+    "displayHours": {
+      "weekly": [
+        {
+          "days": [1, 2, 3, 4, 5],
+          "from": "06:00",
+          "to": "22:00"
+        },
+        {
+          "days": [0, 6],
+          "from": "08:00",
+          "to": "20:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2026-11-26",
+          "on": []
+        },
+        {
+          "date": "2026-12-24",
+          "on": [
+            {
+              "from": "08:00",
+              "to": "14:00"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "brand": {
+    "id": "local",
+    "colors": {
+      "primary": "#1d4ed8",
+      "accent": "#f97316",
+      "background": "#0b1020",
+      "surface": "#18213a",
+      "text": "#f8fafc",
+      "muted": "#a5b4cb",
+      "onPrimary": "#ffffff",
+      "onAccent": "#000000"
+    },
+    "shape": "soft",
+    "fonts": {
+      "display": {
+        "id": "base/oswald",
+        "family": "Oswald",
+        "files": [
+          {
+            "weight": 500,
+            "style": "normal",
+            "file": "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a"
+          },
+          {
+            "weight": 700,
+            "style": "normal",
+            "file": "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16"
+          }
+        ]
+      },
+      "body": {
+        "id": "base/inter",
+        "family": "Inter",
+        "files": [
+          {
+            "weight": 400,
+            "style": "normal",
+            "file": "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc"
+          },
+          {
+            "weight": 600,
+            "style": "normal",
+            "file": "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a"
+          },
+          {
+            "weight": 800,
+            "style": "normal",
+            "file": "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d"
+          }
+        ]
+      }
+    },
+    "logo": {
+      "onDark": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb"
+    }
+  },
+  "files": {
+    "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
+      "size": 582,
+      "type": "image/svg+xml"
+    },
+    "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3": {
+      "size": 1042,
+      "type": "image/svg+xml"
+    },
+    "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
+      "size": 12704,
+      "type": "font/woff2"
+    },
+    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
+      "size": 400856,
+      "type": "text/html"
+    },
+    "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
+      "size": 23664,
+      "type": "font/woff2"
+    },
+    "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
+      "size": 24400,
+      "type": "font/woff2"
+    },
+    "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
+      "size": 399570,
+      "type": "text/html"
+    },
+    "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
+      "size": 12672,
+      "type": "font/woff2"
+    },
+    "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
+      "size": 395766,
+      "type": "text/html"
+    },
+    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
+      "size": 393916,
+      "type": "text/html"
+    },
+    "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f": {
+      "size": 125324,
+      "type": "text/html"
+    },
+    "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080": {
+      "size": 81821,
+      "type": "text/html"
+    },
+    "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
+      "size": 24452,
+      "type": "font/woff2"
+    },
+    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
+      "size": 383288,
+      "type": "text/html"
+    }
+  },
+  "templates": {
+    "base/announcement@1.1.2": {
+      "manifest": {
+        "id": "announcement",
+        "version": "1.1.2",
+        "name": "Announcement",
+        "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
+        "fields": {
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "eyebrow": {
+            "type": "text",
+            "label": "Eyebrow",
+            "default": "Company news",
+            "maxLength": 24
+          },
+          "headline": {
+            "type": "text",
+            "label": "Headline",
+            "default": "Pier 9 opens on Monday",
+            "maxLength": 80
+          },
+          "body": {
+            "type": "text",
+            "label": "Body",
+            "default": "Come for coffee, a tour and the first look at the roof terrace.",
+            "maxLength": 280
+          },
+          "meta": {
+            "type": "text",
+            "label": "Posted by",
+            "default": "From the People Team · 20 November",
+            "maxLength": 48
+          },
+          "facts": {
+            "type": "list",
+            "label": "Facts",
+            "maxItems": 3,
+            "item": {
+              "label": {
+                "type": "text",
+                "label": "Label",
+                "maxLength": 16
+              },
+              "value": {
+                "type": "text",
+                "label": "Value",
+                "maxLength": 32
+              }
+            },
+            "default": []
+          },
+          "photo": {
+            "type": "image",
+            "label": "Photo",
+            "portraitBox": {
+              "w": 1120,
+              "h": 1750
+            }
+          },
+          "qrUrl": {
+            "type": "url",
+            "label": "QR code link",
+            "default": "",
+            "maxLength": 100
+          },
+          "qrLabel": {
+            "type": "text",
+            "label": "QR code label",
+            "default": "Scan for the floor plan",
+            "maxLength": 40
+          },
+          "showPhoto": {
+            "type": "boolean",
+            "label": "Show the photo",
+            "default": true
+          },
+          "showQr": {
+            "type": "boolean",
+            "label": "Show the QR code",
+            "default": true
+          },
+          "showEyebrow": {
+            "type": "boolean",
+            "label": "Show the eyebrow",
+            "default": true
+          },
+          "showBody": {
+            "type": "boolean",
+            "label": "Show the body",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show who posted it",
+            "default": true
+          },
+          "showFacts": {
+            "type": "boolean",
+            "label": "Show the facts",
+            "default": true
+          },
+          "showLogo": {
+            "type": "boolean",
+            "label": "Show the logo",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 10000,
+          "minMs": 5000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "protocol": 2
+      },
+      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
+    },
+    "base/countdown@1.1.1": {
+      "manifest": {
+        "id": "countdown",
+        "version": "1.1.1",
+        "name": "Countdown",
+        "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
+        "fields": {
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "mode": {
+            "type": "select",
+            "label": "Count",
+            "options": ["down", "up"],
+            "default": "down"
+          },
+          "target": {
+            "type": "datetime",
+            "label": "Counts down to, or up from"
+          },
+          "title": {
+            "type": "text",
+            "label": "What it counts to",
+            "default": "The winter party",
+            "maxLength": 60
+          },
+          "doneText": {
+            "type": "text",
+            "label": "Once it is here",
+            "default": "It's here!",
+            "maxLength": 40
+          },
+          "units": {
+            "type": "select",
+            "label": "Units",
+            "options": ["days", "days and hours", "days, hours and minutes"],
+            "default": "days"
+          },
+          "recordDays": {
+            "type": "number",
+            "label": "Record in days, counting up (0 for none)",
+            "default": 0,
+            "min": 0,
+            "max": 99999,
+            "step": 1
+          },
+          "progressDays": {
+            "type": "number",
+            "label": "Show the progress over the last days, counting down",
+            "default": 14,
+            "min": 1,
+            "max": 999,
+            "step": 1
+          },
+          "facts": {
+            "type": "list",
+            "label": "Facts",
+            "maxItems": 3,
+            "item": {
+              "label": {
+                "type": "text",
+                "label": "Label",
+                "maxLength": 16
+              },
+              "value": {
+                "type": "text",
+                "label": "Value",
+                "maxLength": 32
+              }
+            },
+            "default": [
+              {
+                "label": "Where",
+                "value": "Pier 9 roof terrace"
+              }
+            ]
+          },
+          "showProgress": {
+            "type": "boolean",
+            "label": "Show the progress",
+            "default": true
+          },
+          "showRecord": {
+            "type": "boolean",
+            "label": "Show the record",
+            "default": true
+          },
+          "showFacts": {
+            "type": "boolean",
+            "label": "Show the facts",
+            "default": true
+          },
+          "showDetail": {
+            "type": "boolean",
+            "label": "Show the date line",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 10000,
+          "minMs": 5000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "protocol": 2
+      },
+      "html": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9"
+    },
+    "base/cstore-promo@1.3.1": {
+      "manifest": {
+        "id": "cstore-promo",
+        "version": "1.3.1",
+        "name": "C-Store Promo",
+        "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
+        "fields": {
+          "quantity": {
+            "type": "text",
+            "label": "Quantity",
+            "default": "2",
+            "maxLength": 2
+          },
+          "price": {
+            "type": "text",
+            "label": "Price",
+            "default": "4",
+            "maxLength": 5
+          },
+          "points": {
+            "type": "text",
+            "label": "Points",
+            "default": "400",
+            "maxLength": 5
+          },
+          "promo": {
+            "type": "text",
+            "label": "Promo line",
+            "default": "Buy any 2",
+            "maxLength": 24
+          },
+          "product": {
+            "type": "text",
+            "label": "Product name",
+            "default": "Sport Drinks",
+            "maxLength": 18
+          },
+          "detail": {
+            "type": "text",
+            "label": "Detail line",
+            "default": "All flavours, 710 mL",
+            "maxLength": 40
+          },
+          "disclaimer": {
+            "type": "text",
+            "label": "Disclaimer",
+            "default": "",
+            "maxLength": 120
+          },
+          "imageLeft": {
+            "type": "image",
+            "label": "Left product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
+          },
+          "imageCenter": {
+            "type": "image",
+            "label": "Centre product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
+          },
+          "imageRight": {
+            "type": "image",
+            "label": "Right product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
+          }
+        },
+        "duration": {
+          "defaultMs": 8000,
+          "minMs": 4000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#06122b",
+        "protocol": 2
+      },
+      "html": "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080"
+    },
+    "base/alert@1.2.0": {
+      "manifest": {
+        "id": "alert",
+        "version": "1.2.0",
+        "name": "Alert",
+        "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
+        "fields": {
+          "severity": {
+            "type": "select",
+            "label": "Severity",
+            "options": ["emergency", "warning", "advisory", "notice"],
+            "default": "emergency"
+          },
+          "headline": {
+            "type": "text",
+            "label": "Headline",
+            "default": "Evacuate the building now",
+            "maxLength": 40,
+            "maxMarks": 4
+          },
+          "instructions": {
+            "type": "text",
+            "label": "Instructions",
+            "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
+            "maxLength": 240,
+            "maxMarks": 4
+          },
+          "issuedBy": {
+            "type": "text",
+            "label": "Issued by",
+            "default": "Issued by Building Safety",
+            "maxLength": 48,
+            "maxMarks": 4
+          },
+          "endsAt": {
+            "type": "text",
+            "label": "Ends at",
+            "default": "4:00 PM",
+            "maxLength": 24,
+            "maxMarks": 4
+          },
+          "qrUrl": {
+            "type": "url",
+            "label": "QR code address",
+            "default": "",
+            "maxBytes": 213
+          },
+          "qrLabel": {
+            "type": "text",
+            "label": "QR code label",
+            "default": "Scan for updates",
+            "maxLength": 32,
+            "maxMarks": 4
+          },
+          "showQr": {
+            "type": "boolean",
+            "label": "Show the QR code",
+            "default": true
+          },
+          "showIssuedBy": {
+            "type": "boolean",
+            "label": "Show who issued it",
+            "default": true
+          },
+          "showEndsAt": {
+            "type": "boolean",
+            "label": "Show when it ends",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 60000,
+          "minMs": 10000,
+          "maxMs": 3600000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#111827",
+        "protocol": 2
+      },
+      "html": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f"
+    },
+    "base/info-frame@1.2.0": {
+      "manifest": {
+        "id": "info-frame",
+        "version": "1.2.0",
+        "name": "Info frame",
+        "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
+        "fields": {
+          "photo": {
+            "type": "image",
+            "label": "Photo"
+          },
+          "captionTitle": {
+            "type": "text",
+            "label": "Caption",
+            "default": "Large coffee and a pastry",
+            "maxLength": 64
+          },
+          "captionLine": {
+            "type": "text",
+            "label": "Caption line",
+            "default": "Every weekday until 11 am",
+            "maxLength": 80
+          },
+          "price": {
+            "type": "text",
+            "label": "Price (optional)",
+            "default": "$5.99",
+            "maxLength": 8
+          },
+          "city": {
+            "type": "text",
+            "label": "Place",
+            "default": "Atlanta",
+            "maxLength": 24
+          },
+          "temp": {
+            "type": "number",
+            "label": "Temperature",
+            "default": 72
+          },
+          "high": {
+            "type": "number",
+            "label": "Today's high",
+            "default": 78
+          },
+          "low": {
+            "type": "number",
+            "label": "Today's low",
+            "default": 61
+          },
+          "code": {
+            "type": "number",
+            "label": "WMO weather code",
+            "default": 2
+          },
+          "isDay": {
+            "type": "number",
+            "label": "Daytime (1) or night (0)",
+            "default": 1
+          },
+          "unit": {
+            "type": "select",
+            "label": "Temperature unit",
+            "options": ["°F", "°C"],
+            "default": "°F"
+          },
+          "weatherTimezone": {
+            "type": "text",
+            "label": "Weather time zone (empty for screen)",
+            "default": "",
+            "maxLength": 64
+          },
+          "day1Time": {
+            "type": "number",
+            "label": "Day 1 Unix time (0: from screen clock)",
+            "default": 0
+          },
+          "day1High": {
+            "type": "number",
+            "label": "Day 1 high",
+            "default": 75
+          },
+          "day1Low": {
+            "type": "number",
+            "label": "Day 1 low",
+            "default": 60
+          },
+          "day1Code": {
+            "type": "number",
+            "label": "Day 1 WMO weather code",
+            "default": 1
+          },
+          "day2Time": {
+            "type": "number",
+            "label": "Day 2 Unix time (0: from screen clock)",
+            "default": 0
+          },
+          "day2High": {
+            "type": "number",
+            "label": "Day 2 high",
+            "default": 70
+          },
+          "day2Low": {
+            "type": "number",
+            "label": "Day 2 low",
+            "default": 57
+          },
+          "day2Code": {
+            "type": "number",
+            "label": "Day 2 WMO weather code",
+            "default": 61
+          },
+          "day3Time": {
+            "type": "number",
+            "label": "Day 3 Unix time (0: from screen clock)",
+            "default": 0
+          },
+          "day3High": {
+            "type": "number",
+            "label": "Day 3 high",
+            "default": 73
+          },
+          "day3Low": {
+            "type": "number",
+            "label": "Day 3 low",
+            "default": 58
+          },
+          "day3Code": {
+            "type": "number",
+            "label": "Day 3 WMO weather code",
+            "default": 3
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              }
+            }
+          },
+          "crawlLabel": {
+            "type": "text",
+            "label": "Crawl label",
+            "default": "Latest",
+            "maxLength": 12
+          },
+          "crawlSpeed": {
+            "type": "select",
+            "label": "Crawl speed",
+            "options": ["slow", "normal", "fast"],
+            "default": "normal"
+          },
+          "hour24": {
+            "type": "boolean",
+            "label": "24-hour time",
+            "default": false
+          },
+          "rail": {
+            "type": "select",
+            "label": "Rail",
+            "options": ["right", "left", "off"],
+            "default": "right"
+          },
+          "ticker": {
+            "type": "select",
+            "label": "Crawl",
+            "options": ["bottom", "top", "off"],
+            "default": "bottom"
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "showClock": {
+            "type": "boolean",
+            "label": "Show the clock",
+            "default": true
+          },
+          "showWeather": {
+            "type": "boolean",
+            "label": "Show the weather",
+            "default": true
+          },
+          "showForecast": {
+            "type": "boolean",
+            "label": "Show the three-day forecast",
+            "default": true
+          },
+          "showCaption": {
+            "type": "boolean",
+            "label": "Show the caption",
+            "default": true
+          },
+          "showLogo": {
+            "type": "boolean",
+            "label": "Show the logo",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 15000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "sources": {
+            "weather": {
+              "label": "Weather",
+              "source": "open-meteo",
+              "fields": {
+                "weatherTimezone": "timezone",
+                "temp": "current.temperature_2m",
+                "code": "current.weather_code",
+                "isDay": "current.is_day",
+                "high": "daily.temperature_2m_max.0",
+                "low": "daily.temperature_2m_min.0",
+                "day1Time": "daily.time.1",
+                "day1High": "daily.temperature_2m_max.1",
+                "day1Low": "daily.temperature_2m_min.1",
+                "day1Code": "daily.weather_code.1",
+                "day2Time": "daily.time.2",
+                "day2High": "daily.temperature_2m_max.2",
+                "day2Low": "daily.temperature_2m_min.2",
+                "day2Code": "daily.weather_code.2",
+                "day3Time": "daily.time.3",
+                "day3High": "daily.temperature_2m_max.3",
+                "day3Low": "daily.temperature_2m_min.3",
+                "day3Code": "daily.weather_code.3"
+              },
+              "place": "city",
+              "units": {
+                "temperature": "unit"
+              }
+            },
+            "headlines": {
+              "label": "Headlines",
+              "source": "rss",
+              "fields": {
+                "items": "items"
+              }
+            }
+          }
+        },
+        "protocol": 2
+      },
+      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
+    },
+    "base/news@2.1.2": {
+      "manifest": {
+        "id": "news",
+        "version": "2.1.2",
+        "name": "News",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Latest news",
+            "maxLength": 32
+          },
+          "source": {
+            "type": "text",
+            "label": "Source credit",
+            "default": "",
+            "maxLength": 40
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              },
+              "summary": {
+                "type": "text",
+                "label": "Summary",
+                "default": "",
+                "maxLength": 240
+              },
+              "image": {
+                "type": "image",
+                "label": "Photo"
+              }
+            }
+          },
+          "language": {
+            "type": "text",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "default": "",
+            "maxLength": 35
+          },
+          "rotationSeconds": {
+            "type": "number",
+            "label": "Seconds per lead story",
+            "default": 8,
+            "min": 4,
+            "max": 30
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "showImages": {
+            "type": "boolean",
+            "label": "Show photos",
+            "default": true
+          },
+          "showSummary": {
+            "type": "boolean",
+            "label": "Show the summary",
+            "default": true
+          },
+          "showList": {
+            "type": "boolean",
+            "label": "Show the story strip",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show the source and age",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 32000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "source": "rss",
+          "fields": {
+            "items": "items",
+            "language": "language"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
+    },
+    "base/room-status@1.1.1": {
+      "manifest": {
+        "id": "room-status",
+        "version": "1.1.1",
+        "name": "Room status",
+        "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
+        "fields": {
+          "room": {
+            "type": "text",
+            "label": "Room name",
+            "default": "Harbour Room",
+            "maxLength": 32
+          },
+          "seats": {
+            "type": "number",
+            "label": "Seats",
+            "default": 8,
+            "min": 1,
+            "max": 999,
+            "step": 1
+          },
+          "floor": {
+            "type": "text",
+            "label": "Floor (optional)",
+            "default": "",
+            "maxLength": 16
+          },
+          "hour24": {
+            "type": "boolean",
+            "label": "24-hour time",
+            "default": false
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "events": {
+            "type": "list",
+            "label": "Bookings",
+            "maxItems": 25,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Title"
+              },
+              "start": {
+                "type": "text",
+                "label": "Start (YYYY-MM-DD or ISO time)"
+              },
+              "end": {
+                "type": "text",
+                "label": "End",
+                "default": ""
+              },
+              "allDay": {
+                "type": "boolean",
+                "label": "All day",
+                "default": false
+              },
+              "organizer": {
+                "type": "text",
+                "label": "Organiser",
+                "default": ""
+              }
+            }
+          },
+          "showSchedule": {
+            "type": "boolean",
+            "label": "Show today's schedule",
+            "default": true
+          },
+          "showNext": {
+            "type": "boolean",
+            "label": "Show the next meeting",
+            "default": true
+          },
+          "showClock": {
+            "type": "boolean",
+            "label": "Show the clock",
+            "default": true
+          },
+          "showFacts": {
+            "type": "boolean",
+            "label": "Show the seats and floor",
+            "default": true
+          },
+          "showNowLine": {
+            "type": "boolean",
+            "label": "Show the now line",
+            "default": true
+          },
+          "showOrganiser": {
+            "type": "boolean",
+            "label": "Show who booked the meeting",
+            "default": false
+          }
+        },
+        "duration": {
+          "defaultMs": 10000,
+          "minMs": 5000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "source": "ical",
+          "fields": {
+            "events": "events"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
+    }
+  },
+  "spots": {
+    "announcement": {
+      "id": "announcement",
+      "name": "Announcement",
+      "kind": "template",
+      "template": "base/announcement@1.1.2",
+      "data": {
+        "look": "pop",
+        "eyebrow": "Company news",
+        "headline": "Pier 9 opens on Monday",
+        "body": "Come for coffee, a tour and the first look at the roof terrace.",
+        "meta": "From the People Team · 20 November",
+        "facts": [],
+        "qrUrl": "https://example.com/pier-9",
+        "qrLabel": "Scan for the floor plan",
+        "showPhoto": true,
+        "showQr": true,
+        "showEyebrow": true,
+        "showBody": true,
+        "showMeta": true,
+        "showFacts": true,
+        "showLogo": true
+      },
+      "assets": {
+        "photo": "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3"
+      },
+      "durationMs": 10000
+    },
+    "coffee": {
+      "id": "coffee",
+      "name": "Coffee still",
+      "kind": "image",
+      "file": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb",
+      "fit": "cover",
+      "durationMs": 5000
+    },
+    "countdown": {
+      "id": "countdown",
+      "name": "Days without an accident",
+      "kind": "template",
+      "template": "base/countdown@1.1.1",
+      "data": {
+        "look": "poster",
+        "mode": "up",
+        "target": "2026-04-21T09:00",
+        "title": "Days without a lost-time accident",
+        "doneText": "It's here!",
+        "units": "days",
+        "recordDays": 301,
+        "progressDays": 14,
+        "facts": [
+          {
+            "label": "Site",
+            "value": "Riverside warehouse"
+          }
+        ],
+        "showProgress": true,
+        "showRecord": true,
+        "showFacts": true,
+        "showDetail": true
+      },
+      "assets": {},
+      "durationMs": 10000
+    },
+    "energy": {
+      "id": "energy",
+      "name": "Energy drinks 3 for $7",
+      "kind": "template",
+      "template": "base/cstore-promo@1.3.1",
+      "data": {
+        "quantity": "3",
+        "price": "7",
+        "points": "650",
+        "promo": "Mix and match 3",
+        "product": "Energy Drinks",
+        "detail": "Selected 473 mL cans",
+        "disclaimer": "While supplies last."
+      },
+      "assets": {
+        "imageLeft": "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3",
+        "imageCenter": "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9",
+        "imageRight": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04"
+      },
+      "durationMs": 12000
+    },
+    "fire-drill": {
+      "id": "fire-drill",
+      "name": "Fire drill notice",
+      "kind": "template",
+      "template": "base/alert@1.2.0",
+      "data": {
+        "severity": "notice",
+        "headline": "Fire drill at 2 PM today",
+        "instructions": "When the alarm sounds, leave by your usual route and gather at the north car park. It lasts about 15 minutes.",
+        "issuedBy": "Issued by Building Safety",
+        "endsAt": "2:15 PM",
+        "qrUrl": "https://example.com/fire-drill",
+        "qrLabel": "Scan for the route",
+        "showQr": true,
+        "showIssuedBy": true,
+        "showEndsAt": true
+      },
+      "assets": {},
+      "durationMs": 10000
+    },
+    "info-frame": {
+      "id": "info-frame",
+      "name": "Coffee info frame",
+      "kind": "template",
+      "template": "base/info-frame@1.2.0",
+      "data": {
+        "captionTitle": "Large coffee and a pastry",
+        "captionLine": "Every weekday until 11 am",
+        "price": "$5.99",
+        "city": "Atlanta",
+        "temp": 72,
+        "high": 78,
+        "low": 61,
+        "code": 2,
+        "isDay": 1,
+        "unit": "°F",
+        "weatherTimezone": "",
+        "day1Time": 0,
+        "day1High": 75,
+        "day1Low": 60,
+        "day1Code": 1,
+        "day2Time": 0,
+        "day2High": 70,
+        "day2Low": 57,
+        "day2Code": 61,
+        "day3Time": 0,
+        "day3High": 73,
+        "day3Low": 58,
+        "day3Code": 3,
+        "items": [
+          {
+            "title": "Council approves the riverside park",
+            "published": "",
+            "source": ""
+          },
+          {
+            "title": "Farmers market moves to Sundays",
+            "published": "",
+            "source": ""
+          },
+          {
+            "title": "5th Ave closed this weekend",
+            "published": "",
+            "source": ""
+          }
+        ],
+        "crawlLabel": "Latest",
+        "crawlSpeed": "normal",
+        "hour24": false,
+        "rail": "right",
+        "ticker": "bottom",
+        "look": "poster",
+        "showClock": true,
+        "showWeather": true,
+        "showForecast": true,
+        "showCaption": true,
+        "showLogo": true
+      },
+      "assets": {
+        "photo": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb"
+      },
+      "durationMs": 15000
+    },
+    "news-guardian": {
+      "id": "news-guardian",
+      "name": "The Guardian (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Latest news",
+        "source": "The Guardian",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "corporate",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-guardian",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-guardian",
+          "path": "language"
+        }
+      }
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "name": "New York Times (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Latest news",
+        "source": "The New York Times",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "poster",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-nyt",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-nyt",
+          "path": "language"
+        }
+      }
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "name": "The Verge (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Latest news",
+        "source": "The Verge",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "night",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-verge",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-verge",
+          "path": "language"
+        }
+      }
+    },
+    "room-status": {
+      "id": "room-status",
+      "name": "Harbour Room status",
+      "kind": "template",
+      "template": "base/room-status@1.1.1",
+      "data": {
+        "room": "Harbour Room",
+        "seats": 8,
+        "floor": "3",
+        "hour24": false,
+        "look": "pop",
+        "events": [],
+        "showSchedule": true,
+        "showNext": true,
+        "showClock": true,
+        "showFacts": true,
+        "showNowLine": true,
+        "showOrganiser": false
+      },
+      "assets": {},
+      "durationMs": 10000
+    },
+    "sport-drinks": {
+      "id": "sport-drinks",
+      "name": "Sport drinks 2 for $4",
+      "kind": "template",
+      "template": "base/cstore-promo@1.3.1",
+      "data": {
+        "quantity": "2",
+        "price": "4",
+        "points": "400",
+        "promo": "Buy any 2",
+        "product": "Sport Drinks",
+        "detail": "All flavours, 710 mL",
+        "disclaimer": "Limited time offer. See store for details."
+      },
+      "assets": {
+        "imageLeft": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04",
+        "imageCenter": "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f",
+        "imageRight": "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2"
+      },
+      "durationMs": 8000
+    }
+  },
+  "playlists": {
+    "all-day": {
+      "id": "all-day",
+      "name": "All day",
+      "transition": {
+        "type": "fade",
+        "ms": 600
+      },
+      "items": [
+        {
+          "spot": "sport-drinks"
+        },
+        {
+          "spot": "energy"
+        },
+        {
+          "spot": "announcement"
+        },
+        {
+          "spot": "room-status"
+        },
+        {
+          "spot": "countdown"
+        },
+        {
+          "spot": "coffee"
+        },
+        {
+          "spot": "info-frame"
+        },
+        {
+          "spot": "news-nyt"
+        },
+        {
+          "spot": "news-guardian"
+        },
+        {
+          "spot": "news-verge"
+        },
+        {
+          "spot": "fire-drill"
+        }
+      ]
+    },
+    "breakfast": {
+      "id": "breakfast",
+      "name": "Breakfast",
+      "transition": {
+        "type": "cut"
+      },
+      "items": [
+        {
+          "spot": "coffee"
+        },
+        {
+          "spot": "sport-drinks"
+        }
+      ]
+    }
+  },
+  "dataSources": {
+    "news-nyt": {
+      "id": "news-nyt",
+      "refreshS": 300
+    },
+    "news-guardian": {
+      "id": "news-guardian",
+      "refreshS": 300
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "refreshS": 300
+    }
+  },
+  "schedule": [
+    {
+      "id": "breakfast",
+      "playlist": "breakfast",
+      "priority": 10,
+      "target": "group",
+      "from": "06:00",
+      "to": "10:00"
+    }
+  ],
+  "defaultPlaylist": "all-day",
+  "id": "d784608a41d2841f3f352e492b590bec86276cf9c920f1c7b2721fef8c772cee",
+  "generatedAt": "2026-11-26T13:25:41.596Z"
+}
