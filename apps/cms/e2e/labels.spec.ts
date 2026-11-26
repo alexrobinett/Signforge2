@@ -248,9 +248,11 @@ test('#188: download the labels as CSV, edit the file, see what the import chang
   const dialog = page.getByRole('dialog', { name: 'Import labels' });
   await dialog.getByLabel('File').setInputFiles({ name: 'labels.csv', mimeType: 'text/csv', buffer: Buffer.from(`﻿${edited}`) });
   const changes = dialog.getByRole('region', { name: 'What it changes' });
-  await expect(changes.getByText('Changes 1 screen')).toBeVisible();
+  // Read out in one line as it comes (review of #612); shown as the heading of its list.
+  await expect(changes.getByRole('status')).toHaveText('Changes 1 screen. 1 row skipped.');
+  await expect(changes.getByText('Changes 1 screen', { exact: true })).toBeVisible();
   await expect(changes.getByText('+ note: Back door, "staff" · region: south → South')).toBeVisible();
-  await expect(changes.getByText('1 row skipped')).toBeVisible();
+  await expect(changes.getByText('1 row skipped', { exact: true })).toBeVisible();
   await shotsBoth(page, '188-import-preview');
   await axe(page);
   await dialog.getByRole('button', { name: 'Save on 1 screen' }).click();
