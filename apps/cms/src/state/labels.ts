@@ -23,6 +23,8 @@ interface LabelsState {
   editor: { screenId: string; pending: boolean; error: string | null } | null;
   /** The screen the pairing form would copy labels from, chosen but not copied until asked (review of #597). */
   copyFrom: string;
+  /** The Screens page's "+ Filter" dialog, while open: the key chosen and the values ticked. Applying it puts a chip in the URL. */
+  filter: { key: string; values: string[] } | null;
 }
 
 export interface LabelsSlice {
@@ -40,6 +42,11 @@ export interface LabelsSlice {
   copyLabelsForPairing: (labels: Readonly<Record<string, string>>) => void;
   /** Empties the pairing form's labels, once its screen is paired. */
   clearPairingLabels: () => void;
+  /** Opens the "+ Filter" dialog, on `key` and its values in the URL's chip when it has one. */
+  openLabelFilter: (key?: string, values?: string[]) => void;
+  chooseFilterKey: (key: string) => void;
+  tickFilterValue: (value: string, ticked: boolean) => void;
+  closeLabelFilter: () => void;
   /** Saves the editor's rows as one merge into the screen's labels, and closes it. */
   saveScreenLabels: (orgId: string, screen: ScreenView) => Promise<void>;
 }
@@ -55,7 +62,16 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const editor = (change: (e: NonNullable<LabelsState['editor']>) => LabelsState['editor']) => labels((l) => ({ ...l, editor: l.editor && change(l.editor) }));
 
   return {
-    labels: { rows: {}, editor: null, copyFrom: '' },
+    labels: { rows: {}, editor: null, copyFrom: '', filter: null },
+    openLabelFilter: (key = '', values = []) => labels((l) => ({ ...l, filter: { key, values } })),
+    chooseFilterKey: (key) => labels((l) => ({ ...l, filter: { key, values: [] } })),
+    tickFilterValue: (value, ticked) =>
+      labels((l) =>
+        l.filter
+          ? { ...l, filter: { ...l.filter, values: ticked ? [...new Set([...l.filter.values, value])] : l.filter.values.filter((v) => v !== value) } }
+          : l,
+      ),
+    closeLabelFilter: () => labels((l) => ({ ...l, filter: null })),
     editScreenLabels: (screen) =>
       labels((l) => ({
         ...l,
