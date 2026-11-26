@@ -141,8 +141,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
-      "size": 399570,
+    "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd": {
+      "size": 400017,
       "type": "text/html"
     },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
@@ -1026,10 +1026,10 @@
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
-    "base/room-status@1.1.1": {
+    "base/room-status@1.2.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1072,8 +1072,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1098,7 +1096,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,15 +1142,15 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
+      "html": "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd"
     }
   },
   "spots": {
@@ -1415,7 +1415,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.1.1",
+      "template": "base/room-status@1.2.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "56bfb1f6ea9afa5031db50ee3035a99e60ff202ed2fbed5a5e56f2ca284c76dc"
+  "id": "e4adacc005c34f5793ed696a5533750d9268fad1c8225e963369bf94c51a9b27"
 }

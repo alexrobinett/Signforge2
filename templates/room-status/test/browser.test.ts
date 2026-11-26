@@ -34,8 +34,9 @@ describe('room status (#199)', () => {
     let inits = 0;
     return {
       hst,
-      async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC') {
-        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone);
+      /** `fallback`: the bound fields the screen says play their fallback (#225). */
+      async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC', fallback: string[] = []) {
+        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone, undefined, fallback);
         await hst.waitFor('fresh', 'ready', ++inits);
         return hst.frame('fresh');
       },
@@ -191,6 +192,30 @@ describe('room status (#199)', () => {
     });
   });
 
+  it('says the schedule is unavailable, in every look, while the calendar plays its fallback, whatever the fallback holds (#225)', async () => {
+    const r = await room();
+    const found: Record<string, unknown> = {};
+    for (const look of looks)
+      for (const [day, events] of [
+        ['none', []],
+        ['a meeting on now', today],
+      ] as const)
+        found[`${look}, ${day}`] = await says(await r.show({ look, events: [...events] }, undefined, NOW, 'UTC', ['events']));
+    const unavailable = {
+      state: 'unknown',
+      word: 'Schedule unavailable',
+      for: null,
+      line: 'Check the booking before you use the room',
+      org: null,
+      next: null,
+      freeDay: "The room's calendar is not updating",
+      allDay: null,
+    };
+    expect(found).toEqual(Object.fromEntries(Object.keys(found).map((k) => [k, unavailable])));
+    // A field the screen does not name plays live: the same room, free, when only another field is on its fallback.
+    expect(await says(await r.show({ look: 'pop', events: [] }, undefined, NOW, 'UTC', ['room']))).toMatchObject({ state: 'free', freeDay: 'Free all day' });
+  });
+
   /** A booking between two instants, as the feed writes it. */
   const between = (title: string, start: string, end: string) => ({ title, start, end, allDay: false, organizer: '' });
   /** Days in New York across a change of clocks and across midnight, each at the time it is told. */
@@ -223,7 +248,8 @@ describe('room status (#199)', () => {
   /** Copy at its longest: the room and floor at their maxLength, and titles and an organiser longer than any feed sends often. */
   const long = 'Quarterly planning with the North region store managers, the regional finance team and the new hires from the spring intake, with lunch';
   const longest = { room: 'Conference room on the north wing', floor: 'Mezzanine, west' };
-  const days: [string, Data][] = [
+  /** Each day's events, and the bound fields the screen says play their fallback. */
+  const days: [string, Data, string[]?][] = [
     ['free', { ...longest, events: [booking('Stand-up', -5, -4.5), booking(long, 0.5, 1.5, 'Priya Shah'), booking(long, 2, 2.5), booking('Booked', 3, 3.25)] }],
     [
       'busy',
@@ -246,6 +272,8 @@ describe('room status (#199)', () => {
       },
     ],
     ['empty', { ...longest, events: [] }],
+    // The calendar not updating (#225), its fallback a busy day.
+    ['unavailable', { ...longest, events: [booking(long, -0.25, 0.75, 'Priya Shah')] }, ['events']],
   ];
   const toggles = ['showSchedule', 'showNext', 'showClock', 'showFacts', 'showNowLine', 'showOrganiser'];
   const allOn: Data = Object.fromEntries(toggles.map((t) => [t, true]));
@@ -267,13 +295,14 @@ describe('room status (#199)', () => {
       const r = await room(orientation);
       const found: string[] = [];
       for (const look of looks)
-        for (const [day, data] of days)
+        for (const [day, data, fallback] of days)
           for (const set of toggleSets) {
             const off =
               Object.keys(set)
                 .filter((k) => !set[k])
                 .join(', ') || 'all on';
-            for (const fault of await faults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
+            for (const fault of await faults(await r.show({ look, ...data, ...set }, undefined, NOW, 'UTC', fallback)))
+              found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
       // The timeline's hours across a change of clocks and from midnight.
       for (const look of looks)
@@ -289,9 +318,9 @@ describe('room status (#199)', () => {
       const found: string[] = [];
       for (const [kit, theme] of noDemoAndLight(LIGHT_KIT))
         for (const look of looks)
-          for (const [day, data] of days)
+          for (const [day, data, fallback] of days)
             for (const set of day === 'empty' ? [allOn] : [allOn, allOff]) {
-              const f = await r.show({ look, ...data, ...set }, theme);
+              const f = await r.show({ look, ...data, ...set }, theme, NOW, 'UTC', fallback);
               for (const l of await paintedContrast(r.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${day}${set === allOff ? ', all off' : ''}: ${l}`);
             }
       expect(found).toEqual([]);

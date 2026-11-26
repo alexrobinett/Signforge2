@@ -60,8 +60,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
-      "size": 399570,
+    "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd": {
+      "size": 400017,
       "type": "text/html"
     },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
@@ -1252,10 +1252,10 @@
       },
       "html": "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660"
     },
-    "base/room-status@1.1.1": {
+    "base/room-status@1.2.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,15 +1368,15 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
+      "html": "3421140270c0f98a37c6bcb146c8a505e5c60c0104dfb9ead420874c9ac498bd"
     },
     "base/weather@1.7.0": {
       "manifest": {
@@ -1950,7 +1950,7 @@
       "id": "room-status",
       "name": "Room status (live calendar)",
       "kind": "template",
-      "template": "base/room-status@1.1.1",
+      "template": "base/room-status@1.2.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "8904a0a589a197d492e2dc15e9e174b7d0ccdf0f7e88038237b8f69dd738373e"
+  "id": "3e5b35bdf91f9b76307511c27df0cc055e958c66a9fa73bb3d1e2bcdc3ce453b"
 }

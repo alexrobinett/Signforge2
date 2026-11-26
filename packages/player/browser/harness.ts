@@ -53,7 +53,8 @@ export interface Player {
   until(predicate: (s: PlayerState) => boolean, timeoutMs?: number): Promise<PlayerState>;
   /** The label, the listed item titles and the play flag of the template on screen, or undefined if none is. */
   /** `sample`: the size of the sample the template got beside its asset `file`, or ''. */
-  onScreen(): Promise<{ label: string; items: string; playing: boolean; sample: string } | undefined>;
+  /** `fallback`: the bound fields `init` named as playing their fallback (#225), comma-separated. */
+  onScreen(): Promise<{ label: string; items: string; playing: boolean; sample: string; fallback: string } | undefined>;
 }
 
 export interface Harness {
@@ -209,6 +210,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
           items: document.getElementById('box')?.textContent ?? '',
           playing: document.body.dataset.playing === '1',
           sample: document.body.dataset.sample ?? '',
+          fallback: document.body.dataset.fallback ?? '',
         }));
       };
       return { page, server, console: lines, state, until, onScreen };

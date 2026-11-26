@@ -328,6 +328,8 @@ export interface Rejected {
  * snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`, leaves the static
  * fallback in place quietly; a value that is missing at its path or does not fit also leaves the
  * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
+ * `fallback` names each bound field left on its static value, for `init` to tell the template (#225); a list that
+ * kept some rows of a table is live.
  */
 export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
@@ -335,17 +337,22 @@ export function resolveSpotData(
   snapshots: ReadonlyMap<string, DataSnapshot>,
   now: number,
   locale: string,
-): { data: Record<string, unknown>; rejected: Rejected[] } {
+): { data: Record<string, unknown>; rejected: Rejected[]; fallback: string[] } {
   const data = { ...spot.data };
   const rejected: Rejected[] = [];
+  const fallback: string[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) continue;
+    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) {
+      fallback.push(field);
+      continue;
+    }
     const { value, problems } = boundValue(fields, field, b, snapshot.data, locale);
     rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
     if (value !== undefined) data[field] = value;
+    else fallback.push(field);
   }
-  return { data, rejected };
+  return { data, rejected, fallback };
 }
 
 // --------------------------------------------------------------------- files

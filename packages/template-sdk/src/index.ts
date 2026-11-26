@@ -22,6 +22,11 @@
  * fallback, `var(--sf-accent, #22d3ee)`: without a kit nothing is set and the template draws as
  * it is. `ready` waits for the fonts.
  *
+ * Live data (protocol 2). A field bound to a data source plays the spot's static value when its source is missing,
+ * has not been confirmed for a day (`SNAPSHOT_STALE_MS`) or sent a value that does not fit. `ctx.fallback` names
+ * those fields, so a template can say its data is not current rather than show the fallback as if it were:
+ * `if (ctx.fallback.has('events'))`. It holds for the play, as `data` does.
+ *
  * New data (protocol 2). On `reset`, or an `init` after the first, the SDK stops the template,
  * restores the document exactly as it loaded, and initialises again, so `prepare` always starts
  * from clean markup. Look elements up inside the hooks, not once at the top of `main.ts`: a reset
@@ -31,9 +36,14 @@ import type { BrandShape, FrameTheme, HostMessage, InitPayload, TemplateMessage 
 // Values only from the narrow entry: the index would bring the whole contract into every bundle.
 import { BRAND_CSS_VARS, PROTOCOL_VERSION } from '@signforge/contract/frame';
 
-export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme'> {
+export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme' | 'fallback'> {
   /** Image fields as object URLs, and an image's sample under `sampleAsset(field)` when init carries one; `$brand.logo` too when the brand kit has a logo. */
   assets: Record<string, string>;
+  /**
+   * The bound fields playing their static fallback, not live data: their source is missing, stale or broken (#225).
+   * `ctx.fallback.has('events')`. Empty when every bound field is live, and from a player that does not say.
+   */
+  fallback: ReadonlySet<string>;
   root: HTMLElement;
 }
 
@@ -121,6 +131,7 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
           timezone: m.timezone,
           locale: m.locale,
           clock,
+          fallback: new Set(m.fallback),
           root,
         };
         root.style.setProperty('--sf-duration', `${m.durationMs}ms`);

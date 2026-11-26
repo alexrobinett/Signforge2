@@ -32,6 +32,11 @@ ol {
   --tone: var(--lk-text);
   --tone-fill: var(--lk-text);
 }
+/* Unknown (#225): the calendar is not updating. Neither free's accent nor busy's fill: the look's muted ink. */
+.stage[data-state='unknown'] {
+  --tone: var(--lk-muted);
+  --tone-fill: var(--lk-muted);
+}
 
 .stage {
   position: fixed;
