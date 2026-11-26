@@ -5,29 +5,30 @@
  * reached, `publishes.targets_json`), or a draft going live that reaches it. Smart groups make membership move with
  * labels, so a label edit shows here before it reaches any screen.
  */
-import { reaches, targetIdOf } from '@signforge/compiler/schedule';
-import { published, type ScheduleEntryRow } from '@signforge/db';
+import { reaches, targetIdOf, type ScheduleScreen } from '@signforge/compiler/schedule';
+import { published } from '@signforge/db';
 import { z } from 'zod';
 import { sha256Hex } from './dispatch';
 import { outputs } from './outputs';
 import { dryPublish, readTargets, type OrgGraph } from './publishing';
 import { defineTool } from './tool';
 
-/** Whom an entry, as published in a graph, reaches: a screen with these groups. */
-const reachesScreen = (e: ScheduleEntryRow | undefined, screenId: string, groups: readonly string[]) => {
-  const pub = e && published(e);
-  if (!pub) return false;
-  const targetId = targetIdOf(pub);
-  return reaches({ target: pub.target, ...(targetId === undefined ? {} : { targetId }) }, { id: screenId, groups: [...groups] });
-};
-
-/** The playlists a screen plays in a graph, as published: the default and every entry's that reaches it. */
-const playlistsOn = (graph: OrgGraph, screenId: string, groups: readonly string[]) =>
-  new Set([graph.defaultPlaylist ?? '', ...graph.entries.flatMap((e) => (reachesScreen(e, screenId, groups) ? [published(e)!.playlistId] : []))]);
-
-/** The spots the playlists hold, as published in a graph. */
-const spotsIn = (graph: OrgGraph, playlists: ReadonlySet<string>) =>
-  new Set(graph.playlists.flatMap((p) => (playlists.has(p.id) ? (published(p)?.items ?? []) : [])));
+/** A graph's published schedule and playlists, each parsed once (review of #620): what a screen plays, by entry and playlist. */
+function publishedOf(graph: OrgGraph) {
+  const entries = new Map(
+    graph.entries.flatMap((e) => {
+      const pub = published(e);
+      if (!pub) return [];
+      const targetId = targetIdOf(pub);
+      return [[e.id, { playlistId: pub.playlistId, aim: { target: pub.target, ...(targetId === undefined ? {} : { targetId }) } }] as const];
+    }),
+  );
+  const items = new Map(graph.playlists.map((p) => [p.id, published(p)?.items ?? []]));
+  /** The playlists a screen with these groups plays: the default and every entry's that reaches it. */
+  const playlistsOn = (screen: ScheduleScreen) =>
+    new Set([graph.defaultPlaylist ?? '', ...[...entries.values()].flatMap((e) => (reaches(e.aim, screen) ? [e.playlistId] : []))]);
+  return { entries, items, playlistsOn };
+}
 
 export const previewPublish = defineTool({
   name: 'preview_publish',
@@ -49,56 +50,58 @@ export const previewPublish = defineTool({
     const was = new Map<string, string[]>();
     for (const g of before ?? []) for (const id of g.screenIds) was.set(id, [...(was.get(id) ?? []), g.groupId]);
     const names = new Map(read.screens.map((s) => [s.id, s.name]));
-    const playlistName = (id: string) => {
-      const p = graph.playlists.find((x) => x.id === id) ?? read.playlists.find((x) => x.id === id);
-      return (p && (published(p)?.name ?? p.name)) || id;
-    };
-    const spotName = (id: string) => read.spots.find((x) => x.id === id)?.name ?? id;
+    const playlistNames = new Map([...read.playlists, ...graph.playlists].map((p) => [p.id, published(p)?.name ?? p.name]));
+    const spotNames = new Map(read.spots.map((x) => [x.id, x.name]));
+    const then = publishedOf(read);
+    const after = publishedOf(graph);
     const changed = result.screens.filter((s) => s.manifest && s.manifest.id !== s.current);
-    const screens = changed.map(({ screenId }) => {
+    const screens = changed.map(({ screenId, current }) => {
       const now = graph.groupsOf.get(screenId) ?? [];
-      const then = was.get(screenId) ?? [];
+      const had = was.get(screenId) ?? [];
       const reasons: string[] = [];
+      // A screen paired since the last publish gets its first manifest: that is the news, not a draft (review of #620).
+      if (current === null) reasons.push('first publish to this screen');
       if (before !== null) {
-        for (const g of now) if (!then.includes(g)) reasons.push(`joined ${groupName.get(g) ?? g}`);
-        for (const g of then) if (!now.includes(g)) reasons.push(`left ${groupName.get(g) ?? g}`);
+        for (const g of now) if (!had.includes(g)) reasons.push(`joined ${groupName.get(g) ?? g}`);
+        for (const g of had) if (!now.includes(g)) reasons.push(`left ${groupName.get(g) ?? g}`);
       }
       // A draft reaches the screen if it did before this publish or will after it, by either membership.
-      const groups = [...new Set([...now, ...then])];
-      const playlists = new Set([...playlistsOn(read, screenId, groups), ...playlistsOn(graph, screenId, groups)]);
-      const spots = new Set([...spotsIn(read, playlists), ...spotsIn(graph, playlists)]);
+      const screen = { id: screenId, groups: [...new Set([...now, ...had])] };
+      const playlists = new Set([...then.playlistsOn(screen), ...after.playlistsOn(screen)]);
+      const spots = new Set([...playlists].flatMap((p) => [...(then.items.get(p) ?? []), ...(after.items.get(p) ?? [])]));
+      const reaching = (e: { aim: Parameters<typeof reaches>[0] } | undefined) => e !== undefined && reaches(e.aim, screen);
       for (const d of drafts.removed) {
-        const e = read.entries.find((x) => x.id === d.id);
-        if (reachesScreen(e, screenId, groups)) reasons.push(`entry ${playlistName(published(e!)!.playlistId)} removed`);
+        const e = then.entries.get(d.id);
+        if (e && reaching(e)) reasons.push(`entry ${playlistNames.get(e.playlistId) ?? e.playlistId} removed`);
       }
       for (const d of drafts.promoted) {
         if (d.kind === 'schedule_entry') {
-          const old = read.entries.find((x) => x.id === d.id);
-          const after = graph.entries.find((x) => x.id === d.id);
-          if (reachesScreen(old, screenId, groups) || reachesScreen(after, screenId, groups)) {
-            const playlist = (after && published(after)?.playlistId) ?? (old && published(old)?.playlistId) ?? '';
-            reasons.push(`entry ${playlistName(playlist)} ${old && published(old) ? 'changed' : 'added'}`);
-          }
+          const old = then.entries.get(d.id);
+          const next = after.entries.get(d.id);
+          const playlist = next?.playlistId ?? old?.playlistId ?? '';
+          if (reaching(old) || reaching(next)) reasons.push(`entry ${playlistNames.get(playlist) ?? playlist} ${old ? 'changed' : 'added'}`);
         }
-        if (d.kind === 'playlist' && playlists.has(d.id)) reasons.push(`playlist ${playlistName(d.id)} changed`);
-        if (d.kind === 'spot' && spots.has(d.id)) reasons.push(`spot ${spotName(d.id)} changed`);
+        if (d.kind === 'playlist' && playlists.has(d.id)) reasons.push(`playlist ${playlistNames.get(d.id) ?? d.id} changed`);
+        if (d.kind === 'spot' && spots.has(d.id)) reasons.push(`spot ${spotNames.get(d.id) ?? d.id} changed`);
       }
       if (result.madeDefault) reasons.push(`default playlist ${result.madeDefault.name}`);
       // Nothing above, yet its manifest changes: a brand kit, a template, data or its settings.
       if (!reasons.length) reasons.push('compiled again: a brand kit, template, data source or its settings changed');
       return { screenId, name: names.get(screenId) ?? screenId, reasons };
     });
-    // Each group's membership against the last publish's record, who would join and who would leave; a group deleted
-    // since is left by all it had. With no record yet (no publish since #187) nothing is compared.
+    // Each group's joins and leaves against the last publish's record, only of screens this publish would change: a
+    // move no screen plays differently is not news, and a publish that changes nothing records nothing anew, so it would
+    // otherwise show in every later preview (review of #620). A group deleted since is left by all it had.
+    const moving = new Set(changed.map((s) => s.screenId));
     const ids = [...new Set([...graph.groups.map((g) => g.id), ...(before ?? []).map((g) => g.groupId)])];
     const groups =
       before === null
         ? []
         : ids.flatMap((id) => {
-            const members = [...graph.groupsOf].flatMap(([screen, gs]) => (gs.includes(id) ? [screen] : [])).toSorted();
-            const had = before.find((x) => x.groupId === id)?.screenIds ?? [];
-            const joined = members.filter((x) => !had.includes(x));
-            const left = had.filter((x) => !members.includes(x));
+            const members = new Set([...graph.groupsOf].flatMap(([screen, gs]) => (gs.includes(id) ? [screen] : [])));
+            const had = new Set(before.find((x) => x.groupId === id)?.screenIds);
+            const joined = [...members].filter((x) => !had.has(x) && moving.has(x)).toSorted();
+            const left = [...had].filter((x) => !members.has(x) && moving.has(x)).toSorted();
             return joined.length || left.length ? [{ groupId: id, name: groupName.get(id) ?? id, joined, left }] : [];
           });
     return {

@@ -118,4 +118,16 @@ it('previews a publish within a request’s budget, reading the last publish’s
   expect(cost.queries).toBeLessThan(50);
   // Measured, as the most it may take: a new statement fails this on purpose.
   expect(cost).toEqual({ statements: 17, queries: 17, rpcs: [] });
+  // A spot still holding its template's sample text: the dry run works it out again acknowledging it, as a press would.
+  const pier = await testScope(env.DB, org.id).spots.insert({ name: 'Pier 9', kind: 'url', durationMs: 10_000, url: 'https://example.com/pier' });
+  await env.DB.prepare('UPDATE spots SET sample_fields_json = ? WHERE id = ?')
+    .bind(JSON.stringify({ texts: ['headline'], lists: {} }), pier.id)
+    .run();
+  let samples: unknown[] = [];
+  const sampled = await measure(async (b) => {
+    samples = (await as(owner, b).ok<{ samples: unknown[] }>('/api/tools/preview_publish', {})).samples;
+  });
+  expect(samples).toHaveLength(1);
+  expect(sampled.queries).toBeLessThan(50);
+  expect(sampled).toEqual({ statements: 18, queries: 18, rpcs: [] });
 });

@@ -991,7 +991,7 @@ export const outputs = {
     targets: z
       .array(groupReach)
       .nullable()
-      .describe('Whom each group reached at this publish, as it resolved them (#187); null for a roll back, or a publish made before it was kept'),
+      .describe('With targets: whom each group reached at this publish, as it resolved them (#187); null unless asked, or for a publish made before it was kept'),
   }),
   list_templates: z.object({ templates: z.array(templateOutput), next: nextOutput }),
   get_template: z.object({ template: templateOutput }),
