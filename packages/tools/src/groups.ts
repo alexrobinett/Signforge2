@@ -42,40 +42,74 @@ const listGroups = defineTool({
   },
 });
 
-const createGroup = defineTool({
-  name: 'create_group',
+const saveGroup = defineTool({
+  name: 'save_group',
   description:
-    'Create a screen group, optionally with its first screens. Pass an idempotencyKey so a retry cannot create it twice. Returns { group } with the new id.',
+    "Create a screen group, or change one: its name and its screens. Without groupId it creates one, with a name and optionally its first screens in screenIds; pass an idempotencyKey so a retry cannot create it twice. With groupId it changes what you give: name renames it, and screenIds with membership changes its screens. membership add puts them in and remove takes them out, leaving every other screen as it is, so both are safe alongside other changes; set makes them exactly the group's screens (an empty list empties it). Every screen must be in this organization, or nothing changes; remove ignores a screen not in the group. Pass the version you read as ifVersion with name or set, so a change made since is not overwritten. Returns { group }.",
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z.object({ name: name('group'), screenIds: z.array(id('screen')).max(1000).optional().describe('Screens to put in the group'), idempotencyKey }),
-  output: outputs.create_group,
+  // Strict: a field it does not take (the old tools' add or remove lists) is refused by name, not dropped.
+  input: z
+    .strictObject({
+      groupId: id('group').optional().describe('The group to change; omit to create one'),
+      name: name('group').optional(),
+      screenIds: z.array(id('screen')).max(1000).optional().describe("A new group's first screens, or the screens membership adds, removes or sets"),
+      membership: z.enum(['add', 'remove', 'set']).optional().describe("How screenIds change a group's screens; needed with groupId"),
+      ifVersion,
+      idempotencyKey,
+    })
+    .superRefine((v, ctx) => {
+      const problem =
+        v.membership !== undefined && v.screenIds === undefined
+          ? 'membership needs the screenIds it adds, removes or sets'
+          : v.groupId === undefined
+            ? v.name === undefined
+              ? 'a new group needs a name; give groupId to change one'
+              : v.membership === 'remove'
+                ? 'a new group has no screens to remove'
+                : v.ifVersion !== undefined
+                  ? 'a new group has no version yet: ifVersion is for a change'
+                  : undefined
+            : (v.membership === 'add' || v.membership === 'remove') && v.screenIds?.length === 0
+              ? `give the screens to ${v.membership}: an empty list changes nothing (membership set with an empty list empties the group)`
+              : v.screenIds !== undefined && v.membership === undefined
+                ? 'give membership with screenIds: add, remove or set'
+                : v.name === undefined && v.screenIds === undefined
+                  ? 'give a name or screenIds to change'
+                  : undefined;
+      if (problem) ctx.addIssue({ code: 'custom', message: problem });
+    }),
+  output: outputs.save_group,
   example: { name: 'Front of house', screenIds: ['scr_example'] },
-  target: (_input, output) => ({ kind: 'group', id: output.group.id }),
+  target: (input, output) => ({ kind: 'group', id: input.groupId ?? output.group.id }),
   handler: async ({ org, input, write }) => {
-    // The group and its members are written together, so a bad screen id leaves no empty group behind.
     const screenIds = [...new Set(input.screenIds ?? [])];
-    const group = write(org.screenGroups.stage.insert({ name: input.name }));
-    if (screenIds.length) write(await org.screenGroups.stage.setMembers(group, screenIds, { newGroup: true }));
-    return { group: viewOf(group, screenIds) };
-  },
-});
-
-const renameGroup = defineTool({
-  name: 'rename_group',
-  description: 'Rename a screen group. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { group }.',
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ groupId: id('group'), name: name('group'), ifVersion }),
-  output: outputs.rename_group,
-  example: { groupId: 'grp_example', name: 'Drive-through' },
-  target,
-  handler: async ({ org, input, write }) => {
-    const group = await requireGroup(org, input.groupId);
-    return { group: await groupView(org, write(org.screenGroups.stage.update(group, { name: input.name }, input.ifVersion))) };
+    if (input.groupId === undefined) {
+      // The group and its members are written together, so a bad screen id leaves no empty group behind.
+      const group = write(org.screenGroups.stage.insert({ name: input.name! }));
+      if (screenIds.length) write(await org.screenGroups.stage.setMembers(group, screenIds, { newGroup: true }));
+      return { group: viewOf(group, screenIds) };
+    }
+    let group = await requireGroup(org, input.groupId);
+    let members = input.membership === 'set' ? screenIds : await org.screenGroups.members(group.id);
+    // The version read guards the first change; a second follows it in the same batch.
+    let guard = input.ifVersion;
+    if (input.name !== undefined) {
+      group = write(org.screenGroups.stage.update(group, { name: input.name }, guard));
+      guard = undefined;
+    }
+    if (input.membership === 'set') group = write(await org.screenGroups.stage.setMembers(group, screenIds, { ifVersion: guard }));
+    if (input.membership === 'add') {
+      group = write(await org.screenGroups.stage.addMembers(group, screenIds, guard));
+      members = [...new Set([...members, ...screenIds])];
+    }
+    if (input.membership === 'remove') {
+      group = write(await org.screenGroups.stage.removeMembers(group, screenIds, guard));
+      members = members.filter((s) => !screenIds.includes(s));
+    }
+    return { group: viewOf(group, members) };
   },
 });
 
@@ -103,67 +137,4 @@ const deleteGroup = defineTool({
   },
 });
 
-const setGroupMembers = defineTool({
-  name: 'set_group_members',
-  description:
-    "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. To add or remove a few screens, use add_group_members or remove_group_members, which cannot drop a screen someone else added. A replace should pass the version it read as ifVersion. Returns { group }.",
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ groupId: id('group'), screenIds: z.array(id('screen')).max(1000), ifVersion }),
-  output: outputs.set_group_members,
-  example: { groupId: 'grp_example', screenIds: ['scr_example'] },
-  target,
-  handler: async ({ org, input, write }) => {
-    const group = await requireGroup(org, input.groupId);
-    const row = write(await org.screenGroups.stage.setMembers(group, input.screenIds, { ifVersion: input.ifVersion }));
-    return { group: viewOf(row, [...new Set(input.screenIds)]) };
-  },
-});
-
-const memberIds = z.array(id('screen')).min(1).max(1000);
-
-const addGroupMembers = defineTool({
-  name: 'add_group_members',
-  description:
-    'Add screens to a group. Screens already in it stay; every screen must be in this organization, or nothing changes. Safe alongside other changes to the group: nothing is dropped. Returns { group }.',
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to add') }),
-  output: outputs.add_group_members,
-  example: { groupId: 'grp_example', screenIds: ['scr_example'] },
-  target,
-  handler: async ({ org, input, write }) => {
-    const group = await requireGroup(org, input.groupId);
-    const before = await org.screenGroups.members(group.id);
-    const row = write(await org.screenGroups.stage.addMembers(group, input.screenIds));
-    return { group: viewOf(row, [...new Set([...before, ...input.screenIds])]) };
-  },
-});
-
-const removeGroupMembers = defineTool({
-  name: 'remove_group_members',
-  description:
-    'Remove screens from a group. Screens not in it are ignored, and the screens themselves are not deleted. Safe alongside other changes to the group: nothing else is dropped. Returns { group }.',
-  scope: 'screens:manage',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to remove') }),
-  output: outputs.remove_group_members,
-  example: { groupId: 'grp_example', screenIds: ['scr_example'] },
-  target,
-  handler: async ({ org, input, write }) => {
-    const group = await requireGroup(org, input.groupId);
-    const before = await org.screenGroups.members(group.id);
-    const row = write(await org.screenGroups.stage.removeMembers(group, input.screenIds));
-    return {
-      group: viewOf(
-        row,
-        before.filter((s) => !input.screenIds.includes(s)),
-      ),
-    };
-  },
-});
-
-export const groupTools = [listGroups, createGroup, renameGroup, deleteGroup, setGroupMembers, addGroupMembers, removeGroupMembers];
+export const groupTools = [listGroups, saveGroup, deleteGroup];

@@ -217,13 +217,9 @@ describe('GET /v1/device/ws', () => {
 
   it('carries identify, restart and a display override from the CMS to the screen at once', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
-    for (const [tool, input] of [
-      ['identify_screen', {}],
-      ['restart_screen', {}],
-      ['set_display_override', { state: 'off' }],
-    ] as const) {
-      const r = await dispatch(registry, tool, { screenId: a.seed.screen, ...input }, caller(a, 'editor'));
-      expect(r.ok, tool).toBe(true);
+    for (const command of ['identify', 'restart', 'display_off'] as const) {
+      const r = await dispatch(registry, 'screen_command', { screenId: a.seed.screen, command }, caller(a, 'editor'));
+      expect(r.ok, command).toBe(true);
     }
     const commands = (await s.received(3)).flatMap((m) => (typeof m === 'object' && m.type === 'command' ? [m.command] : []));
     expect(commands).toEqual([
@@ -250,7 +246,7 @@ describe('GET /v1/device/ws', () => {
     expect(await reported(a)).toBe(M1);
     await sync(a.credential, { ...syncBody(), manifest: { active: M1, filesMissing: 0 } });
     expect(await a.seed.scope.screens.get(a.seed.screen)).toMatchObject({ rowVersion: before.rowVersion, updatedAt: before.updatedAt });
-    const r = await dispatch(registry, 'rename_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
+    const r = await dispatch(registry, 'update_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
     expect(r.ok).toBe(true);
     s.ws.close(1000);
   });
@@ -279,7 +275,7 @@ describe('GET /v1/device/ws', () => {
     await dispatch(registry, 'publish_manifest_to_screen', { screenId: b.seed.screen, manifestId: M2 }, caller(b));
     expect(await sb.received(1)).toEqual([{ type: 'manifest', id: M2 }]);
     // A dispatch returns once the object has sent, so whatever the publish sent A's socket comes before this.
-    await dispatch(registry, 'identify_screen', { screenId: a.seed.screen }, caller(a, 'editor'));
+    await dispatch(registry, 'screen_command', { screenId: a.seed.screen, command: 'identify' }, caller(a, 'editor'));
     expect(await sa.received(1)).toEqual([{ type: 'command', command: { type: 'identify', name: expect.any(String), seconds: 10 } }]);
     sa.ws.close(1000);
     sb.ws.close(1000);
@@ -317,7 +313,7 @@ describe('revoking a credential whose socket is open', () => {
     expect((await revoke(c, unreachable(c))).ok).toBe(true);
     await stillOpen(s);
 
-    expect((await dispatch(registry, 'identify_screen', { screenId: c.seed.screen }, caller(c, 'editor'))).ok).toBe(true);
+    expect((await dispatch(registry, 'screen_command', { screenId: c.seed.screen, command: 'identify' }, caller(c, 'editor'))).ok).toBe(true);
     await s.closed;
     expect(s.messages).toEqual(['pong', { type: 'revoked' }]);
   });

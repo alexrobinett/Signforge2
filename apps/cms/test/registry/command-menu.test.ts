@@ -69,7 +69,7 @@ describe("a found screen's and group's actions (#180)", () => {
   it('opens a screen, plays a playlist on it or takes it over, identifies and restarts it for an editor, Open first (#181)', () => {
     expect(labels('editor')).toEqual(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
     expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
-      expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
+      expect.objectContaining({ kind: 'command', command: 'identify', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
     );
   });
 

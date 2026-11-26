@@ -28,6 +28,7 @@ export {
   pendingFeedImageDeletes,
 } from './retention';
 export {
+  DEFAULT_PHOTO_BUDGET,
   DELETE_LEASE_MS,
   DeleteInFlightError,
   type Delivery,
@@ -38,6 +39,7 @@ export {
   NEW_PER_ORG_PER_DAY,
   NEW_PER_SOURCE_PER_DAY,
   PHOTOS_PER_SOURCE,
+  type PhotoBudget,
   type PhotoRead,
   photoRead,
   type PollPhotos,

@@ -5,7 +5,7 @@
  * one line. `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus
  * one base template, so an isolation test can call org B's scope with org A's ids and expect nothing.
  */
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { AGENT_GRANT_IDLE_MS } from './agent-grants';
@@ -101,6 +101,12 @@ export function testScope(db: D1Database, orgId: string) {
           .insert(schema.feedImages)
           .values({ createdAt: 0, ...row, orgId })
           .run();
+      },
+      /** Many photos stored at once, as `put` makes each: one statement, its rows as one JSON value (a test of a busy org's thousands). */
+      putMany: async (rows: readonly { url: string; sourceId: string; fileSha256: string; thumbSha256: string; nextCheckAt: number; createdAt: number }[]) => {
+        await drizzle(db).run(sql`INSERT INTO ${schema.feedImages} (org_id, url, source_id, file_sha256, thumb_sha256, next_check_at, created_at, updated_at)
+          SELECT ${orgId}, r.value ->> 'url', r.value ->> 'sourceId', r.value ->> 'fileSha256', r.value ->> 'thumbSha256', r.value ->> 'nextCheckAt', r.value ->> 'createdAt', r.value ->> 'createdAt'
+          FROM json_each(${JSON.stringify(rows)}) AS r`);
       },
       /** The org's queued blob deletes, by hash. */
       deletes: () =>

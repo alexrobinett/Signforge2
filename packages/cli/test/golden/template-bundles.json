@@ -1,14 +1,14 @@
 {
   "base/agenda@1.3.2": "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357",
   "base/alert@1.1.0": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee",
-  "base/announcement@1.1.0": "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87",
+  "base/announcement@1.1.0": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953",
   "base/clock@1.2.4": "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a",
-  "base/countdown@1.1.0": "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9",
+  "base/countdown@1.1.0": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd",
   "base/cstore-promo@1.2.5": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f",
-  "base/info-frame@1.1.0": "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932",
+  "base/info-frame@1.1.0": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b",
   "base/menu-board@1.3.1": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215",
-  "base/news@2.0.3": "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8",
+  "base/news@2.1.1": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119",
   "base/photo-promo@1.4.2": "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2",
-  "base/room-status@1.1.0": "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da",
+  "base/room-status@1.1.0": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637",
   "base/weather@1.5.1": "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff"
 }

@@ -126,7 +126,7 @@ describe('summarize', () => {
     expect(
       summarize(
         {
-          tool: 'rename_screen',
+          tool: 'update_screen',
           input: { screenId: 'scr_dt1', name: 'DT 1' },
           target: { kind: 'screen', id: 'scr_dt1' },
           before: { id: 'scr_dt1', name: 'Drive-thru 1' },

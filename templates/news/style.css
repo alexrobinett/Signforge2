@@ -1,11 +1,11 @@
 @import '@signforge/template-looks/looks.css';
 
-/* News 2.0: the lead story large, with its photo, rotating through the listed stories; the list
-   beside it (under it in portrait) marking the one on screen; every headline in a crawl. In the
-   look kit's four looks. Each lead story is a layer of its own, `.story`, over the one before it:
-   main.ts sets its `--at` and `--until`, and its parts take the look's intro at `--at` and its
-   outro ending at `--until`. Text sits on the page's ground (`--lk-bg`) or on the crawl's band
-   (`--lk-text`), never on a photo: the kit keeps both pairs legible. */
+/* News 2.1 (design D, owner's pick): the lead story's text in a fixed column on the left, its photo beside it in the
+   photo's own shape (above it in portrait), and a strip of the stories along the foot with a bar under the one on
+   screen. Each lead story is a layer of its own, `.story`, over the one before it: main.ts sets its `--at` (its
+   turn's start) and `--until` (its end). Text never sits on a photo. The look gives type, colour and shape; the order
+   and timing of the motion are the same in every look (research.md for #476, Motion spec): only transform and
+   opacity move, travel is at most 1.5vmin, and nothing overshoots. */
 
 html,
 body {
@@ -24,81 +24,90 @@ ol {
   font: inherit;
 }
 
+:root {
+  /* Material's emphasized decelerate (entering), emphasized accelerate (leaving) and standard (moving on screen). */
+  --nw-dec: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --nw-acc: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --nw-std: cubic-bezier(0.2, 0, 0, 1);
+  /* The graphics-safe margin (EBU R95, 5%), and the rows between header, lead and strip. */
+  --nw-pad: 5vh 5vw;
+  --nw-gap: 5.5vmin;
+  /* The text column's share of the width, and the gutter between it and the photo. */
+  --nw-col: 44%;
+  --nw-gutter: 6.5vmin;
+  --nw-label: 2.6vmin;
+  --nw-body: 3vmin;
+  --nw-number: 4vmin;
+  --nw-strip-text: 2.8vmin;
+  --nw-lines: 5;
+  --nw-bare-lines: 4;
+  --nw-bare-step: 1.25;
+  --nw-summary-lines: 2;
+}
+:root[data-orientation='portrait'] {
+  --nw-pad: 3.5vh 5vw;
+  --nw-gap: 4vmin;
+  /* The photo's area above the text, the same for every story, so the headline hangs from one line. */
+  --nw-area: 50%;
+  --nw-number: 4.4vmin;
+  --nw-lines: 4;
+  --nw-bare-lines: 6;
+  --nw-summary-lines: 3;
+}
+
 .stage {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--nw-gap);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: var(--nw-gap);
   padding: var(--nw-pad);
   background: var(--lk-bg);
   color: var(--lk-text);
   font-family: var(--lk-font-body);
   overflow: hidden;
+  /* The spot's end: everything fades out together. */
+  animation: nw-dip 400ms var(--nw-acc) calc(var(--sf-duration, 8s) - 400ms) forwards;
 }
 
-/* The header: the title on its badge, the source credit, the time. */
+/* The header: one line, the title and the time, fading in once. */
 .top {
-  flex: none;
   display: flex;
-  align-items: center;
-  gap: var(--nw-gap);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--nw-gutter);
   white-space: nowrap;
   font: var(--lk-label-weight) var(--nw-label) / 1.2 var(--lk-font-label);
   letter-spacing: var(--lk-label-tracking);
   text-transform: var(--lk-label-case);
+  animation: nw-show 400ms var(--nw-dec) both;
 }
-.badge {
-  padding: var(--nw-badge-pad);
-  border-radius: var(--lk-radius-pill);
-  background: var(--lk-primary);
-  color: var(--lk-on-primary);
-}
-.credit {
+.title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--lk-muted);
 }
 .clock {
-  margin-left: auto;
+  color: var(--lk-muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* The lead and the list. Without the list the lead takes the width, and its type steps up. */
-.body {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--nw-list-w);
-  gap: var(--nw-gap);
-}
-:root[data-orientation='portrait'] .body {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-:root[data-list='off'] .body {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-}
-:root[data-list='off'] {
-  --lk-scale: var(--lk-step);
-}
-
-/* The lead: a stack of stories, each on for its share of the play. */
+/* The lead: a stack of stories, each on for its turn. */
 .leads {
   position: relative;
-  min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  border-radius: var(--lk-radius);
 }
 .story {
+  --until: 1000000s;
+  /* The headline's size: stepped down for a long one (`--fit`, main.ts), up for a story with no photo. */
+  --nw-hl-size: calc(var(--nw-headline) * var(--nw-step, 1) * var(--fit, 1));
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: var(--nw-col) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: var(--nw-gutter);
+  align-items: start;
   /* Shown from its start, under nothing later, and gone at its end: the first needs no start, the last no end. */
   animation:
     nw-on 1ms linear var(--at) both,
@@ -113,59 +122,65 @@ ol {
 .story:only-child {
   animation: none;
 }
-/* The look's intro at the story's start and its outro ending at the story's end, not the play's. */
-.story :is(.lk-text, .lk-fade, .lk-photo, .lk-cover) {
-  animation:
-    var(--lk-motion) var(--lk-in) var(--lk-ease) calc(var(--at) + var(--lk-i, 0) * var(--lk-stagger)) both,
-    var(--lk-motion) var(--lk-out) var(--lk-ease) calc(var(--until, var(--sf-duration, 8s)) - var(--lk-out)) reverse forwards;
+:root[data-orientation='portrait'] .story {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--nw-area) minmax(0, 1fr);
+  row-gap: var(--nw-gap);
 }
-.media {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border-radius: var(--lk-radius);
-  background: var(--lk-surface);
+/* No photo: the headline takes the width, a step larger. */
+.story.no-photo {
+  grid-template-columns: minmax(0, 86%);
+  --nw-lines: var(--nw-bare-lines);
+  --nw-step: var(--nw-bare-step);
+}
+:root[data-orientation='portrait'] .story.no-photo {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.text {
+  grid-area: 1 / 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2.4vmin;
+}
+:root[data-orientation='portrait'] .story:not(.no-photo) .text {
+  grid-area: 2 / 1;
+}
+/* The photo's area: the photo in its own shape, as large as fits and at most 1.25 times its size (main.ts sets it),
+   at the area's top, across from the headline's first line, and centred in its width. Never cropped. */
+.area {
+  grid-area: 1 / 2;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+:root[data-orientation='portrait'] .area {
+  grid-area: 1 / 1;
 }
 .photo {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: var(--nw-photo-w);
+  height: var(--nw-photo-h);
+  object-fit: contain;
+  border-radius: var(--lk-radius-small);
+  transform-origin: 50% 0;
 }
-/* The story's text, on the ground's own colour over the photo's foot. */
-.card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--nw-card-gap);
-  max-width: var(--nw-card-w);
-  margin: 0 var(--nw-inset) var(--nw-inset);
-  padding: var(--nw-card-pad);
-  border-radius: var(--nw-card-radius);
-  border-top: var(--nw-card-rule, 0) solid var(--lk-rule-color);
-  border-right: var(--nw-card-rule, 0) solid var(--lk-rule-color);
-  border-left: var(--nw-card-bar, 0) solid var(--lk-accent);
-  background: var(--lk-bg);
+/* A later story's photo before it loads, in play: nothing to draw yet. */
+.photo:not([src]) {
+  visibility: hidden;
 }
-/* A story without a photo: its headline a step larger, in the middle of the lead's space. */
-.story.no-photo {
-  justify-content: center;
-}
-.no-photo .card {
-  --nw-card-rule: 0;
-  max-width: none;
-  margin: 0;
-  padding: var(--nw-bare-pad);
-}
+
 .meta {
   display: flex;
-  gap: 1.2em;
-  color: var(--lk-accent-ink);
-  font: var(--lk-label-weight) var(--nw-label) / 1.2 var(--lk-font-label);
-  letter-spacing: var(--lk-label-tracking);
-  text-transform: var(--lk-label-case);
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
+  color: var(--lk-muted);
+  font: 600 var(--nw-label) / 1.2 var(--lk-font-label);
 }
 .src {
   min-width: 0;
@@ -174,21 +189,18 @@ ol {
 }
 .age {
   flex: none;
+  color: var(--lk-accent-ink);
+}
+.src + .age::before {
+  content: '·';
+  padding: 0 0.5em;
   color: var(--lk-muted);
 }
 .headline {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--nw-lines);
-  overflow: hidden;
   overflow-wrap: anywhere;
-  font: var(--lk-display-weight) calc(var(--nw-headline) * var(--lk-scale, 1) * var(--fit, 1)) / var(--lk-display-leading) var(--lk-font-display);
+  font: var(--lk-display-weight) var(--nw-hl-size) / var(--lk-display-leading) var(--lk-font-display);
   letter-spacing: var(--lk-display-tracking);
-  text-wrap: balance;
-}
-.no-photo .headline {
-  --nw-lines: var(--nw-bare-lines);
-  font-size: calc(var(--nw-headline) * var(--nw-bare-step) * var(--lk-scale, 1) * var(--fit, 1));
+  text-wrap: pretty;
 }
 .summary {
   display: -webkit-box;
@@ -196,92 +208,103 @@ ol {
   -webkit-line-clamp: var(--nw-summary-lines);
   overflow: hidden;
   overflow-wrap: anywhere;
-  color: var(--lk-muted);
-  font-size: calc(var(--nw-body) * var(--lk-scale, 1));
+  color: color-mix(in srgb, var(--lk-text) 80%, var(--lk-bg));
+  font-size: var(--nw-body);
   line-height: 1.35;
 }
 
-/* The list, and the marker under the story on screen. */
-.list {
+/* The strip: every story, by its place in the turn, under a rule; the bar under the one on screen is all that moves. */
+.strip {
   position: relative;
-  min-width: 0;
+  animation: nw-in 500ms var(--nw-dec) 100ms both;
+  --nw-from: 1vmin;
 }
 .rows {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--nw-row-gap);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  column-gap: 3.5vmin;
   list-style: none;
 }
-.marker {
+.row {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1vmin;
+  padding-top: 2vmin;
+  border-top: max(1px, 0.14vmin) solid var(--lk-rule-color);
+  color: var(--lk-muted);
+}
+.number {
+  font: var(--lk-figure-weight) var(--nw-number) / 1 var(--lk-font-display);
+  font-variant-numeric: tabular-nums;
+}
+.rtitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--nw-strip-text);
+  font-weight: 500;
+  line-height: 1.3;
+}
+:root[data-orientation='portrait'] .rtitle {
+  display: none;
+}
+.bar {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  border-radius: var(--nw-row-radius);
-  border-left: var(--nw-marker-bar) solid var(--lk-accent);
-  background: color-mix(in srgb, var(--lk-accent) var(--nw-marker-tint), var(--lk-bg));
+  height: 0.55vmin;
+  background: var(--lk-accent);
   will-change: transform;
 }
-.row {
-  height: var(--nw-row-h);
-  display: flex;
-  align-items: center;
-  gap: var(--nw-row-gap);
-  padding: var(--nw-row-pad);
-}
-.thumb {
-  flex: none;
-  height: 100%;
-  aspect-ratio: 16 / 9;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: var(--nw-thumb-radius);
-  background: var(--lk-surface);
-}
-.thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.thumb.none {
-  background: var(--lk-primary);
-  color: var(--lk-on-primary);
-  font: var(--lk-display-weight) calc(var(--nw-row-h) * 0.45) / 1 var(--lk-font-display);
-}
-.rtitle {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  font-size: var(--nw-row-text);
-  font-weight: var(--nw-row-weight);
-  line-height: 1.25;
+/* How far the turn has run: one sweep a story, along the foot. */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0.4vmin;
+  background: var(--lk-accent);
+  opacity: 0.55;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  will-change: transform;
+  animation: nw-progress var(--nw-slot) linear 0s var(--nw-turns) both;
 }
 
-/* The crawl, on a band of the text's colour. */
-.ticker {
-  flex: none;
-  height: var(--nw-ticker-h);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--nw-ticker-pad);
-  border-radius: var(--lk-radius-pill);
-  background: var(--lk-text);
-  color: var(--lk-bg);
-  font-size: var(--nw-ticker-text);
-  font-weight: 500;
-  overflow: hidden;
+/* ---------------------------------------------------------------- A story's change */
+/* Leaving, on Acc, ending at `--until`: the summary first, then the source and age with the headline, lifting away;
+   the photo fades to the ground (a dip: two photos never cross-fade). Arriving, on Dec, from `--at`: the photo, then
+   the source and age, the headline and the summary, each rising into place. */
+.story :is(.photo, .meta, .headline, .summary) {
+  will-change: transform, opacity;
 }
-.window {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+.story .photo {
+  animation:
+    nw-photo-in 600ms var(--nw-dec) var(--at) both,
+    nw-dip 300ms var(--nw-acc) calc(var(--until) - 300ms) forwards;
 }
-.lk-crawl {
-  line-height: 1.3;
+.story .meta {
+  --nw-from: 0.8vmin;
+  --nw-to: -0.6vmin;
+  animation:
+    nw-in 400ms var(--nw-dec) calc(var(--at) + 100ms) both,
+    nw-out 250ms var(--nw-acc) calc(var(--until) - 300ms) forwards;
+}
+.story .headline {
+  --nw-from: 1.5vmin;
+  --nw-to: -1vmin;
+  animation:
+    nw-in 650ms var(--nw-dec) calc(var(--at) + 150ms) both,
+    nw-out 250ms var(--nw-acc) calc(var(--until) - 300ms) forwards;
+}
+.story .summary {
+  --nw-from: 1vmin;
+  --nw-to: -0.6vmin;
+  animation:
+    nw-in 500ms var(--nw-dec) calc(var(--at) + 300ms) both,
+    nw-out 250ms var(--nw-acc) calc(var(--until) - 350ms) forwards;
 }
 
 @keyframes nw-on {
@@ -300,129 +323,148 @@ ol {
     opacity: 0;
   }
 }
-
-/* ---------------------------------------------------------------- Each look's sizes and marks */
-:root {
-  --nw-lines: 3;
-  --nw-bare-lines: 4;
-  --nw-summary-lines: 2;
-  --nw-bare-step: 1.25;
-  --nw-inset: 3vmin;
-  --nw-card-w: 78%;
-  --nw-card-gap: 1.3vmin;
-  --nw-bare-pad: 0 0.8vmin 2vmin;
-  --nw-marker-bar: 0.6vmin;
-  --nw-marker-tint: 14%;
-  --nw-row-pad: 0 1.5vmin 0 2vmin;
+@keyframes nw-show {
+  from {
+    opacity: 0;
+  }
 }
-:root[data-orientation='portrait'] {
-  --nw-lines: 4;
-  --nw-bare-lines: 6;
-  --nw-summary-lines: 3;
-  --nw-card-w: 100%;
+@keyframes nw-dip {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes nw-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--nw-from));
+  }
+}
+@keyframes nw-out {
+  to {
+    opacity: 0;
+    transform: translateY(var(--nw-to));
+  }
+}
+@keyframes nw-photo-in {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
+@keyframes nw-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
+/* Held still: nothing moves, and the first story stays (main.ts). */
+@media (prefers-reduced-motion: reduce) {
+  .stage,
+  .top,
+  .strip,
+  .story :is(.photo, .meta, .headline, .summary) {
+    animation: none;
+    will-change: auto;
+  }
+  .progress {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- Each look's headline */
 [data-look='pop'] {
-  --nw-pad: 3.7vmin;
-  --nw-gap: 3vmin;
-  --nw-label: 2.6vmin;
-  --nw-badge-pad: 0.9vmin 2.6vmin;
-  --nw-list-w: 62vmin;
-  --nw-headline: 7.4vmin;
-  --nw-body: 2.9vmin;
-  --nw-card-pad: 3vmin 3.7vmin;
-  --nw-card-radius: 3vmin;
-  --nw-row-h: 11.4vmin;
-  --nw-row-gap: 1.6vmin;
-  --nw-row-radius: 2.6vmin;
-  --nw-row-text: 2.8vmin;
-  --nw-row-weight: 700;
-  --nw-thumb-radius: 1.6vmin;
-  --nw-ticker-h: 8.5vmin;
-  --nw-ticker-pad: 3vmin;
-  --nw-ticker-text: 3vmin;
+  --nw-headline: 7.2vmin;
 }
+/* Instrument Serif sets small on its body: a size up holds the same reading distance. */
+[data-look='poster'] {
+  --nw-headline: 9vmin;
+}
+/* Unbounded sets wide: a line more in landscape holds the research's 7vmin to about 80 characters (review of #502). */
+[data-look='night'] {
+  --nw-headline: 7vmin;
+  --nw-lines: 6;
+}
+[data-look='corporate'] {
+  --nw-headline: 7vmin;
+}
+
+/* ---------------------------------------------------------------- Pop and Poster's marks */
+/* Pop, bold and bright: Bricolage Grotesque, heavy and tight, for every word that is not the summary, and one accent,
+   the look's tomato, only as a fill (it does not read as text on the ground): the strip's bar and the progress line,
+   over heavy ink rules. The age is muted, not a second colour. */
 [data-look='pop'] .headline {
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+[data-look='pop'] .top {
   font-weight: 800;
 }
+[data-look='pop'] .meta {
+  font-weight: 700;
+}
+[data-look='pop'] :is(.src, .number) {
+  color: var(--lk-text);
+}
+[data-look='pop'] .age {
+  color: var(--lk-muted);
+}
+[data-look='pop'] .number {
+  font-weight: 800;
+}
+[data-look='pop'] .row {
+  border-top: var(--lk-rule) solid var(--lk-text);
+}
+[data-look='pop'] :is(.bar, .progress) {
+  background: var(--lk-primary);
+  opacity: 1;
+}
+[data-look='pop'] .bar {
+  height: 1.1vmin;
+}
 
-[data-look='poster'] {
-  --nw-pad: 4.4vmin;
-  --nw-gap: 3.3vmin;
-  --nw-label: 1.9vmin;
-  --nw-badge-pad: 1vmin 1.8vmin;
-  --nw-list-w: 60vmin;
-  --nw-headline: 9.6vmin;
-  --nw-body: 2.8vmin;
-  --nw-card-pad: 3vmin 3.3vmin 2.6vmin;
-  --nw-card-radius: 0;
-  --nw-inset: 0;
-  --nw-row-h: 11.6vmin;
-  --nw-row-gap: 1.4vmin;
-  --nw-row-radius: 0;
-  --nw-row-text: 2.7vmin;
-  --nw-row-weight: 600;
-  --nw-thumb-radius: 0;
-  --nw-marker-bar: 0.9vmin;
-  --nw-marker-tint: 10%;
-  --nw-card-rule: var(--lk-rule);
-  --nw-ticker-h: 7.8vmin;
-  --nw-ticker-pad: 2.6vmin;
-  --nw-ticker-text: 2.8vmin;
+/* Poster, graphic and editorial: Instrument Serif set large and solid as a front page's headline, a heavy ink rule
+   under the masthead, italic serif figures in the strip, and the look's red only for the age and the bar. */
+[data-look='poster'] .headline {
+  line-height: 0.94;
+  letter-spacing: -0.012em;
 }
 [data-look='poster'] .top {
-  padding-bottom: 2vmin;
-  border-bottom: var(--lk-rule) solid var(--lk-rule-color);
+  padding-bottom: 1.8vmin;
+  border-bottom: 0.55vmin solid var(--lk-text);
 }
-[data-look='poster'] .rows .row + .row {
-  border-top: var(--lk-rule) solid var(--lk-rule-color);
+[data-look='poster'] .meta {
+  font-family: var(--lk-font-body);
+  font-weight: 600;
 }
-
-[data-look='night'] {
-  --nw-pad: 4.4vmin;
-  --nw-gap: 3.3vmin;
-  --nw-label: 2.2vmin;
-  --nw-badge-pad: 0.9vmin 2.2vmin;
-  --nw-list-w: 62vmin;
-  --nw-headline: 6.2vmin;
-  --nw-body: 2.8vmin;
-  --nw-card-pad: 3vmin 3.3vmin;
-  --nw-card-radius: 2.4vmin;
-  --nw-row-h: 11vmin;
-  --nw-row-gap: 1.6vmin;
-  --nw-row-radius: 1.6vmin;
-  --nw-row-text: 2.6vmin;
-  --nw-row-weight: 500;
-  --nw-thumb-radius: 1vmin;
-  --nw-marker-tint: 18%;
-  --nw-ticker-h: 7.4vmin;
-  --nw-ticker-pad: 2.6vmin;
-  --nw-ticker-text: 2.7vmin;
+[data-look='poster'] :is(.src, .number) {
+  color: var(--lk-text);
 }
-[data-look='night'] .marker {
-  border: var(--lk-rule) solid var(--lk-accent);
-  border-left-width: var(--nw-marker-bar);
+[data-look='poster'] .number {
+  font-size: calc(var(--nw-number) * 1.5);
+  font-style: italic;
+  line-height: 0.8;
+}
+[data-look='poster'] .row {
+  border-top: var(--lk-rule) solid var(--lk-text);
+}
+[data-look='poster'] :is(.bar, .progress) {
+  background: var(--lk-accent);
+  opacity: 1;
+}
+[data-look='poster'] .bar {
+  height: 1.1vmin;
 }
 
-[data-look='corporate'] {
-  --nw-pad: 5.2vmin;
-  --nw-gap: 3vmin;
-  --nw-label: 1.85vmin;
-  --nw-badge-pad: 1vmin 1.8vmin;
-  --nw-list-w: 60vmin;
-  --nw-headline: 6.7vmin;
-  --nw-body: 2.7vmin;
-  --nw-card-pad: 3vmin 3.7vmin 3vmin 3.3vmin;
-  --nw-card-radius: 0;
-  --nw-row-h: 11vmin;
-  --nw-row-gap: 1.4vmin;
-  --nw-row-radius: 0;
-  --nw-row-text: 2.6vmin;
-  --nw-row-weight: 500;
-  --nw-thumb-radius: 0;
-  --nw-marker-tint: 8%;
-  --nw-card-bar: 0.7vmin;
-  --nw-ticker-h: 7.4vmin;
-  --nw-ticker-pad: 2.6vmin;
-  --nw-ticker-text: 2.6vmin;
+/* A portrait story without a photo has the whole lead: its headline a size larger again and its summary larger and
+   longer, so the text fills the screen it has rather than leaving two thirds of it empty (review of #502). */
+:root[data-orientation='portrait'] .story.no-photo {
+  --nw-step: 1.6;
+  --nw-lines: 7;
+}
+:root[data-orientation='portrait'] .story.no-photo .summary {
+  -webkit-line-clamp: 5;
+  font-size: calc(var(--nw-body) * 1.3);
 }

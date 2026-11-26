@@ -171,7 +171,7 @@ export type TargetAction =
   | { kind: 'play-here'; label: string; screenId: string }
   /** The takeover dialog, aimed at the screen (#181). */
   | { kind: 'take-over'; label: string; screenId: string }
-  | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
+  | { kind: 'command'; label: string; command: 'identify' | 'restart'; screenId: string; screenName: string; done: string };
 
 /**
  * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
@@ -193,20 +193,20 @@ export function targetActions(
   if (listed('create_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
   // A takeover is started, then published at once: an editor where only owners publish keeps start_takeover, not publish.
   if (listed('start_takeover') && listed('publish')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
-  if (may('identify_screen'))
+  if (may('screen_command'))
     actions.push({
-      kind: 'tool',
+      kind: 'command',
       label: 'Identify (10 s)',
-      tool: 'identify_screen',
+      command: 'identify',
       screenId,
       screenName,
       done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
     });
-  if (may('restart_screen') && reachable(target.screen))
+  if (may('screen_command') && reachable(target.screen))
     actions.push({
-      kind: 'tool',
+      kind: 'command',
       label: 'Restart player',
-      tool: 'restart_screen',
+      command: 'restart',
       screenId,
       screenName,
       done: 'Sent. The player restarts and plays from its cache at once.',

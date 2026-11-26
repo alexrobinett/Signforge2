@@ -248,7 +248,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
     // A takeover is sent at once, so it is offered only to one who may publish (#253, #358); no raw tool is ever listed.
     await invitee.keyboard.type('take over');
     await expect(menu.getByRole('option', { name: 'Take over screens now…' })).toHaveCount(count);
-    await expect(menu.getByRole('option', { name: /rename_screen|publish_manifest_to_screen/ })).toHaveCount(0);
+    await expect(menu.getByRole('option', { name: /update_screen|publish_manifest_to_screen/ })).toHaveCount(0);
     await invitee.keyboard.press('Escape');
   };
   await publishOption(1);

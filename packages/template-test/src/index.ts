@@ -643,28 +643,29 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
 }
 
 /**
- * What is wrong with a template's layout at rest: text past the screen, past its clamp or cut by a
- * box around it, painted over (except by what `crosses` selects, drawn across text by design), and
- * texts that overlap, with the elements `also` selects (such as a now line) counted as text. Each
- * text is its lines' boxes, cut to every box that clips it. With `inside`, each text must also stay
- * within its nearest ancestor that matches it (a card).
- */
-/**
  * An entrance starts and ends inside this many ms of its play's start: the last stagger step's delay plus the longest
  * intro is under it, and an exit, a push-in over the play or a loop is not.
  */
 export const INTRO_WINDOW_MS = 2000;
 
-export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
+/**
+ * What is wrong with a template's layout at rest: text past the screen, past its clamp or cut by a
+ * box around it, painted over (except by what `crosses` selects, drawn across text by design), and
+ * texts that overlap, with the elements `also` selects (such as a now line) counted as text. Each
+ * text is its lines' boxes, cut to every box that clips it. With `inside`, each text must also stay
+ * within its nearest ancestor that matches it (a card). `at`: the time at rest, for a template whose outros are not its
+ * intros reversed (news 2.1's lift away); otherwise, where the longest intro ends.
+ */
+export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '', at?: number) =>
   f.evaluate(
-    ({ also, crosses, inside, window }) => {
+    ({ also, crosses, inside, at, window }) => {
       // At rest: where the longest entrance ends. An entrance starts and ends within the first seconds; an exit starts
       // near the play's end (or, before D's motion, ran in reverse), a push-in lasts the play, and a loop never ends.
       const intros = document
         .getAnimations()
         .map((a) => a.effect!.getComputedTiming())
         .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < window && Number(t.duration) < window);
-      const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
+      const rest = at ?? Math.max(0, ...intros.map((t) => Number(t.endTime)));
       for (const a of document.getAnimations()) a.currentTime = rest;
       type Box = { l: number; t: number; r: number; b: number };
       const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
@@ -747,7 +748,7 @@ export const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
         }
       return [...new Set(found)];
     },
-    { also, crosses, inside, window: INTRO_WINDOW_MS },
+    { also, crosses, inside, at, window: INTRO_WINDOW_MS },
   );
 
 /**

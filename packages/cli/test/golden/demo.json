@@ -101,6 +101,10 @@
     }
   },
   "files": {
+    "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b": {
+      "size": 400892,
+      "type": "text/html"
+    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
@@ -117,8 +121,8 @@
       "size": 12704,
       "type": "font/woff2"
     },
-    "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87": {
-      "size": 396010,
+    "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd": {
+      "size": 393916,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
@@ -133,12 +137,16 @@
       "size": 23664,
       "type": "font/woff2"
     },
+    "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953": {
+      "size": 395766,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8": {
-      "size": 383396,
+    "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637": {
+      "size": 399570,
       "type": "text/html"
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
@@ -157,20 +165,12 @@
       "size": 12672,
       "type": "font/woff2"
     },
-    "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9": {
-      "size": 394160,
-      "type": "text/html"
-    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da": {
-      "size": 399814,
-      "type": "text/html"
-    },
-    "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932": {
-      "size": 401141,
+    "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119": {
+      "size": 383289,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -304,7 +304,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87"
+      "html": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953"
     },
     "base/countdown@1.1.0": {
       "manifest": {
@@ -432,7 +432,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9"
+      "html": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -889,14 +889,14 @@
         },
         "protocol": 2
       },
-      "html": "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932"
+      "html": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b"
     },
-    "base/news@2.0.3": {
+    "base/news@2.1.1": {
       "manifest": {
         "id": "news",
-        "version": "2.0.3",
+        "version": "2.1.1",
         "name": "News",
-        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
           "title": {
             "type": "text",
@@ -979,17 +979,12 @@
           },
           "showList": {
             "type": "boolean",
-            "label": "Show the story list",
+            "label": "Show the story strip",
             "default": true
           },
           "showMeta": {
             "type": "boolean",
             "label": "Show the source and age",
-            "default": true
-          },
-          "showCrawl": {
-            "type": "boolean",
-            "label": "Show the crawl",
             "default": true
           }
         },
@@ -1013,7 +1008,7 @@
         },
         "protocol": 2
       },
-      "html": "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8"
+      "html": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119"
     },
     "base/room-status@1.1.0": {
       "manifest": {
@@ -1139,7 +1134,7 @@
         },
         "protocol": 2
       },
-      "html": "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da"
+      "html": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637"
     }
   },
   "spots": {
@@ -1314,7 +1309,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.0.3",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1325,8 +1320,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1345,7 +1339,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.0.3",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1356,8 +1350,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1376,7 +1369,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.0.3",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1387,8 +1380,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 32000,
@@ -1532,5 +1524,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "a7768b0b510c6bc326b0a31de3f7f5041245f3f336f4d65945cf63580e05737a"
+  "id": "99ff55c4ba0c8f919020399f5a7416bb89075ef16226b095190402b0c427d6e2"
 }

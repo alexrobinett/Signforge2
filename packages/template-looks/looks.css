@@ -165,14 +165,10 @@
      Only transform and opacity move: no clip or mask reveals, which the Pi has not measured. */
   --lk-ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
   --lk-ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
-  --lk-ease: var(--lk-ease-in);
   --lk-in-text: 0.65s;
   --lk-in-fade: 0.5s;
   --lk-in-badge: 0.4s;
   --lk-in-photo: 0.6s;
-  /* News's own animation still reads one entrance time and reverses it, until its rebuild (the News builder's): it
-     goes then. */
-  --lk-in: var(--lk-in-text);
   --lk-out: 0.3s;
   --lk-stagger: 0.11s;
   --lk-rise: 1.5vmin;
@@ -418,10 +414,6 @@
 }
 .lk-d8 {
   --lk-i: 8;
-}
-/* No look wipes a cover over its photo now. News's markup keeps one until its rebuild, so it stays out of sight. */
-.lk-cover {
-  display: none;
 }
 /* Ambient motion, inside an element that has an intro and outro of its own: one slow push-in over the play, so the
    screen holds still otherwise (D's long holds). No wobble, bounce or breathing on text. */

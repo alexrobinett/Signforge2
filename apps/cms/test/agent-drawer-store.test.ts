@@ -269,7 +269,7 @@ describe('the agent drawer, in the store', () => {
 
   describe('a confirmation card (#269)', () => {
     const CONFIRM: ConfirmCard = {
-      tool: 'restart_screen',
+      tool: 'screen_command',
       title: 'Restart a screen',
       lines: ['Bayside door restarts now: it goes blank for a moment, then plays again.'],
       address: null,
@@ -288,14 +288,14 @@ describe('the agent drawer, in the store', () => {
     const DONE: AnswerCard = {
       ...CARD,
       text: 'Bayside door restarted.',
-      trace: [{ tool: 'restart_screen', title: 'Restart screen', summary: 'Restarted a screen', ok: true }],
+      trace: [{ tool: 'screen_command', title: 'Screen command', summary: 'Sent the command to the screen', ok: true }],
     };
     /** A press's run: what the action did (`done`), then the model's answer, or its end without one. */
     const pressed = (done: { ok: boolean; message: string }, answered: boolean) => (run: { runId: string; threadId: string }) =>
       sse(
         run,
         { type: 'RUN_STARTED' },
-        { type: 'CUSTOM', name: CHAT_EVENTS.done, value: { tool: 'restart_screen', ...done } },
+        { type: 'CUSTOM', name: CHAT_EVENTS.done, value: { tool: 'screen_command', ...done } },
         ...(answered
           ? [
               { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: DONE },

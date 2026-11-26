@@ -36,9 +36,9 @@ beforeEach(() => {
 });
 
 const identify: TargetAction = {
-  kind: 'tool',
+  kind: 'command',
   label: 'Identify (10 s)',
-  tool: 'identify_screen',
+  command: 'identify',
   screenId: 'scr_1',
   screenName: '0157 Drive-thru L',
   done: 'Sent.',
@@ -60,7 +60,7 @@ function holdNextCall() {
 }
 
 describe('a call on its way across closing and opening again', () => {
-  const restart: TargetAction = { kind: 'tool', label: 'Restart player', tool: 'restart_screen', screenId: 'scr_1', screenName: 'Lobby', done: 'Sent.' };
+  const restart: TargetAction = { kind: 'command', label: 'Restart player', command: 'restart', screenId: 'scr_1', screenName: 'Lobby', done: 'Sent.' };
 
   it('is not sent again from a later opening, and its answer leaves that opening open', async () => {
     const { store } = menuStore();
@@ -74,7 +74,7 @@ describe('a call on its way across closing and opening again', () => {
     store.getState().chooseTarget({ kind: 'screen', id: 'scr_1' });
     expect(store.getState().commandMenu.running).toBe(true);
     await store.getState().runTargetAction(restart);
-    expect(calls.map((c) => c.name)).toEqual(['restart_screen']);
+    expect(calls).toEqual([{ name: 'screen_command', input: { screenId: 'scr_1', command: 'restart' } }]);
 
     held.answer(200);
     await first;
@@ -132,7 +132,7 @@ describe('⌘K on a found screen or group', () => {
     store.getState().openCommandMenu();
     store.getState().chooseTarget({ kind: 'screen', id: 'scr_1' });
     await store.getState().runTargetAction(identify);
-    expect(calls).toEqual([{ name: 'identify_screen', input: { screenId: 'scr_1' } }]);
+    expect(calls).toEqual([{ name: 'screen_command', input: { screenId: 'scr_1', command: 'identify' } }]);
     expect(store.getState().commandMenu).toMatchObject({ open: false, target: null, running: false });
     expect(toast.success).toHaveBeenCalledWith('Identify (10 s): 0157 Drive-thru L', { description: 'Sent.' });
   });

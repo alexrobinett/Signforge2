@@ -144,7 +144,7 @@ const TARGETS: Record<string, { id: string; out: string }> = {
   update_playlist: { id: 'playlistId', out: 'playlist' },
   update_schedule_entry: { id: 'scheduleEntryId', out: 'entry' },
   create_schedule_entry: { id: 'scheduleEntryId', out: 'entry' },
-  rename_screen: { id: 'screenId', out: 'screen' },
+  update_screen: { id: 'screenId', out: 'screen' },
 };
 
 /** A saved draft's record, as its tool gave it back. */

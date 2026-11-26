@@ -32,7 +32,7 @@ describe('weekWords', () => {
 });
 
 describe('outcome', () => {
-  const call = (c: Partial<AgentCall>): AgentCall => ({ at: NOW, tool: 'rename_screen', result: 'ok', change: false, needs: null, target: null, ...c });
+  const call = (c: Partial<AgentCall>): AgentCall => ({ at: NOW, tool: 'update_screen', result: 'ok', change: false, needs: null, target: null, ...c });
   it('says a read, a change, a refusal as the ticket words it, and the rest as what it was', () => {
     expect(outcome(call({}))).toBe('Read');
     expect(outcome(call({ change: true }))).toBe('Changed');

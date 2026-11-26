@@ -33,12 +33,12 @@ describe('screens', () => {
   });
 
   it('renames', async () => {
-    expect((await call('rename_screen', { screenId: o.screen, name: '  Counter  ' })).screen.name).toBe('Counter');
+    expect((await call('update_screen', { screenId: o.screen, name: '  Counter  ' })).screen.name).toBe('Counter');
   });
 
   it('updates settings, validating display hours as the player does', async () => {
     const hours = { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }], exceptions: [{ date: '2026-12-25', on: [] }] };
-    const { screen } = await call('update_screen_settings', {
+    const { screen } = await call('update_screen', {
       screenId: o.screen,
       timezone: 'America/New_York',
       locale: 'en-US',
@@ -48,21 +48,21 @@ describe('screens', () => {
     expect(screen).toMatchObject({ timezone: 'America/New_York', locale: 'en-US', orientation: 'portrait', displayHours: hours });
 
     // Only what is given changes; null clears.
-    const cleared = (await call('update_screen_settings', { screenId: o.screen, locale: null, displayHours: null })).screen;
+    const cleared = (await call('update_screen', { screenId: o.screen, locale: null, displayHours: null })).screen;
     expect(cleared).toMatchObject({ timezone: 'America/New_York', locale: null, displayHours: null, orientation: 'portrait' });
 
-    const bad = await refusal('update_screen_settings', { screenId: o.screen, displayHours: { weekly: [{ days: [9], from: '25:00', to: '22:00' }] } });
+    const bad = await refusal('update_screen', { screenId: o.screen, displayHours: { weekly: [{ days: [9], from: '25:00', to: '22:00' }] } });
     expect(bad).toMatchObject({ ok: false, error: 'invalid_input' });
     expect((bad as { message: string }).message).toMatch(/days must be 0-6/);
     expect(
-      await refusal('update_screen_settings', {
+      await refusal('update_screen', {
         screenId: o.screen,
         displayHours: { weekly: [], exceptions: [{ date: '2026-12-24', on: [{ from: '18:00', to: '09:00' }] }] },
       }),
     ).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await refusal('update_screen_settings', { screenId: o.screen, timezone: 'Mars/Olympus' })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await refusal('update_screen_settings', { screenId: o.screen, locale: 'not a locale!' })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await refusal('update_screen_settings', { screenId: o.screen })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await refusal('update_screen', { screenId: o.screen, timezone: 'Mars/Olympus' })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await refusal('update_screen', { screenId: o.screen, locale: 'not a locale!' })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await refusal('update_screen', { screenId: o.screen })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 
   it('revokes a credential once, and only one of the named screen', async () => {
@@ -78,24 +78,81 @@ describe('screens', () => {
 describe('groups', () => {
   it('creates, renames, sets members and deletes', async () => {
     const extra = await testScope(env.DB, o.orgId).screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });
-    const { group } = await call('create_group', { name: 'Windows', screenIds: [o.screen, o.screen] });
+    const { group } = await call('save_group', { name: 'Windows', screenIds: [o.screen, o.screen] });
     expect(group).toMatchObject({ name: 'Windows', screenIds: [o.screen] });
-    expect((await call('rename_group', { groupId: group.id, name: 'Shop windows' })).group.name).toBe('Shop windows');
-    expect((await call('set_group_members', { groupId: group.id, screenIds: [extra.id, o.screen] })).group.screenIds).toEqual([extra.id, o.screen].sort());
-    expect((await call('set_group_members', { groupId: group.id, screenIds: [] })).group.screenIds).toEqual([]);
+    expect((await call('save_group', { groupId: group.id, name: 'Shop windows' })).group.name).toBe('Shop windows');
+    expect((await call('save_group', { groupId: group.id, screenIds: [extra.id, o.screen], membership: 'set' })).group.screenIds).toEqual(
+      [extra.id, o.screen].sort(),
+    );
+    expect((await call('save_group', { groupId: group.id, screenIds: [], membership: 'set' })).group.screenIds).toEqual([]);
     expect((await call('list_groups', {})).groups.map((g: { id: string }) => g.id)).toContain(group.id);
     expect(await call('delete_group', { groupId: group.id })).toEqual({ deleted: group.id });
-    expect(await refusal('rename_group', { groupId: group.id, name: 'x' })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await refusal('save_group', { groupId: group.id, name: 'x' })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('renames and changes screens in one call, at the version read, its first change guarded and the rest following', async () => {
+    const extra = await testScope(env.DB, o.orgId).screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });
+    const { group } = await call('save_group', { name: 'Doors', screenIds: [o.screen] });
+    const both = (await call('save_group', { groupId: group.id, name: 'Front doors', screenIds: [extra.id], membership: 'add', ifVersion: group.version }))
+      .group;
+    expect(both).toMatchObject({ name: 'Front doors', screenIds: [extra.id, o.screen].sort() });
+    expect((await call('list_groups', {})).groups.find((g: { id: string }) => g.id === group.id)).toEqual(both);
+    // At the version read before: refused, and nothing of it written.
+    expect(
+      await refusal('save_group', { groupId: group.id, name: 'Late', screenIds: [o.screen], membership: 'remove', ifVersion: group.version }),
+    ).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    const removed = (await call('save_group', { groupId: group.id, screenIds: [o.screen, 'scr_notmember'], membership: 'remove' })).group;
+    expect(removed).toMatchObject({ name: 'Front doors', screenIds: [extra.id] });
+  });
+
+  it('refuses a call that does not say what to do, with what to send instead', async () => {
+    const said = async (input: Record<string, unknown>) => {
+      const r = await refusal('save_group', input);
+      expect(r, JSON.stringify(input)).toMatchObject({ ok: false, error: 'invalid_input' });
+      return r.ok ? '' : r.message;
+    };
+    expect(await said({ screenIds: [o.screen] })).toMatch(/a new group needs a name/);
+    expect(await said({ name: 'New', screenIds: [o.screen], membership: 'remove' })).toMatch(/no screens to remove/);
+    expect(await said({ groupId: o.group, screenIds: [o.screen] })).toMatch(/give membership with screenIds: add, remove or set/);
+    expect(await said({ groupId: o.group, membership: 'add' })).toMatch(/membership needs the screenIds/);
+    expect(await said({ groupId: o.group })).toMatch(/give a name or screenIds/);
+  });
+
+  it('refuses what it does not take by name, ifVersion on a new group, and add or remove of no screens, writing nothing', async () => {
+    const said = async (name: string, input: Record<string, unknown>) => {
+      const r = await refusal(name, input);
+      expect(r, JSON.stringify(input)).toMatchObject({ ok: false, error: 'invalid_input' });
+      return r.ok ? '' : r.message;
+    };
+    expect(await said('save_group', { groupId: o.group, name: 'Door', add: [o.screen] })).toMatch(/add/);
+    expect(await said('screen_command', { screenId: o.screen, command: 'display_on', state: 'on' })).toMatch(/state/);
+    expect(await said('update_screen', { screenId: o.screen, name: 'Door', mode: 'x' })).toMatch(/mode/);
+    expect(await said('save_group', { name: 'New', ifVersion: 1 })).toMatch(/ifVersion is for a change/);
+    for (const membership of ['add', 'remove'])
+      expect(await said('save_group', { groupId: o.group, screenIds: [], membership })).toMatch(/an empty list changes nothing/);
+    const { group } = await call('save_group', { name: 'Stale', screenIds: [o.screen] });
+    await call('save_group', { groupId: group.id, name: 'Moved on', ifVersion: group.version });
+    expect(await refusal('save_group', { groupId: group.id, screenIds: [o.screen], membership: 'remove', ifVersion: group.version })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    expect((await call('list_groups', {})).groups.find((g: { id: string }) => g.id === group.id).screenIds).toEqual([o.screen]);
   });
 
   it('creates nothing when a screen is unknown', async () => {
     const before = (await call('list_groups', {})).groups.length;
-    expect(await refusal('create_group', { name: 'Bad', screenIds: ['scr_nope'] })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await refusal('save_group', { name: 'Bad', screenIds: ['scr_nope'] })).toMatchObject({ ok: false, error: 'not_found' });
     expect((await call('list_groups', {})).groups.length).toBe(before);
   });
 
   it('will not set members it cannot find, and changes nothing then', async () => {
-    expect(await refusal('set_group_members', { groupId: o.group, screenIds: [o.screen, 'scr_nope'] })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await refusal('save_group', { groupId: o.group, screenIds: [o.screen, 'scr_nope'], membership: 'set' })).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
     expect(await testScope(env.DB, o.orgId).screenGroups.members(o.group)).toEqual([o.screen]);
   });
 

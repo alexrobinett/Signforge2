@@ -45,7 +45,7 @@ beforeAll(async () => {
       actorKind: 'user',
       actorId: 'usr_jun',
       clientId: 'cms',
-      action: 'rename_screen',
+      action: 'update_screen',
       targetKind: 'screen',
       targetId: o.screen,
       detailJson: JSON.stringify({ input: { screenId: o.screen, name: `${name} ${i}` } }),
@@ -63,7 +63,7 @@ beforeAll(async () => {
 describe('list_audit_log', () => {
   it('lists the newest first, a page at a time, with no row repeated or skipped', async () => {
     const pages = await all({ limit: 2 });
-    expect(pages.map((e) => e.action)).toEqual(['rate_limited', 'rename_screen', 'rename_screen', 'rename_screen', 'seed']);
+    expect(pages.map((e) => e.action)).toEqual(['rate_limited', 'update_screen', 'update_screen', 'update_screen', 'seed']);
     // Rows of one millisecond: the latest written first.
     expect(pages.slice(1, 4).map((e) => e.detail.input)).toEqual([
       { screenId: o.screen, name: 'Third 2' },
@@ -89,7 +89,7 @@ describe('list_audit_log', () => {
     expect(await actions({ target: { kind: 'screen', id: o.screen } })).toHaveLength(3);
     // A target that is gone, or never was, still filters: its history, if any.
     expect(await actions({ target: { kind: 'screen', id: 'scr_deleted' } })).toEqual([]);
-    expect(await actions({ from: T, to: T + 1000 })).toEqual([`rename_screen@${T}`, `rename_screen@${T}`, `rename_screen@${T}`]);
+    expect(await actions({ from: T, to: T + 1000 })).toEqual([`update_screen@${T}`, `update_screen@${T}`, `update_screen@${T}`]);
     expect(await actions({ from: T + 1 })).toEqual([`rate_limited@${T + 1000}`]);
     // Text: in the recorded input, any case; LIKE's wildcards are plain characters.
     expect((await all({ query: 'second' })).map((e) => e.detail.input)).toEqual([{ screenId: o.screen, name: 'Second 1' }]);
@@ -244,5 +244,23 @@ describe('list_audit_log', () => {
     });
     expect((await all({ query: long })).map((e) => e.action)).toEqual(['rename_spot']);
     expect(await all({ query: 'z'.repeat(100) })).toEqual([]);
+  });
+});
+
+describe('list_audit_log by a screen command (#345)', () => {
+  it("finds screen_command's rows under the tool each command replaced, and only those", async () => {
+    const mine = await seedOrg(env.DB, 'audit-commands');
+    const editor = member(mine.orgId, 'editor');
+    for (const command of ['identify', 'restart', 'display_on', 'display_auto'])
+      expect(await dispatch(registry, 'screen_command', { screenId: mine.screen, command }, editor), command).toMatchObject({ ok: true });
+    const commands = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, editor);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => (e.detail.input as { command: string }).command).sort();
+    };
+    expect(await commands('restart_screen')).toEqual(['restart']);
+    expect(await commands('identify_screen')).toEqual(['identify']);
+    expect(await commands('set_display_override')).toEqual(['display_auto', 'display_on']);
+    expect(await commands('screen_command')).toEqual(['display_auto', 'display_on', 'identify', 'restart']);
   });
 });

@@ -82,7 +82,7 @@ function DraftsCard({ index }: { index: number }) {
   const summaries = d.shown.state === 'shown' ? d.shown.summaries : [];
   const savable = summaries.length === m.card.drafts.length;
   // A screen's new name shows at once; the rest wait for a publish.
-  const renames = m.card.drafts.filter((c) => c.tool === 'rename_screen').length;
+  const renames = m.card.drafts.filter((c) => c.tool === 'update_screen').length;
   const drafted = m.card.drafts.length - renames;
   const request = summaries.map((s) => [s.title, ...s.lines.map((l) => `${l.label}: ${l.before} → ${l.after}`), s.reach].join('\n')).join('\n\n');
   return (
