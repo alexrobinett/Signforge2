@@ -336,12 +336,15 @@ async function deliverFeedPhoto(
   if (!source?.photos || !row) return;
   /** Fetch, check and store the photo from `from`, under the feed's URL whichever it is. */
   const storeFrom = async (from: string) => {
-    const fetched = await guardedImageFetch(from, row, guards);
+    // Only to the URL they came from: BBC and Le Monde answer each size of a photo with one ETag, so the feed's small
+    // photo's would get a 304 from the CDN's copy and keep the small one (#518).
+    const sent = (row.validatedFrom ?? httpsOf(url)) === from ? row : { etag: null, lastModified: null };
+    const fetched = await guardedImageFetch(from, sent, guards);
     if (fetched.status === 'not-modified') {
       await org.feedPhotos.delivered(url, { result: 'unchanged', now, sourceId, checked: row });
       return;
     }
-    const validators = { etag: fetched.etag, lastModified: fetched.lastModified };
+    const validators = { etag: fetched.etag, lastModified: fetched.lastModified, validatedFrom: from };
     const sourceSha256 = await sha256Hex(fetched.body);
     if (sourceSha256 === row.sourceSha256 && row.fileSha256 && row.thumbSha256) {
       await org.feedPhotos.delivered(url, { result: 'unchanged', now, sourceId, checked: row, validators });
@@ -389,10 +392,14 @@ async function deliverFeedPhoto(
   }
 }
 
-/** Whether a CDN's rewritten copy was refused as that copy: a 4xx, or bytes that are not a photo it can decode. */
+/**
+ * Whether a CDN's rewritten copy was refused as that copy: a 4xx other than 429 (which, like a 5xx, waits and asks for
+ * the copy again, #518), over the size a photo may be, or bytes that are not a photo it can decode.
+ */
 const refusedCopy = (e: unknown): e is FetchError | PhotoFailure =>
-  (e instanceof FetchError && e.code === 'http-status' && e.status !== undefined && e.status >= 400 && e.status < 500) ||
-  (e instanceof PhotoFailure && (e.code === 'not-an-image' || e.code === 'undecodable'));
+  (e instanceof FetchError &&
+    ((e.code === 'http-status' && e.status !== undefined && e.status >= 400 && e.status < 500 && e.status !== 429) || e.code === 'too-large')) ||
+  (e instanceof PhotoFailure && (e.code === 'not-an-image' || e.code === 'undecodable' || e.code === 'too-large'));
 
 /** Many feeds still name `http:` photos: each is tried once over https, and dropped if that fails the guards. */
 function httpsOf(url: string): string {

@@ -1241,6 +1241,11 @@ export const feedImages = sqliteTable(
     thumbSha256: text('thumb_sha256'),
     etag: text('etag'),
     lastModified: text('last_modified'),
+    /**
+     * The URL `etag` and `lastModified` came from: a CDN's copy (#488) or the feed's own, whose sizes some CDNs answer
+     * with one ETag, so they are sent only to it. Null: the feed's own, as every fetch was before #488.
+     */
+    validatedFrom: text('validated_from'),
     /** When a poll that finds this URL queues it to be fetched again; moved on when it is queued, so the next poll does not queue it twice. */
     nextCheckAt: integer('next_check_at').notNull(),
     /** Why the last fetch failed, as a category; null once one succeeds. */

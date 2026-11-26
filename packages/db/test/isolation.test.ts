@@ -552,7 +552,7 @@ describe('the audit log', () => {
 describe('feed photos', () => {
   const sha = (c: string) => c.repeat(64);
   const copy = (c: string) => ({ file: sha(c), thumb: sha(c) });
-  const validators = { etag: null, lastModified: null };
+  const validators = { etag: null, lastModified: null, validatedFrom: 'https://cdn.example/a.jpg' };
   const hold = async (org: Seeded['a'], sourceId: string, urls: { again: readonly string[]; fresh: readonly string[] }, now: number) => {
     const row = (await org.scope.dataSources.get(sourceId))!;
     const { held } = await org.scope.dataSources.savePoll(sourceId, {

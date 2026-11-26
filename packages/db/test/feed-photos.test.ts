@@ -21,7 +21,7 @@ const NOW = Date.UTC(2026, 10, 23, 9);
 const MIN = 60_000;
 const sha = (c: string) => c.repeat(64);
 const copy = (c: string) => ({ file: sha(c), thumb: sha(c) });
-const validators = { etag: null, lastModified: null };
+const validators = { etag: null, lastModified: null, validatedFrom: 'https://cdn.example/a.jpg' };
 
 let o: SeededOrg;
 let n = 0;

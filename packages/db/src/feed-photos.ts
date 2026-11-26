@@ -199,7 +199,7 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
     hold && (hold.again.length || hold.fresh.length)
       ? db
           .insert(fi)
-          .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
+          .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
             WITH counts AS (
               SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n,
                 -- The org's RSS sources whose photos a screen shows: a full read records their URLs only then, and this one is shown.
@@ -248,7 +248,7 @@ export type Delivery =
   /** Not stored, for `error`: the last good copy kept, tried again later. */
   | { result: 'failed'; now: number; checked: FeedImageRow; error: string; passing: boolean };
 
-type Validators = { etag: string | null; lastModified: string | null };
+type Validators = { etag: string | null; lastModified: string | null; validatedFrom: string };
 type Copy = { file: string; thumb: string };
 
 /** A delivery found a delete of one of its hashes under way: it is tried again later. */
