@@ -9,6 +9,7 @@ import type { CommandEntry, CommandTarget, PeopleAction, Selection, TargetAction
 import { orgOnScreen } from '~/lib/live';
 import { callTool, toolMessage } from '~/lib/tools';
 import { getNavCounts } from '~/server/nav-counts.functions';
+import { changingOrg } from './orgs';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
@@ -176,6 +177,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           await act(entry.action);
           return;
         case 'agent':
+          if (changingOrg(get().orgs)) return;
           set((s) => ({ commandMenu: closed(s.commandMenu) }));
           // No button opened it: closing it, focus goes to the page.
           get().openAgentDrawer(null);
@@ -193,6 +195,8 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       }
     },
     askFromMenu(question, keepOpen) {
+      // Not while the org changes: the drawer is the next org's, and asks nothing until it is shown (#479).
+      if (changingOrg(get().orgs)) return;
       if (!keepOpen) set((s) => ({ commandMenu: closed(s.commandMenu) }));
       get().openAgentDrawer(null);
       void get().askAgent(question);

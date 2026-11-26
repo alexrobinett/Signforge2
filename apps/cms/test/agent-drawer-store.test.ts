@@ -304,6 +304,17 @@ describe('the agent drawer, in the store', () => {
           : [{ type: 'RUN_ERROR', code: 'unreadable', message: 'The model gave no answer it could show. Ask again.' }]),
       );
 
+    it('a press while the org changes sends nothing, and leaves the card to press once it has (#479)', async () => {
+      const { store } = drawerStore();
+      answer = pausing;
+      await store.getState().askAgent('Restart the Bayside door');
+      const before = sent.length;
+      store.setState({ orgs: { ...initialOrgs, switchingTo: 'org_2' } });
+      await store.getState().pressConfirm(1);
+      expect(sent).toHaveLength(before);
+      expect(store.getState().agentDrawer.messages[1]).toMatchObject({ role: 'confirm', press: 'offered' });
+    });
+
     it("pressed, sends the question again with the card's token and nothing of the call, once, and shows the answer", async () => {
       const { store } = drawerStore();
       answer = pausing;
