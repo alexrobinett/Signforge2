@@ -97,6 +97,12 @@ export type ListItemFieldDef = ScalarFieldDef | { type: 'image'; label: string }
 /** The most a template may say it draws an image across, in CSS px of a 1080p screen, either way. */
 export const MAX_IMAGE_BOX = 4096;
 
+/**
+ * The most a rendition chosen by an image field's `portraitBox` may be drawn larger than it is: the News
+ * template's rule for photos, past which they look soft (docs/template-spec.md).
+ */
+export const PORTRAIT_BOX_UPSCALE = 1.25;
+
 export type FieldDef =
   | ScalarFieldDef
   | {
@@ -104,9 +110,9 @@ export type FieldDef =
       label: string;
       /**
        * The largest box the template draws this image in on a portrait screen (1080x1920), at any moment of the
-       * spot, transforms included, in CSS px. With it, a portrait screen gets the smaller of the asset's renditions
-       * that still covers this box (the landscape one, for a photo in a frame); without it, the portrait rendition,
-       * which covers the whole screen (#224).
+       * spot, transforms included, in CSS px. With it, a portrait screen gets the landscape rendition when that has
+       * fewer pixels and covers this box drawn at most `PORTRAIT_BOX_UPSCALE` times its size, as a photo in a frame
+       * does; without it, the portrait rendition, which covers the whole screen (#224).
        */
       portraitBox?: { w: number; h: number };
     }
