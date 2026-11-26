@@ -1301,5 +1301,16 @@ Of the 300 ms or so between a kit template's first prepare and its later ones, t
 | | after | 446, 244, 325; 428, 227, 326 | 222-391 | 0.56, 0.33% | 10.5, 10.7% | 0.23, 0.00% | 133, 67 ms |
 
 - **Every first play but the page's first is now within the budget,** and the screen drops half as many frames while the next spot loads: a first play no longer parses its bundle while the spot before it is on screen.
-- **Reading ahead costs the spot on screen nothing measurable.** It runs on the player page's main thread when idle; templates render in their own processes. Playing drops were 0.00 to 0.06% in five of six runs; one portrait run's 0.23% did not come again.
+- **The runs above do not show the read-ahead's cost while it runs** (review of #555): `isolate.py` starts counting 10 s after the page loads, when it is long done. Its one portrait run at 0.23% playing was a single 133 ms frame in steady state, where the read-ahead finds nothing left to read.
+
+**While it runs.** The first seconds after a page load, nothing reset, `room-status+announcement+countdown+info-frame`, cut, landscape, ABBA, three loads a build per order (the read-ahead reads the other three bundles while `room-status` plays, from about 1 s in):
+
+| Build | Player frame monitor, playing (first 12 s) | Its stalls while playing | Presented by the compositor, 1 to 7 s in | Gaps over 50 ms | Worst gap |
+| --- | --- | --- | --- | --- | --- |
+| before | 0.00% in all six | none | 198-209 frames | 8-9 | 500-509 ms |
+| after | 0.42-3.95% | 67-250 ms, one to two a load | 196-207 frames | 8-9 | 500-502 ms |
+
+- **Each bundle's read and parse is one task of about 65 to 250 ms on the player page's main thread**, started when it is idle but not cut into pieces. The player's own frame monitor (a `requestAnimationFrame` loop on that thread) counts it as dropped `play` frames, in the first seconds after a page load or a new manifest.
+- **The compositor presented the same frames either way** (a `viz` trace, `Display::DrawAndSwap`): the template draws in its own process, and the player page draws nothing while a spot plays. These templates hold still between their animations, so the compositor presents only on a change, which is why the counts sit near 200 in 6 s; the gaps and the worst gap are the templates' own cadence, the same in both builds. So the stalls are the monitor's, not the panel's.
+- **A prepare that starts while a read runs waits for it**: a spot of about 5 s or less, whose successor loads at once. Running `containedFrames` in a worker would take it off the main thread; not done here.
 - **The page's first prepare is unchanged** (no spot plays before it to read ahead under): a kit template as the first spot after a page load took 432-558 ms before (one 948) and 455-542 ms after, landscape and portrait together. That is the cold-start cost left: its bundle's first parse and a new template process. Its bundle could be smaller (only the chosen look's fonts, as separate resources; a look-kit change, #232), and the parse itself is the containment check, which this does not touch.

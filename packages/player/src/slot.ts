@@ -193,33 +193,49 @@ type Frames = ReturnType<typeof containedFrames>;
  */
 let framesCache: { manifest: string; frames: Map<string, Promise<Frames>> } | undefined;
 
-function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
+/** `framesCache`, made `manifest`'s if it is another's: what both use is kept. */
+function cacheOf(manifest: ScreenManifest): NonNullable<typeof framesCache> {
   if (framesCache?.manifest !== manifest.id) {
     const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
     const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
     framesCache = { manifest: manifest.id, frames: new Map(kept) };
   }
-  const cache = framesCache;
+  return framesCache;
+}
+
+function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
+  const cache = cacheOf(manifest);
   let frames = cache.frames.get(sha);
   if (!frames) {
     const read = getFile(sha).then(async (blob) => containedFrames(await blob.text()));
     cache.frames.set(sha, (frames = read));
-    // A read that failed is not kept: the next prepare tries again.
+    // A read that failed is not kept: the next prepare tries again. From the cache as it is then,
+    // which a manifest prepared meanwhile has replaced, carrying this read over.
     read.catch(() => {
-      if (cache.frames.get(sha) === read) cache.frames.delete(sha);
+      if (framesCache?.frames.get(sha) === read) framesCache.frames.delete(sha);
     });
   }
   return frames;
 }
 
+/** The manifest whose bundles `warmBundles` is reading, if it is. */
+let warming: string | undefined;
+
 /**
  * Read the bundles of `manifest` not read yet, one at a time when the page is idle, those of the
  * spots in `first` first: while a spot plays, so a template's first prepare does not pay for it
  * (#232). On a Pi 4 a 400 kB bundle's first read and parse took 75 to 210 ms of its first prepare,
- * of 450 to 610 in all; the template plays in its own process, so the player's idle main thread
- * costs it nothing. Stops once another manifest has been prepared.
+ * of 450 to 610 in all; the template plays in its own process. Each read and parse is one task on
+ * the player's main thread, started when it is idle. `manifest` is the one playing, so the cache is
+ * made its own here, whatever kind of spot came first; it stops once another manifest has been
+ * prepared. Not in a browser without `requestIdleCallback` (Safari): the budget it serves is the
+ * Pi's, and a timer could start a parse in the middle of a prepare.
  */
 export function warmBundles(manifest: ScreenManifest, first: readonly string[]): void {
+  // Each play asks again: one read-ahead a manifest at a time.
+  if (typeof requestIdleCallback !== 'function' || warming === manifest.id) return;
+  warming = manifest.id;
+  cacheOf(manifest);
   const firstBundles = first.flatMap((id) => {
     const spot = manifest.spots[id];
     const html = spot?.kind === 'template' && manifest.templates[spot.template]?.html;
@@ -227,13 +243,19 @@ export function warmBundles(manifest: ScreenManifest, first: readonly string[]):
   });
   // Each once: a file that cannot be read is left to the prepare that needs it.
   const left = new Set([...firstBundles, ...Object.values(manifest.templates).map((t) => t.html)]);
+  const done = () => {
+    if (warming === manifest.id) warming = undefined;
+  };
   const next = () => {
     const cache = framesCache;
-    if (cache?.manifest !== manifest.id) return;
-    const sha = [...left].find((s) => !cache.frames.has(s));
-    if (!sha) return;
+    const sha = cache?.manifest === manifest.id ? [...left].find((s) => !cache.frames.has(s)) : undefined;
+    if (!sha) return done();
     left.delete(sha);
-    requestIdleCallback(() => void framesFor(manifest, sha).then(next, next));
+    requestIdleCallback(() => {
+      // Another manifest prepared while this waited: reading for this one would put its cache back.
+      if (framesCache?.manifest === manifest.id) void framesFor(manifest, sha).then(next, next);
+      else done();
+    });
   };
   next();
 }

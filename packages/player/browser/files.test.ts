@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import type { Page } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { Spot } from '@signforge/contract';
-import { TEMPLATE_KEY, type Content } from './content';
+import { TEMPLATE_KEY, type Content, type FixtureSpot } from './content';
 import { png, spotsPlayed, useHarness, visibleFrame, type Player } from './harness';
 
 const h = useHarness();
@@ -22,23 +23,30 @@ const onScreenComments = async (p: Player) => {
   });
 };
 
-/** The player on `content`, counting each read of a file out of its file cache, the only reads of a bundle (`readsOf`). */
-const openCountingReads = (content: Content) =>
+/**
+ * The player on `content`, counting each read of a file out of its file cache, the only reads of a
+ * bundle (`readsOf`), in order (`readOrder`). `more` sets the page up further before it opens.
+ */
+const openCountingReads = (content: Content, more?: (page: Page) => Promise<unknown>) =>
   h.openPlayer(
     (s) => s.publish(content),
     {},
     {
-      before: (page) =>
-        page.addInitScript(() => {
+      before: async (page) => {
+        await page.addInitScript(() => {
           const reads: Record<string, number> = {};
-          Object.assign(window, { sfReads: reads });
+          const order: string[] = [];
+          Object.assign(window, { sfReads: reads, sfOrder: order });
           const match = Cache.prototype.match;
           Cache.prototype.match = function (request, options) {
             const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
             reads[url] = (reads[url] ?? 0) + 1;
+            order.push(url);
             return match.call(this, request, options);
           };
-        }),
+        });
+        await more?.(page);
+      },
     },
   );
 /** How often the player read the file `sha`. */
@@ -50,6 +58,42 @@ const readsOf = (p: Player, sha: string) =>
         .reduce((n, [, c]) => n + c, 0),
     sha,
   );
+/** The order the player first read each of `shas` in. */
+const readOrder = async (p: Player, shas: string[]) => {
+  const order = await p.page.evaluate(() => (window as unknown as { sfOrder: string[] }).sfOrder);
+  return [...new Set(order.flatMap((url) => shas.filter((sha) => url.endsWith(sha))))];
+};
+
+/**
+ * Content where spot `a` has the fixture's bundle and each of `ids` a spot of its own bundle (a template
+ * `<id>/fixture@1.0.0`), added in that order; `playlist` lists the spots that play, `extra` more spots.
+ * Returns each spot's bundle hash too.
+ */
+function ownBundles(ids: string[], playlist: string[], { durationMs = 600, extra = [] as FixtureSpot[] } = {}) {
+  const own = ids.map((id) => {
+    const c = h.content([{ id, durationMs }], { variant: `bundle-${id}` });
+    const spot = c.manifest.spots[id];
+    if (spot?.kind !== 'template') throw new Error(`${id} is a template spot`);
+    return { id, c, spot, sha: bundleOf(c) };
+  });
+  const content = h.content([{ id: 'a', durationMs }, ...extra], {
+    edit: (m) => {
+      for (const o of own) {
+        const key = `${o.id}/fixture@1.0.0`;
+        m.templates[key] = { ...m.templates[TEMPLATE_KEY]!, html: o.sha };
+        m.files[o.sha] = o.c.manifest.files[o.sha]!;
+        m.spots[o.id] = { ...o.spot, template: key };
+      }
+      m.playlists.main!.items = playlist.map((spot) => ({ spot }));
+    },
+  });
+  const bundle: Record<string, string> = { a: bundleOf(content) };
+  for (const o of own) {
+    content.blobs.set(o.sha, o.c.blobs.get(o.sha)!);
+    bundle[o.id] = o.sha;
+  }
+  return { content, bundle };
+}
 
 /** Every key in the player's file cache. */
 const cached = (p: Player) => p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
@@ -97,27 +141,104 @@ describe('content files', () => {
   });
 
   it('reads the bundles still to come while a spot plays, once each (#232)', async () => {
-    // A second template whose spot `b` is in the manifest but not the playlist: only the warm-up reads its bundle.
-    const other = h.content([{ id: 'b', durationMs: 600 }], { variant: 'other-bundle' });
-    const otherBundle = bundleOf(other);
-    const b = other.manifest.spots.b;
-    if (b?.kind !== 'template') throw new Error('b is a template spot');
-    const content = h.content([{ id: 'a', durationMs: 600 }], {
-      edit: (m) => {
-        m.templates['other/fixture@1.0.0'] = { ...m.templates[TEMPLATE_KEY]!, html: otherBundle };
-        m.files[otherBundle] = other.manifest.files[otherBundle]!;
-        m.spots.b = { ...b, template: 'other/fixture@1.0.0' };
-      },
-    });
-    content.blobs.set(otherBundle, other.blobs.get(otherBundle)!);
+    // `b` is in the manifest but not the playlist: only the read-ahead reads its bundle.
+    const { content, bundle } = ownBundles(['b'], ['a']);
     const p = await openCountingReads(content);
     await p.until((s) => s.log.length >= 1);
-    await expect.poll(() => readsOf(p, otherBundle)).toBe(1);
+    await expect.poll(() => readsOf(p, bundle.b!)).toBe(1);
     // And not again, however often a plays.
     await p.until((s) => s.log.length >= 4);
-    expect(await readsOf(p, otherBundle)).toBe(1);
-    expect(await readsOf(p, bundleOf(content))).toBe(1);
+    expect(await readsOf(p, bundle.b!)).toBe(1);
+    expect(await readsOf(p, bundle.a!)).toBe(1);
     expect(spotsPlayed(await p.state()).every((id) => id === 'a')).toBe(true);
+  });
+
+  it("reads the playlist's next spots' bundles first, then the rest of the manifest's (#232)", async () => {
+    // `d`'s template comes first in the manifest, but no spot of the playlist uses it.
+    const { content, bundle } = ownBundles(['d', 'c', 'b'], ['a', 'c', 'b'], { durationMs: 60_000 });
+    const p = await openCountingReads(content);
+    await p.until((s) => s.log.length >= 1);
+    const read = [bundle.c!, bundle.b!, bundle.d!];
+    await expect.poll(() => readOrder(p, read)).toHaveLength(3);
+    expect(await readOrder(p, read)).toEqual(read);
+  });
+
+  it('reads ahead when the playlist opens with a spot that is not a template (#232)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['u'], { durationMs: 60_000, extra: [{ id: 'u', url: 'https://first.test/', durationMs: 60_000 }] });
+    const p = await openCountingReads(content, (page) =>
+      page.context().route(/^https:\/\/first\.test\//, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>First</title>' })),
+    );
+    await p.until((s) => s.log.length >= 1);
+    await expect.poll(() => Promise.all([readsOf(p, bundle.a!), readsOf(p, bundle.b!)])).toEqual([1, 1]);
+  });
+
+  it('plays and logs every spot in a browser without requestIdleCallback (Safari), reading nothing ahead (#232)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a']);
+    const p = await openCountingReads(content, (page) => page.addInitScript(() => Reflect.deleteProperty(window, 'requestIdleCallback')));
+    const s = await p.until((s) => s.played >= 3);
+    expect(s.lastError).toBe('');
+    expect(s.log.length).toBe(s.played);
+    expect(await readsOf(p, bundle.b!)).toBe(0);
+  });
+
+  it('drops a read that failed after the manifest changed, so the next prepare reads again (#232)', async () => {
+    const one = h.content([{ id: 'a', durationMs: 600 }]);
+    const two = h.content([{ id: 'a', durationMs: 700 }]);
+    expect(bundleOf(two)).toBe(bundleOf(one));
+    const p = await h.openPlayer(
+      (s) => s.publish(one),
+      {},
+      {
+        before: (page) =>
+          page.addInitScript((sha) => {
+            // While held, a read of the bundle waits, then misses, as a file the browser evicted does.
+            const w = window as unknown as { sfHold: boolean; sfHeld: (() => void)[] };
+            w.sfHold = true;
+            w.sfHeld = [];
+            const match = Cache.prototype.match;
+            Cache.prototype.match = function (request, options) {
+              const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
+              if (w.sfHold && url.endsWith(sha)) return new Promise((resolve) => w.sfHeld.push(() => resolve(undefined)));
+              return match.call(this, request, options);
+            };
+          }, bundleOf(one)),
+      },
+    );
+    // The first prepare's read is held, so it times out; the next manifest's prepares join that read.
+    await p.until((s) => s.skipped >= 1);
+    p.server.publish(two);
+    const adopted = await p.until((s) => s.manifestId === two.manifest.id);
+    await p.until((s) => s.skipped >= adopted.skipped + 1);
+    // The read misses; from here the file reads as it is, in the cache.
+    await p.page.evaluate(() => {
+      const w = window as unknown as { sfHold: boolean; sfHeld: (() => void)[] };
+      w.sfHold = false;
+      w.sfHeld.splice(0).forEach((f) => f());
+    });
+    expect((await p.until((s) => s.log.length >= 1)).log[0]).toMatchObject({ spot: 'a', manifest: two.manifest.id });
+  });
+
+  it("stops reading ahead for a manifest once another is prepared, and never puts the old one's back (#232)", async () => {
+    const { content: one, bundle } = ownBundles(['b'], ['a']);
+    const two = h.content([{ id: 'c', durationMs: 600 }], { variant: 'bundle-third' });
+    const p = await openCountingReads(one, (page) =>
+      page.addInitScript(() => {
+        // Idle callbacks wait until the test lets them go.
+        const w = window as unknown as { sfIdle: IdleRequestCallback[] };
+        w.sfIdle = [];
+        window.requestIdleCallback = (cb) => w.sfIdle.push(cb);
+      }),
+    );
+    await p.until((s) => s.log.length >= 1);
+    await expect.poll(() => p.page.evaluate(() => (window as unknown as { sfIdle: unknown[] }).sfIdle.length)).toBe(1);
+    p.server.publish(two);
+    await p.until((s) => s.log.some((l) => l.manifest === two.manifest.id));
+    // `one`'s read-ahead, held across the change, runs now; `two`'s own is still held.
+    await p.page.evaluate(() => (window as unknown as { sfIdle: IdleRequestCallback[] }).sfIdle.shift()!({ didTimeout: false, timeRemaining: () => 50 }));
+    const before = (await p.state()).log.length;
+    await p.until((s) => s.log.length >= before + 3);
+    expect(await readsOf(p, bundle.b!)).toBe(0);
+    expect(await readsOf(p, bundleOf(two))).toBe(1);
   });
 
   it('never shows a template from the bundle it had for another hash (#213)', async () => {
