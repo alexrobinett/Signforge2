@@ -9,6 +9,7 @@ import {
   dispatch,
   effectiveScopes,
   grantOf,
+  ListedInput,
   platformRegistry,
   redact,
   registry,
@@ -177,6 +178,19 @@ describe('the registry', () => {
       expect(schema.required ?? [], name).not.toContain('idempotencyKey');
     }
     // register_template_version is idempotent by its natural key: a version is registered once (templates.test.ts).
+  });
+
+  it("lists an input as its own JSON Schema for the target asked, trimmed, and its output as zod's (review of #475)", () => {
+    const input = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]+$/), n: z.number().int().default(1) });
+    const standard = new ListedInput(input)['~standard'];
+    const latest = standard.jsonSchema.input({ target: 'draft-2020-12' });
+    expect(latest).not.toHaveProperty('$schema');
+    // Another target is built for it, as listed: no `$schema` either.
+    expect(standard.jsonSchema.input({ target: 'draft-07' })).toMatchObject({ type: 'object', required: ['id'] });
+    expect(standard.jsonSchema.input({ target: 'draft-07' })).not.toHaveProperty('$schema');
+    // Its output: what a call parses to (n always there), not the input again.
+    expect(standard.jsonSchema.output({ target: 'draft-2020-12' })).toMatchObject({ required: ['id', 'n'] });
+    expect(latest).toMatchObject({ required: ['id'] });
   });
 
   it('keeps the platform tools apart: base templates only, never on /api', () => {

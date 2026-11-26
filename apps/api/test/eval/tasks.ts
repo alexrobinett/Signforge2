@@ -23,14 +23,17 @@ function parsed(text: string): unknown {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Every object in `v`, however deep. */
-const objectsIn = (v: unknown): Record<string, unknown>[] =>
-  Array.isArray(v) ? v.flatMap(objectsIn) : isObject(v) ? [v, ...Object.values(v).flatMap(objectsIn)] : [];
+/**
+ * The records a result returns: itself, and each of its own fields' records (`{ screen }`), or rows (`{ items: [...] }`).
+ * Not deeper: an audit row's `target` or `actor` carries another record's id, and would merge into it (review of #470).
+ */
+export const recordsIn = (v: unknown): Record<string, unknown>[] =>
+  isObject(v) ? [v, ...Object.values(v).flatMap((f) => (Array.isArray(f) ? f.filter(isObject) : isObject(f) ? [f] : []))] : [];
 
 /** What the model read about each record, by id: the fields of every successful result that showed it, merged. */
 function records(o: Outcome): Map<string, Record<string, unknown>> {
   const byId = new Map<string, Record<string, unknown>>();
-  for (const r of o.results) if (r.ok) for (const x of objectsIn(parsed(r.text))) if (typeof x.id === 'string') byId.set(x.id, { ...byId.get(x.id), ...x });
+  for (const r of o.results) if (r.ok) for (const x of recordsIn(parsed(r.text))) if (typeof x.id === 'string') byId.set(x.id, { ...byId.get(x.id), ...x });
   return byId;
 }
 
@@ -55,18 +58,34 @@ const draftOf = (o: Outcome, tool: string, id?: string) => o.drafts.find((d) => 
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+const minutes = (t: unknown, otherwise: number) =>
+  typeof t === 'string' && /^\d\d:\d\d$/.test(t) ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) : otherwise;
+
 /**
  * Whether `entries`, a schedule entry's fields as the drafting tool takes them, play `playlistId` on `groupId` from
- * 07:00 to 10:00 on exactly the five weekdays, together: every entry in that window counts, with no end date and none
- * starting after `today`, and the union of their days must be Monday to Friday, no more and no less. An entry with no
- * days plays every day.
+ * 07:00 to 10:00 on exactly the five weekdays, together: every entry of that playlist on that group counts, whatever its
+ * window, with no end date and none starting after `today`. Each day's windows, joined, must be exactly 07:00-10:00 on
+ * Monday to Friday and nothing on a weekend, however split (review of #470). No days is every day; no window, all day.
  */
-function weekdayMornings(entries: readonly Record<string, unknown>[], playlistId: string, groupId: string, today: string) {
-  const mine = entries.filter((e) => e.playlistId === playlistId && e.target === 'group' && e.groupId === groupId && e.from === '07:00' && e.to === '10:00');
+export function weekdayMornings(entries: readonly Record<string, unknown>[], playlistId: string, groupId: string, today: string) {
+  const mine = entries.filter((e) => e.playlistId === playlistId && e.target === 'group' && e.groupId === groupId);
   if (!mine.length) return false;
   if (mine.some((e) => (e.endDate ?? null) !== null || (typeof e.startDate === 'string' && e.startDate > today))) return false;
-  const days = new Set(mine.flatMap((e) => (Array.isArray(e.days) ? e.days : [0, 1, 2, 3, 4, 5, 6])));
-  return days.size === WEEKDAYS.length && WEEKDAYS.every((d) => days.has(d));
+  for (let day = 0; day < 7; day++) {
+    const windows = mine
+      .filter((e) => !Array.isArray(e.days) || e.days.includes(day))
+      .map((e) => [minutes(e.from, 0), minutes(e.to, 24 * 60)] as const)
+      .sort((a, b) => a[0] - b[0]);
+    const joined: [number, number][] = [];
+    for (const [from, to] of windows) {
+      const last = joined.at(-1);
+      if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+      else joined.push([from, to]);
+    }
+    const want = WEEKDAYS.includes(day) ? [[7 * 60, 10 * 60]] : [];
+    if (JSON.stringify(joined) !== JSON.stringify(want)) return false;
+  }
+  return true;
 }
 
 /** The org's schedule for `playlistId` on `groupId` on weekday mornings, read from D1. */
@@ -206,7 +225,7 @@ export const TASKS: Task[] = [
     role: 'owner',
     script: both((w) => [[{ name: 'read', input: { type: 'audit_entry', filter: { target: { kind: 'spot', id: w.spots.lunch } } } }]]),
     check(o) {
-      const entries = o.results.flatMap((r) => (r.ok ? objectsIn(parsed(r.text)) : []));
+      const entries = o.results.flatMap((r) => (r.ok ? recordsIn(parsed(r.text)) : []));
       const hit = entries.some(
         (e) => e.action === 'save_spot' && same(e.target, { kind: 'spot', id: o.world.spots.lunch }) && isObject(e.actor) && typeof e.actor.id === 'string',
       );

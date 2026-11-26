@@ -598,29 +598,46 @@ export async function sha256Hex(text: string) {
  * call against it before the tool runs or pauses for a card, and tells the model what was wrong. The dispatcher checks
  * it again.
  */
+/** `input`'s JSON Schema for `target` as listed: no `$schema`, id pattern or safe-integer bound. */
+function listedSchema(input: z.ZodType, target: z.core.JSONSchemaGenerator['target'] = 'draft-2020-12'): Record<string, unknown> {
+  const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
+    target,
+    io: 'input',
+    unrepresentable: 'any',
+    override: ({ jsonSchema: s }) => {
+      if (s.pattern === ID_PATTERN.source) delete s.pattern;
+      if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
+      if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+    },
+  });
+  return schema;
+}
+
 export class ListedInput {
   [field: string]: unknown;
   readonly #input: z.ZodType;
   readonly #schema: Record<string, unknown>;
 
   constructor(input: z.ZodType) {
-    const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
-      io: 'input',
-      unrepresentable: 'any',
-      override: ({ jsonSchema: s }) => {
-        if (s.pattern === ID_PATTERN.source) delete s.pattern;
-        if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
-        if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
-      },
-    });
+    const schema = listedSchema(input);
     Object.assign(this, schema);
     this.#input = input;
     this.#schema = schema;
   }
 
+  /**
+   * As zod's own, with the input's JSON Schema the listed one for the target asked (2020-12 the one built), and its output
+   * zod's: what a call parses to, not the input again (review of #475).
+   */
   get '~standard'(): z.ZodType['~standard'] {
-    const listed = () => structuredClone(this.#schema);
-    return { ...this.#input['~standard'], jsonSchema: { input: listed, output: listed } };
+    const own = this.#input['~standard'];
+    return {
+      ...own,
+      jsonSchema: {
+        input: ({ target }) => (target === 'draft-2020-12' ? structuredClone(this.#schema) : listedSchema(this.#input, target)),
+        output: (options) => own.jsonSchema.output(options),
+      },
+    };
   }
 }
 
