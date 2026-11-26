@@ -25,7 +25,7 @@ import { boundImageHashes, hasBoundListImage, snapshotFit } from '@signforge/pla
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
-import { screenManifests, type ManifestSummary } from './manifests';
+import { fileManifests, screenManifests, type ManifestSummary } from './manifests';
 import { issueTicket } from './ticket';
 
 /** How often a screen syncs. */
@@ -50,7 +50,8 @@ function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
  * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it
  * holds at the current version were last checked, and any feed image blob hashes referenced by
  * those snapshots that the screen did not report holding (capped at `MAX_SYNC_RESPONSE_BLOBS`),
- * and whether more were left out.
+ * and whether more were left out. `first`: sources whose photos go before the others', those of the manifest a
+ * screen plays while it falls back from the desired one.
  */
 async function snapshotsFor(
   env: Env,
@@ -59,6 +60,7 @@ async function snapshotsFor(
   held: Record<string, number>,
   heldBlobs: readonly string[] | undefined,
   includeBlobs: boolean,
+  first: ReadonlySet<string>,
 ): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'> & { morePhotos: boolean }> {
   if (!desired?.dataSources.size) return { snapshots: [], checked: {}, morePhotos: false };
   const rows = await scoped(env.DB, screen.orgId).dataSources.snapshots([...desired.dataSources]);
@@ -66,8 +68,8 @@ async function snapshotsFor(
   const snapshots: DataSnapshot[] = [];
   const checked: NonNullable<SyncResponse['checked']> = {};
   const have = new Set(heldBlobs ?? []);
-  /** Each source's missing photos, in story order. */
-  const missingBySource: string[][] = [];
+  /** Each source's missing photos, in story order: `first`'s sources, then the rest. */
+  const missingBySource: [string[][], string[][]] = [[], []];
   for (const r of rows) {
     const checkedAt = new Date(r.checkedAt).toISOString();
     if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
@@ -79,13 +81,14 @@ async function snapshotsFor(
     // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
     if (snapshotFit(bound, data).refused) continue;
     if (newer) snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
-    if (wantBlobs) missingBySource.push(boundImageHashes(bound, data).filter((sha) => !have.has(sha)));
+    if (wantBlobs) missingBySource[first.has(r.dataSourceId) ? 0 : 1].push(boundImageHashes(bound, data).filter((sha) => !have.has(sha)));
   }
   // One from each source in turn: every feed's first stories come before any feed's later ones, rather than the
   // sources first in order filling the reply.
   const missing = new Set<string>();
-  for (let i = 0; missing.size <= MAX_SYNC_RESPONSE_BLOBS && missingBySource.some((m) => i < m.length); i++)
-    for (const m of missingBySource) if (i < m.length) missing.add(m[i]!);
+  for (const group of missingBySource)
+    for (let i = 0; missing.size <= MAX_SYNC_RESPONSE_BLOBS && group.some((m) => i < m.length); i++)
+      for (const m of group) if (i < m.length) missing.add(m[i]!);
   const blobs = [...missing].slice(0, MAX_SYNC_RESPONSE_BLOBS);
   return { snapshots, checked, ...(blobs.length ? { blobs } : {}), morePhotos: missing.size > blobs.length };
 }
@@ -187,7 +190,11 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const display = overrideCommand(screen, req.display.override, now);
   if (display) commands.push(display);
 
-  const { morePhotos, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable);
+  // Falling back from the desired manifest, the screen plays its last good one: a feed both bind gets its photos first,
+  // rather than the reply filling with those of feeds only the broken one names (#464).
+  const playing =
+    desired && req.manifest.fallbackFrom === desired.id ? (await fileManifests(c.env.BLOBS, screen)).find((m) => m.id === req.manifest.active) : undefined;
+  const { morePhotos, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable, playing?.dataSources ?? new Set());
   const res: SyncResponse = {
     serverTime: new Date().toISOString(),
     nextSyncS: morePhotos ? MORE_PHOTOS_SYNC_S : SYNC_INTERVAL_S,

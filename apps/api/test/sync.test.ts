@@ -525,6 +525,44 @@ describe('snapshot feed blobs (#196)', () => {
     expect(r3.blobs).toBeUndefined();
   });
 
+  it('falling back, sends the photos of a feed the manifest playing binds before those only the broken one names (#464)', async () => {
+    const s = await setUp('sync-feed-blobs-fallback');
+    const shared = s.seed.dataSource;
+    const broken = (await s.seed.scope.dataSources.insert({ name: 'Only in the broken one', format: 'rss', urlEncrypted: 'enc:b', refreshS: 300 })).id;
+    const spot = (id: string, source: string) => ({
+      id,
+      kind: 'template',
+      template: 'base/news@2.0.0',
+      data: { items: [] },
+      bindings: { items: { source, path: 'items' } },
+    });
+    const items = (offset: number) =>
+      Array.from({ length: 10 }, (_, i) => ({
+        title: `Story ${offset + i}`,
+        published: '',
+        source: '',
+        image: { file: hash(offset + i * 2 + 1), thumb: hash(offset + i * 2 + 2) },
+      }));
+    await s.seed.scope.dataSources.putSnapshot(shared, { version: 'v1', fetchedAt: 6000, checkedAt: 6000, dataJson: JSON.stringify({ items: items(100) }) });
+    await s.seed.scope.dataSources.putSnapshot(broken, { version: 'v1', fetchedAt: 6000, checkedAt: 6000, dataJson: JSON.stringify({ items: items(200) }) });
+    const templates = { 'base/news@2.0.0': newsTemplate(true) };
+    // The good one, played to the end once: the screen reports it as its last good.
+    await publish(s, OLD, { schema: MANIFEST_SCHEMA, dataSources: { [shared]: { id: shared, refreshS: 300 } }, templates, spots: { n: spot('n', shared) } });
+    await sync(s, body({ manifest: { active: OLD, filesMissing: 0, lastGood: OLD }, snapshots: { [shared]: 6000 } }));
+    await publish(s, NEW, {
+      schema: MANIFEST_SCHEMA,
+      dataSources: { [shared]: { id: shared, refreshS: 300 }, [broken]: { id: broken, refreshS: 300 } },
+      templates,
+      spots: { n: spot('n', shared), x: spot('x', broken) },
+    });
+    const r = await sync(
+      s,
+      body({ manifest: { active: OLD, filesMissing: 0, fallbackFrom: NEW, lastGood: OLD }, snapshots: { [shared]: 6000, [broken]: 6000 } }),
+    );
+    expect(new Set(r.blobs)).toEqual(new Set(Array.from({ length: 20 }, (_, i) => hash(100 + i + 1))));
+    expect(r.nextSyncS).toBeLessThan(60);
+  });
+
   it('sends no feed blobs for a text-only template (news 1.4.1) or an outdated player, and refuses over-limit SyncRequest.blobs', async () => {
     const s = await setUp('sync-feed-blobs-text');
     const src = s.seed.dataSource;
