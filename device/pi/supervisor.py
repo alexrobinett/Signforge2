@@ -53,8 +53,9 @@ output's name and its modes, which wake nothing), and when it is not MODE sets i
 does and logs it. GET /display reports the last reading and how often a set took ("output": {"mode",
 "resets"}); the player sends it in its heartbeat, so the screen's tools show it. A panel that refuses
 MODE is set MODE_TRIES times in a row, then once every MODE_RETRY_S, its own mode reported meanwhile
-(#558). A check that fails unexpectedly is logged and the reading dropped, so none looks current. Not
-read while the panel is off: the signal is off by design then, and setting a mode would turn it on.
+(#558). A check that fails unexpectedly is logged (then once an hour while it goes on) and the
+reading dropped, so none looks current. Not read while the panel is off: the signal is off by design
+then, and setting a mode would turn it on.
 """
 import hmac, ipaddress, json, os, re, secrets, subprocess, threading, time
 from urllib.parse import urlsplit
@@ -227,6 +228,8 @@ def read_mode():
 
 # The mode watch's own counts: sets that took, failed sets in a row, and the monotonic time before which none is tried.
 mode_watch = {"resets": 0, "failed": 0, "next_try": 0.0}
+# Checks that failed in a row, and the monotonic time before which another failure is not logged (review of #560).
+mode_errors = {"count": 0, "next_log": 0.0}
 
 
 def check_mode(now):
@@ -253,7 +256,7 @@ def check_mode(now):
                 stuck = mode_watch["failed"] >= MODE_TRIES
                 if stuck:
                     mode_watch["next_try"] = now + MODE_RETRY_S
-                then = f"; stuck at {mode}, tried again in {MODE_RETRY_S // 60} min" if stuck else ""
+                then = f"; stuck at {mode}, next try in {MODE_RETRY_S // 60} min" if stuck else ""
                 print(f"output at {was}, not {MODE}: set back, still {mode}{why}{then}", flush=True)
         state["output"] = {"mode": mode, "resets": mode_watch["resets"]}
 
@@ -261,13 +264,22 @@ def check_mode(now):
 def watch_mode():
     while True:
         time.sleep(MODE_CHECK_S)
+        now = time.monotonic()
         try:
-            check_mode(time.monotonic())
+            check_mode(now)
         except Exception as e:
-            # Logged and the reading dropped, so the screen shows none rather than one that looks current (#558).
+            # The reading dropped, so the screen shows none rather than one that looks current (#558). Logged at the
+            # first failure, then once every MODE_RETRY_S while they go on, not every minute (review of #560).
             with lock:
                 state.pop("output", None)
-            print(f"mode check failed: {e!r}", flush=True)
+            mode_errors["count"] += 1
+            if now >= mode_errors["next_log"]:
+                mode_errors["next_log"] = now + MODE_RETRY_S
+                print(f"mode check failed ({mode_errors['count']} in a row): {e!r}", flush=True)
+            continue
+        if mode_errors["count"]:
+            print(f"mode check works again, after {mode_errors['count']} that failed", flush=True)
+            mode_errors.update(count=0, next_log=0.0)
 
 
 # time.monotonic() of the player's last beat; None until a beat after a start or a restart.
