@@ -199,7 +199,9 @@ describe('groups', () => {
     expect(await said({ name: 'New', screenIds: [o.screen], membership: 'remove' })).toMatch(/no screens to remove/);
     expect(await said({ groupId: o.group, screenIds: [o.screen] })).toMatch(/give membership with screenIds: add, remove or set/);
     // A key replays its first answer, so on a change it would hide a repeat (#503).
-    expect(await said({ groupId: o.group, screenIds: [o.screen], membership: 'add', idempotencyKey: 'k-1' })).toMatch(/idempotencyKey is for a new group/);
+    expect(await said({ groupId: o.group, screenIds: [o.screen], membership: 'add', idempotencyKey: 'group-change-1' })).toMatch(
+      /idempotencyKey is for a new group/,
+    );
     expect(await said({ groupId: o.group, membership: 'add' })).toMatch(/membership needs the screenIds/);
     expect(await said({ groupId: o.group })).toMatch(/give a name or screenIds/);
   });

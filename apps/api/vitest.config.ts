@@ -4,7 +4,7 @@ import { buildTemplate } from '@signforge/template-build';
 import { FONTS, fontFilePath } from '@signforge/compiler/fonts';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
-import { unstable_readConfig } from 'wrangler';
+import { experimental_readRawConfig, unstable_readConfig } from 'wrangler';
 
 // Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
 // ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
@@ -72,7 +72,9 @@ function rateLimits() {
 // malformed one fails CI, not every queue batch once deployed (#508).
 function deployedVars() {
   const config = new URL('wrangler.jsonc', import.meta.url).pathname;
-  return JSON.stringify(Object.fromEntries(['dev', 'demo', 'prod'].map((env) => [env, unstable_readConfig({ config, env }, { hideWarnings: true }).vars])));
+  // Every environment the config names, so one added later is parsed too (review of #548).
+  const names = Object.keys(experimental_readRawConfig({ config }).rawConfig.env ?? {});
+  return JSON.stringify(Object.fromEntries(names.map((env) => [env, unstable_readConfig({ config, env }, { hideWarnings: true }).vars])));
 }
 
 // FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.

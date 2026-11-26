@@ -694,6 +694,23 @@ describe('a news source with photos', () => {
     await consume(take(), { guards: web({ [url]: { body: avif() } }).guards, images });
     expect(draws).toEqual(['image/webp@1920x1280', 'image/webp@480x320']);
   });
+
+  it("asks Images nothing for an AVIF the month's transformations cannot pay for, not even its size (review of #548)", async () => {
+    await news('https://avif-spent.test/rss');
+    const url = 'https://cdn.avif-spent.test/a.avif';
+    await poll({ now: NOW, guards: web({ 'https://avif-spent.test/rss': { body: feedOf(1, () => url) } }).guards });
+    const { images, draws } = imagesStub();
+    const info = vi.spyOn(images, 'info');
+    // Bytes no other test's AVIF has, so no copy of them is reused before Images would be asked.
+    await consume(take(), {
+      guards: web({ [url]: { body: new Uint8Array([...avif(), 7]) } }).guards,
+      images,
+      transforms: { spent: async () => false, take: async () => false },
+    });
+    expect(info).not.toHaveBeenCalled();
+    expect(draws).toEqual([]);
+    expect(await row(url)).toMatchObject({ fileSha256: null, lastError: 'images-month-budget' });
+  });
 });
 
 describe('only fetching for sources something will show', () => {
@@ -1008,6 +1025,15 @@ describe('budgets, resilience and cleanup', () => {
     expect(photos.requests.length).toBeGreaterThan(beforeRecheck);
     expect(await row(big!)).toMatchObject({ fileSha256: held.fileSha256, lastError: null });
     expect((await row(big!))!.nextCheckAt).toBeGreaterThan(held.nextCheckAt);
+    // Its bytes changed: a new copy would need Images, so it keeps the one it has and is fetched again a day later (review of #548).
+    const changedAt = (await row(big!))!.nextCheckAt;
+    await o.scope.dataSources.update(id, { nextPollAt: changedAt, etag: null });
+    await poll({ now: changedAt, guards: web({ 'https://month.test/rss': { body: feedOf(1, () => big!) } }).guards });
+    const changed = web({ [big!]: { body: jpeg(3010, 2000, 'big, changed') } });
+    await consume(take(), { guards: changed.guards, images, transforms: d1TransformBudget(env.DB, 2, changedAt) }, changedAt);
+    expect(changed.requests).toHaveLength(1);
+    expect(await row(big!)).toMatchObject({ fileSha256: held.fileSha256, lastError: 'images-month-budget', nextCheckAt: changedAt + DAY_MS });
+    expect(await imagesTransformsUsed(env.DB, imagesMonth(at))).toBe(2);
     // A new month starts again.
     const next = Date.UTC(2031, 1, 1);
     await o.scope.dataSources.update(id, { nextPollAt: next, etag: null });
@@ -1044,7 +1070,8 @@ describe('budgets, resilience and cleanup', () => {
 
   it("reads every environment's photo caps and month's ceiling as the Worker does, so a malformed one fails here (#508)", () => {
     const vars: Record<string, Record<string, string | undefined>> = JSON.parse(env.DEPLOYED_VARS);
-    expect(Object.keys(vars)).toEqual(['dev', 'demo', 'prod']);
+    // Read from wrangler.jsonc's env: these at least, and any added since.
+    expect(Object.keys(vars)).toEqual(expect.arrayContaining(['dev', 'demo', 'prod']));
     for (const [name, v] of Object.entries(vars)) {
       expect(() => photoBudget(v), name).not.toThrow();
       expect(() => monthlyTransforms(v), name).not.toThrow();

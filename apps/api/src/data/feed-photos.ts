@@ -139,7 +139,7 @@ export function cfPhotoQueue(queue: { sendBatch(messages: Iterable<{ body: FeedI
  * add up to fewer than the account's allowance.
  */
 export interface TransformBudget {
-  /** Whether the month's are used up: the consumer then fetches no photo. */
+  /** Whether the month's are used up: the consumer then fetches no new photo, and rechecks only those it holds (#508). */
   spent(): Promise<boolean>;
   /** Takes `n` of the month's, all or none: whether they were. */
   take(n: number): Promise<boolean>;
@@ -441,7 +441,11 @@ async function copies(
   bytes: Uint8Array,
 ): Promise<{ file: { bytes: Uint8Array; type: string }; thumb: { bytes: Uint8Array; type: string } }> {
   const source = sniffed(bytes);
+  // An AVIF never passes through: its first transformation is taken before Images reads its size, so a spent month
+  // asks Images nothing (review of #548). One Images then refuses keeps that one taken, which errs on the safe side.
+  const paid = source.type === 'image/avif' ? 1 : 0;
   try {
+    if (paid && !(await transforms.take(paid))) throw new PhotoFailure('images-month-budget');
     // AVIF's size is the decoder's to read; the others' as displayed, after a JPEG's EXIF orientation, as a browser draws them.
     const size = source.width && source.height ? { width: source.width, height: source.height } : await images.info(stream(bytes));
     if (!('width' in size)) throw new PhotoFailure('not-an-image');
@@ -456,7 +460,7 @@ async function copies(
     const fileSize = passThrough ? size : cover;
     const small = coverSize(fileSize.width, fileSize.height, NEWS_THUMB_BOX);
     // What Images is asked for, taken from the month's before it is: none for a small photo that passes through.
-    const needed = (passThrough ? 0 : 1) + (small.scaled ? 1 : 0);
+    const needed = (passThrough ? 0 : 1) + (small.scaled ? 1 : 0) - paid;
     if (needed && !(await transforms.take(needed))) throw new PhotoFailure('images-month-budget');
     const file = passThrough ? { bytes, type } : { bytes: await scaled(images, bytes, cover, type), type };
     const thumb = small.scaled ? { bytes: await scaled(images, file.bytes, small, type), type } : file;
