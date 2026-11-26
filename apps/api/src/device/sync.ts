@@ -37,6 +37,8 @@ const SYNC_INTERVAL_S = 300;
  * them would otherwise sync 5,760 times a day rather than 288.
  */
 const MORE_PHOTOS_SYNC_S = 15;
+/** How much of each asked photo's hash the heartbeat keeps, its end, to tell whether the next sync holds it: 64 bits. */
+const ASK_KEPT = 16;
 /** Counts for an hour this far past the server's are not believed: the screen's clock is wrong. */
 const FUTURE_SLACK_MS = 3_600_000;
 
@@ -91,14 +93,15 @@ async function snapshotsFor(
   const order = new Set<string>();
   for (const group of photosBySource) for (let i = 0; group.some((h) => i < h.length); i++) for (const h of group) if (i < h.length) order.add(h[i]!);
   const photos = [...order];
-  const lacking = photos.filter((sha) => !have.has(sha)).length;
+  /** Positions in `photos` of those the screen lacks. */
+  const lacking = photos.flatMap((sha, i) => (have.has(sha) ? [] : [i]));
   // From the photo after the one the last ask ended on, round to the front: photos that never arrive, and those a
   // screen holding more than MAX_SYNC_BLOBS holds but cannot report, cannot keep the rest from being asked for. From
   // the front once more are missing than were (a publish, a feed's new stories), so leads come before deeper stories.
-  const start = last?.after !== undefined && lacking <= last.missing ? photos.indexOf(last.after) + 1 : 0;
-  const missing = [...photos.slice(start), ...photos.slice(0, start)].filter((sha) => !have.has(sha));
-  const blobs = missing.slice(0, MAX_SYNC_RESPONSE_BLOBS);
-  return { snapshots, checked, ...(blobs.length ? { blobs } : {}), missing: missing.length };
+  const end = last && lacking.length <= last.missing ? last.ask.at(-1) : undefined;
+  const after = end === undefined ? -1 : photos.findIndex((sha) => sha.endsWith(end));
+  const ask = [...lacking.filter((i) => i > after), ...lacking.filter((i) => i <= after)].slice(0, MAX_SYNC_RESPONSE_BLOBS).map((i) => photos[i]!);
+  return { snapshots, checked, ...(ask.length ? { blobs: ask } : {}), missing: lacking.length };
 }
 
 const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
@@ -159,12 +162,16 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     desired && req.manifest.fallbackFrom === desired.id ? (await fileManifests(c.env.BLOBS, screen)).find((m) => m.id === req.manifest.active) : undefined;
   const last = screen.lastPhotos;
   const { missing, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable, playing?.dataSources ?? new Set(), last);
-  const asked = snapshotsOut.blobs;
-  // Soon again while more are missing than this reply asks for and the count still missing moves. When it holds (the
-  // screen cannot fetch them, keeps only those it plays, or holds more than MAX_SYNC_BLOBS), one retry, for a reply
-  // that was lost, then the full interval, as for a screen with nothing missing.
-  const moved = !last?.asked || missing !== last.missing;
-  const soon = missing > (asked?.length ?? 0) && (moved || !last?.retried);
+  const asked = snapshotsOut.blobs ?? [];
+  // Soon again while more are missing than this reply asks for, and either the screen now holds a photo the last reply
+  // asked for or more are missing than were (a publish, a feed's new stories). Otherwise (it cannot fetch them, keeps
+  // only those it plays, holds more than MAX_SYNC_BLOBS, or the reply was lost) one retry, for a lost reply, and then
+  // the full interval, as for a screen with nothing missing. The retry is spent until the screen fetches one, so a feed
+  // that turns over on a screen that cannot act on it costs one 15 s sync, not a retry each time.
+  const reported = new Set((req.blobs ?? []).map((sha) => sha.slice(-ASK_KEPT)));
+  const fetched = !last?.ask.length || last.ask.some((p) => reported.has(p));
+  const grew = missing > (last?.missing ?? 0);
+  const soon = missing > asked.length && (fetched || grew || !last?.retried);
 
   const { player, manifest: m, display: d, clock } = req;
   // Only the contract's fields, copied one by one: the parser lets unknown keys through, and the
@@ -187,7 +194,13 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     driftMs: now - Date.parse(req.deviceTime),
     // A player before gh-45 reports every source seen since it started: kept to a bounded row.
     dataRejected: Object.fromEntries(Object.entries(req.dataRejected ?? {}).slice(0, MAX_SYNC_SOURCES)),
-    photos: { held: req.blobs?.length ?? 0, missing, asked: asked !== undefined, retried: !moved, ...(asked && { after: asked.at(-1)! }) },
+    photos: {
+      held: req.blobs?.length ?? 0,
+      missing,
+      // Spent by a retry, kept while nothing asked for arrives, renewed once something does.
+      retried: !fetched && (!!last?.retried || !grew),
+      ask: asked.map((sha) => sha.slice(-ASK_KEPT)),
+    },
   };
   const counts = req.playCounts
     .map((p) => ({ hour: Date.parse(p.hour), spotId: p.spot, plays: p.plays, ms: Math.round(p.ms) }))

@@ -625,9 +625,10 @@ describe('snapshot feed blobs (#196)', () => {
     expect(r3.nextSyncS).toBe(300);
     // Each ask starts after the photo the last one ended on, so photos that never come cannot hold the front.
     expect(new Set([...r1.blobs!, ...r2.blobs!, ...r3.blobs!])).toEqual(new Set([0, 1, 2].flatMap(photos)));
-    expect((await sync(s, body(held))).nextSyncS).toBe(300);
-    // Once they come in, soon again.
-    expect((await sync(s, body({ ...held, blobs: r2.blobs }))).nextSyncS).toBe(15);
+    const r4 = await sync(s, body(held));
+    expect(r4.nextSyncS).toBe(300);
+    // Once those it was last asked for come in, soon again.
+    expect((await sync(s, body({ ...held, blobs: r4.blobs }))).nextSyncS).toBe(15);
   });
 
   /** Source `n`'s photos, in story order: hashes 1000(n+1)+1 on. */
@@ -717,6 +718,28 @@ describe('snapshot feed blobs (#196)', () => {
     // 64 look missing, 20 an ask: every one is asked for within four replies.
     for (let i = 0; i < 4; i++) for (const sha of (await sync(s, body(report))).blobs ?? []) asked.add(sha);
     expect(asked).toEqual(new Set(all.filter((sha) => !report.blobs.includes(sha))));
+  });
+
+  // Review of #514: such a screen cannot act on a feed's turnover (it holds more than it reports), so each turnover
+  // costs it one sync soon, for the photos the new stories bring, and not a retry as well.
+  it('spends one sync soon on a turnover a screen holding more than it can report cannot act on', async () => {
+    const s = await setUp('sync-feed-blobs-turnover');
+    const feeds = await newsSources(s, OLD, 0, 8, 20);
+    const all = Array.from({ length: 8 }, (_, n) => photosOf(n, 20)).flat();
+    const report = { snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) };
+    // Its first ask, the retry, then the full interval: nothing it is asked for shows as held.
+    const paces: number[] = [];
+    for (let i = 0; i < 3; i++) paces.push((await sync(s, body(report))).nextSyncS);
+    expect(paces).toEqual([15, 15, 300]);
+    // The first feed's lead story is replaced: two photos the screen reports leave, two new ones come.
+    const items = Array.from({ length: 20 }, (_, i) => {
+      const [file, thumb] = i === 0 ? [hash(99_001), hash(99_002)] : [photosOf(0, 20)[2 * i], photosOf(0, 20)[2 * i + 1]];
+      return { title: `Story ${i}`, published: '', source: '', image: { file, thumb } };
+    });
+    await s.seed.scope.dataSources.putSnapshot(feeds.ids[0]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
+    paces.length = 0;
+    for (let i = 0; i < 3; i++) paces.push((await sync(s, body(report))).nextSyncS);
+    expect(paces).toEqual([15, 300, 300]);
   });
 
   it('sends no feed blobs for a text-only template (news 1.4.1) or an outdated player, and refuses over-limit SyncRequest.blobs', async () => {

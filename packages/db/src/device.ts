@@ -19,7 +19,7 @@ export interface DeviceScreen {
   /** The last manifest that played a spot, as the screen's last sync reported it (`manifest.lastGood`). */
   lastGoodManifestId: string | null;
   /** The feed photos the screen's last sync lacked, and what its reply asked for (`ScreenHeartbeat.photos`). */
-  lastPhotos: { missing: number; asked: boolean; retried: boolean; after?: string } | null;
+  lastPhotos: { missing: number; retried: boolean; ask: string[] } | null;
   /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
   displayOverrideJson: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
@@ -43,9 +43,8 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       previousManifestId: sc.previousManifestId,
       lastGoodManifestId: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.manifest.lastGood')`,
       photosMissing: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.missing')`,
-      photosAsked: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.asked')`,
       photosRetried: sql<number | null>`json_extract(${sc.heartbeatJson}, '$.photos.retried')`,
-      photosAfter: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.after')`,
+      photosAsk: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.photos.ask')`,
       displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
@@ -66,14 +65,10 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     // SQLite's json_extract reads a JSON boolean as 1 or 0.
     // A heartbeat from before #496 has no count missing: read as none, so the next reply starts the ask afresh.
     lastPhotos:
-      first.photosMissing === null
+      first.photosMissing === null || first.photosAsk === null
         ? null
-        : {
-            missing: first.photosMissing,
-            asked: first.photosAsked === 1,
-            retried: first.photosRetried === 1,
-            ...(first.photosAfter !== null && { after: first.photosAfter }),
-          },
+        : // json_extract gives an array as its JSON text; the API's sync route wrote it.
+          { missing: first.photosMissing, retried: first.photosRetried === 1, ask: JSON.parse(first.photosAsk) },
     displayOverrideJson: first.displayOverrideJson,
     credentials:
       first.status === 'active'
