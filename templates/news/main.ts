@@ -135,7 +135,8 @@ defineTemplate({
       }
       const meta = el.querySelector('.meta');
       if (meta) {
-        const src = story.source || credit;
+        // The spot's credit, where one is set: a feed's own name for itself ("NYT > Top Stories") is not what the screen should say.
+        const src = credit || story.source;
         const age = ago(story.published, now, lang);
         if (src) meta.querySelector('.src')!.textContent = src;
         else meta.querySelector('.src')!.remove();

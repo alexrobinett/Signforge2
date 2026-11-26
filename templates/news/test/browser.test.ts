@@ -518,6 +518,91 @@ describe('news 2.1 (design D, #476)', () => {
     expect(await faults(f)).toEqual([]);
   });
 
+  // Review of #502: a live feed names itself ("NYT > Top Stories", "World news | The Guardian"); the spot's credit is
+  // the name its owner chose, so it wins wherever it is set.
+  it("names each story by the spot's credit where one is set, and by the feed's source where not", async () => {
+    const r = await frame();
+    const items = [story(0, { source: 'NYT > Top Stories' }), story(1, { source: 'NYT > Top Stories' })];
+    const sources = async (data: Data) =>
+      (await r.show({ items, rotationSeconds: 8, ...data }, photos(2), demo, 16_000)).evaluate(() =>
+        [...document.querySelectorAll('.src')].map((s) => s.textContent),
+      );
+    expect(await sources({ source: 'The New York Times' })).toEqual(['The New York Times', 'The New York Times']);
+    expect(await sources({ source: '' })).toEqual(['NYT > Top Stories', 'NYT > Top Stories']);
+  });
+
+  // Review of #502: Night's headline was a size below the others (6vmin), 5.2vmin at 80 characters. At the research's
+  // 7vmin a headline is read from about 6 m; every look holds it to about 80 characters beside a photo.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`draws an 80-character headline beside a photo at 7vmin or more in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const sizes: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, items: [story(0, { title: sentence.slice(0, 80).trim() }), story(1)] }, shaped(['1920x1280', '1920x1280']));
+        const vmin = await f.evaluate(
+          () => Number.parseFloat(getComputedStyle(document.querySelector('.headline')!).fontSize) / (Math.min(innerWidth, innerHeight) / 100),
+        );
+        if (vmin < 6.99) sizes.push(`${look}: ${vmin.toFixed(2)}vmin`);
+      }
+      expect(sizes).toEqual([]);
+    }, 120_000);
+
+  // Review of #502: under a brand kit Poster's age took the accent and its bar the primary, two colours where the
+  // design has one. Both take the accent (the age its readable ink), under no kit, the demo kit and a light kit.
+  it("marks Poster's age and bar in the one accent under every kit", async () => {
+    const r = await frame();
+    for (const [kit, theme] of noDemoAndLight(LIGHT_KIT)) {
+      const f = await r.show({ look: 'poster', items: [0, 1, 2].map((i) => story(i)), rotationSeconds: 8 }, photos(3), theme ?? null, 24_000);
+      const got = await f.evaluate(() => {
+        const probe = (v: string) => {
+          const el = document.createElement('i');
+          el.style.color = `var(${v})`;
+          document.body.append(el);
+          const c = getComputedStyle(el).color;
+          el.remove();
+          return c;
+        };
+        return {
+          bar: getComputedStyle(document.querySelector('.bar')!).backgroundColor,
+          progress: getComputedStyle(document.querySelector('.progress')!).backgroundColor,
+          age: getComputedStyle(document.querySelector('.age')!).color,
+          accent: probe('--lk-accent'),
+          ink: probe('--lk-accent-ink'),
+        };
+      });
+      expect({ bar: got.bar, progress: got.progress, age: got.age }, kit).toEqual({ bar: got.accent, progress: got.accent, age: got.ink });
+    }
+  });
+
+  // Review of #502: in portrait a story without a photo has the whole lead, and fills it with a larger headline and
+  // summary rather than leaving two thirds of the screen empty.
+  it('fills the lead in portrait when a story has no photo, with a larger headline and summary', async () => {
+    const r = await frame('portrait');
+    for (const look of looks) {
+      const f = await r.show(
+        { look, items: [story(0), story(1, { image: undefined, summary: sentence.repeat(2).slice(0, 200) })], rotationSeconds: 8 },
+        photos(2, [1]),
+        demo,
+        16_000,
+      );
+      const got = await f.evaluate(() => {
+        const [photo, bare] = [...document.querySelectorAll<HTMLElement>('.story')];
+        const px = (s: HTMLElement, sel: string) => Number.parseFloat(getComputedStyle(s.querySelector(sel)!).fontSize);
+        const text = bare!.querySelector<HTMLElement>('.text')!;
+        return {
+          headline: px(bare!, '.headline') / px(photo!, '.headline'),
+          summary: px(bare!, '.summary') / px(photo!, '.summary'),
+          filled: (text.offsetTop + text.offsetHeight) / bare!.clientHeight,
+        };
+      });
+      expect(got.headline, look).toBeGreaterThanOrEqual(1.59);
+      expect(got.summary, look).toBeGreaterThanOrEqual(1.29);
+      // Filling the lead, and within it.
+      expect(got.filled, look).toBeGreaterThan(0.4);
+      expect(got.filled, look).toBeLessThanOrEqual(1);
+    }
+  }, 120_000);
+
   it("shows the time from init, not the device clock, and each story's age in the feed's language", async () => {
     const r = await frame();
     const items = [story(0, { published: at(-1) }), story(1, { published: at(-26) })];

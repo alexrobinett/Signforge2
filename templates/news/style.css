@@ -38,7 +38,7 @@ ol {
   --nw-label: 2.6vmin;
   --nw-body: 3vmin;
   --nw-number: 4vmin;
-  --nw-strip-text: 2.5vmin;
+  --nw-strip-text: 2.8vmin;
   --nw-lines: 5;
   --nw-bare-lines: 4;
   --nw-bare-step: 1.25;
@@ -382,9 +382,10 @@ ol {
 [data-look='poster'] {
   --nw-headline: 9vmin;
 }
-/* Unbounded sets wide: a size down holds the same characters to a line. */
+/* Unbounded sets wide: a line more in landscape holds the research's 7vmin to about 80 characters (review of #502). */
 [data-look='night'] {
-  --nw-headline: 6vmin;
+  --nw-headline: 7vmin;
+  --nw-lines: 6;
 }
 [data-look='corporate'] {
   --nw-headline: 7vmin;
@@ -450,9 +451,20 @@ ol {
   border-top: var(--lk-rule) solid var(--lk-text);
 }
 [data-look='poster'] :is(.bar, .progress) {
-  background: var(--lk-primary);
+  background: var(--lk-accent);
   opacity: 1;
 }
 [data-look='poster'] .bar {
   height: 1.1vmin;
+}
+
+/* A portrait story without a photo has the whole lead: its headline a size larger again and its summary larger and
+   longer, so the text fills the screen it has rather than leaving two thirds of it empty (review of #502). */
+:root[data-orientation='portrait'] .story.no-photo {
+  --nw-step: 1.6;
+  --nw-lines: 7;
+}
+:root[data-orientation='portrait'] .story.no-photo .summary {
+  -webkit-line-clamp: 5;
+  font-size: calc(var(--nw-body) * 1.3);
 }
