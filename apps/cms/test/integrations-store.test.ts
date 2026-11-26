@@ -32,7 +32,7 @@ const feed: ListedSource = {
   horizonDays: null,
   rowsPath: null,
   photos: true,
-  nextPollAt: 0,
+  nextPollAt: null,
   failures: 0,
   lastError: null,
   version: 3,

@@ -47,7 +47,8 @@ const CLOSE_REVOKED = 4001;
  * most 5 minutes) writes the same column. So a credentials read that takes 10 to 30 s and then
  * succeeds drops its report even when no later one came; the CMS reads "updating" until that sync.
  * That is intended: a write that late could land over a later report. A send given up on is not
- * sent (its credentials were never checked): a nudge, not the content, which the screen syncs anyway.
+ * sent (its credentials were never checked). A manifest and a display override are stored, so the screen's next sync
+ * brings them; an identify or a restart is not, and is lost: both are for someone at the screen now (#519).
  */
 export const D1_LIMIT_MS = 10_000;
 
@@ -58,10 +59,11 @@ export class ScreenObject extends DurableObject<Env> {
    */
   private handling: Promise<void> = Promise.resolve();
   /**
-   * The report waiting for the one being written, the latest taken: a report that arrives while one
-   * waits replaces it, so a screen sending reports faster than D1 writes them holds one, not a queue.
+   * Each socket's report waiting for the one being written, its latest: a report that arrives while its socket's waits
+   * replaces it, so a screen sending reports faster than D1 writes them holds one, not a queue. One a socket, so a
+   * revoked socket's report, dropped at its write, never replaces a live one's (#519). Each keeps when it arrived.
    */
-  private waiting?: { ws: WebSocket; report: DeviceSocketMessage };
+  private waiting = new Map<WebSocket, { report: DeviceSocketMessage; arrivedAt: number }>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -100,14 +102,16 @@ export class ScreenObject extends DurableObject<Env> {
     // Parsed as it arrives, so a message that is not an `applied` report is dropped without waiting behind one that is.
     const report = parseReport(message);
     if (!report) return Promise.resolve();
-    const replaced = this.waiting !== undefined;
-    this.waiting = { ws, report };
+    const replaced = this.waiting.has(ws);
+    // Stamped as it arrives, not after its credentials read, as a sync is at its start: a sync that starts after this
+    // report arrived is the later one (#519).
+    this.waiting.set(ws, { report, arrivedAt: Date.now() });
     // Its place in the queue is taken already: the handling below writes this report instead.
     if (replaced) return Promise.resolve();
     const handled = this.handling.then(() => {
-      const next = this.waiting!;
-      this.waiting = undefined;
-      return withinLimit('applied report', (late) => this.writeApplied(next.ws, next.report, late));
+      const next = this.waiting.get(ws)!;
+      this.waiting.delete(ws);
+      return withinLimit('applied report', (late) => this.writeApplied(ws, next.report, next.arrivedAt, late));
     });
     // A report that failed still lets the next one through; the runtime sees its error.
     this.handling = handled.catch(() => {});
@@ -115,7 +119,7 @@ export class ScreenObject extends DurableObject<Env> {
   }
 
   /** Write what the screen applied, unless its credential is gone or the report ran past its limit while reading it. */
-  private async writeApplied(ws: WebSocket, report: DeviceSocketMessage, late: () => boolean): Promise<void> {
+  private async writeApplied(ws: WebSocket, report: DeviceSocketMessage, arrivedAt: number, late: () => boolean): Promise<void> {
     const holder = ws.deserializeAttachment() as SocketHolder;
     if (!(await liveCredentials(this.env.DB, holder.screenId)).has(holder.credentialId)) return closeRevoked(ws);
     // A later report may already have been written: this one must not land over it.
@@ -125,7 +129,7 @@ export class ScreenObject extends DurableObject<Env> {
     const { manifest, observedAt } = report;
     await scoped(this.env.DB, holder.orgId).screens.reportManifest(holder.screenId, manifest, {
       ...(observedAt !== undefined && { observedAt: Date.parse(observedAt) }),
-      arrivedAt: Date.now(),
+      arrivedAt,
     });
   }
 
