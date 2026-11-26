@@ -211,13 +211,14 @@ describe('feed images on screens (#196)', () => {
   }, 30_000);
 
   /** A player that played a manifest whose one spot binds `news`, then fell back to it from `broken`. */
-  async function fallenBack(broken: Content) {
+  async function fallenBack(broken: Content, first?: (p: Player) => Promise<void>) {
     const good = h.content([{ id: 'news', durationMs: 600, items: [{ title: 'Fallback' }], bindings: bound }], { variant: 'good' });
     const p = await h.openPlayer((s) => {
       s.nextSyncS = 1;
       s.publish(good);
     }, api);
     await p.until((s) => s.lastGood === good.manifest.id);
+    await first?.(p);
     p.server.publish(broken);
     await p.until((s) => s.fallback === broken.manifest.id && s.manifestId === good.manifest.id);
     return p;
@@ -256,9 +257,9 @@ describe('feed images on screens (#196)', () => {
     feed(p.server, 1000, [photo('One', f1, t1)], images);
     p.server.setData('news2', { ...makeSnap(1000, [photo('Two', f2, t2)]), id: 'news2' });
     await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
-    // Two more syncs, each naming news2's photos.
-    const syncs = p.server.syncs.length;
-    await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(syncs + 1);
+    // Two more syncs the player has finished with, each naming news2's photos.
+    const { syncs } = await p.state();
+    await p.until((s) => s.syncs > syncs + 1);
     expect(requestsFor(p, f2)).toEqual([]);
     expect(requestsFor(p, t2)).toEqual([]);
   }, 30_000);
@@ -313,9 +314,9 @@ describe('feed images on screens (#196)', () => {
     });
     failing();
     await p.until((s) => s.manifestId === next.manifest.id);
-    // A sync after the adoption, then the store goes on.
-    const syncs = p.server.syncs.length;
-    await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(syncs);
+    // A sync the player has finished with after the adoption, then the store goes on.
+    const { syncs } = await p.state();
+    await p.until((s) => s.syncs > syncs);
     await p.page.evaluate(() => {
       const release: unknown = Reflect.get(window, 'sfReleaseStore');
       if (typeof release === 'function') release();
@@ -323,6 +324,23 @@ describe('feed images on screens (#196)', () => {
     await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([...shas].sort());
     // Never evicted and fetched again.
     for (const sha of shas) expect(requestsFor(p, sha), sha).toHaveLength(1);
+  }, 40_000);
+
+  // Restarted while falling back, its last good manifest's photos are kept, not deleted and fetched again (#464).
+  it('keeps the photos of the manifest it falls back to across a restart', async () => {
+    const { images, shas } = twoPhotos();
+    const [f1, t1] = shas;
+    // A spot that never gets ready: after the restart, the first sync's cleanup runs before the player falls back again.
+    const broken = h.content([{ id: 'y', mode: 'hang', durationMs: 600, bindings: { items: { source: 'news2', path: 'items' } } }], { variant: 'broken' });
+    // Its photos come while the good one is the one synced: the broken one binds another feed.
+    const p = await fallenBack(broken, async (p) => {
+      feed(p.server, 1000, [photo('One', f1, t1)], images.slice(0, 2));
+      await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
+    });
+    await p.page.reload();
+    await p.until((s) => s.fallback === broken.manifest.id && s.syncs > 1, 20_000);
+    await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
+    for (const sha of [f1, t1]) expect(requestsFor(p, sha), sha).toHaveLength(1);
   }, 40_000);
 
   // A broken image would show where the photo was: the row goes without one instead (review of #240).
@@ -387,6 +405,15 @@ describe('feed images on screens (#196)', () => {
     }
     const gone = (p: Player, ...shas: string[]) =>
       expect.poll(async () => (await cached(p)).filter((k) => shas.some((sha) => k.endsWith(sha))), { timeout: 15_000 }).toEqual([]);
+
+    it('lets go of those a newer snapshot dropped while the manifest is still on its way (#464)', async () => {
+      const { p, f1, t1 } = await sentWhileFailing();
+      const { images, shas } = twoPhotos();
+      const [, , f2, t2] = shas;
+      feed(p.server, 2000, [photo('Two', f2, t2)], images.slice(2));
+      await expect.poll(() => cached(p), { timeout: 10_000 }).toEqual(expect.arrayContaining([`/_sf/blob/${f2}`, `/_sf/blob/${t2}`]));
+      await gone(p, f1, t1);
+    }, 40_000);
 
     it('evicts them when it recovers onto a manifest that does not name them', async () => {
       const { p, f1, t1, failing } = await sentWhileFailing();

@@ -56,6 +56,7 @@ import {
   heldVersions,
   liveData,
   offerChecked,
+  namedImages,
   offerPending,
   offerSnapshots,
   restoreSources,
@@ -171,6 +172,8 @@ const state = {
   skipped: 0,
   lastError: '',
   lastSync: '',
+  /** Syncs the player has finished with: their snapshots offered, their photos asked for. Tests wait on it. */
+  syncs: 0,
   online: navigator.onLine,
   /**
    * 'pairing' while a code is shown, 'revoked' while the screen wipes itself, 'no credential' while
@@ -423,7 +426,8 @@ const playback = new Playback({
     adopted(next) {
       wakeData();
       if (API) {
-        adoption = offerPending(next).then(() => restoreSources(next));
+        // After the adoption before it, not instead of it: a cleanup waits for every waiting snapshot to be stored (#464).
+        adoption = adoption.catch(() => undefined).then(() => offerPending(next).then(() => restoreSources(next)));
         void adoption.then(() => {
           if (refreshSnapshotPins()) {
             feedBlobsDue = true;
@@ -878,15 +882,19 @@ async function apiSync(): Promise<void> {
   if (!incomingBlobs.length) settleSources(playback.manifest);
   await offerChecked(r.checked ?? {});
   const dropped = refreshSnapshotPins();
-  if (incomingBlobs.length) {
-    for (const sha of incomingBlobs) {
-      pendingFeedBlobs.add(sha);
-      incomingFeedBlobs.add(sha);
-    }
+  for (const sha of incomingBlobs) incomingFeedBlobs.add(sha);
+  let superseded = false;
+  if (incomingFeedBlobs.size) {
+    // Only photos a snapshot still names: one a newer snapshot dropped is not kept while the manifest is on its way (#464).
+    const named = namedImages();
+    for (const sha of incomingFeedBlobs) if (!named.has(sha)) superseded = incomingFeedBlobs.delete(sha);
     pins.hold('snapshots-incoming', incomingFeedBlobs);
+  }
+  if (incomingBlobs.length) {
+    for (const sha of incomingBlobs) pendingFeedBlobs.add(sha);
     feedBlobsDue = true;
     settleAfterBlobs = true;
-  } else if (dropped || evictDue) {
+  } else if (dropped || evictDue || superseded) {
     feedBlobsDue = true;
   }
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
@@ -895,6 +903,7 @@ async function apiSync(): Promise<void> {
     contentDue = true;
   }
   if (contentDue || feedBlobsDue) content.wake();
+  state.syncs++;
 }
 
 // Untrusted, the clock cannot tell whether the saved override has ended: it is reported as saved,
@@ -1026,7 +1035,8 @@ async function boot(): Promise<void> {
   if (stored.lastGood) playback.restore(stored.lastGood);
   const cached = stored.active ?? stored.lastGood;
   if (cached) {
-    if (API) await restoreSources(cached).catch(() => undefined);
+    // The last good manifest's snapshots too, before any cleanup: their photos are pinned, though it is not the one adopted (#464).
+    if (API) await Promise.all([cached, stored.lastGood].map((m) => m && restoreSources(m).catch(() => undefined)));
     playback.adopt(cached);
     refreshSnapshotPins();
   } else status('SignForge\nWaiting for content…');

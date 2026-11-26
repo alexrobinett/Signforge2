@@ -324,7 +324,10 @@ export class FixtureServer {
             this.acked.set(sync.epoch, sync.seq);
           }
           const held = sync.snapshots ?? {};
-          const all = [...this.data.values()] as { id: string; version: number; checkedAt: string; data?: unknown }[];
+          // As the API does: only the sources of the manifest the server wants this screen on.
+          const all = ([...this.data.values()] as { id: string; version: number; checkedAt: string; data?: unknown }[]).filter(
+            (snap) => !c || Object.hasOwn(c.manifest.dataSources, snap.id),
+          );
           const snapshots = all.filter((snap) => snap.version > (held[snap.id] ?? -1));
           // As the API does: when each snapshot the screen holds at its version was last checked.
           const checked = Object.fromEntries(

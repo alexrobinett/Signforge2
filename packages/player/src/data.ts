@@ -11,7 +11,7 @@
  * so a value that does not fit leaves the spot's fallback on screen. Every refusal is counted
  * against its source in `dataRejections`.
  */
-import { MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
+import { isNewsImage, MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
 import { manifestBoundFields, snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
@@ -140,6 +140,24 @@ export async function offerChecked(checked: NonNullable<SyncResponse['checked']>
     snapshots.set(id, next);
     await store(id, next).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   }
+}
+
+/**
+ * Every feed photo a snapshot the screen holds or keeps waiting names (any `{ file, thumb }` in its data): what a
+ * manifest still on its way can need. A photo only a superseded snapshot named is in none of them.
+ */
+export function namedImages(): Set<string> {
+  const out = new Set<string>();
+  const visit = (v: unknown): void => {
+    if (isNewsImage(v)) {
+      out.add(v.file);
+      out.add(v.thumb);
+    } else if (Array.isArray(v)) v.forEach(visit);
+    else if (typeof v === 'object' && v !== null) Object.values(v).forEach(visit);
+  };
+  for (const snap of snapshots.values()) visit(snap.data);
+  for (const { snapshot } of pending.values()) visit(snapshot.data);
+  return out;
 }
 
 /** Load the stored snapshots of `manifest`'s sources, for a screen whose data comes on sync. */
