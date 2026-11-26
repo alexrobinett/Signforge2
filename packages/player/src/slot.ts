@@ -34,6 +34,21 @@ function alive(signal: AbortSignal): void {
 
 const orientationOf = (w: number, h: number): Orientation => (w >= h ? 'landscape' : 'portrait');
 
+/**
+ * How a template fits the screen as it is now. On an orientation it does not support it is
+ * letterboxed at the shape it does support, over the background it declares (`background`).
+ */
+function fitTo(t: TemplateManifest): { orientation: Orientation; viewport: { width: number; height: number }; background?: string } {
+  const sw = innerWidth,
+    sh = innerHeight;
+  const screenIs = orientationOf(sw, sh);
+  const orientation = t.orientations.includes(screenIs) ? screenIs : t.orientations[0]!;
+  if (orientation === screenIs) return { orientation, viewport: { width: sw, height: sh } };
+  const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
+  const width = Math.min(sw, sh * ratio);
+  return { orientation, viewport: { width, height: width / ratio }, background: t.background };
+}
+
 type TemplateSpot = Extract<Spot, { kind: 'template' }>;
 
 /** A slot's template frame, and what its next `init` sends. */
@@ -45,6 +60,7 @@ interface LiveFrame {
   protocol: number;
   /** The bundle's hash: an update to another bundle is a fresh load. */
   html: string;
+  template: TemplateManifest;
   spot: TemplateSpot;
   manifest: ScreenManifest;
   data: Record<string, unknown>;
@@ -212,10 +228,22 @@ export class Slot {
   private urls: string[] = [];
   private abort?: AbortController;
   private video?: HTMLVideoElement;
+  /** Settles when the spot's load is done, whatever its outcome. */
+  private loading: Promise<void> = Promise.resolve();
+  /**
+   * Settles when the load and every refit queued are done; rejects if the last refit failed.
+   * `play` waits for it, so a spot never starts drawn for a size it no longer has.
+   */
+  private fitted: Promise<void> = Promise.resolve();
+  /** A refit is queued and has not started: later resizes join it. */
+  private refitQueued = false;
+  /** The frame was sent `play` since its load: a refit plays it again. */
+  private started = false;
 
   constructor() {
     this.el.className = 'slot';
     document.body.appendChild(this.el);
+    addEventListener('resize', () => this.refit());
   }
 
   /** Load a spot and resolve once it can be shown complete. Rejects on error or timeout. */
@@ -233,6 +261,9 @@ export class Slot {
             : this.url(spot, this.abort.signal);
     // If the timeout wins, the load is cancelled and rejects later; that is expected, not an error.
     work.catch(() => undefined);
+    this.loading = work.catch(() => undefined);
+    // A refit queued for the spot this replaced still runs, after this load: see `refit`.
+    this.fitted = Promise.all([this.fitted.catch(() => undefined), this.loading]).then(() => undefined);
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => {
       timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
@@ -249,7 +280,79 @@ export class Slot {
    * an image or a URL spot, and when its `play()` does for a video. Rejects if the video's is refused.
    */
   play(): Promise<void> {
-    return this.startPlayback();
+    return this.fitted.then(() => {
+      this.started = true;
+      return this.startPlayback();
+    });
+  }
+
+  /**
+   * Fit a template spot to the viewport again, after a resize or a rotation. Its frames take the
+   * new size, and the template is initialised again for it (`reset`, then `init`; protocol 1
+   * reloads its frame), as playing if it was. Image, video and URL spots fill the slot, so they
+   * need nothing. A refit waits for the load and the refit before it, and later resizes join the
+   * one waiting, so a burst of resizes costs at most two inits, and the last one has the last size.
+   */
+  private refit(): void {
+    if (this.refitQueued) return;
+    this.refitQueued = true;
+    const run = this.fitted
+      .catch(() => undefined)
+      .then(async () => {
+        this.refitQueued = false;
+        // A spot loaded since this was queued is fitted after its load, which may have read the old size.
+        for (let l = this.loading; ; l = this.loading) {
+          await l;
+          if (l === this.loading) break;
+        }
+        return this.fitAgain();
+      });
+    this.fitted = run;
+    run.catch((err: unknown) => console.warn(`[sf] refit ${this.spot?.id}: ${err instanceof Error ? err.message : String(err)}`));
+  }
+
+  private async fitAgain(): Promise<void> {
+    const live = this.live;
+    if (!live || !this.abort || this.abort.signal.aborted) return;
+    const fit = fitTo(live.template);
+    if (fit.orientation === live.orientation && fit.viewport.width === live.viewport.width && fit.viewport.height === live.viewport.height) return;
+    const replay = this.started;
+    if (live.protocol < 2) {
+      await this.prepare(live.spot, live.manifest);
+    } else {
+      const signal = this.abort.signal;
+      this.size(live.wrapperFrame, fit);
+      live.orientation = fit.orientation;
+      live.viewport = fit.viewport;
+      await this.resetToReady(live, signal);
+    }
+    if (replay) {
+      this.started = true;
+      await this.startPlayback();
+    }
+  }
+
+  private size(wrapperFrame: HTMLIFrameElement, fit: ReturnType<typeof fitTo>): void {
+    wrapperFrame.style.width = `${fit.viewport.width}px`;
+    wrapperFrame.style.height = `${fit.viewport.height}px`;
+    if (fit.background) this.el.style.setProperty('--slot-bg', fit.background);
+    else this.el.style.removeProperty('--slot-bg');
+  }
+
+  /** `reset` the frame, which answers `loaded` and gets `init` from `live`; resolve on its `ready`. */
+  private async resetToReady(live: LiveFrame, signal: AbortSignal): Promise<void> {
+    let timer = 0;
+    try {
+      await Promise.race([
+        this.nextReady(() => this.post({ sf: live.protocol, type: 'reset' }), signal),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    alive(signal);
   }
 
   clear(): void {
@@ -269,6 +372,7 @@ export class Slot {
     this.urls = [];
     this.spot = undefined;
     this.live = undefined;
+    this.started = false;
     this.startPlayback = () => Promise.resolve();
   }
 
@@ -317,20 +421,7 @@ export class Slot {
     const data = rowImages.data;
     alive(signal);
 
-    // Fit the template to the screen. On an orientation it does not support it is letterboxed
-    // at the shape it does support, over the background it declares.
-    const sw = innerWidth,
-      sh = innerHeight;
-    const screenIs = orientationOf(sw, sh);
-    const orientation = t.manifest.orientations.includes(screenIs) ? screenIs : t.manifest.orientations[0]!;
-    let w = sw,
-      h = sh;
-    if (orientation !== screenIs) {
-      const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
-      w = Math.min(sw, sh * ratio);
-      h = w / ratio;
-      this.el.style.setProperty('--slot-bg', t.manifest.background);
-    }
+    const fit = fitTo(t.manifest);
 
     // The template runs in a wrapper frame the player writes and the template cannot touch. The
     // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
@@ -342,8 +433,7 @@ export class Slot {
     const wrapperFrame = document.createElement('iframe');
     // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
     wrapperFrame.title = spot.name;
-    wrapperFrame.style.width = `${w}px`;
-    wrapperFrame.style.height = `${h}px`;
+    this.size(wrapperFrame, fit);
     wrapperFrame.srcdoc = wrapperHtml;
     const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
     this.el.appendChild(wrapperFrame);
@@ -363,14 +453,15 @@ export class Slot {
       wrapper,
       protocol,
       html: t.html,
+      template: t.manifest,
       spot,
       manifest,
       data,
       locale,
       assets,
       theme,
-      orientation,
-      viewport: { width: w, height: h },
+      orientation: fit.orientation,
+      viewport: fit.viewport,
     });
     // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
     // it is already playing, blank it until the next spot.
@@ -448,18 +539,9 @@ export class Slot {
     // The frames are reused, so a rename in the editor must reach their titles too.
     live.frame.title = live.wrapperFrame.title = spot.name;
     this.spot = spot;
-    let timer = 0;
-    try {
-      await Promise.race([
-        this.nextReady(() => this.post({ sf: live.protocol, type: 'reset' }), signal),
-        new Promise<never>((_, reject) => {
-          timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-    alive(signal);
+    await this.resetToReady(live, signal);
+    // This init had the size the last refit set: a refit it superseded failed for nothing.
+    this.fitted = this.fitted.catch(() => undefined);
     await this.play();
   }
 
