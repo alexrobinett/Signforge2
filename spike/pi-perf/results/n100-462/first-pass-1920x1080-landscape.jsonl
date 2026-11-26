@@ -1,0 +1,31 @@
+{"spot": "announcement-pop", "first": 219, "p": {"play": {"count": 1774, "dropped": 0}, "prepare": {"count": 26, "dropped": 0}}, "st": [], "pr": [166, 133, 132], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "announcement-poster", "first": 214, "p": {"play": {"count": 1776, "dropped": 0}, "prepare": {"count": 24, "dropped": 0}}, "st": [], "pr": [133, 132, 132], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "announcement-night", "first": 226, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 9, "err": "announcement-night: not ready within 2000 ms", "played": 1}
+{"spot": "announcement-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "announcement-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "countdown-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "countdown-pop: not ready within 2000 ms", "played": 0}
+{"spot": "countdown-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "countdown-poster: not ready within 2000 ms", "played": 0}
+{"spot": "countdown-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "countdown-night: not ready within 2000 ms", "played": 0}
+{"spot": "countdown-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "countdown-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "info-frame-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "info-frame-pop: not ready within 2000 ms", "played": 0}
+{"spot": "info-frame-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "info-frame-poster: not ready within 2000 ms", "played": 0}
+{"spot": "info-frame-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "info-frame-night: not ready within 2000 ms", "played": 0}
+{"spot": "info-frame-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "info-frame-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "news-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-pop: not ready within 2000 ms", "played": 0}
+{"spot": "news-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-poster: not ready within 2000 ms", "played": 0}
+{"spot": "news-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-night: not ready within 2000 ms", "played": 0}
+{"spot": "news-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-pop: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "room-status-poster: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-night: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "alert-emergency", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-emergency: not ready within 2000 ms", "played": 0}
+{"spot": "alert-warning", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-warning: not ready within 2000 ms", "played": 0}
+{"spot": "alert-advisory", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-advisory: not ready within 2000 ms", "played": 0}
+{"spot": "alert-notice", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-notice: not ready within 2000 ms", "played": 0}
+{"spot": "menu-dark", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "menu-dark: not ready within 2000 ms", "played": 0}
+{"spot": "menu-light", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "menu-light: not ready within 2000 ms", "played": 0}
+{"spot": "agenda", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "agenda: not ready within 2000 ms", "played": 0}
+{"spot": "clock", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "clock: not ready within 2000 ms", "played": 0}
+{"spot": "cstore-promo", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "cstore-promo: not ready within 2000 ms", "played": 0}
+{"spot": "photo-promo", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "photo-promo: not ready within 2000 ms", "played": 0}
+{"spot": "weather", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "weather: not ready within 2000 ms", "played": 0}

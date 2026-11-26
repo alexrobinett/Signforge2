@@ -225,3 +225,40 @@ test('groups and screens in name order wherever they are listed, though their id
   await hydrated(page);
   await expect(page.getByText('Screen 2, Screen 10 are in groups that chose different kits')).toBeVisible();
 });
+
+test('a smart group is shown where a screen is in it, never offered to tick by hand (#186, review of #608)', async ({ page }) => {
+  await signInAs(page, `e2e-smart-groups-${Date.now()}@example.com`, '192.0.2.201');
+  await createOrg(page, 'Smart Deli', '192.0.2.201');
+  const { id } = await pairScreen(page, 'Bayside door', '192.0.2.202');
+  await tool(page, 'update_screen_labels', { screenIds: [id], set: { store: 'bayside' } });
+  await tool(page, 'save_group', { name: 'Listed', idempotencyKey: `listed-${Date.now()}` });
+  await tool(page, 'save_group', {
+    name: 'Bayside',
+    selector: { all: [{ key: 'store', op: 'eq', values: ['bayside'] }] },
+    idempotencyKey: `bayside-${Date.now()}`,
+  });
+  const ticks = (where: ReturnType<Page['getByRole']>) => where.getByRole('group', { name: 'Groups' }).getByRole('checkbox');
+
+  // Its page names the group its rule puts it in, and its settings offer only the listed one.
+  await page.goto(`/screens/${id}`);
+  await hydrated(page);
+  await expect(page.getByText('group Bayside')).toBeVisible();
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(ticks(settings)).toHaveCount(1);
+  await expect(ticks(settings)).toHaveAccessibleName('Listed');
+  await page.keyboard.press('Escape');
+
+  // The pair form and the selection bar offer the listed group alone too.
+  await page.goto('/screens?view=table');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Pair a screen' }).click();
+  const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  await expect(ticks(pair)).toHaveCount(1);
+  await expect(ticks(pair)).toHaveAccessibleName('Listed');
+  await page.keyboard.press('Escape');
+  await page.getByLabel('Select Bayside door').check();
+  await page.getByRole('region', { name: 'Selected screens' }).getByRole('button', { name: 'Add to group' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Listed']);
+});

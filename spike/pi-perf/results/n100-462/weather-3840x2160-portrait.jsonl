@@ -1,0 +1,2 @@
+{"spot": "weather", "first": 419, "p": {"play": {"count": 1707, "dropped": 45}, "prepare": {"count": 36, "dropped": 12}}, "st": [[100, "play"], [67, "prepare"], [67, "play"], [67, "prepare"]], "pr": [245, 294, 242], "worst": 100, "skipped": 0, "err": "", "played": 4}
+{"spot": "weather", "first": 175, "p": {"play": {"count": 1716, "dropped": 40}, "prepare": {"count": 40, "dropped": 4}}, "st": [[67, "play"], [67, "play"], [50, "prepare"]], "pr": [300, 197, 233], "worst": 67, "skipped": 0, "err": "", "played": 4}

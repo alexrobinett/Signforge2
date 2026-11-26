@@ -444,7 +444,12 @@ export const screenGroups = sqliteTable(
     id: text('id').primaryKey(),
     orgId: orgId(),
     name: text('name').notNull(),
-    /** Moves on when the name or the members change. */
+    /**
+     * A smart group's rule (#186): a selector (`@signforge/compiler/selector`) as JSON, whose members are every screen it
+     * matches at publish; null for a group of listed screens (`screen_group_members`). A rule group has no member rows.
+     */
+    selectorJson: text('selector_json'),
+    /** Moves on when the name, the rule or the members change. */
     rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
