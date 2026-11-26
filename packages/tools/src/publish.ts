@@ -16,6 +16,7 @@
  */
 import type { ScreenManifest } from '@signforge/contract';
 import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow, type StoredManifest } from '@signforge/db';
+import { manifestPhotoSources } from '@signforge/player-core';
 import { z } from 'zod';
 import { clearOfSweep } from './assets';
 import { madeBySpotEditor } from './data-sources';
@@ -69,7 +70,8 @@ const publishManifestToScreen = defineTool({
     if (changed) {
       // Checked as /admin stored it. Its files are fenced against the storage sweep and indexed with the switch, so the
       // sweep keeps them from the commit on (#235, review of #429, round 2).
-      const files = Object.keys((await stored.json<Pick<ScreenManifest, 'files'>>()).files);
+      const manifest = await stored.json<ScreenManifest>();
+      const files = Object.keys(manifest.files);
       await clearOfSweep(org, write, files);
       // A file the sweep deleted since the push checked it was there (#432): refused, from a read and at the commit.
       const now = Date.now();
@@ -78,7 +80,8 @@ const publishManifestToScreen = defineTool({
       write({ row: undefined, writes: org.storage.stage.notDeleted(files, now) });
       write(org.storage.stage.index([{ screenId: screen.id, id: input.manifestId, files }], Date.now()));
       write({ row: undefined, writes: org.storage.stage.manifestsStored([at], since, since) });
-      write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));
+      // The sources it shows photos for, beside it, so the feed poller reads no manifest (#486).
+      write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId, manifestPhotoSources(manifest)));
       // The screen's socket carries it at once; its next sync would anyway.
       notify((screens) => screens.manifest(screen.id, input.manifestId));
     }
@@ -109,11 +112,12 @@ function sourcesIn(json: string | null | undefined): string[] {
 /**
  * Stage a publish's record and its screens' switches, and queue telling the screens: the part of
  * a publish and a roll back that is the same. The caller has staged the move of the revision.
+ * `photoSources`: what each manifest shows photos for (`manifestPhotoSources`, #486), null if not known.
  */
 async function switchScreens(
   ctx: Pick<ToolContext<unknown>, 'org' | 'actor' | 'write' | 'notify'>,
   revision: number,
-  rows: { screenId: string; manifestId: string }[],
+  rows: { screenId: string; manifestId: string; photoSources: string[] | null }[],
   restoresId?: string,
   changes?: PublishView['changes'],
 ) {
@@ -121,9 +125,10 @@ async function switchScreens(
   const [previous] = await org.publishes.history({ limit: 1 });
   const changesJson = changes ? JSON.stringify(changes) : null;
   const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson }));
-  write(org.publishes.stage.addScreens(made.id, rows));
-  for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId));
-  if (rows.length) notify((screens) => screens.manifests(rows));
+  const switched = rows.map(({ screenId, manifestId }) => ({ screenId, manifestId }));
+  write(org.publishes.stage.addScreens(made.id, switched));
+  for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId, r.photoSources));
+  if (rows.length) notify((screens) => screens.manifests(switched));
   return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
 }
 
@@ -250,7 +255,7 @@ export async function runPublish(
   const made = await switchScreens(
     ctx,
     result.revision + 1,
-    changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+    changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id, photoSources: manifestPhotoSources(m) })),
     undefined,
     changes,
   );
@@ -483,7 +488,7 @@ const rollBackPublish = defineTool({
   example: { publishId: 'pub_example' },
   target: (input) => ({ kind: 'publish', id: input.publishId }),
   handler: async (ctx) => {
-    const { org, input, write } = ctx;
+    const { org, input, write, blobs } = ctx;
     // The revision before the screens: a publish committed after this read fails the guard.
     const revision = (await org.settings.get())?.publishRevision ?? 0;
     const target = await org.publishes.get(input.publishId);
@@ -514,7 +519,15 @@ const rollBackPublish = defineTool({
       throw new ToolError('conflict', `publish v${target.revision}'s manifests are no longer stored, so it can no longer be rolled back to`, { tooOld: true });
     write({ row: undefined, writes: org.storage.stage.manifestsStored(stored, now, 0) });
     write(org.publishes.stage.advance(revision));
-    return { publish: await switchScreens(ctx, revision + 1, rows, target.id) };
+    // What each shows photos for (#486), read once here so the feed poller need not. One that cannot be read is not
+    // known: the poller reads it then, and finds what a screen would.
+    const withSources = await Promise.all(
+      rows.map(async (r) => {
+        const obj = await blobs.get(manifestKey(org.orgId, r.screenId, r.manifestId));
+        return { ...r, photoSources: obj ? manifestPhotoSources(await obj.json<ScreenManifest>()) : null };
+      }),
+    );
+    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id) };
   },
 });
 

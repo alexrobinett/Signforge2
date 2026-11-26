@@ -252,8 +252,8 @@ describe('publish_manifest_to_screen', () => {
   it('makes an uploaded manifest desired, keeping the one it replaces', async () => {
     const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
     expect(await refusal('publish_manifest_to_screen', { screenId: o.screen, manifestId: m1 })).toMatchObject({ ok: false, error: 'not_found' });
-    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m1), JSON.stringify({ files: {} }));
-    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m2), JSON.stringify({ files: {} }));
+    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m1), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }));
+    await env.BLOBS.put(manifestKey(o.orgId, o.screen, m2), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }));
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m1 })).toEqual({ screenId: o.screen, manifestId: m1, changed: true });
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: true });
     expect(await call('publish_manifest_to_screen', { screenId: o.screen, manifestId: m2 })).toMatchObject({ changed: false });
@@ -266,7 +266,7 @@ describe('publish_manifest_to_screen', () => {
     try {
       const file = '7'.repeat(64);
       const manifestId = '3'.repeat(64);
-      await env.BLOBS.put(manifestKey(o.orgId, o.screen, manifestId), JSON.stringify({ files: { [file]: {} } }));
+      await env.BLOBS.put(manifestKey(o.orgId, o.screen, manifestId), JSON.stringify({ files: { [file]: {} }, spots: {}, templates: {}, screen: {} }));
       await queueDeletedFiles(env.DB, o.orgId, [file], AT - STORAGE_GRACE_MS);
       const sweep = scoped(env.DB, o.orgId);
       // The seeded org's kept manifests looked for, as the sweep does first: stored nowhere here.

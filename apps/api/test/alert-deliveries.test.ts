@@ -182,7 +182,7 @@ describe('alerts to Slack and webhooks', () => {
     await o.commit([
       ...made.writes,
       ...o.publishes.stage.addScreens(made.row.id, rows).writes,
-      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes),
+      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId, null).writes),
     ]);
     const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
     const cms = { ...env, CMS_ORIGIN: 'https://cms.test' };
@@ -229,7 +229,7 @@ describe('alerts to Slack and webhooks', () => {
       await o.commit([
         ...p.writes,
         ...o.publishes.stage.addScreens(p.row.id, r).writes,
-        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId, null).writes),
       ]);
       return p.row;
     };
@@ -256,7 +256,7 @@ describe('alerts to Slack and webhooks', () => {
     await o.commit([
       ...v5.writes,
       ...o.publishes.stage.addScreens(v5.row.id, [{ screenId: screens[1]!, manifestId: 'e'.repeat(64) }]).writes,
-      ...o.screens.stage.setDesiredManifest(screens[1]!, 'e'.repeat(64)).writes,
+      ...o.screens.stage.setDesiredManifest(screens[1]!, 'e'.repeat(64), null).writes,
     ]);
     await finishRollouts(cms, outbox, start + 17 * MIN);
     await deliverAlerts(env, outbox, { now: start + 17 * MIN, guards });
@@ -277,7 +277,7 @@ describe('alerts to Slack and webhooks', () => {
       await o.commit([
         ...p.writes,
         ...o.publishes.stage.addScreens(p.row.id, r).writes,
-        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId, null).writes),
       ]);
       return p.row;
     };

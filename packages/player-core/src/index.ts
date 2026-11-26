@@ -354,6 +354,7 @@ export {
   boundImageHashes,
   hasBoundListImage,
   manifestBoundFields,
+  manifestPhotoSources,
   manifestSnapshotFiles,
   PLAYER_LOCALE,
   screenLocale,

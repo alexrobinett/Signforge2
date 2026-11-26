@@ -54,7 +54,10 @@ async function published(orgId: string, id: string, revision: number, createdAt:
   );
   await run('INSERT INTO publish_screens (org_id, publish_id, screen_id, manifest_id) VALUES (?, ?, ?, ?)', orgId, id, screenId, manifestId);
   await run('UPDATE screens SET desired_manifest_id = ?, reported_manifest_id = ? WHERE id = ?', manifestId, manifestId, screenId);
-  await env.BLOBS.put(manifestKey(orgId, screenId, manifestId), JSON.stringify({ files: Object.fromEntries(files.map((f) => [f, {}])) }));
+  await env.BLOBS.put(
+    manifestKey(orgId, screenId, manifestId),
+    JSON.stringify({ files: Object.fromEntries(files.map((f) => [f, {}])), spots: {}, templates: {}, screen: {} }),
+  );
 }
 
 const audits = async (orgId: string) =>

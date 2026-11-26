@@ -317,7 +317,7 @@ describe('rows a scope writes', () => {
     await b.commit([
       ...smuggled.writes,
       ...b.screens.stage.update(aScreen, { name: 'hijacked' }).writes,
-      ...b.screens.stage.setDesiredManifest(a.screen, 'f'.repeat(64)).writes,
+      ...b.screens.stage.setDesiredManifest(a.screen, 'f'.repeat(64), null).writes,
       ...b.screenGroups.stage.delete(a.group).writes,
       ...b.assets.stage.delete(a.asset).writes,
       ...b.idempotency.stage({ key: 'k-iso', action: 'x', inputSha256: '0', outputJson: '{}' }).writes,

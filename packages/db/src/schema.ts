@@ -396,6 +396,12 @@ export const screens = sqliteTable(
     desiredManifestId: text('desired_manifest_id'),
     /** The desired manifest before the current one. A screen may still be fetching its files, so they stay servable. */
     previousManifestId: text('previous_manifest_id'),
+    /**
+     * The sources a desired manifest shows photos for, as `{"manifest": <its id>, "sources": [...]}`, written with it
+     * when it becomes desired (`stage.setDesiredManifest`), so the feed poller reads no manifest from R2 (#486). It
+     * counts only while `manifest` is still `desiredManifestId`: null, or another manifest's, is not known.
+     */
+    desiredPhotoSourcesJson: text('desired_photo_sources_json'),
     reportedManifestId: text('reported_manifest_id'),
     /**
      * When the screen observed `reported_manifest_id`, on the server's clock: a report replaces it

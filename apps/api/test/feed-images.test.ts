@@ -45,6 +45,7 @@ import {
 } from '../src/data/feed-photos';
 import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
+import { screenNotifier } from '../src/device/screens';
 import { manifestKey, orgBlobKey } from '../src/r2';
 import { fakeProvider } from './fake-provider';
 
@@ -771,9 +772,44 @@ describe('only fetching for sources something will show', () => {
 describe('photos for what screens play, and a feed unchanged since photos were turned on (#481)', () => {
   /**
    * A manifest as `sf push` uploads one for `org`'s screen: a News spot binding `sourceIds`' stories, with no published
-   * spot behind it. The screen is told to play it.
+   * spot behind it. The screen is told to play it by a plain update, which records no photo sources (#486): the poller
+   * reads the manifest, as for a screen made desired before migration 0050.
    */
   async function pushed(org: SeededOrg, sourceIds: string[]) {
+    const manifestId = await uploaded(org, sourceIds);
+    await org.scope.screens.update(org.screen, { desiredManifestId: manifestId });
+  }
+
+  /** As `sf push` does it: uploaded, then `publish_manifest_to_screen`, which records its photo sources with it (#486). */
+  async function pushedBySf(org: SeededOrg, sourceIds: string[]) {
+    const manifestId = await uploaded(org, sourceIds);
+    const r = await dispatch(
+      registry,
+      'publish_manifest_to_screen',
+      { screenId: org.screen, manifestId },
+      { org: org.scope, role: 'owner', actor: { kind: 'user', id: 'feed-test' }, blobs: env.BLOBS, services: { notify: screenNotifier(env) } },
+    );
+    expect(r.ok).toBe(true);
+  }
+
+  /** The R2 bucket, counting the reads of `org`'s manifests. */
+  function countingManifestReads(org: SeededOrg) {
+    let reads = 0;
+    const bucket = new Proxy(env.BLOBS, {
+      get(target, prop) {
+        if (prop === 'get')
+          return (key: string) => {
+            if (key.startsWith(`o/${org.orgId}/`) && key.includes('/m/')) reads++;
+            return target.get(key);
+          };
+        const v = Reflect.get(target, prop, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    return { bucket, reads: () => reads };
+  }
+
+  async function uploaded(org: SeededOrg, sourceIds: string[]) {
     const manifestId = (++n).toString(16).padStart(64, 'f');
     const template = 'org/news-test@2.0.0';
     const manifest = {
@@ -787,7 +823,7 @@ describe('photos for what screens play, and a feed unchanged since photos were t
       dataSources: Object.fromEntries(sourceIds.map((id) => [id, {}])),
     };
     await env.BLOBS.put(manifestKey(org.orgId, org.screen, manifestId), JSON.stringify(manifest));
-    await org.scope.screens.update(org.screen, { desiredManifestId: manifestId });
+    return manifestId;
   }
 
   it('names the photos stored since its last poll in the next snapshot, though the feed answers 304 to a conditional request', async () => {
@@ -856,6 +892,53 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss"');
   });
 
+  it("queues photos for a source an `sf push`'d manifest shows, from what the push recorded, reading no manifest (#486)", async () => {
+    const org = await seedOrg(env.DB, `push-486-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://pushed-486.test/rss';
+    const id = await news(feed, { org, bind: false });
+    await pushedBySf(org, [id]);
+    const r2 = countingManifestReads(org);
+    const photo = (i: number) => `https://cdn.pushed-486.test/${i}.jpg`;
+    await poll({ now: NOW, guards: web({ [feed]: { body: feedOf(2, photo) } }).guards }, { ...env, BLOBS: r2.bucket });
+    expect(
+      take()
+        .filter((job) => job.sourceId === id)
+        .map((job) => job.url),
+    ).toEqual([photo(0), photo(1)]);
+    expect(r2.reads()).toBe(0);
+  });
+
+  it('reads the manifest when what was recorded is for another one: the screen was pointed at it by a path that records none (#486)', async () => {
+    const org = await seedOrg(env.DB, `push-486-other-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://pushed-486-other.test/rss';
+    const id = await news(feed, { org, bind: false });
+    // Recorded for a manifest that shows nothing; the one now desired shows the source.
+    await pushedBySf(org, []);
+    await pushed(org, [id]);
+    const r2 = countingManifestReads(org);
+    const photo = (i: number) => `https://cdn.pushed-486-other.test/${i}.jpg`;
+    await poll({ now: NOW, guards: web({ [feed]: { body: feedOf(1, photo) } }).guards }, { ...env, BLOBS: r2.bucket });
+    expect(take().filter((job) => job.sourceId === id)).toHaveLength(1);
+    expect(r2.reads()).toBe(1);
+  });
+
+  it('takes a desired manifest that cannot be read as showing no photos, and polls the source as it is (#486)', async () => {
+    const org = await seedOrg(env.DB, `push-486-gone-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://pushed-486-gone.test/rss';
+    const id = await news(feed, { org, bind: false });
+    // Pointed at a manifest R2 does not hold, with nothing recorded for it.
+    await org.scope.screens.update(org.screen, { desiredManifestId: 'e'.repeat(64) });
+    await poll({ now: NOW, guards: web({ [feed]: { body: feedOf(1, (i) => `https://cdn.pushed-486-gone.test/${i}.jpg`) } }).guards });
+    expect(take().filter((job) => job.sourceId === id)).toEqual([]);
+    expect(await org.scope.dataSources.snapshot(id)).toBeDefined();
+  });
+
   it("decides fit by published spots alone, whatever else the run claims: a pushed manifest's fields are for photos only", async () => {
     const org = await seedOrg(env.DB, `push-481-fit-${++n}`);
     extraPollOrgs.add(org.orgId);
@@ -907,7 +990,7 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     expect(await broken.scope.dataSources.snapshot(theirs)).toBeUndefined();
   });
 
-  it("keeps a poll of 5 sources a pushed manifest shows under the Free plan's D1 limits", async () => {
+  it("keeps a poll of 5 sources an `sf push`'d manifest shows under the Free plan's D1 limits, reading no manifest from R2 (#486)", async () => {
     const org = await seedOrg(env.DB, `push-481-budget-${++n}`);
     extraPollOrgs.add(org.orgId);
     // Only the five: the seeded org's own source is not due.
@@ -919,12 +1002,14 @@ describe('photos for what screens play, and a feed unchanged since photos were t
       ids.push(await news(feedUrl, { org, bind: false }));
       answers[feedUrl] = { body: feedOf(10, (i) => `https://cdn.push-budget-${s}.test/${i}.jpg`) };
     }
-    await pushed(org, ids);
+    await pushedBySf(org, ids);
     const counter = countingDb(env.DB);
-    await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db });
-    // Measured: pollInit is one batch, the screens' manifests a statement in it; the manifests themselves are R2 reads, not D1.
-    // 12 calls is what D1 counts against an invocation's 50.
+    const r2 = countingManifestReads(org);
+    await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db, BLOBS: r2.bucket });
+    // Measured: pollInit is one batch, the screens' desired manifests and their recorded photo sources a statement in it
+    // (#486), as before it, when the manifests themselves were R2 reads. 12 calls is what D1 counts against an invocation's 50.
     expect(counter.counts()).toEqual({ apiCalls: 12, statements: 36 });
+    expect(r2.reads()).toBe(0);
     // Ten each, within each source's share of the org's day (60 / 5).
     expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(50);
   });

@@ -354,7 +354,7 @@ describe('concurrent publishes (R09)', () => {
   const commitPublish = (org: TestScope, result: Publish) =>
     org.commit([
       ...result.writes,
-      ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+      ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id, null).writes : [])),
     ]);
   const titleOn = (result: Publish, screenId: string) =>
     (result.screens.find((s) => s.screenId === screenId)!.manifest!.spots[x('deal')] as Extract<Spot, { kind: 'template' }>).data.title;
@@ -828,9 +828,14 @@ describe('the publish tools (M3-18)', () => {
     const v2 = (await org.screens.get(lobby.id))!.desiredManifestId;
     expect(v2).not.toBe(v1);
 
+    // Each records what its manifest shows photos for beside it, for the feed poller (#486): this content shows none.
+    expect((await org.screens.get(lobby.id))!.desiredPhotoSourcesJson).toBe(JSON.stringify({ manifest: v2, sources: [] }));
+
     const back = (await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))) as unknown as Out;
     expect(back.publish).toMatchObject({ revision: 3, screens: 2, previousId: second.publish!.id });
     expect((await org.screens.get(lobby.id))!).toMatchObject({ desiredManifestId: v1, previousManifestId: v2 });
+    // A roll back reads its manifests once to record theirs.
+    expect((await org.screens.get(lobby.id))!.desiredPhotoSourcesJson).toBe(JSON.stringify({ manifest: v1, sources: [] }));
     expect((await org.publishes.get(back.publish!.id))!.restoresId).toBe(first.publish!.id);
     expect((await ok(editorCalls(org)('get_publish', {}))).publish).toMatchObject({ revision: 3, restoresId: first.publish!.id, restoresRevision: 1 });
     expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });
@@ -1091,7 +1096,7 @@ describe('the publish tools (M3-18)', () => {
       // Deleted, then uploaded again (as `/admin` does): it is pointed at, and marked stored.
       await sweptManifests(org, [a!], AT - 1);
       expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: false, error: 'not_found' });
-      await env.BLOBS.put(manifestKey(org.orgId, a!.screenId, a!.manifestId), JSON.stringify({ files: {} }));
+      await env.BLOBS.put(manifestKey(org.orgId, a!.screenId, a!.manifestId), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }));
       expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: true, output: { changed: true } });
       expect(await org.screens.get(lobby.id)).toMatchObject({ desiredManifestId: a!.manifestId });
       const row = await env.DB.prepare('SELECT deleted_at AS d FROM stored_manifests WHERE org_id = ? AND manifest_id = ?')

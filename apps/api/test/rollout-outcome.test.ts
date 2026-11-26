@@ -55,7 +55,7 @@ async function orgWith(names: string[], now: number) {
     await o.commit([
       ...p.writes,
       ...o.publishes.stage.addScreens(p.row.id, rows).writes,
-      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes),
+      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId, null).writes),
     ]);
     return p.row.id;
   };
