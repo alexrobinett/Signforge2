@@ -338,8 +338,7 @@ describe('alerts to Slack and webhooks', () => {
     const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
     const start = Date.now();
     const request = await ask('menu');
-    // The first run sends Slack and the webhook, and fans the email out to each approver; the next sends those.
-    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    // One run sends Slack and the webhook, and fans the email out to each approver, sending those too (#396).
     await deliverAlerts(env, outbox, { now: start + MIN, guards });
     const asks = (addr: string) => outbox.messages.filter((m) => m.to === addr && m.subject.includes('asks to publish'));
     for (const addr of [ownerEmail, other.email]) {
@@ -370,9 +369,10 @@ describe('alerts to Slack and webhooks', () => {
 
     // While only owners publish, an editor is not asked to approve: the email goes to whoever may when it is sent.
     await owner.ok('/api/tools/update_org_settings', { editorsPublish: false });
-    await ask('specials');
-    await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
-    await deliverAlerts(env, outbox, { now: start + 2 * MIN, guards });
+    const specials = await ask('specials');
+    // Sent at once, as the call's `deliverNow` does: the approvers' emails with it, not at the next run (#396).
+    const [fanOut] = (await o.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === `evt_publish_requested_${specials.id}` && d.channel === 'email');
+    await deliverAlert(env, outbox, org.id, fanOut!.id, { now: start + 2 * MIN, guards });
     expect(asks(ownerEmail)).toHaveLength(2);
     expect(asks(other.email)).toHaveLength(1);
 
@@ -382,7 +382,6 @@ describe('alerts to Slack and webhooks', () => {
       send: async (m: { to: string; subject: string; text: string }) => (m.to === other.email ? Promise.reject(new Error('mailbox full')) : outbox.send(m)),
     };
     await ask('lunch');
-    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
     await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
     expect(asks(ownerEmail)).toHaveLength(3);
     expect(asks(other.email)).toHaveLength(1);

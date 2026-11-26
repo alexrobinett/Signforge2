@@ -160,7 +160,7 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     const second: string = (await ask(token, other.id, other.version)).structuredContent.request.id;
     const declining = await measure((b) => owner(b).ok('/api/tools/decline_publish_request', { publishRequestId: second }));
     const approving = await measure((b) => owner(b).ok('/api/tools/approve_publish_request', { publishRequestId: first!.id }));
-    // Its deliveries as asked: Slack, the webhook, and one email to all 31 who may approve, whatever their number (fanned out when sent).
+    // Its deliveries as asked: Slack, the webhook, and one email to all 32 who may approve, whatever their number (fanned out when sent).
     expect(
       (await org.alertDeliveries.list({ take: 200 }))
         .filter((d) => d.eventId === `evt_publish_requested_${first!.id}`)
@@ -170,9 +170,13 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     // Measured, as the most each may take. A new statement fails this on purpose: look at the budget, then raise it.
     // Asking reads the token, the pins (three reads, however many), the asker's waiting requests, the brand
     // state, the settings, members, channels and the agent's client, then writes the request, its three
-    // deliveries and the audit row in one batch; then, sent at once, the email's fan-out to the 31 is one
-    // batch more (its 31 statements count once). Its one RPC is the agent's write limit (#107).
-    expect(asking).toEqual({ statements: 60, queries: 24, rpcs: ['write'] });
+    // deliveries and the audit row in one batch; then, sent at once, the email's fan-out to the 32 is one
+    // batch more (its 32 statements count once), and the first 12 of them, sent with it, are settled in one
+    // more (#396). Its one RPC is the agent's write limit (#107).
+    expect(asking).toEqual({ statements: 72, queries: 25, rpcs: ['write'] });
+    const fannedOut = (await org.alertDeliveries.list({ take: 200 })).filter((d) => d.eventId.startsWith(`evt_publish_requested_${first!.id}:`));
+    expect(fannedOut.filter((d) => d.status === 'delivered')).toHaveLength(12);
+    expect(fannedOut.filter((d) => d.status === 'pending' && d.attempts === 0)).toHaveLength(20);
     // Reading, listing and deciding also read who asked by name (#115): the members, and the connected agents, two queries.
     expect(reading).toEqual({ statements: 5, queries: 5, rpcs: [] });
     expect(listing).toEqual({ statements: 5, queries: 5, rpcs: [] });
@@ -250,7 +254,10 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     await t.owner.ok('/api/tools/publish', {});
     const [edited, ...live] = spots;
     await org.spots.update(edited!.id, { durationMs: 9000 });
-    const pins = [{ kind: 'spot', id: edited!.id, version: (await org.spots.get(edited!.id))!.rowVersion }, ...live.map((x) => ({ kind: 'spot', id: x.id, version: x.rowVersion }))];
+    const pins = [
+      { kind: 'spot', id: edited!.id, version: (await org.spots.get(edited!.id))!.rowVersion },
+      ...live.map((x) => ({ kind: 'spot', id: x.id, version: x.rowVersion })),
+    ];
     const asked = await t.owner.ok<{ request: { id: string } }>('/api/tools/request_publish', { drafts: pins, reason: 'A hundred at once' });
     // Another publish moves the revision between the approval's reads and its batch: the batch fails on the revision's guard,
     // which goes before the 99 live pins' guards, so the diagnosis finds it in its first read; the retry commits.

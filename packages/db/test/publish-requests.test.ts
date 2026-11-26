@@ -86,7 +86,9 @@ describe('the guards a request batch holds (re-check of #386)', () => {
     it('refuses putting a declined one back the same way', async () => {
       const a = scoped(env.DB, s.a.orgId);
       const pending = await requestAt(Date.UTC(2021, 0, 1) - 7 * DAY);
-      await env.DB.prepare("UPDATE publish_requests SET status = 'declined', decided_by = 'u', decided_at = ? WHERE id = ?").bind(pending.createdAt, pending.id).run();
+      await env.DB.prepare("UPDATE publish_requests SET status = 'declined', decided_by = 'u', decided_at = ? WHERE id = ?")
+        .bind(pending.createdAt, pending.id)
+        .run();
       const row = (await a.publishRequests.get(pending.id))!;
       behind();
       const refused = a.commit(a.publishRequests.stage.reopen(row, Date.now(), 10).writes);
