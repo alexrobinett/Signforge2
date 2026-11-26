@@ -97,13 +97,12 @@ function Setup({ orgId, steps, defaultPlaylist }: { orgId: string; steps: Record
   const canPublish = useCanPublish();
   const hidden = useAppStore((s) => s.ui.setupHidden.includes(orgId));
   const hide = useAppStore((s) => s.hideSetup);
-  const newSpot = useAppStore((s) => s.openNewSpot);
   const done = STEPS.filter((s) => steps[s.key]).length;
   if (!canManage || hidden || done === STEPS.length) return null;
 
   const action: Record<SetupStep, ReactNode> = {
     spot: (
-      <Link to="/spots" onClick={() => newSpot(true)}>
+      <Link to="/spots" search={{ new: true }}>
         New spot
       </Link>
     ),

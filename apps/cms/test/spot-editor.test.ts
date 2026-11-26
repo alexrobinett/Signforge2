@@ -599,6 +599,29 @@ describe('deleting a spot (#242)', () => {
     expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });
   });
 
+  it('lets the autosave go once Delete starts: an edit whose save was refused sends nothing while the delete is on its way (#445)', async () => {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    d.store.getState().askDeleteSpot(true);
+    const deleted = d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    // The save before the delete is refused: the delete goes at the version loaded.
+    reply({ error: 'conflict', message: 'spot spt_a has changed since you read it' }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
+    // Past the autosave's second, with the delete still on its way: no save races it.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
+    reply({ error: 'conflict', message: 'spot spt_a has changed since you read it' }, 409);
+    expect(await deleted).toBe(false);
+    // Refused, the edit still unsaved waits to save again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot', 'save_spot']);
+  });
+
   it('sends no delete without a version: a spot not loaded here is refused before any call (#355)', async () => {
     const d = deletable();
     withStatus();

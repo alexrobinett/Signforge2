@@ -65,8 +65,11 @@ export const createProposalsSlice: SliceCreator<ProposalsSlice> = (set, get, { q
       if (running === going) running = null;
     }
   };
-  /** A toast's Undo: at once, or, pressed while the Reject is still being read again, once it is (review of #410). */
-  const once = (go: () => void) => (running ? void running.then(go) : go());
+  /**
+   * A toast's Undo: at once, or, pressed while the Reject is still being read again, once that ends, failed or not: a
+   * failed read is the Reject's own to say, not a reason to drop the Undo (review of #410, #415).
+   */
+  const once = (go: () => void) => (running ? void running.then(go, go) : go());
 
   return {
     proposals: { pending: null },

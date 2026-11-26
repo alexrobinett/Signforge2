@@ -116,6 +116,33 @@ describe("an agent's proposal", () => {
     expect(reloadSpot).not.toHaveBeenCalled();
   });
 
+  it('runs an Undo pressed while the Reject is read again even when that read fails (#415)', async () => {
+    const { s } = setup();
+    vi.mocked(callTool).mockResolvedValue({ spot: { version: 8 }, rejected: true } as never);
+    let fail = (_: Error) => {};
+    let started = () => {};
+    const rereading = new Promise<void>((go) => (started = go));
+    reloadSpot.mockImplementationOnce(() => {
+      started();
+      return new Promise<void>((_, no) => (fail = no));
+    });
+    const first = s.getState().rejectProposal(ORG, 'spot', 'spt_soup', 7);
+    await rereading;
+    const done = toast
+      .getToasts()
+      .filter((t) => 'title' in t && t.title === "Rejected the agent's draft")
+      .at(-1);
+    const undo = done && 'action' in done ? done.action : undefined;
+    if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
+    undo.onClick({} as never);
+    expect(callTool).toHaveBeenCalledTimes(1);
+    // The read again fails: the Reject's run ends refused, and the Undo still goes.
+    fail(new Error('offline'));
+    await expect(first).rejects.toThrow('offline');
+    // Waited for as the call itself, not a count of microtask turns that a longer chain would outgrow.
+    await vi.waitFor(() => expect(callTool).toHaveBeenLastCalledWith('revert_spot_draft', { spotId: 'spt_soup', ifVersion: 8 }, ORG));
+  });
+
   it('runs an Undo pressed while the Reject is still read again once it is, and is never left pending by a read that fails', async () => {
     const { s } = setup();
     vi.mocked(callTool).mockResolvedValue({ spot: { version: 8 }, rejected: true } as never);

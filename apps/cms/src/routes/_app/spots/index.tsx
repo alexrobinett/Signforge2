@@ -18,6 +18,8 @@ import { useAppStore } from '~/state/provider';
 const section = sectionFor('/spots');
 
 export const Route = createFileRoute('/_app/spots/')({
+  // New spot open: a link from another page asks for it here, so it opens in the tab that lands on Spots (#403).
+  validateSearch: (s: Record<string, unknown>): { new?: true } => (s.new === true ? { new: true } : {}),
   loader: async ({ context: { queryClient }, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
@@ -33,12 +35,13 @@ function SpotsPage() {
   const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const versions = versionsById(templates);
+  const asked = Route.useSearch().new === true;
 
   return (
     <div className="space-y-6">
       {/* With no spots, New spot is the empty state's own action, the one on the page (#369). */}
       <PageHeader title={section.label} description={section.description}>
-        {canManage && spots.length > 0 && <NewSpotDialog orgId={orgId} templates={templates} />}
+        {canManage && spots.length > 0 && <NewSpotDialog orgId={orgId} templates={templates} asked={asked} />}
       </PageHeader>
       {spots.length ? (
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
@@ -58,7 +61,9 @@ function SpotsPage() {
           <EmptyState
             icon={section.icon}
             title={section.empty.title}
-            action={canManage ? <NewSpotDialog orgId={orgId} templates={templates} /> : <p className="text-sm text-muted-foreground">{ASK_AN_EDITOR}</p>}
+            action={
+              canManage ? <NewSpotDialog orgId={orgId} templates={templates} asked={asked} /> : <p className="text-sm text-muted-foreground">{ASK_AN_EDITOR}</p>
+            }
           >
             {section.empty.body}
           </EmptyState>

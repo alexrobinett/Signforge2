@@ -57,6 +57,15 @@ export const publishesOnScreen = (router: AnyRouter) => {
   return shell.tools.some((t: unknown) => typeof t === 'object' && t !== null && 'name' in t && t.name === 'publish');
 };
 
+/**
+ * Whether the page's address asks for New spot (`/spots?new=true`, #403). Going to the spot it made then replaces that
+ * entry, so Back lands on Spots, not on a New spot asked for again (review of #562).
+ */
+export const newSpotAsked = (router: AnyRouter) => {
+  const search: unknown = router.state.location.search;
+  return typeof search === 'object' && search !== null && 'new' in search && search.new === true;
+};
+
 /** The same, for a component that may render outside the app shell (the invitation page). */
 export const useOrgOnScreen = () => useRouterState({ select: (s) => shellOrg(s.matches) });
 
