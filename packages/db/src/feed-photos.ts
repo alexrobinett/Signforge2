@@ -200,7 +200,27 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
     hold && (hold.again.length || hold.fresh.length)
       ? db
           .insert(fi)
-          .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
+          // Each value by its column's name, and aliased as it: drizzle refuses a selection whose keys are not the table's, in
+          // its order, so a column moved or added fails here rather than taking another's value (#353).
+          .select((qb) =>
+            qb
+              .select({
+                orgId: sql`${orgId}`.as(fi.orgId.name),
+                url: sql`held.url`.as(fi.url.name),
+                sourceId: sql`${dataSourceId}`.as(fi.sourceId.name),
+                sourceSha256: sql`NULL`.as(fi.sourceSha256.name),
+                fileSha256: sql`NULL`.as(fi.fileSha256.name),
+                thumbSha256: sql`NULL`.as(fi.thumbSha256.name),
+                etag: sql`NULL`.as(fi.etag.name),
+                lastModified: sql`NULL`.as(fi.lastModified.name),
+                validatedFrom: sql`NULL`.as(fi.validatedFrom.name),
+                nextCheckAt: sql`${read.now + HOLD_MS}`.as(fi.nextCheckAt.name),
+                lastError: sql`NULL`.as(fi.lastError.name),
+                failures: sql`0`.as(fi.failures.name),
+                createdAt: sql`${read.now}`.as(fi.createdAt.name),
+                updatedAt: sql`${read.now}`.as(fi.updatedAt.name),
+              })
+              .from(sql`(
             WITH counts AS (
               SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n,
                 -- The org's RSS sources whose photos a screen shows: a full read records their URLs only then, and this one is shown.
@@ -218,7 +238,9 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
               LIMIT (SELECT CAST(MAX(0, MIN(MIN(${hold.budget.perSource}, ${hold.budget.perOrg} / MAX(1, sources)) - src_n, ${hold.budget.perOrg} - org_n)) AS INTEGER) FROM counts)
             )
-          ) WHERE ${current}`)
+          ) AS held`)
+              .where(current),
+          )
           .onConflictDoUpdate({
             target: [fi.orgId, fi.url],
             set: { nextCheckAt: sql`excluded.next_check_at`, updatedAt: sql`excluded.updated_at` },

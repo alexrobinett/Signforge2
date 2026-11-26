@@ -2091,13 +2091,13 @@ export function scoped(d1: D1Database, orgId: string) {
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
        * A news source's poll also passes `photos` (./feed-photos.ts): its writes and optional photo
        * holds then stand only if the source is still the row the poll read, and a reread is left due
-       * if not. Returns whether the poll's writes stood and the photo URLs held for queueing. Throws
+       * if not. Returns the photo URLs held for queueing. Throws
        * `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
         poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number; photos?: PollPhotos },
-      ): Promise<{ stood: boolean; held: string[] }> => {
+      ): Promise<{ held: string[] }> => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
@@ -2131,9 +2131,8 @@ export function scoped(d1: D1Database, orgId: string) {
         try {
           const [first, ...rest] = queries;
           const results = await db.batch([first!, ...rest]);
-          const stood = ((results[1] as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
           const held = holdAt !== undefined ? (results[holdAt] as { url: string }[]).map((r) => r.url) : [];
-          return { stood, held };
+          return { held };
         } catch (err) {
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
           if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });
