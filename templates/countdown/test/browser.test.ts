@@ -123,6 +123,14 @@ describe('countdown (#198)', () => {
     expect(await reads(f)).toMatchObject({ state: 'count', number: '0', rest: '0 h 0 min' });
   });
 
+  // The scale runs from the window's first day to the target; today is the marker on it, not its start (#611's review).
+  it("labels the scale's start with the window's first day, a DST change in between moving no day", async () => {
+    const s = await screen('landscape', 'America/New_York');
+    // Clocks go forward on 14 March 2027: 14 days of 24 hours before midnight on the 21st is 23:00 on the 6th.
+    const f = await s.show({ look: 'corporate', target: '2027-03-21T00:00', progressDays: 14 }, Date.parse('2027-03-15T16:00:00Z'));
+    expect(await f.evaluate(() => [...document.querySelectorAll('.ends > *')].map((e) => e.textContent))).toEqual(['Sunday, March 7', 'Sunday, March 21']);
+  });
+
   it("draws a countdown's progress over its last progressDays, only moving forward", async () => {
     const s = await screen();
     const seen: Record<string, unknown> = {};
@@ -143,14 +151,14 @@ describe('countdown (#198)', () => {
     expect(seen).toEqual({
       '16 of 14': ['off', null, null],
       '15 of 14': ['off', null, null],
-      '14 of 14': ['on', 'Today', '0'],
-      '13 of 14': ['on', 'Today', String(1 / 14)],
-      '7 of 14': ['on', 'Today', '0.5'],
-      '1 of 14': ['on', 'Today', String(13 / 14)],
-      '0 of 14': ['on', 'Today', '1'],
+      '14 of 14': ['on', 'Tuesday, November 17', '0'],
+      '13 of 14': ['on', 'Monday, November 16', String(1 / 14)],
+      '7 of 14': ['on', 'Tuesday, November 10', '0.5'],
+      '1 of 14': ['on', 'Wednesday, November 4', String(13 / 14)],
+      '0 of 14': ['on', 'Tuesday, November 3', '1'],
       '31 of 30': ['off', null, null],
-      '30 of 30': ['on', 'Today', '0'],
-      '29 of 30': ['on', 'Today', String(1 / 30)],
+      '30 of 30': ['on', 'Tuesday, November 17', '0'],
+      '29 of 30': ['on', 'Monday, November 16', String(1 / 30)],
     });
   });
 
@@ -407,7 +415,12 @@ describe('countdown (#198)', () => {
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`lights only Night's number, in a hairline ring, with ruled facts, ${orientation}`, async () => {
       const s = await screen(orientation);
-      const f = await s.show({ look: 'night', target: '2026-11-29T18:00', facts: [{ label: 'Where', value: 'Pier 9 roof terrace' }] });
+      const facts = [
+        { label: 'Where', value: 'Pier 9 roof terrace' },
+        { label: 'Dress code', value: 'Black tie' },
+        { label: 'Ticket office', value: 'Opens at 9' },
+      ];
+      const f = await s.show({ look: 'night', target: '2026-11-29T18:00', facts });
       const seen = await f.evaluate(() => {
         for (const a of document.getAnimations()) a.currentTime = 3000;
         const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
@@ -420,9 +433,12 @@ describe('countdown (#198)', () => {
           unit: document.querySelector('.unit-row')!.textContent!.trim().startsWith('//'),
           lit: style('.number').color !== style('.title').color && style('.title').color === style('body').color,
           rows: [...document.querySelectorAll('.fact')].every((el) => getComputedStyle(el).display === 'grid'),
+          // Labels whole, the values in one column.
+          cut: [...document.querySelectorAll('.fact dt')].filter((dt) => dt.scrollWidth > dt.clientWidth).map((dt) => dt.textContent),
+          lefts: new Set([...document.querySelectorAll('.fact dd')].map((dd) => Math.round(dd.getBoundingClientRect().left))).size,
         };
       });
-      expect(seen).toEqual({ ring: 1.1, ping: 0, unit: false, lit: true, rows: true });
+      expect(seen).toEqual({ ring: 1.1, ping: 0, unit: false, lit: true, rows: true, cut: [], lefts: 1 });
     });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {

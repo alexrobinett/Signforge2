@@ -465,16 +465,18 @@ h1 {
   font: 700 calc(8.9vmin * var(--lk-scale) * var(--fit)) / 1.08 var(--lk-font-display);
   -webkit-line-clamp: 4;
 }
-/* The facts as ruled rows, the label beside the value. */
+/* The facts as ruled rows, the label beside the value: one label column, as wide as the widest label up to 45%, so
+   "Dress code" stays whole and the values line up. */
 [data-look='night'] .facts {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: fit-content(45%) minmax(0, 1fr);
   border-top: max(1px, 0.12vmin) solid var(--lk-rule-color);
 }
 [data-look='night'] .fact {
   --lk-motion: var(--lk-badge-motion);
   display: grid;
-  grid-template-columns: 14vmin minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
   padding: 1.8vmin 0;
   border-bottom: max(1px, 0.12vmin) solid var(--lk-rule-color);

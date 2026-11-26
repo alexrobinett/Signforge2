@@ -116,13 +116,17 @@ defineTemplate({
     // The date line, in the look's style; a target at midnight is a day, with no time.
     const year = (d: Date) => formatter(ctx, { year: 'numeric' }).format(d);
     const style = DATE_STYLE[look];
-    const date = formatter(ctx, { weekday: style, day: 'numeric', month: style, ...(year(at) === year(now) ? {} : { year: 'numeric' }) }).format(at);
+    const day = (t: Date) => formatter(ctx, { weekday: style, day: 'numeric', month: style, ...(year(t) === year(now) ? {} : { year: 'numeric' }) }).format(t);
+    const date = day(at);
     const when = target.endsWith('T00:00') ? date : `${date} · ${formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(at)}`;
 
     // The progress: a countdown's way through its last `progressDays` (it has no start, and a span that
     // changed as the days went by would run backwards), shown once the days to go fit in it; or a
     // count-up's way to its record.
     const span = Number(data.progressDays);
+    // The scale's start, `span` calendar days before the target's: noon on that wall date, so a DST change in between moves no day.
+    const opens = new Date(Date.UTC(Number(target.slice(0, 4)), Number(target.slice(5, 7)) - 1, Number(target.slice(8, 10)) - span));
+    const start = day(wallTime(ctx, `${opens.toISOString().slice(0, 10)}T12:00`));
     const share = up ? (record ? Math.min(1, days / record) : undefined) : days <= span ? (span - days) / span : undefined;
     const beaten = days > record;
     const more = record + 1 - days;
@@ -162,7 +166,7 @@ defineTemplate({
       progress(look, share, {
         label: progressLabel,
         dots: up ? MAX_DOTS : Math.min(span, MAX_DOTS),
-        from: up ? `${plural(days, 'day', 'days')} of ${record.toLocaleString(ctx.locale)}` : 'Today',
+        from: up ? `${plural(days, 'day', 'days')} of ${record.toLocaleString(ctx.locale)}` : start,
         to: up ? 'Record' : date,
       });
     if (look === 'poster') tiles(units);
