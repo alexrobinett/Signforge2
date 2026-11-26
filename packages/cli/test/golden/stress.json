@@ -24,16 +24,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "37559e626fd771e81a5cae2ea301faff2f42b9167e438cfb0ff9733bf7ecc6e7": {
-      "size": 400510,
-      "type": "text/html"
-    },
-    "426c489eadc4508eca9a770997daedc64ff07be83a003c5ae46e69fdeabd2ad8": {
-      "size": 394856,
-      "type": "text/html"
-    },
-    "49686b8e3552535d2590b9ad15a8f84c2313a9e2d0c2e1d90b2679d796e56422": {
-      "size": 396837,
+    "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87": {
+      "size": 396010,
       "type": "text/html"
     },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
@@ -56,10 +48,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "866846883935e57652eb059ad2599abb7c1bd303144869c7a1b0e17890d5991b": {
-      "size": 384092,
-      "type": "text/html"
-    },
     "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
       "size": 125360,
       "type": "text/html"
@@ -72,6 +60,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8": {
+      "size": 383396,
+      "type": "text/html"
+    },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
       "type": "text/html"
@@ -80,9 +72,17 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9": {
+      "size": 394160,
+      "type": "text/html"
+    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da": {
+      "size": 399814,
+      "type": "text/html"
     },
     "b1a5fc555b8779e36f147b8f4e5be30f25f769a0127f4f0db6a011cdb48f1cff": {
       "size": 90095,
@@ -101,6 +101,10 @@
       "size": 43425,
       "type": "image/png"
     },
+    "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932": {
+      "size": 401141,
+      "type": "text/html"
+    },
     "de29f63a8d1386d966af4f67750a68a3498ec14b44d005facc2144f63162c937": {
       "size": 46747,
       "type": "image/png"
@@ -109,10 +113,6 @@
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
-    },
-    "f831d774c0bdac598fdcc2036129d989451e1172ed5a0bdea70424c069d1111a": {
-      "size": 401884,
-      "type": "text/html"
     }
   },
   "templates": {
@@ -331,7 +331,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "49686b8e3552535d2590b9ad15a8f84c2313a9e2d0c2e1d90b2679d796e56422"
+      "html": "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87"
     },
     "base/clock@1.2.4": {
       "manifest": {
@@ -509,7 +509,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "426c489eadc4508eca9a770997daedc64ff07be83a003c5ae46e69fdeabd2ad8"
+      "html": "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -967,7 +967,7 @@
         },
         "protocol": 2
       },
-      "html": "f831d774c0bdac598fdcc2036129d989451e1172ed5a0bdea70424c069d1111a"
+      "html": "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932"
     },
     "base/menu-board@1.3.1": {
       "manifest": {
@@ -1066,10 +1066,10 @@
       },
       "html": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215"
     },
-    "base/news@2.1.0": {
+    "base/news@2.0.3": {
       "manifest": {
         "id": "news",
-        "version": "2.1.0",
+        "version": "2.0.3",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1188,7 +1188,7 @@
         },
         "protocol": 2
       },
-      "html": "866846883935e57652eb059ad2599abb7c1bd303144869c7a1b0e17890d5991b"
+      "html": "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -1365,7 +1365,7 @@
         },
         "protocol": 2
       },
-      "html": "37559e626fd771e81a5cae2ea301faff2f42b9167e438cfb0ff9733bf7ecc6e7"
+      "html": "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da"
     },
     "base/weather@1.5.1": {
       "manifest": {
@@ -1861,7 +1861,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.0.3",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -2205,5 +2205,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "fb44b58795a56480ee957e3f83ed279c6bbdcf548d533166b1c01cd50c55a41f"
+  "id": "bb5c07b68095cf292ce0f21e1800f686a8cbc3323929281cb50ec03bb9014ccb"
 }

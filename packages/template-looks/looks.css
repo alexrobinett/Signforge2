@@ -161,8 +161,8 @@
 [data-look] {
   /* Motion (D's, #news-design): arriving decelerates, leaving accelerates, and a move that starts and ends on screen
      takes the standard curve. Entrances run 400 to 650 ms by role, 110 ms apart in reading order; exits run 300 ms
-     and are their own, not the entrance reversed. Travel is at most 1.5vmin in and 0.6vmin out (a mask's own 110% is
-     the one exception), with no overshoot. Only transform and opacity move. */
+     and are their own, not the entrance reversed. Travel is at most 1.5vmin in and 0.6vmin out, with no overshoot.
+     Only transform and opacity move: no clip or mask reveals, which the Pi has not measured. */
   --lk-ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
   --lk-ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
   --lk-ease-move: cubic-bezier(0.2, 0, 0, 1);
@@ -184,7 +184,6 @@
   --lk-accent-ink: var(--lk-accent);
   --lk-accent-ink-large: var(--lk-accent);
   --lk-scale: 1;
-  --lk-cover-motion: none;
   background: var(--lk-bg);
   color: var(--lk-text);
   font-family: var(--lk-font-body);
@@ -226,7 +225,7 @@
   --lk-text-motion: lk-rise;
   --lk-fade-motion: lk-fade;
   --lk-badge-motion: lk-pop-press;
-  --lk-photo-motion: lk-pop-slide;
+  --lk-photo-motion: lk-slide;
   --lk-drift-motion: lk-push;
   --lk-ping-motion: none;
   --lk-crawl-speed: 9vmin;
@@ -267,11 +266,10 @@
   --lk-radius-pill: 0px;
   --lk-rule: 0.28vmin;
 
-  --lk-text-motion: lk-mask-up;
+  --lk-text-motion: lk-rise;
   --lk-fade-motion: lk-rise;
-  --lk-badge-motion: lk-poster-stamp;
-  --lk-photo-motion: none;
-  --lk-cover-motion: lk-poster-wipe;
+  --lk-badge-motion: lk-rise;
+  --lk-photo-motion: lk-fade;
   --lk-drift-motion: lk-push;
   --lk-ping-motion: none;
   --lk-crawl-speed: 8.3vmin;
@@ -311,9 +309,9 @@
   --lk-radius-pill: 9999px;
   --lk-rule: 0.19vmin;
 
-  --lk-text-motion: lk-mask-up;
+  --lk-text-motion: lk-rise;
   --lk-fade-motion: lk-rise;
-  --lk-badge-motion: lk-night-slide;
+  --lk-badge-motion: lk-slide;
   --lk-photo-motion: lk-settle;
   --lk-drift-motion: lk-push;
   --lk-ping-s: 1.6s;
@@ -364,7 +362,7 @@
 }
 /* Motion. Each element gets its look's intro, for its role's time, staggered by `lk-d1` to `lk-d8`, and its own
    outro, ending as the spot does (`--sf-duration`): everything leaves together, lifting a little (`lk-leave`), or a
-   photo, cover or rule fading (`lk-fade-out`). Only transform and opacity move. */
+   photo or rule fading (`lk-fade-out`). Only transform and opacity move. */
 .lk-text {
   --lk-motion: var(--lk-text-motion);
   --lk-dur: var(--lk-in-text);
@@ -395,8 +393,7 @@
 .lk-fade,
 .lk-badge,
 .lk-photo,
-.lk-draw,
-.lk-cover {
+.lk-draw {
   will-change: transform, opacity;
   animation:
     var(--lk-motion) var(--lk-dur) var(--lk-ease-in) calc(var(--lk-i, 0) * var(--lk-stagger)) both,
@@ -426,27 +423,8 @@
 .lk-d8 {
   --lk-i: 8;
 }
-/* Text that slides up out of a mask (Poster, Night) sits in one; descenders keep their room. */
-.lk-mask {
-  padding-bottom: 0.1em;
-  margin-bottom: -0.1em;
-}
-[data-look='poster'] .lk-mask,
-[data-look='night'] .lk-mask {
-  overflow: hidden;
-}
-/* Poster's ink wipe: a block over a photo, scaled away. Nothing in the other looks. */
+/* No look wipes a cover over its photo now. News's markup keeps one until its rebuild, so it stays out of sight. */
 .lk-cover {
-  --lk-motion: var(--lk-cover-motion);
-  --lk-dur: var(--lk-in-photo);
-  --lk-leave: lk-fade-out;
-  position: absolute;
-  inset: 0;
-  background: var(--lk-text);
-  transform: scaleX(0);
-  transform-origin: right center;
-}
-:root:not([data-look='poster']) .lk-cover {
   display: none;
 }
 /* Ambient motion, inside an element that has an intro and outro of its own: one slow push-in over the play, so the
@@ -508,14 +486,6 @@
     transform: scaleX(0);
   }
 }
-/* Up out of a mask, fading as it comes: a mask-up element in no `.lk-mask` (Announcement's facts in Poster and
-   Night) showed displaced at full opacity from the first frame and through the outro. */
-@keyframes lk-mask-up {
-  from {
-    opacity: 0;
-    transform: translateY(110%);
-  }
-}
 @keyframes lk-crawl {
   to {
     transform: translateX(var(--lk-crawl-shift, -50%));
@@ -539,24 +509,7 @@
     transform: scale(0.94);
   }
 }
-@keyframes lk-pop-slide {
-  from {
-    opacity: 0;
-    transform: translateX(var(--lk-rise));
-  }
-}
-@keyframes lk-poster-stamp {
-  from {
-    opacity: 0;
-    transform: scale(1.04);
-  }
-}
-@keyframes lk-poster-wipe {
-  from {
-    transform: scaleX(1);
-  }
-}
-@keyframes lk-night-slide {
+@keyframes lk-slide {
   from {
     opacity: 0;
     transform: translateX(var(--lk-rise));

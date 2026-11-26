@@ -113,8 +113,7 @@ describe('the look kit (#190)', () => {
         for (const a of document.getAnimations())
           for (const k of (a.effect as KeyframeEffect).getKeyframes())
             for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
-        // The photo's own intro and outro, or in Poster the ink block's, which uncovers it and covers it again.
-        const moving = ['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo', '.cover'];
+        const moving = ['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo'];
         const ends = moving.map((sel) => {
           const timed = document
             .querySelector(sel)!
@@ -131,9 +130,7 @@ describe('the look kit (#190)', () => {
       }, durationMs);
       expect(props, look).toEqual(['opacity', 'transform']);
       const both = (sel: string) => `${sel} intro, outro at the end`;
-      // In Poster the photo comes in under the ink block's wipe, and leaves with everything else.
-      const photo = look === 'poster' ? ['.photo outro at the end', both('.cover')] : [both('.photo'), '.cover '];
-      expect(ends, look).toEqual([...['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker'].map(both), ...photo]);
+      expect(ends, look).toEqual(['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo'].map(both));
     }
   });
 
@@ -146,6 +143,32 @@ describe('the look kit (#190)', () => {
         for (const line of await motionContract(await k.play({ look }, undefined, durationMs), durationMs)) found.push(`${look}: ${line}`);
       expect(found).toEqual([]);
     });
+
+  it('motionContract names a clip-path or mask reveal, and a scale that passes its end on the way', async () => {
+    const k = await kitFrame();
+    const durationMs = 11_000;
+    const f = await k.play({ look: 'corporate' }, undefined, durationMs);
+    await f.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes t-clip { from { clip-path: inset(0 100% 0 0); } }
+        @keyframes t-mask { from { mask-position: 100% 0; } }
+        @keyframes t-over { from { transform: scale(0.94); } }
+        .t-clip { animation: t-clip .5s cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+        .t-mask { animation: t-mask .5s cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+        .t-over { animation: t-over .5s linear(0, 2.2, 1) both; }`;
+      document.head.append(style);
+      for (const name of ['t-clip', 't-mask', 't-over']) document.body.append(Object.assign(document.createElement('div'), { className: name }));
+    });
+    const found = (await motionContract(f, durationMs)).filter((line) => line.startsWith('div.t-'));
+    expect(found).toEqual(
+      expect.arrayContaining([
+        'div.t-clip t-clip moves clipPath',
+        expect.stringMatching(/^div\.t-mask t-mask moves (webkitM|m)askPosition/),
+        expect.stringMatching(/^div\.t-over t-over scales to 1\.0[5-9]/),
+      ]),
+    );
+  });
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames
   // dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until one measures under.
@@ -177,7 +200,6 @@ describe('the look kit (#190)', () => {
       const still = await f.evaluate(() => ({
         animations: document.getAnimations().length,
         moved: [...document.querySelectorAll<HTMLElement>('.stage *')]
-          .filter((el) => !el.classList.contains('lk-cover'))
           .filter((el) => getComputedStyle(el).opacity !== '1' || getComputedStyle(el).transform !== 'none')
           .map((el) => el.className),
         crawl: [...document.querySelectorAll('#crawl > *')].map((el) => getComputedStyle(el).display),

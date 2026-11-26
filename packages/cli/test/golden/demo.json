@@ -105,37 +105,25 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "37559e626fd771e81a5cae2ea301faff2f42b9167e438cfb0ff9733bf7ecc6e7": {
-      "size": 400510,
-      "type": "text/html"
-    },
     "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
       "size": 582,
       "type": "image/svg+xml"
-    },
-    "426c489eadc4508eca9a770997daedc64ff07be83a003c5ae46e69fdeabd2ad8": {
-      "size": 394856,
-      "type": "text/html"
     },
     "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3": {
       "size": 1042,
       "type": "image/svg+xml"
     },
-    "49686b8e3552535d2590b9ad15a8f84c2313a9e2d0c2e1d90b2679d796e56422": {
-      "size": 396837,
-      "type": "text/html"
-    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
     },
+    "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87": {
+      "size": 396010,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "866846883935e57652eb059ad2599abb7c1bd303144869c7a1b0e17890d5991b": {
-      "size": 384092,
-      "type": "text/html"
     },
     "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
       "size": 125360,
@@ -148,6 +136,10 @@
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8": {
+      "size": 383396,
+      "type": "text/html"
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
@@ -165,12 +157,20 @@
       "size": 12672,
       "type": "font/woff2"
     },
+    "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9": {
+      "size": 394160,
+      "type": "text/html"
+    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "f831d774c0bdac598fdcc2036129d989451e1172ed5a0bdea70424c069d1111a": {
-      "size": 401884,
+    "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da": {
+      "size": 399814,
+      "type": "text/html"
+    },
+    "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932": {
+      "size": 401141,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -304,7 +304,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "49686b8e3552535d2590b9ad15a8f84c2313a9e2d0c2e1d90b2679d796e56422"
+      "html": "57d0d3581a953f366ab5ef91b1c8c81ab2de1b5df81f0e609c9f675904be5b87"
     },
     "base/countdown@1.1.0": {
       "manifest": {
@@ -432,7 +432,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "426c489eadc4508eca9a770997daedc64ff07be83a003c5ae46e69fdeabd2ad8"
+      "html": "ada170cbf0aae49b5712bb4494623ae792332a2ffb5b3e82a300974ff5e59db9"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -889,12 +889,12 @@
         },
         "protocol": 2
       },
-      "html": "f831d774c0bdac598fdcc2036129d989451e1172ed5a0bdea70424c069d1111a"
+      "html": "dd2d2e1f3359be6eeff972d4b6fa511912d9fd2e50d4cd031e79fe8e9e06e932"
     },
-    "base/news@2.1.0": {
+    "base/news@2.0.3": {
       "manifest": {
         "id": "news",
-        "version": "2.1.0",
+        "version": "2.0.3",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1013,7 +1013,7 @@
         },
         "protocol": 2
       },
-      "html": "866846883935e57652eb059ad2599abb7c1bd303144869c7a1b0e17890d5991b"
+      "html": "9f8aeb15680723ca50b3bedc348ec3e4e8631b39389383a7dd0da0d54f63a9d8"
     },
     "base/room-status@1.1.0": {
       "manifest": {
@@ -1139,7 +1139,7 @@
         },
         "protocol": 2
       },
-      "html": "37559e626fd771e81a5cae2ea301faff2f42b9167e438cfb0ff9733bf7ecc6e7"
+      "html": "b0bfa52f23daab6ef02a9fc867e6248c48acc83fbbd2feab6f4e41efa88d31da"
     }
   },
   "spots": {
@@ -1314,7 +1314,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.0.3",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1345,7 +1345,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.0.3",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1376,7 +1376,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.0.3",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1532,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "affd56e1873c841293aec8116c80b658a898df1d659ee706888ea7a268684c9a"
+  "id": "a7768b0b510c6bc326b0a31de3f7f5041245f3f336f4d65945cf63580e05737a"
 }

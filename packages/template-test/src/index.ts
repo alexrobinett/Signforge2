@@ -785,8 +785,8 @@ export const MOTION = {
  * Where a play of `durationMs` breaks D's motion, one line each: none when it keeps it. Every element that arrives
  * does so on the decelerating curve in 400 to 650 ms; every element that leaves does so on the accelerating curve in
  * 300 ms, ending as the spot does, with keyframes of its own rather than its entrance reversed. Nothing travels more
- * than 1.5vmin or scales past 0.94 to 1.04 (text rising out of a `.lk-mask` is the one exception), nothing overshoots
- * (two keyframes and no bezier leaving [0, 1]), only transform and opacity move, and nothing loops but `loops`.
+ * than 1.5vmin or scales past 0.94 to 1.04 at any point on its way, nothing overshoots (two keyframes and no bezier
+ * leaving [0, 1]), only transform and opacity move (no clip-path or mask reveal), and nothing loops but `loops`.
  * Read by seeking each animation, so it takes no wall clock.
  */
 export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl, .lk-ping') =>
@@ -827,8 +827,8 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
           if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
           if (easing !== m.easeIn) found.push(`${who} arrives on ${easing}`);
         }
-        // How far it moves: its transform where it starts, set by seeking it there, against its own rest.
-        if (el.closest('.lk-mask')) continue;
+        // How far it moves: its transform at points along its way, set by seeking it there, so an easing that passes
+        // its end shows too.
         // Every animation of the element at the same moment, as they play: an exit sampled while the entrance still sat
         // at its start would read the entrance's offset.
         const together = el.getAnimations();
@@ -838,13 +838,14 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
           const transform = getComputedStyle(el).transform;
           return new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
         };
-        for (const t of [start, start + dur - 0.01]) {
-          const x = sample(t);
+        for (let i = 0; i <= 8; i++) {
+          const x = sample(start + ((dur - 0.01) * i) / 8);
           const travel = Math.hypot(x.m41, x.m42) / vmin;
-          // A rule drawn across, or a cover wiped away, scales along one axis only: a reveal, not a size change.
           const [sx, sy] = [Math.hypot(x.m11, x.m12), Math.hypot(x.m21, x.m22)];
           if (travel > m.travelVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
-          if (Math.abs(sx - sy) < 0.001 && (sx < m.scale[0] - 0.001 || sx > m.scale[1] + 0.001)) found.push(`${who} scales to ${sx.toFixed(2)}`);
+          // A rule drawn across grows along one axis from nothing: a reveal, which may start below 0.94 but never pass 1.04.
+          const shrinks = Math.abs(sx - sy) < 0.001 && sx < m.scale[0] - 0.001;
+          if (shrinks || Math.max(sx, sy) > m.scale[1] + 0.001) found.push(`${who} scales to ${Math.max(sx, sy).toFixed(2)}`);
         }
         together.forEach((x, i) => (x.currentTime = was[i] ?? null));
       }

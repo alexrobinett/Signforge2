@@ -155,23 +155,21 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 
 **Toggles.** Each element that can be switched off has a boolean field `show<Name>`, such as `showPhoto` or `showNowLine`. `applyLook` marks the root `data-<name>="on|off"` (`data-photo`, `data-now-line`) and removes every element marked `data-show="<name>"` when it is off. So the layout reflows around what is left: write it in flex or grid, which close up over a removed element, and key anything else off the root's marks. A photo that is switched off is never decoded, and needs no image: an image field whose `show<Name>` toggle is false (set or by default, and not bound to live data) is not required to publish (`validateSpotData`, #252). Type steps up into space an element leaves: each look has a `--lk-step` (Pop 1.18, Poster 1.2, Night 1.6, Corporate 1.15), and a template sets `:root[data-photo='off'] { --lk-scale: var(--lk-step); }` and sizes text as `calc(var(--lk-size-display) * var(--lk-scale))`. No template needs layout code in `main.ts` for a toggle.
 
-**Motion.** Classes whose movement each look gives in its own language. Every one moves only `transform` and `opacity`:
+**Motion.** D's (#news-design): an element arrives decelerating (`--lk-ease-in`, `cubic-bezier(0.05, 0.7, 0.1, 1)`) in 400 to 650 ms by role, 110 ms after the one before it in reading order, and leaves accelerating (`--lk-ease-out`, `cubic-bezier(0.3, 0, 0.8, 0.15)`) in 300 ms, on keyframes of its own, not its entrance reversed. It travels at most 1.5vmin in and 0.6vmin out, scales no further than 0.94 to 1.04, and never overshoots. Only `transform` and `opacity` move: no clip-path or mask reveal, which the Pi has not measured. Each look keeps its character through type, colour and corners, and through which of these motions each role takes:
 
 | Class | Pop | Poster | Night | Corporate |
 | --- | --- | --- | --- | --- |
-| `lk-text` | bouncy rise | slide-up out of a mask | slide-up out of a mask, expo-out | 1.5vmin eased rise |
-| `lk-fade` | fade | fade and rise | fade and rise | fade |
-| `lk-badge` | springy pop-in | stamp | slide in | fade |
-| `lk-photo` | slide in, tilted | none (see `lk-cover`) | zoom out of 1.06 | settle from 1.04 |
-| `lk-cover` | none | ink wipe: a block over a photo, scaled away | none | none |
-| `lk-draw` | a rule or bar drawn left to right | the same | the same | the same |
-| `lk-drift`, ambient, landscape only | slow drift | slow push-in | slow pan | slow push-in |
-| `lk-wobble`, ambient | sticker wobble | none | none | none |
-| `lk-pulse` / `lk-ping`, ambient | bounce / none | none | live pulse / ping | breathing / none |
+| `lk-text`, 650 ms | rise | rise | rise | rise |
+| `lk-fade`, 500 ms | fade | rise | rise | fade |
+| `lk-badge`, 400 ms | press in from 0.94 | rise | slide in from the side | fade |
+| `lk-photo`, 600 ms | slide in from the side | fade | settle from 1.03 | settle from 1.03 |
+| `lk-draw`, 500 ms | a rule or bar drawn left to right | the same | the same | the same |
+| `lk-drift`, ambient, landscape only | slow push-in to 1.04 over the play | the same | the same | the same |
+| `lk-ping`, ambient | none | none | a live ping every 1.6 s | none |
 | `lk-crawl` | steady crawl, `--lk-crawl-speed` vmin a second | the same | the same | the same |
 
-- Each element with `lk-text`, `lk-fade`, `lk-badge`, `lk-photo`, `lk-cover` or `lk-draw` gets its look's intro, staggered by `lk-d1` to `lk-d8`. Its outro is the same motion reversed, ending as the spot ends (`calc(var(--sf-duration) - var(--lk-out))`).
-- Text that slides out of a mask sits in an `.lk-mask`.
+- Each element with `lk-text`, `lk-fade`, `lk-badge`, `lk-photo` or `lk-draw` gets its look's intro, staggered by `lk-d1` to `lk-d8`. Its outro ends as the spot ends (`calc(var(--sf-duration) - var(--lk-out))`): text, fades and badges fade as they lift 0.6vmin (`lk-leave`), photos and rules fade (`lk-fade-out`).
+- `motionContract(frame, durationMs)` in `@signforge/template-test` checks a play against all of this by seeking each animation, and fails on a clip-path or mask animation or on a scale that passes its end on the way.
 - An ambient class goes on an element inside one that has an intro, so the outer element's outro takes it away.
 - A crawl is a `.lk-crawl` strip filled in `prepare` and passed to `crawl(strip, ctx)`. It holds its content twice and slides by exactly one copy at the look's speed, however long the text is.
 - Under `prefers-reduced-motion` nothing animates: every element shows its final frame, and a crawl is one line cut with an ellipsis.
@@ -199,7 +197,7 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - **The canvas's rules.** A rail that would hold only the logo is dropped. With no rail, the clock and the weather are a chip on the photo's corner and the logo sits on the photo. The weather grows without the forecast, and the clock without the weather. The canvas's clock sizes fit "9:41" but not "10:00" in the rail, so each look's sizes are the largest at which the widest time fits; with the weather off, a landscape rail, too narrow for a bigger clock on one line, sets the hours over the minutes.
 - **Text on cards.** No text sits on the photo itself: the caption, the chip and the logo each have a fill, and `main.ts` measures each card's inks through `readableOn` (an ink that is a mix of tokens is resolved first). Long copy steps the caption's title down (0.86, 0.74, 0.64 of its size) before the clamp's ellipsis; the clock and the temperature shrink only to fit their box.
 - **Time.** The clock and the date are from `now()` in the screen's zone; the text is written only when it changes, from a timer that wakes on each second. Each live forecast day is named from its Open-Meteo timestamp (`daily.time.1`–`.3`) in the feed's own `timezone` (`weatherTimezone`), so a screen in another time zone or a snapshot cached across midnight keeps every temperature under its own weekday; static fallbacks (`0`) name the next three days from the screen's today.
-- **Motion.** As the look kit's, with the rail sliding in from its own side. Looping motion (the colon's blink, Pop's sticker wobble and glyph bob, Night's live dot and seconds bar) holds still in portrait, as Countdown's does (#218); the crawl runs. Poster's photo stays unpainted until play, under its ink block (Announcement, #197). The crawl's speed is the look's times `crawlSpeed` (slow 0.7, normal 1, fast 1.4).
+- **Motion.** As the look kit's, with the rail sliding in from its own side. Looping motion (the colon's blink, Pop's sticker wobble and glyph bob, Night's live dot and seconds bar) holds still in portrait, as Countdown's does (#218); the crawl runs. The photo stays unpainted until play, when its panel comes in from nothing (Announcement, #197). The crawl's speed is the look's times `crawlSpeed` (slow 0.7, normal 1, fast 1.4).
 - **Bundle**: 403,207 bytes with all four looks.
 - **On the Pi** (`spike/pi-perf/RESULTS.md`, Info frame), over a 4K photo with the crawl running: Poster, Night and Corporate landscape cuts drop 0.50 to 0.72% of frames (Poster landscape fade 0.44%, Poster portrait cut 0.50%, Night portrait cut 1.00%), with later landscape prepare medians of 410 to 454 ms (Pop 592 ms). Over budget (10/16 specs over 1% dropped, 58/80 prepares over 500 ms, 16/16 specs with worst frames over 50 ms): all four portrait fades (1.33 to 3.33%), Pop (2.33%, 1.27% playing) and Corporate (1.39%) portrait cuts, Pop (1.94%), Night (1.33%) and Corporate (1.11%) landscape fades, Pop landscape cut (1.44%); all 40 portrait prepares (568 to 994 ms, the portrait photo being 6.6 megapixels), all 8 landscape cold-load first prepares (698 to 855 ms), and 10 of 32 later landscape prepares (561 to 658 ms); and worst frames of 67 to 100 ms in every spec (while loading the next spot, plus one 67–83 ms play frame in each Pop portrait spec).
 

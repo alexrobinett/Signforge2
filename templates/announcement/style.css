@@ -326,9 +326,8 @@ body {
   grid-column: 1 / -1;
 }
 
-/* Poster: a printed bill. A ruled header, a serif headline that slides out of its mask, a ruled
-   footer with the signature in italic and the code in a ruled frame; the photo full bleed behind a
-   rule, uncovered by the ink wipe. */
+/* Poster: a printed bill. A ruled header, a serif headline, a ruled footer with the signature in
+   italic and the code in a ruled frame; the photo full bleed behind a rule. */
 [data-look='poster'] .copy {
   padding: 6.7vmin 8.1vmin 6.7vmin 8.9vmin;
   grid-template-rows: min-content min-content min-content min-content min-content minmax(0, 1fr) min-content min-content;
