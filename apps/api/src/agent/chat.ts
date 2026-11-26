@@ -207,7 +207,8 @@ function readCard(type: ReadType, ids: boolean, output: unknown): { tool: string
   const items = output && typeof output === 'object' && 'items' in output && Array.isArray(output.items) ? output.items : [];
   // One is its get's own words ("Read a spot"); more, how many of its list's ("Read 3 screens").
   if (items.length === 1) return { tool: get, summary: TOOL_CARDS[get]?.did ?? '' };
-  return { tool: get, summary: `Read ${items.length} ${(TOOL_CARDS[list]?.title ?? type).toLowerCase()}` };
+  // Several, titled as its list is ("Screens"), not as one ("A screen").
+  return { tool: list, summary: `Read ${items.length} ${(TOOL_CARDS[list]?.title ?? type).toLowerCase()}` };
 }
 
 /** The model's answer, every field required: prose alone, or a lone `{ text }`, is not one (#350). */
