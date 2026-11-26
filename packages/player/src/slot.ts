@@ -183,14 +183,17 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
   return themeCache.theme;
 }
 
+type Frames = ReturnType<typeof containedFrames>;
+
 /**
  * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a 400 kB
  * bundle again cost about 150 ms of a prepare on a Pi 4 (spike/pi-perf/RESULTS.md, #213): once per
- * bundle, not per play. By hash, so a new bundle is a new entry, never another's.
+ * bundle, not per play. By hash, so a new bundle is a new entry, never another's. Held as promises,
+ * so a prepare and `warmBundles` reading one bundle at once share the read.
  */
-let framesCache: { manifest: string; frames: Map<string, ReturnType<typeof containedFrames>> } | undefined;
+let framesCache: { manifest: string; frames: Map<string, Promise<Frames>> } | undefined;
 
-async function framesFor(manifest: ScreenManifest, sha: string): Promise<ReturnType<typeof containedFrames>> {
+function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
   if (framesCache?.manifest !== manifest.id) {
     const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
     const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
@@ -198,8 +201,41 @@ async function framesFor(manifest: ScreenManifest, sha: string): Promise<ReturnT
   }
   const cache = framesCache;
   let frames = cache.frames.get(sha);
-  if (!frames) cache.frames.set(sha, (frames = containedFrames(await (await getFile(sha)).text())));
+  if (!frames) {
+    const read = getFile(sha).then(async (blob) => containedFrames(await blob.text()));
+    cache.frames.set(sha, (frames = read));
+    // A read that failed is not kept: the next prepare tries again.
+    read.catch(() => {
+      if (cache.frames.get(sha) === read) cache.frames.delete(sha);
+    });
+  }
   return frames;
+}
+
+/**
+ * Read the bundles of `manifest` not read yet, one at a time when the page is idle, those of the
+ * spots in `first` first: while a spot plays, so a template's first prepare does not pay for it
+ * (#232). On a Pi 4 a 400 kB bundle's first read and parse took 75 to 210 ms of its first prepare,
+ * of 450 to 610 in all; the template plays in its own process, so the player's idle main thread
+ * costs it nothing. Stops once another manifest has been prepared.
+ */
+export function warmBundles(manifest: ScreenManifest, first: readonly string[]): void {
+  const firstBundles = first.flatMap((id) => {
+    const spot = manifest.spots[id];
+    const html = spot?.kind === 'template' && manifest.templates[spot.template]?.html;
+    return html ? [html] : [];
+  });
+  // Each once: a file that cannot be read is left to the prepare that needs it.
+  const left = new Set([...firstBundles, ...Object.values(manifest.templates).map((t) => t.html)]);
+  const next = () => {
+    const cache = framesCache;
+    if (cache?.manifest !== manifest.id) return;
+    const sha = [...left].find((s) => !cache.frames.has(s));
+    if (!sha) return;
+    left.delete(sha);
+    requestIdleCallback(() => void framesFor(manifest, sha).then(next, next));
+  };
+  next();
 }
 
 async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefined> {

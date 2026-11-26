@@ -22,6 +22,35 @@ const onScreenComments = async (p: Player) => {
   });
 };
 
+/** The player on `content`, counting each read of a file out of its file cache, the only reads of a bundle (`readsOf`). */
+const openCountingReads = (content: Content) =>
+  h.openPlayer(
+    (s) => s.publish(content),
+    {},
+    {
+      before: (page) =>
+        page.addInitScript(() => {
+          const reads: Record<string, number> = {};
+          Object.assign(window, { sfReads: reads });
+          const match = Cache.prototype.match;
+          Cache.prototype.match = function (request, options) {
+            const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
+            reads[url] = (reads[url] ?? 0) + 1;
+            return match.call(this, request, options);
+          };
+        }),
+    },
+  );
+/** How often the player read the file `sha`. */
+const readsOf = (p: Player, sha: string) =>
+  p.page.evaluate(
+    (sha) =>
+      Object.entries((window as unknown as { sfReads: Record<string, number> }).sfReads)
+        .filter(([url]) => url.endsWith(sha))
+        .reduce((n, [, c]) => n + c, 0),
+    sha,
+  );
+
 /** Every key in the player's file cache. */
 const cached = (p: Player) => p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
 
@@ -62,28 +91,33 @@ describe('content files', () => {
   it('reads a template bundle once, however often its spots play (#213)', async () => {
     // Two spots of one template, so each plays the bundle the other loaded.
     const content = h.content(['a', 'b'].map((id) => ({ id, durationMs: 600 })));
-    // Counts the reads of each file out of the player's file cache, the only reads of a bundle.
-    const p = await h.openPlayer(
-      (s) => s.publish(content),
-      {},
-      {
-        before: (page) =>
-          page.addInitScript(() => {
-            const reads: Record<string, number> = {};
-            Object.assign(window, { sfReads: reads });
-            const match = Cache.prototype.match;
-            Cache.prototype.match = function (request, options) {
-              const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
-              reads[url] = (reads[url] ?? 0) + 1;
-              return match.call(this, request, options);
-            };
-          }),
-      },
-    );
+    const p = await openCountingReads(content);
     await p.until((s) => s.log.length >= 5);
-    const reads = await p.page.evaluate(() => (window as unknown as { sfReads: Record<string, number> }).sfReads);
-    const bundle = bundleOf(content);
-    expect(Object.entries(reads).filter(([url]) => url.endsWith(bundle))).toEqual([[expect.stringContaining(bundle), 1]]);
+    expect(await readsOf(p, bundleOf(content))).toBe(1);
+  });
+
+  it('reads the bundles still to come while a spot plays, once each (#232)', async () => {
+    // A second template whose spot `b` is in the manifest but not the playlist: only the warm-up reads its bundle.
+    const other = h.content([{ id: 'b', durationMs: 600 }], { variant: 'other-bundle' });
+    const otherBundle = bundleOf(other);
+    const b = other.manifest.spots.b;
+    if (b?.kind !== 'template') throw new Error('b is a template spot');
+    const content = h.content([{ id: 'a', durationMs: 600 }], {
+      edit: (m) => {
+        m.templates['other/fixture@1.0.0'] = { ...m.templates[TEMPLATE_KEY]!, html: otherBundle };
+        m.files[otherBundle] = other.manifest.files[otherBundle]!;
+        m.spots.b = { ...b, template: 'other/fixture@1.0.0' };
+      },
+    });
+    content.blobs.set(otherBundle, other.blobs.get(otherBundle)!);
+    const p = await openCountingReads(content);
+    await p.until((s) => s.log.length >= 1);
+    await expect.poll(() => readsOf(p, otherBundle)).toBe(1);
+    // And not again, however often a plays.
+    await p.until((s) => s.log.length >= 4);
+    expect(await readsOf(p, otherBundle)).toBe(1);
+    expect(await readsOf(p, bundleOf(content))).toBe(1);
+    expect(spotsPlayed(await p.state()).every((id) => id === 'a')).toBe(true);
   });
 
   it('never shows a template from the bundle it had for another hash (#213)', async () => {
