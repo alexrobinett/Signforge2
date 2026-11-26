@@ -33,8 +33,9 @@ const SYNC_INTERVAL_S = 300;
 /**
  * How soon a screen syncs again while feed photos it lacks are left out of a reply (`MAX_SYNC_RESPONSE_BLOBS`): a few
  * replies bring a new feed's photos in a minute, not one batch every interval (#476). Each sync writes one D1 row, so
- * this lasts only while the count still missing moves, plus one retry for a lost reply: a screen that cannot store
- * them would otherwise sync 5,760 times a day rather than 288.
+ * this lasts only while photos it was asked for arrive or a reply's new snapshots bring more than one ask holds, plus
+ * one retry for a lost reply: a screen that cannot store them would otherwise sync 5,760 times a day rather than 288
+ * (the pace rule in `syncRoute`).
  */
 const MORE_PHOTOS_SYNC_S = 15;
 /** How much of each asked photo's hash the heartbeat keeps, its end, to tell whether the next sync holds it: 64 bits. */
@@ -53,9 +54,9 @@ function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
  * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it
  * holds at the current version were last checked, and any feed image blob hashes referenced by
  * those snapshots that the screen did not report holding (capped at `MAX_SYNC_RESPONSE_BLOBS`),
- * with how many it lacks in all. `first`: sources whose photos go before the others', those of the
- * manifest a screen plays while it falls back from the desired one. `last`: the screen's last sync,
- * whose ask this one starts after.
+ * with how many it lacks in all and of the snapshots sent (`fresh`). `first`: sources whose photos go
+ * before the others', those of the manifest a screen plays while it falls back from the desired one.
+ * `last`: the screen's last sync, whose ask this one starts after.
  */
 async function snapshotsFor(
   env: Env,
@@ -66,8 +67,8 @@ async function snapshotsFor(
   includeBlobs: boolean,
   first: ReadonlySet<string>,
   last: DeviceScreen['lastPhotos'],
-): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'> & { missing: number }> {
-  if (!desired?.dataSources.size) return { snapshots: [], checked: {}, missing: 0 };
+): Promise<Pick<SyncResponse, 'snapshots' | 'checked' | 'blobs'> & { missing: number; fresh: number }> {
+  if (!desired?.dataSources.size) return { snapshots: [], checked: {}, missing: 0, fresh: 0 };
   const rows = await scoped(env.DB, screen.orgId).dataSources.snapshots([...desired.dataSources]);
   // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
   const snapshots: DataSnapshot[] = [];
@@ -75,6 +76,8 @@ async function snapshotsFor(
   const have = new Set(heldBlobs ?? []);
   /** Each source's photos, in story order: `first`'s sources, then the rest. */
   const photosBySource: [string[][], string[][]] = [[], []];
+  /** The photos of the snapshots this reply sends. */
+  const sent = new Set<string>();
   for (const r of rows) {
     const checkedAt = new Date(r.checkedAt).toISOString();
     if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
@@ -86,7 +89,10 @@ async function snapshotsFor(
     // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
     if (snapshotFit(bound, data).refused) continue;
     if (newer) snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
-    if (wantBlobs) photosBySource[first.has(r.dataSourceId) ? 0 : 1].push(boundImageHashes(bound, data));
+    if (!wantBlobs) continue;
+    const hashes = boundImageHashes(bound, data);
+    photosBySource[first.has(r.dataSourceId) ? 0 : 1].push(hashes);
+    if (newer) for (const sha of hashes) sent.add(sha);
   }
   // One from each source in turn: every feed's first stories come before any feed's later ones, rather than the
   // sources first in order filling the reply.
@@ -95,13 +101,16 @@ async function snapshotsFor(
   const photos = [...order];
   /** Positions in `photos` of those the screen lacks. */
   const lacking = photos.flatMap((sha, i) => (have.has(sha) ? [] : [i]));
-  // From the photo after the one the last ask ended on, round to the front: photos that never arrive, and those a
-  // screen holding more than MAX_SYNC_BLOBS holds but cannot report, cannot keep the rest from being asked for. From
-  // the front once more are missing than were (a publish, a feed's new stories), so leads come before deeper stories.
-  const end = last && lacking.length <= last.missing ? last.ask.at(-1) : undefined;
+  // The photos of the snapshots this reply sends first: a feed's new stories have theirs as their text arrives, even on
+  // a screen holding more than MAX_SYNC_BLOBS, which cannot report them all. Then from the photo after the one the
+  // last ask ended on, round to the front, so photos that never arrive, and those such a screen holds but cannot
+  // report, cannot keep the rest from being asked for.
+  const fresh = lacking.filter((i) => sent.has(photos[i]!));
+  const end = last?.ask.at(-1);
   const after = end === undefined ? -1 : photos.findIndex((sha) => sha.endsWith(end));
-  const ask = [...lacking.filter((i) => i > after), ...lacking.filter((i) => i <= after)].slice(0, MAX_SYNC_RESPONSE_BLOBS).map((i) => photos[i]!);
-  return { snapshots, checked, ...(ask.length ? { blobs: ask } : {}), missing: lacking.length };
+  const rest = lacking.filter((i) => !sent.has(photos[i]!));
+  const ask = [...fresh, ...rest.filter((i) => i > after), ...rest.filter((i) => i <= after)].slice(0, MAX_SYNC_RESPONSE_BLOBS).map((i) => photos[i]!);
+  return { snapshots, checked, ...(ask.length ? { blobs: ask } : {}), missing: lacking.length, fresh: fresh.length };
 }
 
 const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
@@ -161,17 +170,28 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const playing =
     desired && req.manifest.fallbackFrom === desired.id ? (await fileManifests(c.env.BLOBS, screen)).find((m) => m.id === req.manifest.active) : undefined;
   const last = screen.lastPhotos;
-  const { missing, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable, playing?.dataSources ?? new Set(), last);
+  const { missing, fresh, ...snapshotsOut } = await snapshotsFor(
+    c.env,
+    screen,
+    desired,
+    req.snapshots,
+    req.blobs,
+    playable,
+    playing?.dataSources ?? new Set(),
+    last,
+  );
   const asked = snapshotsOut.blobs ?? [];
-  // Soon again while more are missing than this reply asks for, and either the screen now holds a photo the last reply
-  // asked for or more are missing than were (a publish, a feed's new stories). Otherwise (it cannot fetch them, keeps
-  // only those it plays, holds more than MAX_SYNC_BLOBS, or the reply was lost) one retry, for a lost reply, and then
-  // the full interval, as for a screen with nothing missing. The retry is spent until the screen fetches one, so a feed
-  // that turns over on a screen that cannot act on it costs one 15 s sync, not a retry each time.
+  // Soon again while more are missing than this reply asks for, and the screen now holds a photo the last reply asked
+  // for, or the snapshots this reply sends bring more photos than it asks for (a publish). Otherwise (it cannot fetch
+  // them, keeps only those it plays, holds more than MAX_SYNC_BLOBS, or the reply was lost) one retry, for a lost
+  // reply; then the full interval, as for a screen with nothing missing. The retry stays spent until one reply asks for
+  // all that is missing, so a screen that can never fetch them all spends it once, and a feed's turnover costs it at
+  // most one 15 s sync, once it fetches the new stories' photos.
   const reported = new Set((req.blobs ?? []).map((sha) => sha.slice(-ASK_KEPT)));
   const fetched = !last?.ask.length || last.ask.some((p) => reported.has(p));
-  const grew = missing > (last?.missing ?? 0);
-  const soon = missing > asked.length && (fetched || grew || !last?.retried);
+  const more = missing > asked.length;
+  const retry = !fetched && !last?.retried;
+  const soon = more && (fetched || fresh > asked.length || retry);
 
   const { player, manifest: m, display: d, clock } = req;
   // Only the contract's fields, copied one by one: the parser lets unknown keys through, and the
@@ -197,8 +217,8 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     photos: {
       held: req.blobs?.length ?? 0,
       missing,
-      // Spent by a retry, kept while nothing asked for arrives, renewed once something does.
-      retried: !fetched && (!!last?.retried || !grew),
+      // Spent by a retry until a reply asks for every photo missing.
+      retried: more && (!!last?.retried || retry),
       ask: asked.map((sha) => sha.slice(-ASK_KEPT)),
     },
   };

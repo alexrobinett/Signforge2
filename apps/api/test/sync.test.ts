@@ -698,8 +698,10 @@ describe('snapshot feed blobs (#196)', () => {
     const stuck = photosOf(0).slice(0, -1);
     for (let i = 0; i < 3; i++)
       expect(await sync(s, body({ snapshots: one.snapshots, blobs: stuck }))).toMatchObject({ blobs: [photosOf(0).at(-1)], nextSyncS: 300 });
-    const three = await newsSources(s, NEW, 1, 2, 10, one.ids);
-    const r = await sync(s, body({ snapshots: three.snapshots, blobs: stuck }));
+    await newsSources(s, NEW, 1, 2, 10, one.ids);
+    // The reply that sends the new feeds' snapshots asks for their photos first, and soon for the rest.
+    const r = await sync(s, body({ snapshots: one.snapshots, blobs: stuck }));
+    expect(r.blobs).toEqual(expect.arrayContaining([photosOf(1)[0], photosOf(2)[0]]));
     expect(r.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
     expect(r.nextSyncS).toBe(15);
   });
@@ -720,26 +722,80 @@ describe('snapshot feed blobs (#196)', () => {
     expect(asked).toEqual(new Set(all.filter((sha) => !report.blobs.includes(sha))));
   });
 
-  // Review of #514: such a screen cannot act on a feed's turnover (it holds more than it reports), so each turnover
-  // costs it one sync soon, for the photos the new stories bring, and not a retry as well.
-  it('spends one sync soon on a turnover a screen holding more than it can report cannot act on', async () => {
-    const s = await setUp('sync-feed-blobs-turnover');
-    const feeds = await newsSources(s, OLD, 0, 8, 20);
-    const all = Array.from({ length: 8 }, (_, n) => photosOf(n, 20)).flat();
-    const report = { snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) };
-    // Its first ask, the retry, then the full interval: nothing it is asked for shows as held.
-    const paces: number[] = [];
-    for (let i = 0; i < 3; i++) paces.push((await sync(s, body(report))).nextSyncS);
-    expect(paces).toEqual([15, 15, 300]);
-    // The first feed's lead story is replaced: two photos the screen reports leave, two new ones come.
-    const items = Array.from({ length: 20 }, (_, i) => {
-      const [file, thumb] = i === 0 ? [hash(99_001), hash(99_002)] : [photosOf(0, 20)[2 * i], photosOf(0, 20)[2 * i + 1]];
-      return { title: `Story ${i}`, published: '', source: '', image: { file, thumb } };
+  // Review of #514: a screen holding more than it can report spends its retry once, and a feed's turnover costs it at
+  // most one sync soon, once it fetches the new story's photos.
+  describe('a feed turning over on a screen holding more than it can report', () => {
+    /** 8 feeds of 20 stories, the screen holding all 320 photos and reporting the first MAX_SYNC_BLOBS. */
+    async function overCap(name: string) {
+      const s = await setUp(name);
+      const feeds = await newsSources(s, OLD, 0, 8, 20);
+      const all = Array.from({ length: 8 }, (_, n) => photosOf(n, 20)).flat();
+      const paces: number[] = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }))).nextSyncS);
+      return { s, feeds, all, paces };
+    }
+
+    /** Feed `n`'s lead story replaced, at version 7000: its two new photos. */
+    async function turnOver(s: Screen, feeds: { ids: string[] }, n: number) {
+      const fresh = [hash(90_000 + 2 * n + 1), hash(90_000 + 2 * n + 2)];
+      const old = photosOf(n, 20);
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        title: `Story ${i}`,
+        published: '',
+        source: '',
+        image: i === 0 ? { file: fresh[0], thumb: fresh[1] } : { file: old[2 * i], thumb: old[2 * i + 1] },
+      }));
+      await s.seed.scope.dataSources.putSnapshot(feeds.ids[n]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
+      return { fresh, gone: old.slice(0, 2) };
+    }
+
+    it('costs one sync soon when the screen fetches the new photos', async () => {
+      const { s, feeds, all, paces: before } = await overCap('sync-turnover-fetches');
+      // Its first ask, its one retry, then the full interval: nothing it is asked for shows as held.
+      expect(before).toEqual([15, 15, 300]);
+      const { fresh, gone } = await turnOver(s, feeds, 0);
+      // The reply that sends the snapshot asks for the new story's photos first.
+      const r1 = await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }));
+      expect(r1.blobs!.slice(0, 2)).toEqual(fresh);
+      expect(r1.nextSyncS).toBe(300);
+      // It adopts the snapshot and stores them, reporting in manifest order: the new two in place of the old.
+      const held = all.flatMap((sha) => (sha === gone[0] ? [fresh[0]!] : sha === gone[1] ? [fresh[1]!] : [sha])).slice(0, MAX_SYNC_BLOBS);
+      const after = { snapshots: { ...feeds.snapshots, [feeds.ids[0]!]: 7000 }, blobs: held };
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body(after))).nextSyncS);
+      expect(paces).toEqual([15, 300, 300]);
     });
-    await s.seed.scope.dataSources.putSnapshot(feeds.ids[0]!, { version: 'v2', fetchedAt: 7000, checkedAt: 7000, dataJson: JSON.stringify({ items }) });
-    paces.length = 0;
-    for (let i = 0; i < 3; i++) paces.push((await sync(s, body(report))).nextSyncS);
-    expect(paces).toEqual([15, 300, 300]);
+
+    it('costs none when it does not', async () => {
+      const { s, feeds, all } = await overCap('sync-turnover-stuck');
+      await turnOver(s, feeds, 0);
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }))).nextSyncS);
+      expect(paces).toEqual([300, 300, 300]);
+    });
+
+    it('costs one sync soon on a screen with photos it never fetches, under the cap too', async () => {
+      const s = await setUp('sync-turnover-under-cap');
+      const feeds = await newsSources(s, OLD, 0, 3, 20);
+      const stuck = { snapshots: feeds.snapshots };
+      const before = [];
+      for (let i = 0; i < 3; i++) before.push((await sync(s, body(stuck))).nextSyncS);
+      expect(before).toEqual([15, 15, 300]);
+      const { fresh } = await turnOver(s, feeds, 0);
+      expect((await sync(s, body(stuck))).blobs!.slice(0, 2)).toEqual(fresh);
+      // It stores the new story's two, and nothing else.
+      const after = { snapshots: { ...feeds.snapshots, [feeds.ids[0]!]: 7000 }, blobs: fresh };
+      const paces = [];
+      for (let i = 0; i < 3; i++) paces.push((await sync(s, body(after))).nextSyncS);
+      expect(paces).toEqual([15, 300, 300]);
+    });
+
+    it("asks for a new story's photos with its snapshot in a feed past the photos reported", async () => {
+      const { s, feeds, all } = await overCap('sync-turnover-deep');
+      const { fresh } = await turnOver(s, feeds, 7);
+      const r = await sync(s, body({ snapshots: feeds.snapshots, blobs: all.slice(0, MAX_SYNC_BLOBS) }));
+      expect(r.blobs!.slice(0, 2)).toEqual(fresh);
+    });
   });
 
   it('sends no feed blobs for a text-only template (news 1.4.1) or an outdated player, and refuses over-limit SyncRequest.blobs', async () => {
