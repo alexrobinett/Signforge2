@@ -55,9 +55,9 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 30 tools · 13,598 tokens | 27 · 12,178 | 6 · 1,713 |
-| Drawer request | 18 · 6,489 | 16 · 6,187 | 10 · 3,518 |
-| /mcp `tools/list` (discovery) | 30 · 14,388 | 27 · 12,887 | 6 · 1,869 |
+| /mcp request | 30 tools · 13,208 tokens | 27 · 11,788 | 6 · 1,713 |
+| Drawer request | 18 · 6,279 | 16 · 5,977 | 10 · 3,501 |
+| /mcp `tools/list` (discovery) | 30 · 13,998 | 27 · 12,497 | 6 · 1,869 |
 
 The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Since PR 4, one `save_*` tool per content type creates or changes it (spot, playlist, schedule entry, brand kit, data source), and the drawer drafts a spot's name, length and fields alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882; after PR 3, /mcp 16,886 / 15,450 / 1,726, drawer 7,992 / 7,690 / 4,334, and discovery 18,079 / 16,562 / 1,882.
 

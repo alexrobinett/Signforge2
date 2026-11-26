@@ -57,7 +57,7 @@ const binding = z.object({
 const bindings = z
   .record(z.string(), binding)
   .describe(
-    "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live and their usual paths: live.fields for one source, or each named source's fields under live.sources, each source's fields bound to a data source of its kind",
+    "Template fields bound to the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). describe(spot) says how binding works",
   );
 
 /** The fields that belong to one kind of spot (KIND_FIELDS), as save_spot takes them. */
