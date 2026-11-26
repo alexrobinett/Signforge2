@@ -40,8 +40,8 @@
       "size": 44306,
       "type": "image/png"
     },
-    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
-      "size": 400856,
+    "a643ed05e2f25b7c22480e9b081a5a7f0ac6b8d7804a2eb254d7726362bd2388": {
+      "size": 399642,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
@@ -695,10 +695,10 @@
       },
       "html": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62"
     },
-    "base/info-frame@1.2.0": {
+    "base/info-frame@1.3.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -983,7 +983,7 @@
         },
         "protocol": 2
       },
-      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
+      "html": "a643ed05e2f25b7c22480e9b081a5a7f0ac6b8d7804a2eb254d7726362bd2388"
     },
     "base/menu-board@1.5.0": {
       "manifest": {
@@ -1630,7 +1630,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.2.0",
+      "template": "base/info-frame@1.3.0",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "876a59d34f161c16be92afed2ebc9681aef026f830671ea7a4f6c3437bd4935c"
+  "id": "aae9dfdb04abb37af3316d482a1f64233a0360b68f328332bd9244106a0f4973"
 }
