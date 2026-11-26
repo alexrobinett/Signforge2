@@ -164,8 +164,8 @@ body {
   --glow: color-mix(in srgb, var(--sf-primary, #78beff) 50%, var(--sf-text, #78beff));
 }
 
-/* The panel is the copy block's own box: even padding on every side, and a margin that keeps
-   it at least 5vmin from each screen edge in both orientations. */
+/* The copy on the stage itself, no panel: the price is the poster. Even padding on every side, and a margin that
+   keeps it at least 5vmin from each screen edge in both orientations. */
 .copy {
   margin-left: calc(var(--u) * 5);
   padding: calc(var(--u) * 5);
@@ -174,24 +174,6 @@ body {
   max-width: calc(100% - var(--u) * 5);
   position: relative;
   z-index: 2;
-}
-.copy::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: min(var(--sf-radius, 4vmin), 4vmin);
-  z-index: -1;
-  /* The kit's surface, nearly opaque; with no kit, a faint white sheen. */
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.18)) 88%, transparent),
-    color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.045)) 88%, transparent)
-  );
-  border: 0.15vmin solid color-mix(in srgb, var(--text) 18%, transparent);
-  animation:
-    fade-in 0.6s var(--d-in) both,
-    fade-out 0.3s var(--d-out) forwards;
-  animation-delay: 0s, var(--out);
 }
 .price {
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
@@ -204,7 +186,7 @@ body {
   transform-origin: 0 60%;
   text-shadow: 0 1vmin 3vmin color-mix(in srgb, var(--bg) 45%, transparent);
   animation:
-    pop-in 0.65s var(--d-in) both,
+    rise-in 0.65s var(--d-in) both,
     shrink-out 0.3s var(--d-out) forwards;
   animation-delay: 0.1s, var(--out);
   will-change: transform, opacity;
@@ -224,8 +206,8 @@ body {
   white-space: nowrap;
   will-change: transform, opacity;
   animation:
-    slide-in 0.65s var(--d-in) both,
-    slide-out 0.3s var(--d-out) forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
 .l1 {
   font-size: calc(var(--u) * 5.2);
@@ -238,13 +220,9 @@ body {
   font-size: calc(var(--u) * 8.4);
   letter-spacing: -0.02em;
   animation-delay: 0.5s, var(--out);
-  background: linear-gradient(90deg, var(--text), color-mix(in srgb, var(--sf-text, #9fd0ff) 60%, var(--sf-primary, #9fd0ff)));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 .l3 {
-  font-size: calc(var(--u) * 3);
+  font-size: calc(var(--u) * 3.6);
   font-weight: 500;
   text-transform: none;
   animation-delay: 0.65s, var(--out);
@@ -263,11 +241,7 @@ body {
   will-change: transform, opacity;
   animation:
     rise-in 0.65s var(--d-in) both,
-    sink-out 0.3s var(--d-out) forwards;
-}
-.bob {
-  width: 100%;
-  height: 100%;
+    shrink-out 0.3s var(--d-out) forwards;
 }
 .product img {
   width: 100%;
@@ -318,27 +292,17 @@ body {
     shrink-out 0.3s var(--d-out) forwards;
   animation-delay: 1s, var(--out);
 }
-/* The badge is the kit's primary colour with its on-primary text, a pair the kit keeps legible.
-   Each has its own fallback: with no kit, a white disc with red figures. */
+/* The badge is the kit's accent, the one accent, with its on-accent text (main.ts keeps the pair legible). With no
+   kit, a yellow disc with the stage's navy figures. */
 .badge .disc {
   position: absolute;
   inset: 6%;
   border-radius: 50%;
-  background: var(--sf-primary, #fff);
-  box-shadow:
-    0 1.5vmin 5vmin color-mix(in srgb, var(--bg) 50%, transparent),
-    0 0 8vmin color-mix(in srgb, var(--text) 35%, transparent);
-}
-.badge .ring circle {
-  stroke: var(--sf-accent, #c8102e);
-}
-.badge .ring {
-  position: absolute;
-  inset: 0;
+  background: var(--sf-accent, #ffd84a);
 }
 .badge .txt {
   position: relative;
-  color: var(--sf-on-primary, #c8102e);
+  color: var(--sf-on-accent, #06122b);
   font-weight: 900;
   line-height: 1;
 }
@@ -346,7 +310,6 @@ body {
   display: block;
   font-size: calc(var(--u) * 2.4);
   font-weight: 700;
-  color: var(--sf-on-primary, #06122b);
 }
 .badge b {
   display: block;
@@ -359,7 +322,7 @@ body {
   left: calc(var(--u) * 8);
   right: calc(var(--u) * 8);
   bottom: calc(var(--u) * 3.5);
-  font-size: calc(var(--u) * 2.4);
+  font-size: calc(var(--u) * 2.6);
   z-index: 3;
   opacity: 0.75;
   animation:
@@ -397,18 +360,6 @@ body {
   height: 74%;
 }
 
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(1.5vmin);
-  }
-}
-@keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(1.5vmin);
-  }
-}
 @keyframes rise-in {
   from {
     opacity: 0;
@@ -427,17 +378,6 @@ body {
   }
 }
 @keyframes shrink-out {
-  to {
-    opacity: 0;
-  }
-}
-@keyframes slide-out {
-  to {
-    opacity: 0;
-    transform: translateY(-0.6vmin);
-  }
-}
-@keyframes sink-out {
   to {
     opacity: 0;
   }
