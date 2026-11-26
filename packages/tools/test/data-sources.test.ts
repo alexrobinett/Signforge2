@@ -74,7 +74,7 @@ describe('data sources', () => {
       spots: [],
     });
     await o.scope.spots.update(o.templateSpot, { bindingsJson: null });
-    await call('delete_data_source', { dataSourceId: 'unpolled' });
+    await call('delete', { type: 'data_source', id: 'unpolled' });
   });
 
   it('updates, polling a changed URL afresh', async () => {
@@ -102,7 +102,7 @@ describe('data sources', () => {
       photos: false,
     });
     for (const id of ['headlines', (await owner.org.dataSources.list()).find((d) => d.name === 'Quiet')!.id])
-      await call('delete_data_source', { dataSourceId: id });
+      await call('delete', { type: 'data_source', id: id });
   });
 
   it('refuses the photos switch on anything but a news feed', async () => {
@@ -114,7 +114,7 @@ describe('data sources', () => {
       error: 'invalid_input',
       message: 'photos is for rss sources only',
     });
-    await call('delete_data_source', { dataSourceId: 'cal' });
+    await call('delete', { type: 'data_source', id: 'cal' });
   });
 
   it('refuses a feed URL the poller would refuse, before storing it', async () => {
@@ -142,21 +142,22 @@ describe('data sources', () => {
 
   it('refuses to delete a source a spot binds, and deletes one no spot binds', async () => {
     await o.scope.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
-    expect(await refusal('delete_data_source', { dataSourceId: 'holidays' })).toMatchObject({
+    expect(await refusal('delete', { type: 'data_source', id: 'holidays' })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { spotIds: [o.templateSpot] },
     });
     await o.scope.spots.update(o.templateSpot, { bindingsJson: null });
-    expect(await call('delete_data_source', { dataSourceId: 'holidays' })).toEqual({ deleted: 'holidays' });
+    expect(await call('delete', { type: 'data_source', id: 'holidays' })).toEqual({ deleted: 'holidays', version: null });
     expect(await owner.org.dataSources.snapshot('holidays')).toBeUndefined();
   });
 });
 
 describe('table sources', () => {
   it('adds a csv source, and a json-table source with the path to its rows, which only json-table takes', async () => {
-    await call('delete_data_source', {
-      dataSourceId: (await call('save_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
+    await call('delete', {
+      type: 'data_source',
+      id: (await call('save_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
     });
     const ids = (await owner.org.dataSources.list()).map((d) => d.id);
     for (const id of ids.slice(0, 2)) await o.scope.dataSources.delete(id);
@@ -174,7 +175,28 @@ describe('table sources', () => {
       error: 'invalid_input',
       details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
     });
-    expect(await refusal('save_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({ error: 'invalid_input' });
+    expect(await refusal('save_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({
+      error: 'invalid_input',
+      details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
+    });
+  });
+
+  it("points each refusal of a save at the fields it gave or left out, as the schema's own refusals do (#507)", async () => {
+    const fields = async (input: Record<string, unknown>) => {
+      const r = await refusal('save_data_source', input);
+      if (r.ok) throw new Error('saved');
+      return { error: r.error, paths: (r.details as { path: string }[]).map((d) => d.path) };
+    };
+    expect(await fields({ name: 'Menu', feedUrl: 'https://menu.example.com/a.csv' })).toEqual({ error: 'invalid_input', paths: ['format'] });
+    expect(await fields({ format: 'csv', feedUrl: 'https://menu.example.com/a.csv', ifVersion: 1 })).toEqual({ error: 'invalid_input', paths: ['ifVersion'] });
+    expect(await fields({ name: 'Menu', format: 'csv', connectionId: 'con_x', resource: 'A1' })).toEqual({
+      error: 'invalid_input',
+      paths: ['connectionId', 'resource'],
+    });
+    await call('save_data_source', { id: 'paths', name: 'Paths', format: 'csv', feedUrl: 'https://menu.example.com/p.csv' });
+    expect(await fields({ dataSourceId: 'paths', format: 'json' })).toEqual({ error: 'invalid_input', paths: ['format'] });
+    expect(await fields({ dataSourceId: 'paths', horizonDays: 9 })).toEqual({ error: 'invalid_input', paths: ['horizonDays'] });
+    expect(await fields({ dataSourceId: 'paths', resource: 'A1' })).toEqual({ error: 'invalid_input', paths: ['resource'] });
   });
 
   it('polls a json-table source afresh when the path to its rows changes', async () => {

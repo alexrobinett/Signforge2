@@ -108,6 +108,29 @@ describe('content saves (#345 PR 4): one tool creates or changes each kind', () 
       expect(await refused(name, input), name).toMatch(/has no version yet: ifVersion is for a change/);
   });
 
+  it('points each refusal at the fields it names in details, as a schema refusal does (#507)', async () => {
+    const paths = async (name: string, input: Record<string, unknown>) => {
+      const r = await refusal(name, input);
+      if (r.ok) throw new Error(`${name} saved`);
+      return (r.details as { path: string }[] | undefined)?.map((d) => d.path);
+    };
+    expect(await paths('save_spot', { kind: 'url', url: 'https://example.com' })).toEqual(['name']);
+    expect(await paths('save_spot', { name: 'New', kind: 'url', url: 'https://example.com', ifVersion: 1 })).toEqual(['ifVersion']);
+    expect(await paths('save_playlist', { spotIds: [] })).toEqual(['name']);
+    expect(await paths('save_schedule_entry', { target: 'org' })).toEqual(['playlistId']);
+    expect(await paths('save_schedule_entry', { playlistId: o.playlist, target: 'org', endsAt: '2026-11-17T20:00:00Z' })).toEqual(['endsAt']);
+    expect(await paths('save_brand_kit', { colors: { primary: '#000000' } })).toEqual([
+      'name',
+      'colors.accent',
+      'colors.background',
+      'colors.surface',
+      'colors.text',
+      'colors.muted',
+    ]);
+    expect(await paths('save_data_source', { name: 'No format', feedUrl: 'https://example.com/feed' })).toEqual(['format']);
+    expect(await paths('save_data_source', { dataSourceId: o.dataSource, format: 'rss' })).toEqual(['format']);
+  });
+
   it('refuses a change that changes nothing, which would write nothing to guard', async () => {
     expect(await refused('save_spot', { spotId: o.imageSpot })).toMatch(/nothing to change/);
     expect(await refused('save_playlist', { playlistId: o.playlist })).toMatch(/nothing to change/);
@@ -273,5 +296,38 @@ describe('publish_manifest_to_screen', () => {
   it('will not publish a manifest uploaded for another screen', async () => {
     const other = await testScope(env.DB, o.orgId).screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
     expect(await refusal('publish_manifest_to_screen', { screenId: other.id, manifestId: '1'.repeat(64) })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+});
+
+describe('delete, takeover and the uploads (#345 PR 5): one tool each, refusing what its type, action or kind does not take', () => {
+  const paths = async (name: string, input: Record<string, unknown>) => {
+    const r = await refusal(name, input);
+    expect(r, `${name} ${JSON.stringify(input)}`).toMatchObject({ ok: false, error: 'invalid_input' });
+    return r.ok ? [] : (r.details as { path: string }[]).map((d) => d.path);
+  };
+
+  it('refuses ifVersion on a delete of anything but a schedule entry', async () => {
+    expect(await paths('delete', { type: 'playlist', id: o.playlist, ifVersion: 1 })).toEqual(['ifVersion']);
+    expect(await refusal('delete', { type: 'schedule_entry', id: o.scheduleEntry, ifVersion: 99 })).toMatchObject({ ok: false, error: 'conflict' });
+  });
+
+  it('refuses a takeover missing what its action needs, or given what the other action takes', async () => {
+    expect(await paths('takeover', { action: 'end' })).toEqual(['scheduleEntryId']);
+    expect(await paths('takeover', { action: 'end', scheduleEntryId: o.scheduleEntry, playlistId: o.playlist })).toEqual(['playlistId']);
+    expect(await paths('takeover', { action: 'publish', target: 'org' })).toEqual(['playlistId', 'endsAt']);
+    expect(await paths('takeover', { action: 'publish', scheduleEntryId: o.scheduleEntry, playlistId: o.playlist, target: 'org', endsAt: 'x' })).toEqual([
+      'scheduleEntryId',
+    ]);
+    expect(await refusal('takeover', { action: 'end', scheduleEntryId: o.scheduleEntry })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it("refuses an upload given another kind's fields, a renewal given more than the asset, and an image's finish given a video's parts", async () => {
+    expect(await paths('start_upload', { kind: 'image', name: 'Photo', sha256: '1'.repeat(64) })).toEqual(['renditions', 'sha256']);
+    expect(await paths('start_upload', { kind: 'image', assetId: o.asset, name: 'Again' })).toEqual(['name']);
+    expect(await paths('start_upload', { kind: 'video', name: 'Clip', size: 10 })).toEqual(['sha256', 'type']);
+    expect(await paths('start_upload', { kind: 'video', assetId: o.asset, name: 'Clip', sha256: '1'.repeat(64), type: 'video/mp4', size: 10 })).toEqual([
+      'assetId',
+    ]);
+    expect(await paths('finalize_upload', { assetId: o.asset, uploadId: 'u' })).toEqual(['uploadId']);
   });
 });

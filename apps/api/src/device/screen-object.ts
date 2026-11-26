@@ -18,7 +18,7 @@
  * whose credential is gone. A notice that does arrive is remembered, so an upgrade the Worker
  * checked just before the revocation is refused when it reaches the object after it.
  */
-import { parseDeviceSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
+import { parseDeviceSocketMessage, type DeviceCommand, type DeviceSocketMessage, type ServerSocketMessage } from '@signforge/contract';
 import { findDeviceScreen, scoped } from '@signforge/db';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -38,6 +38,15 @@ const PONG = 'pong';
 
 /** Close code for a revoked credential (4000-4999 is the application's range). */
 const CLOSE_REVOKED = 4001;
+
+/**
+ * How long one `applied` report may wait on D1 before the socket's next message is let through.
+ * A report is one indexed read and one single-row write, milliseconds when D1 is well, but D1 gives
+ * up on a query only after 30 seconds and the object cannot cancel one, so a hung call would hold
+ * every later report behind it. A report given up on here is not missed for long: the screen's next
+ * sync (at most 5 minutes) writes the same column.
+ */
+export const MESSAGE_D1_LIMIT_MS = 10_000;
 
 export class ScreenObject extends DurableObject<Env> {
   /**
@@ -80,27 +89,34 @@ export class ScreenObject extends DurableObject<Env> {
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    const handled = this.handling.then(() => this.handleMessage(ws, message));
+    // Parsed as it arrives, so a message that is not an `applied` report is dropped without waiting behind one that is.
+    const report = parseReport(message);
+    if (!report) return Promise.resolve();
+    const handled = this.handling.then(() => {
+      let late = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const limit = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          late = true;
+          reject(new Error(`applied report waited on D1 for ${MESSAGE_D1_LIMIT_MS} ms`));
+        }, MESSAGE_D1_LIMIT_MS);
+      });
+      return Promise.race([this.writeApplied(ws, report, () => late), limit]).finally(() => clearTimeout(timer));
+    });
     // A message that failed still lets the next one through; the runtime sees its error.
     this.handling = handled.catch(() => {});
     return handled;
   }
 
-  private async handleMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== 'string') return;
-    let msg: unknown;
-    try {
-      msg = JSON.parse(message);
-    } catch {
-      return;
-    }
-    const parsed = parseDeviceSocketMessage(msg);
-    if (!parsed.ok) return;
+  /** Write what the screen applied, unless its credential is gone or the report ran past its limit while reading it. */
+  private async writeApplied(ws: WebSocket, report: DeviceSocketMessage, late: () => boolean): Promise<void> {
     const holder = ws.deserializeAttachment() as SocketHolder;
     if (!(await liveCredentials(this.env.DB, holder.screenId)).has(holder.credentialId)) return closeRevoked(ws);
+    // A later report may already have been written: this one must not land over it.
+    if (late()) return;
     // The screen reporting about itself, through its org's scope: the only write the socket makes.
     // Not skipped when this object saw the same id last: a sync may have reported another since.
-    const { manifest, observedAt } = parsed.value;
+    const { manifest, observedAt } = report;
     await scoped(this.env.DB, holder.orgId).screens.reportManifest(holder.screenId, manifest, {
       ...(observedAt !== undefined && { observedAt: Date.parse(observedAt) }),
       arrivedAt: Date.now(),
@@ -136,6 +152,19 @@ export class ScreenObject extends DurableObject<Env> {
 }
 
 const revokedKey = (credentialId: string) => `revoked:${credentialId}`;
+
+/** The screen's `applied` report, or undefined for anything else it sends (binary, not JSON, not a valid message). */
+function parseReport(message: string | ArrayBuffer): DeviceSocketMessage | undefined {
+  if (typeof message !== 'string') return undefined;
+  let msg: unknown;
+  try {
+    msg = JSON.parse(message);
+  } catch {
+    return undefined;
+  }
+  const parsed = parseDeviceSocketMessage(msg);
+  return parsed.ok ? parsed.value : undefined;
+}
 
 /** The screen's credentials that are not revoked (none once the screen is not active). */
 async function liveCredentials(db: D1Database, screenId: string): Promise<Set<string>> {

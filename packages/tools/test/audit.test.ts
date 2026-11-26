@@ -264,3 +264,55 @@ describe('list_audit_log by a screen command (#345)', () => {
     expect(await commands('screen_command')).toEqual(['display_auto', 'display_on', 'identify', 'restart']);
   });
 });
+
+describe('list_audit_log by a content or group save (#345, #507)', () => {
+  it("finds each save's rows under the create or update it replaced, by whether it gave the id", async () => {
+    const mine = await seedOrg(env.DB, 'audit-saves');
+    const editor = member(mine.orgId, 'editor');
+    const save = async (name: string, input: Record<string, unknown>) => {
+      const r = await dispatch(registry, name, input, editor);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return r.output as Record<string, { id: string; version: number }>;
+    };
+    const { playlist } = await save('save_playlist', { name: 'Lunch', idempotencyKey: 'audit-saves-pl' });
+    await save('save_playlist', { playlistId: playlist!.id, name: 'Lunch menu', ifVersion: playlist!.version });
+    const { group } = await save('save_group', { name: 'Windows', idempotencyKey: 'audit-saves-grp' });
+    await save('save_group', { groupId: group!.id, screenIds: [mine.screen], membership: 'add' });
+    const found = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, editor);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => `${e.action} ${JSON.stringify(e.detail.input)}`);
+    };
+    expect(await found('create_playlist')).toEqual([expect.stringMatching(/^save_playlist \{"name":"Lunch",/)]);
+    expect(await found('update_playlist')).toEqual([expect.stringMatching(/^save_playlist \{"playlistId":/)]);
+    expect(await found('save_playlist')).toHaveLength(2);
+    expect(await found('create_group')).toEqual([expect.stringMatching(/^save_group \{"name":"Windows",/)]);
+    expect(await found('add_group_members')).toEqual([expect.stringMatching(/"membership":"add"/)]);
+    expect(await found('rename_group')).toEqual([]);
+    expect(await found('remove_group_members')).toEqual([]);
+  });
+});
+
+describe('list_audit_log by a delete or a takeover (#345 PR 5)', () => {
+  it('finds each row under the tool its type or action replaced, and only those', async () => {
+    const mine = await seedOrg(env.DB, 'audit-merged');
+    const owner = member(mine.orgId, 'owner');
+    const run = async (name: string, input: Record<string, unknown>) => {
+      const r = await dispatch(registry, name, input, owner);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return r.output;
+    };
+    const { playlist } = (await run('save_playlist', { name: 'Gone soon', idempotencyKey: 'audit-merged-pl' })) as { playlist: { id: string } };
+    await run('delete', { type: 'playlist', id: playlist.id });
+    await run('delete', { type: 'schedule_entry', id: mine.scheduleEntry });
+    const found = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, owner);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => `${e.action} ${(e.detail.input as { type?: string }).type}`);
+    };
+    expect(await found('delete_playlist')).toEqual(['delete playlist']);
+    expect(await found('delete_schedule_entry')).toEqual(['delete schedule_entry']);
+    expect(await found('delete_asset')).toEqual([]);
+    expect(await found('delete')).toHaveLength(2);
+  });
+});

@@ -275,7 +275,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
 
     async removeEntry(orgId, e) {
       try {
-        await callTool('delete_schedule_entry', { scheduleEntryId: e.id });
+        await callTool('delete', { type: 'schedule_entry', id: e.id });
         await refresh(orgId);
         toast.success('Removed', { description: e.published ? 'Screens keep it until you publish.' : 'It was never published.' });
       } catch (err) {

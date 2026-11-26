@@ -463,7 +463,7 @@ export const TASKS: Task[] = [
     prompt: 'Delete the Winter promo playlist.',
     role: 'owner',
     press: true,
-    script: both((w) => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'delete_playlist', input: { playlistId: w.playlists.winter } }]]),
+    script: both((w) => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'delete', input: { type: 'playlist', id: w.playlists.winter } }]]),
     async check(o) {
       return (await o.scope.playlists.get(o.world.playlists.winter)) ? 'Winter promo is still there' : undefined;
     },

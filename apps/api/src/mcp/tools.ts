@@ -5,8 +5,8 @@
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
 import { type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
 
-/** Tools that take something away for good: a person should look before an agent runs them. */
-const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
+/** Tools that take something away for good: a person should look before an agent runs them. `takeover` can end one. */
+const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(delete|roll_back_publish|takeover|disconnect)$/;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -16,17 +16,20 @@ const isObjectSchema = (s: unknown): s is Tool['inputSchema'] => isRecord(s) && 
 /**
  * The tools a grant may call, as `tools/list` lists them: those `describeTools` gives for it (its
  * scopes capped by the role now), less those only a person may run (`people`: the grant tools) and any
- * that needs a service this caller lacks (the member tools' Better Auth session: an agent has none),
+ * that needs a service this caller lacks (the member tools' Better Auth session: an agent has none; the connection
+ * tools where no provider can be connected),
  * each with its input's JSON Schema and hints from the
  * registry. No output schema: a client may check results against one, and the registry's are not
  * written to be checked by other code.
  */
 export function listedTools(grant: Grant, services: ToolServices): Tool[] {
-  return describeTools(registry, grant, services).flatMap((described): Tool[] => {
+  // A deployment that connects no provider lists no connection tool, nor `read`'s connection type (#345): nothing could be connected.
+  const listing = services.connectors?.providers.length ? services : { ...services, connectors: undefined };
+  return describeTools(registry, grant, listing).flatMap((described): Tool[] => {
     const tool = registry.get(described.name);
-    const runnable = (tool?.needs ?? []).every((need) => services[need] !== undefined);
+    const runnable = (tool?.needs ?? []).every((need) => listing[need] !== undefined);
     // A type's own read is listed as `read` where read serves it for this grant (#345); called by name, it still answers.
-    if (!tool || tool.people || servedByRead(registry, grant, tool.name, services) || !runnable || !isObjectSchema(described.inputSchema)) return [];
+    if (!tool || tool.people || servedByRead(registry, grant, tool.name, listing) || !runnable || !isObjectSchema(described.inputSchema)) return [];
     return [
       {
         name: described.name,

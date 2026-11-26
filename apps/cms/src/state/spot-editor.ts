@@ -228,7 +228,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   /**
    * Deletes each weather source the editor made that the save stopped binding, so one nobody uses
    * no longer counts against the org's ten or gets polled; picking the place again makes it again.
-   * A feed or calendar someone typed stays (`madeByEditor`). `delete_data_source` refuses one any
+   * A feed or calendar someone typed stays (`madeByEditor`). `delete` refuses one any
    * other spot's draft or published version still binds; that refusal, or any other, leaves the
    * source, which is all a failed cleanup costs.
    */
@@ -236,7 +236,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const kept = sourcesOf(after);
     const dropped = [...sourcesOf(before)].filter((id) => !kept.has(id) && madeByEditor(id));
     if (!dropped.length) return;
-    await Promise.allSettled(dropped.map((dataSourceId) => callTool('delete_data_source', { dataSourceId })));
+    await Promise.allSettled(dropped.map((dataSourceId) => callTool('delete', { type: 'data_source', id: dataSourceId })));
     await queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
   }
 

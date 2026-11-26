@@ -18,16 +18,44 @@ import { ACTOR_KINDS, outputs } from './outputs';
  */
 const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
 
+/** A content save's rows under the create (no id given) and the update (its id given) it replaced (#345 PR 4). */
+const saves = (save: string, idKey: string, created: string, changed: string) => ({
+  [created]: { actions: [save], inputHas: { [idKey]: false } },
+  [changed]: { actions: [save], inputHas: { [idKey]: true } },
+});
+
 /**
  * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
- * changed it too (#243). A screen command (#345) does what the tool it replaced did: its rows are found under that one's
- * name, by the command its input recorded.
+ * changed it too (#243). A screen command, a group's save, a content save, a delete, a takeover and an upload (#345) do
+ * what the tools they replaced did: their rows are found under those tools' names, by the input they recorded (or, for
+ * an upload's finish, the kind it checked).
  */
-const ALSO: Record<string, { actions: readonly string[]; detailHas: string }> = {
+const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> }> = {
   set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
   identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
   restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
   set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
+  create_group: { actions: ['save_group'], inputHas: { groupId: false } },
+  rename_group: { actions: ['save_group'], inputHas: { groupId: true, name: true } },
+  set_group_members: { actions: ['save_group'], detailHas: '"membership":"set"', inputHas: { groupId: true } },
+  add_group_members: { actions: ['save_group'], detailHas: '"membership":"add"', inputHas: { groupId: true } },
+  remove_group_members: { actions: ['save_group'], detailHas: '"membership":"remove"', inputHas: { groupId: true } },
+  ...saves('save_spot', 'spotId', 'create_spot', 'update_spot'),
+  ...saves('save_playlist', 'playlistId', 'create_playlist', 'update_playlist'),
+  ...saves('save_schedule_entry', 'scheduleEntryId', 'create_schedule_entry', 'update_schedule_entry'),
+  ...saves('save_brand_kit', 'brandKitId', 'create_brand_kit', 'update_brand_kit'),
+  ...saves('save_data_source', 'dataSourceId', 'create_data_source', 'update_data_source'),
+  set_default_brand_kit: { actions: ['save_brand_kit'], detailHas: '"makeDefault":true' },
+  delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
+  delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
+  delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
+  delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
+  publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
+  end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
+  create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
+  create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
+  finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
+  finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
 };
 
 const listAuditLog = defineTool({
@@ -48,7 +76,9 @@ const listAuditLog = defineTool({
       .min(1)
       .max(64)
       .optional()
-      .describe('Only this action, such as update_screen; identify_screen, restart_screen and set_display_override find those screen_command sent too'),
+      .describe(
+        'Only this action, such as update_screen. A replaced tool also finds the rows of the tool that does its job now: create_spot and update_spot find save_spot without and with spotId, delete_playlist finds delete of a playlist, identify_screen finds screen_command identify, and so on',
+      ),
     target: z
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()

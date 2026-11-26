@@ -14,6 +14,7 @@ import { auditTools } from './audit';
 import { brandTools } from './brand';
 import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
+import { deleteTools } from './delete';
 import { groupTools } from './groups';
 import { labelTools } from './labels';
 import { memberTools } from './members';
@@ -29,7 +30,7 @@ import { settingsTools } from './settings';
 import { spotTools } from './spots';
 import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
-import { videoTools } from './videos';
+import { uploadTools } from './uploading';
 
 /** Every tool but `read` and `describe`, which read and describe these. */
 const BASE_TOOLS: readonly AnyTool[] = [
@@ -41,7 +42,7 @@ const BASE_TOOLS: readonly AnyTool[] = [
   ...publishRequestTools,
   ...templateTools,
   ...assetTools,
-  ...videoTools,
+  ...uploadTools,
   ...brandTools,
   ...dataSourceTools,
   ...connectionTools,
@@ -52,6 +53,7 @@ const BASE_TOOLS: readonly AnyTool[] = [
   ...playlistTools,
   ...agentDraftTools,
   ...scheduleTools,
+  ...deleteTools,
   ...auditTools,
   ...memberTools,
   ...agentGrantTools,

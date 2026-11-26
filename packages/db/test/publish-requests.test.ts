@@ -1,7 +1,7 @@
 // Publish requests' rows (M4-09, review of #386): the publish an approval names is the org's own
 // (a composite foreign key), and decided or expired requests go with the org's audit retention.
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { brandStateOf, expirePublishRequests, scoped, StaleVersionError } from '../src';
 import { type Seeded, seedTwoOrgs, testScope } from '../src/testing';
 
@@ -63,6 +63,38 @@ describe('the guards a request batch holds (re-check of #386)', () => {
       StaleVersionError,
     );
     expect((await a.publishRequests.get(row.id))?.status).toBe('pending');
+  });
+
+  describe("with the Worker's clock behind the database's at the expiry (#396)", () => {
+    // The Worker in 2020, the request expiring in 2021: past it by the database's clock, which no test can move, not by the Worker's.
+    afterEach(() => vi.useRealTimers());
+    const behind = () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.UTC(2020, 0, 1));
+    };
+
+    it('refuses a decision as a conflict naming the request, never a fault', async () => {
+      const a = scoped(env.DB, s.a.orgId);
+      const row = await requestAt(Date.UTC(2021, 0, 1) - 7 * DAY);
+      behind();
+      const refused = a.commit(a.publishRequests.stage.decide(row, { status: 'declined', by: 'u', now: Date.now() }).writes);
+      await expect(refused).rejects.toBeInstanceOf(StaleVersionError);
+      await expect(refused).rejects.toMatchObject({ id: row.id, version: row.rowVersion });
+      expect((await a.publishRequests.get(row.id))?.status).toBe('pending');
+    });
+
+    it('refuses putting a declined one back the same way', async () => {
+      const a = scoped(env.DB, s.a.orgId);
+      const pending = await requestAt(Date.UTC(2021, 0, 1) - 7 * DAY);
+      await env.DB.prepare("UPDATE publish_requests SET status = 'declined', decided_by = 'u', decided_at = ? WHERE id = ?")
+        .bind(pending.createdAt, pending.id)
+        .run();
+      const row = (await a.publishRequests.get(pending.id))!;
+      behind();
+      const refused = a.commit(a.publishRequests.stage.reopen(row, Date.now(), 10).writes);
+      await expect(refused).rejects.toMatchObject({ name: 'StaleVersionError', id: row.id, version: row.rowVersion });
+      expect((await a.publishRequests.get(row.id))?.status).toBe('declined');
+    });
   });
 
   it('refuses, as it inserts, the same pins waiting from the same asker, and an asker at the cap', async () => {

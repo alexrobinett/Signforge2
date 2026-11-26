@@ -112,7 +112,7 @@ export interface PublishingSlice {
    * all of them: all of it reaches screens, or none. Whether it was published.
    */
   publishTogether: (orgId: string, items: readonly Pick<Pin, 'kind' | 'id'>[]) => Promise<boolean>;
-  /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
+  /** Ends a takeover now: deleted and published alone, in one call (`takeover`, action end). */
   endTakeover: (orgId: string, entryId: string) => Promise<void>;
   /** The held publish, sent with its sample text. */
   publishAnyway: () => void;
@@ -721,7 +721,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     async endTakeover(orgId, entryId) {
       pending(true);
       try {
-        await told(orgId, await callTool('end_takeover', { scheduleEntryId: entryId }), false);
+        await told(orgId, await callTool('takeover', { action: 'end', scheduleEntryId: entryId }), false);
         await refresh(orgId);
       } catch (err) {
         toast.error('Not ended', { description: toolMessage(err) });

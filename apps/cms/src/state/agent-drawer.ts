@@ -162,7 +162,7 @@ function undoOf(call: ProposedCall, saved: Row, version: number | undefined): { 
   const id = TARGETS[call.tool]?.id ?? '';
   const before = call.before ?? {};
   if (call.tool === 'save_schedule_entry' && call.input.scheduleEntryId === undefined)
-    return { tool: 'delete_schedule_entry', input: { scheduleEntryId: saved.id, ifVersion: version } };
+    return { tool: 'delete', input: { type: 'schedule_entry', id: saved.id, ifVersion: version } };
   if (call.tool === 'save_schedule_entry')
     return {
       tool: call.tool,

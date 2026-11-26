@@ -131,6 +131,33 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await expect(rows).toHaveCount(50);
 });
 
+test("the What filter's create and change find a content save's rows, which list no option of their own (#507)", async ({ page }) => {
+  const address = '192.0.2.43';
+  await signInAs(page, `e2e-audit-saves-${Date.now()}@example.com`, address);
+  await createOrg(page, 'Eastside Bakery', address);
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast', idempotencyKey: 'e2e-audit-saves' })) as {
+    playlist: { id: string; version: number };
+  };
+  await tool(page, 'save_playlist', { playlistId: playlist.id, name: 'Breakfast menu', ifVersion: playlist.version });
+
+  await page.goto('/audit');
+  await hydrated(page);
+  const rows = page.locator('tbody tr');
+  const what = page.getByLabel('What', { exact: true });
+  await expect(what.locator('option[value="save_playlist"]')).toHaveCount(0);
+  await what.selectOption('create_playlist');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Created');
+  await expect(rows.first()).toContainText('name: Breakfast');
+  await what.selectOption('update_playlist');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Draft changed');
+  await expect(rows.first()).toContainText('name: Breakfast menu');
+  await shots(page, '52-audit-log-save-filter');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '53-audit-log-save-filter-phone');
+});
+
 test("the audit log's filters, search and Export CSV are disabled in the server's HTML, until the page has hydrated (#140)", async ({ page }) => {
   // The page hydrates after the app (body[data-hydrated]): a filter chosen in between was set back
   // by React, the browser's own submit put the search in the URL, and Export CSV made no file.

@@ -103,29 +103,35 @@ export const ACTIONS: Record<string, { group: string; words: string; unlisted?: 
   restart_screen: { group: 'Screens', words: 'Player restarted' },
   revoke_screen_credential: { group: 'Screens', words: 'Credential revoked' },
   publish_manifest_to_screen: { group: 'Screens', words: 'Published' },
-  save_group: { group: 'Groups', words: 'Saved' },
+  // The saves are not What options of their own: the tools they replaced find their rows (list_audit_log).
+  save_group: { group: 'Groups', words: 'Saved', unlisted: true },
   create_group: { group: 'Groups', words: 'Created' },
   rename_group: { group: 'Groups', words: 'Renamed' },
   delete_group: { group: 'Groups', words: 'Deleted' },
   set_group_members: { group: 'Groups', words: 'Screens set' },
   add_group_members: { group: 'Groups', words: 'Screens added' },
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
-  save_spot: { group: 'Spots', words: 'Saved' },
+  save_spot: { group: 'Spots', words: 'Saved', unlisted: true },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
   revert_spot_draft: { group: 'Spots', words: "Agent's draft rejected, or put back" },
   keep_spot_draft: { group: 'Spots', words: "Agent's draft kept" },
   delete_spot: { group: 'Spots', words: 'Deleted' },
-  save_playlist: { group: 'Playlists', words: 'Saved' },
+  save_playlist: { group: 'Playlists', words: 'Saved', unlisted: true },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
   revert_playlist_draft: { group: 'Playlists', words: "Agent's draft rejected, or put back" },
   keep_playlist_draft: { group: 'Playlists', words: "Agent's draft kept" },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
-  save_schedule_entry: { group: 'Schedule', words: 'Schedule saved' },
+  save_schedule_entry: { group: 'Schedule', words: 'Schedule saved', unlisted: true },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
+  // #345 PR 5's merges are not What options of their own: the tools they replaced find their rows (list_audit_log).
+  takeover: { group: 'Schedule', words: 'Takeover', unlisted: true },
+  delete: { group: 'Assets', words: 'Deleted', unlisted: true },
+  start_upload: { group: 'Assets', words: 'Upload started', unlisted: true },
+  finalize_upload: { group: 'Assets', words: 'Upload checked', unlisted: true },
   publish_takeover: { group: 'Schedule', words: 'Takeover made and published' },
   update_schedule_entry: { group: 'Schedule', words: 'Schedule changed' },
   delete_schedule_entry: { group: 'Schedule', words: 'Unscheduled' },
@@ -142,12 +148,12 @@ export const ACTIONS: Record<string, { group: string; words: string; unlisted?: 
   create_video_upload: { group: 'Assets', words: 'Video upload started' },
   finalize_video_upload: { group: 'Assets', words: 'Video checked' },
   delete_asset: { group: 'Assets', words: 'Deleted' },
-  save_brand_kit: { group: 'Brand kits', words: 'Saved' },
+  save_brand_kit: { group: 'Brand kits', words: 'Saved', unlisted: true },
   create_brand_kit: { group: 'Brand kits', words: 'Created' },
   update_brand_kit: { group: 'Brand kits', words: 'Changed' },
   set_default_brand_kit: { group: 'Brand kits', words: 'Made the default' },
   assign_brand_kit: { group: 'Brand kits', words: 'Brand kit changed' },
-  save_data_source: { group: 'Data sources', words: 'Saved' },
+  save_data_source: { group: 'Data sources', words: 'Saved', unlisted: true },
   create_data_source: { group: 'Data sources', words: 'Created' },
   update_data_source: { group: 'Data sources', words: 'Changed' },
   delete_data_source: { group: 'Data sources', words: 'Deleted' },
@@ -212,6 +218,17 @@ const SAVES: Record<string, { id: string; created: string; changed: string }> = 
   save_data_source: { id: 'dataSourceId', created: 'create_data_source', changed: 'update_data_source' },
 };
 
+/** A delete, a takeover and an upload (#345 PR 5), each said as the tool it replaced said it, by its type, action or kind. */
+const MERGED: Record<string, { by: string; was: Record<string, string> }> = {
+  delete: {
+    by: 'type',
+    was: { asset: 'delete_asset', data_source: 'delete_data_source', playlist: 'delete_playlist', schedule_entry: 'delete_schedule_entry' },
+  },
+  takeover: { by: 'action', was: { publish: 'publish_takeover', end: 'end_takeover' } },
+  start_upload: { by: 'kind', was: { image: 'create_asset_upload', video: 'create_video_upload' } },
+  finalize_upload: { by: 'kind', was: { image: 'finalize_asset', video: 'finalize_video_upload' } },
+};
+
 /** What each of `screen_command`'s commands did, as the tools it replaced said it. */
 const SCREEN_COMMANDS: Record<string, string> = {
   identify: 'Identified',
@@ -230,6 +247,8 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   const name = text(e.input.name);
   const role = text(e.input.role);
   const save = SAVES[e.action];
+  const merged = MERGED[e.action];
+  if (merged) return capital(ACTIONS[merged.was[text(e.input[merged.by]) ?? ''] ?? e.action]!.words);
   if (save) {
     const words = ACTIONS[e.input[save.id] === undefined ? save.created : save.changed]!.words;
     return e.action === 'save_brand_kit' && e.input.makeDefault === true ? `${words} · made the default` : words;
@@ -268,13 +287,17 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   }
 }
 
-/** The input a tool was given, or a membership change's own fields; a cancel's invitee too, which the tool records apart (#321). */
+/**
+ * The input a tool was given, or a membership change's own fields; a cancel's invitee too, which the tool records apart
+ * (#321), and the kind of asset a finished upload checked (#345).
+ */
 const inputOf = (e: AuditEntry): Record<string, unknown> => {
   const input = e.detail.input;
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return e.detail;
   const more = e.detail.detail;
   const invitee = e.action === 'cancel_invitation' && typeof more === 'object' && more !== null && 'email' in more ? { email: more.email } : {};
-  return { ...input, ...invitee };
+  const kind = e.action === 'finalize_upload' && typeof more === 'object' && more !== null && 'kind' in more ? { kind: more.kind } : {};
+  return { ...input, ...invitee, ...kind };
 };
 
 /** The playlist a publish made the org's first default (#243), from its row's `detail`. */

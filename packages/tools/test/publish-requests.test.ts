@@ -511,6 +511,24 @@ describe('the second re-check of #386', () => {
     await pendingStill(request.id);
   });
 
+  it('refuses a decline whose editor is demoted between its read and its batch: forbidden, never a conflict (#396)', async () => {
+    const version = await editSpot(agent(), o.templateSpot, 11_000);
+    const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);
+    try {
+      expect(
+        await dispatch(
+          registry,
+          'decline_publish_request',
+          { publishRequestId: request.id },
+          racing(asMember('editor'), () => demote('editor', 'viewer')),
+        ),
+      ).toMatchObject({ ok: false, error: 'forbidden' });
+    } finally {
+      await demote('editor', 'editor');
+    }
+    await pendingStill(request.id);
+  });
+
   it('refuses an editor demoted while the approval waits for the lock, and one demoted between its read and its batch', async () => {
     const version = await editSpot(agent(), o.templateSpot, 12_000);
     const { request } = await ask(agent(), [{ kind: 'spot', id: o.templateSpot, version }]);

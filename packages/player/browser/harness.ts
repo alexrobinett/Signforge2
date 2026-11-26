@@ -69,8 +69,11 @@ export interface Harness {
   openPlayer(
     setup?: (server: FixtureServer) => void,
     query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>),
-    /** Run the page on Playwright's clock from this instant (`page.clock`): time flows, and a test can jump it. */
-    opts?: { clockAt?: Date },
+    /**
+     * `clockAt`: run the page on Playwright's clock from this instant (`page.clock`): time flows, and a test can jump it.
+     * `before`: set the page up before the player opens, for routes it must find in place.
+     */
+    opts?: { clockAt?: Date; before?: (page: Page) => Promise<unknown> },
   ): Promise<Player>;
   /** A blank page in a fresh context, for hosting a template without the player. */
   blankPage(): Promise<Page>;
@@ -136,6 +139,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
       page.on('console', (m) => lines.push(`${m.type()}: ${m.text()}`));
       page.on('pageerror', (e) => lines.push(`pageerror: ${e.message}`));
       if (opts.clockAt) await page.clock.install({ time: opts.clockAt });
+      await opts.before?.(page);
       // The supervisor points at the fixture server, so a real one on this machine is never touched.
       const q = new URLSearchParams({ poll: '1', supervisor: `${server.url}/supervisor`, ...(typeof query === 'function' ? query(server) : query) });
       await page.goto(`${server.url}/?${q}`);
