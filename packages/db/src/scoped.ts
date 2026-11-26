@@ -1136,14 +1136,16 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       membership: async () => {
         const g = s.screenGroups;
-        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null }>(sql`
-            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson FROM ${m} WHERE ${m.orgId} = ${orgId}
+        // Every group's own row too, with its name: what a publish records it reached (#187), in the same statement.
+        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null; name: string | null }>(sql`
+            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson, NULL AS name FROM ${m} WHERE ${m.orgId} = ${orgId}
             UNION ALL
-            SELECT ${g.id}, NULL, ${g.selectorJson} FROM ${g} WHERE ${g.orgId} = ${orgId} AND ${g.selectorJson} IS NOT NULL
+            SELECT ${g.id}, NULL, ${g.selectorJson}, ${g.name} FROM ${g} WHERE ${g.orgId} = ${orgId}
             ORDER BY 1, 2`);
         return {
           members: rows.flatMap((r) => (r.screenId === null ? [] : [{ groupId: r.groupId, screenId: r.screenId }])),
           rules: rows.flatMap((r) => (r.selectorJson === null ? [] : [{ id: r.groupId, selectorJson: r.selectorJson }])),
+          groups: rows.flatMap((r) => (r.name === null ? [] : [{ id: r.groupId, name: r.name }])),
         };
       },
       /** Every membership in the org, by group then screen. */
@@ -1977,12 +1979,15 @@ export function scoped(d1: D1Database, orgId: string) {
        * the whole address, #253), for a roll back the revision it went back to, and its rollout's
        * `rolloutCounts`, read after the page: a publish's screens commit with it.
        */
-      history: async ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
+      history: async ({ beforeRevision, limit, targets = false }: { beforeRevision?: number; limit: number; targets?: boolean }) => {
         const p = s.publishes;
         const restored = alias(s.publishes, 'restored');
+        // A publish's record of whom it reached (#187) only when asked (`targets`, one publish's page): a page of them would be large.
+        const { targetsJson, ...columns } = getTableColumns(p);
         const page = await db
           .select({
-            ...getTableColumns(p),
+            ...columns,
+            targetsJson: targets ? targetsJson : sql<string | null>`NULL`,
             actorName: sql<string | null>`coalesce(nullif(${s.user.name}, ''), substr(${s.user.email}, 1, instr(${s.user.email}, '@') - 1))`,
             restoresRevision: restored.revision,
           })
@@ -2015,6 +2020,17 @@ export function scoped(d1: D1Database, orgId: string) {
           .limit(1)
           .get();
       },
+      /** The latest publish's record of whom its groups reached, skipping roll backs: what the next publish is compared with (#187). */
+      lastTargets: async () =>
+        (
+          await db
+            .select({ t: s.publishes.targetsJson })
+            .from(s.publishes)
+            .where(and(eq(s.publishes.orgId, orgId), isNotNull(s.publishes.targetsJson)))
+            .orderBy(desc(s.publishes.revision))
+            .limit(1)
+            .get()
+        )?.t ?? null,
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>
         db
