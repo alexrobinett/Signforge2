@@ -448,3 +448,79 @@ describe('schedule entries', () => {
     expect((await org.scheduleEntries.get(entry.id))?.deletedAt).toBeNull();
   });
 });
+
+describe("a takeover's or a delete's card, held to the commit (#408)", () => {
+  afterEach(() => vi.useRealTimers());
+  const start = (flash: string, more: Record<string, unknown> = {}) => ({
+    action: 'publish',
+    playlistId: flash,
+    target: 'org',
+    endsAt: '2026-11-17T14:00:00Z',
+    ...more,
+  });
+  const takeovers = async (org: Awaited<ReturnType<typeof setup>>['org']) => (await org.scheduleEntries.list()).filter((e) => e.endsAt !== null);
+
+  it('ends a takeover only at the version shown: one changed just before the batch is refused and left as it is', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash } = await setup('card-end');
+    const made = entryOf(await ok(call('takeover', start(flash))));
+    const raced = racing(memberOf(org, 'editor'), () =>
+      ok(call('save_schedule_entry', { scheduleEntryId: made.id, endsAt: '2026-11-17T13:00:00Z', ifVersion: made.version })),
+    );
+    expect(await dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: made.id, ifVersion: made.version }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: made.id },
+    });
+    expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: null });
+  });
+
+  it('deletes a playlist only at the version shown: one renamed just before the batch is refused and kept', async () => {
+    const { org, call, breakfast } = await setup('card-delete');
+    const row = (await org.playlists.get(breakfast))!;
+    const raced = racing(memberOf(org, 'editor'), () => ok(call('save_playlist', { playlistId: breakfast, name: 'Brunch', ifVersion: row.rowVersion })));
+    expect(await dispatch(registry, 'delete', { type: 'playlist', id: breakfast, ifVersion: row.rowVersion }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+    });
+    expect(await org.playlists.get(breakfast)).toMatchObject({ name: 'Brunch' });
+  });
+
+  it('takes over only the screens shown: a member or a screen added just before the batch refuses it, making nothing', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, flash, front, lobby, hall } = await setup('card-reach');
+    const joined = racing(memberOf(org, 'editor'), () => org.screenGroups.setMembers(front, [lobby, hall]));
+    expect(await dispatch(registry, 'takeover', start(flash, { target: 'group', groupId: front, ifReach: [lobby] }), joined)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { screens: [hall, lobby].sort() },
+    });
+    const added = racing(memberOf(org, 'editor'), () => org.screens.insert({ name: 'Annex', timezone: 'Europe/London', orientation: 'landscape' }));
+    expect(await dispatch(registry, 'takeover', start(flash, { ifReach: [lobby, hall] }), added)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await takeovers(org)).toEqual([]);
+  });
+
+  it('takes over with what it plays as shown: a spot published again just before the batch refuses it, and as shown it runs', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash, still, lobby, hall } = await setup('card-plays');
+    const playlist = (await org.playlists.get(flash))!;
+    const spot = (await org.spots.get(still))!;
+    const plays = { playlist: playlist.publishedVersion, spots: { [still]: spot.publishedVersion } };
+    const republished = racing(memberOf(org, 'editor'), async () => {
+      await ok(call('save_spot', { spotId: still, durationMs: 6000, ifVersion: spot.rowVersion }));
+      await ok(call('publish', {}));
+    });
+    expect(await dispatch(registry, 'takeover', start(flash, { ifPlays: plays }), republished)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('published again'),
+    });
+    expect(await takeovers(org)).toEqual([]);
+    const now = { playlist: playlist.publishedVersion, spots: { [still]: (await org.spots.get(still))!.publishedVersion } };
+    await ok(call('takeover', start(flash, { ifReach: [lobby, hall], ifPlays: now })));
+    expect(await takeovers(org)).toHaveLength(1);
+  });
+});

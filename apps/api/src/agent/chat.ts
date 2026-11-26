@@ -551,7 +551,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         .map(([name, confirmable]) => ({
           name,
           description: `${confirmable.description()} From the drawer it stops at a card the person sees, and runs only if they press it.`,
-          inputSchema: new ListedInput(confirmable.input()),
+          inputSchema: new ListedInput(confirmable.input(grant)),
           needsApproval: true,
           execute: (input: unknown) =>
             within(async () => {

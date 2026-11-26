@@ -24,9 +24,12 @@ const deleteTool = defineTool({
     .strictObject({
       type: z.enum(['asset', 'data_source', 'playlist', 'schedule_entry']),
       id: z.string().regex(ID_PATTERN, 'not a valid id').describe("The thing's id"),
-      ifVersion: ifVersion.describe('schedule_entry only: the version you read; a conflict means it changed since: read it again'),
+      ifVersion: ifVersion.describe('playlist or schedule_entry: the version you read; a conflict means it changed since'),
     })
-    .refine((v) => v.ifVersion === undefined || v.type === 'schedule_entry', { message: 'ifVersion is for a schedule entry only', path: ['ifVersion'] }),
+    .refine((v) => v.ifVersion === undefined || v.type === 'schedule_entry' || v.type === 'playlist', {
+      message: 'ifVersion is for a playlist or a schedule entry',
+      path: ['ifVersion'],
+    }),
   output: outputs.delete,
   example: { type: 'playlist', id: 'pls_example' },
   target: (input) => ({ kind: input.type, id: input.id }),
@@ -40,7 +43,7 @@ const deleteTool = defineTool({
         await deleteDataSource(ctx, input.id);
         return { deleted: input.id, version: null };
       case 'playlist':
-        await deletePlaylist(ctx, input.id);
+        await deletePlaylist(ctx, input.id, input.ifVersion);
         return { deleted: input.id, version: null };
       case 'schedule_entry':
         return { deleted: input.id, version: await deleteScheduleEntry(ctx, input.id, input.ifVersion) };

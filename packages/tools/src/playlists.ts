@@ -238,8 +238,13 @@ export async function playlistInUse(org: OrgScope, playlistId: string): Promise<
  * Delete a playlist, its draft and its published version, not its spots (the `delete` tool, ./delete.ts): refused with a
  * conflict while it is the default or a schedule entry plays it. Takeovers of it that have ended go with it.
  */
-export async function deletePlaylist({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, playlistId: string) {
-  await requirePlaylist(org, playlistId);
+export async function deletePlaylist({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, playlistId: string, ifVersion: number | undefined) {
+  const row = await requirePlaylist(org, playlistId);
+  // At the version read, held to the commit: an edit landing before the batch refuses it, as the drawer's card shows it (#408).
+  if (ifVersion !== undefined) {
+    if (row.rowVersion !== ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
+    write(org.playlists.stage.unchanged(row));
+  }
   const used = await playlistInUse(org, playlistId);
   if (used) throw used;
   for (const e of await endedWith(org, playlistId, Date.now())) write(org.scheduleEntries.stage.remove(e));

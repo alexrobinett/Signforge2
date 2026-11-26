@@ -733,7 +733,7 @@ describe('confirmation cards (#269)', () => {
     // A screen joins the group: the takeover would reach it, though the card did not say so.
     await s.scope.screenGroups.setMembers(group.id, [first!.id, second!.id]);
     const all = await raw(await s.member.post('/api/agent/chat', card.body));
-    expect(doneOf(all)).toMatchObject({ ok: false, message: expect.stringContaining('The screens it would play on changed since the card was made') });
+    expect(doneOf(all)).toMatchObject({ ok: false, message: expect.stringContaining('the screens it would play on have changed since they were shown') });
     expect(doneOf(all).message).toContain('This card is spent');
     expect(await s.scope.scheduleEntries.list()).toEqual([]);
     expect((await s.member.post('/api/agent/chat', card.body)).status).toBe(409);
@@ -1223,7 +1223,7 @@ describe('confirmation cards (#269)', () => {
       Object.assign(s.called, { groupId: group.id });
       const { body } = pressOf(await raw(await s.ask('q')), 'q');
       expect((await s.owner.tool('delete_group', { groupId: group.id })).status).toBe(200);
-      await refusedPress(s, body, 'takeover', /Its group or screen was deleted since the card was made/);
+      await refusedPress(s, body, 'takeover', /the screens it would play on have changed since they were shown/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
     });
 
@@ -1237,7 +1237,7 @@ describe('confirmation cards (#269)', () => {
       const row = (await s.scope.spots.get(spot.id))!;
       expect((await s.owner.tool('save_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
       expect((await s.owner.tool('publish', {})).status).toBe(200);
-      await refusedPress(s, body, 'takeover', /A spot of its playlist was published again since the card was made/);
+      await refusedPress(s, body, 'takeover', /its playlist, or a spot of it, was published again since it was shown/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
     });
   });
