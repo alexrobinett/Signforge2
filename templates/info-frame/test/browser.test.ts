@@ -4,6 +4,7 @@ import type { FrameTheme, Orientation } from '@signforge/contract';
 import {
   DEMO_KIT,
   host,
+  INTRO_WINDOW_MS,
   layoutFaults,
   LIGHT_KIT,
   motion,
@@ -85,12 +86,12 @@ describe('info frame (#201)', () => {
    * colour meets WCAG 4.5:1 (3:1 large) against that card's computed fill.
    */
   const cardContrast = (f: Frame) =>
-    f.evaluate(() => {
+    f.evaluate((window) => {
       const intros = document
         .getAnimations()
         .map((a) => a.effect!.getComputedTiming())
         // An entrance, as layoutFaults reads one: not an exit near the play's end, a push-in or a loop.
-        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < 2000 && Number(t.duration) < 2000);
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)) && Number(t.delay) < window && Number(t.duration) < window);
       const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
       for (const a of document.getAnimations()) a.currentTime = rest;
       const rgba = (c: string): [number, number, number, number] => {
@@ -130,7 +131,7 @@ describe('info frame (#201)', () => {
         if (ratio < min) out.push(`${el.className || el.tagName}: ${ratio.toFixed(2)}:1, below ${min}:1`);
       }
       return [...new Set(out)];
-    });
+    }, INTRO_WINDOW_MS);
 
   for (const orientation of ['landscape', 'portrait'] as const)
     for (const look of looks)
@@ -481,7 +482,7 @@ describe('info frame (#201)', () => {
         await r.hst.waitFor('fresh', 'ready', i + 1);
         const f = r.hst.page.mainFrame().childFrames()[0]!;
         const seen = await motion(f, durationMs);
-        expect(seen, look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [] });
+        expect(seen, look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
         const looping = await f.evaluate(() =>
           [
             ...new Set(

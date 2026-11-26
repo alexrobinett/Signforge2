@@ -323,6 +323,7 @@ describe('room status (#199)', () => {
         props: ['opacity', 'transform'],
         withinCap: true,
         unended: [],
+        unknown: [],
       });
     }
   });

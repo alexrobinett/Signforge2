@@ -165,7 +165,6 @@
      Only transform and opacity move: no clip or mask reveals, which the Pi has not measured. */
   --lk-ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
   --lk-ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
-  --lk-ease-move: cubic-bezier(0.2, 0, 0, 1);
   --lk-ease: var(--lk-ease-in);
   --lk-in-text: 0.65s;
   --lk-in-fade: 0.5s;
@@ -226,7 +225,6 @@
   --lk-fade-motion: lk-fade;
   --lk-badge-motion: lk-pop-press;
   --lk-photo-motion: lk-slide;
-  --lk-drift-motion: lk-push;
   --lk-ping-motion: none;
   --lk-crawl-speed: 9vmin;
 }
@@ -270,7 +268,6 @@
   --lk-fade-motion: lk-rise;
   --lk-badge-motion: lk-rise;
   --lk-photo-motion: lk-fade;
-  --lk-drift-motion: lk-push;
   --lk-ping-motion: none;
   --lk-crawl-speed: 8.3vmin;
 }
@@ -313,7 +310,6 @@
   --lk-fade-motion: lk-rise;
   --lk-badge-motion: lk-slide;
   --lk-photo-motion: lk-settle;
-  --lk-drift-motion: lk-push;
   --lk-ping-s: 1.6s;
   --lk-ping-motion: lk-night-ping;
   --lk-crawl-speed: 9vmin;
@@ -356,7 +352,6 @@
   --lk-fade-motion: lk-fade;
   --lk-badge-motion: lk-fade;
   --lk-photo-motion: lk-settle;
-  --lk-drift-motion: lk-push;
   --lk-ping-motion: none;
   --lk-crawl-speed: 7.5vmin;
 }
@@ -395,8 +390,9 @@
 .lk-photo,
 .lk-draw {
   will-change: transform, opacity;
+  /* `both` before the name: after it, a `--lk-motion: none` reads as the fill mode and `both` as the name. */
   animation:
-    var(--lk-motion) var(--lk-dur) var(--lk-ease-in) calc(var(--lk-i, 0) * var(--lk-stagger)) both,
+    var(--lk-dur) var(--lk-ease-in) calc(var(--lk-i, 0) * var(--lk-stagger)) both var(--lk-motion),
     var(--lk-leave) var(--lk-out) var(--lk-ease-out) calc(var(--sf-duration, 8s) - var(--lk-out)) forwards;
 }
 .lk-d1 {
@@ -431,7 +427,7 @@
    screen holds still otherwise (D's long holds). No wobble, bounce or breathing on text. */
 .lk-drift {
   will-change: transform;
-  animation: var(--lk-drift-motion) var(--sf-duration, 8s) linear both;
+  animation: lk-push var(--sf-duration, 8s) linear both;
 }
 /* A photo drifting across a portrait screen's width took the kit's test template over 1% of frames
    dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until a portrait

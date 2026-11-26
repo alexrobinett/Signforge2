@@ -364,7 +364,7 @@ describe('countdown (#198)', () => {
       for (const [, data] of states) {
         const f = await s.show({ look, ...data }, NOW, undefined, durationMs);
         // Every element with a kit class has its intro and outro here.
-        expect(await motion(f, durationMs, true), look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [] });
+        expect(await motion(f, durationMs, true), look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
       }
   });
 
