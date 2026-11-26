@@ -79,7 +79,7 @@ export const READ_TYPES = {
   publish: {
     about: 'publishes, newest first, and how each rolled out',
     rules:
-      "A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
+      "A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. unreachable: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. An outcome is where the screen stands on this publish; state is the screen's state now, so a screen playing it may since be unreachable. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
     list: { tool: 'list_publishes', items: 'publishes' },
     get: { tool: 'get_publish', id: 'publishId', item: 'publish', maxIds: 7, rename: { screens: 'rollout' }, latest: true },
     summary: ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'],

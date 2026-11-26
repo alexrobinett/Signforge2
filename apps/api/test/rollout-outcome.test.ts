@@ -14,7 +14,7 @@ const MIN = 60_000;
 const SECRET = 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD';
 const m = (c: string) => c.repeat(64);
 
-type Outcome = 'playing' | 'downloading' | 'asleep' | 'offline' | 'waiting' | 'fell_back' | 'revoked' | 'replaced';
+type Outcome = 'playing' | 'downloading' | 'asleep' | 'unreachable' | 'waiting' | 'fell_back' | 'revoked' | 'replaced';
 interface Page {
   publish: {
     id: string;
@@ -180,7 +180,7 @@ describe('the publish page and the finished-publish alert', () => {
     // Annex was last heard from an hour ago, past the 15 minutes; Cellar is online and fetching it.
     await org.o.screens.update((await org.o.publishes.rollout(v1)).find((r) => r.name === 'Annex')!.id, { lastSeenAt: start - 60 * MIN });
     expect(await bothSides(org, v1, start + MIN)).toEqual({
-      outcomes: { Lobby: 'playing', Annex: 'offline', Cellar: 'downloading' },
+      outcomes: { Lobby: 'playing', Annex: 'unreachable', Cellar: 'downloading' },
       counts: { screens: 3, playing: 1, replaced: 0, open: 2 },
       finished: false,
       alert: null,
