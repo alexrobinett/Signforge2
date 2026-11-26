@@ -72,8 +72,8 @@
       "size": 77944,
       "type": "text/html"
     },
-    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
-      "size": 395766,
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
       "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
@@ -206,10 +206,10 @@
       },
       "html": "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e"
     },
-    "base/announcement@1.1.2": {
+    "base/announcement@1.2.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -335,7 +335,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
+      "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
     },
     "base/clock@1.4.0": {
       "manifest": {
@@ -1517,7 +1517,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.1.2",
+      "template": "base/announcement@1.2.0",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "1b151a7b6f3f0c7451d7909811523e9ce9f1f8dd35e2c42bd45c5c1ecdd05daf"
+  "id": "9bec5882192d621f5fc463b4618dab580c17bf36c63547dff14ffed0406ed15a"
 }

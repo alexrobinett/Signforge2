@@ -153,8 +153,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
-      "size": 395766,
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
       "type": "text/html"
     },
     "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
@@ -179,10 +179,10 @@
     }
   },
   "templates": {
-    "base/announcement@1.1.2": {
+    "base/announcement@1.2.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -308,7 +308,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
+      "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
     },
     "base/countdown@1.1.1": {
       "manifest": {
@@ -1158,7 +1158,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.1.2",
+      "template": "base/announcement@1.2.0",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "56bfb1f6ea9afa5031db50ee3035a99e60ff202ed2fbed5a5e56f2ca284c76dc"
+  "id": "9c84fed6fa61a08bd918ef61d26875fd95cb6593d0c01df0b96afb4be8605646"
 }
