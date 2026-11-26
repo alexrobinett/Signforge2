@@ -209,7 +209,7 @@ describe('a publish preview and its recorded targets (#187)', () => {
     expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [] });
   });
 
-  it("says a screen paired since the last publish gets its first, not that something was compiled again (review of #620)", async () => {
+  it('says a screen paired since the last publish gets its first, not that something was compiled again (review of #620)', async () => {
     const fresh = await scope().screens.insert({ name: 'Zone new', timezone: 'Europe/London', orientation: 'landscape' });
     const preview = await call('preview_publish', {});
     // It also joins the rule of a missing key an earlier test made: a new screen has no labels.
