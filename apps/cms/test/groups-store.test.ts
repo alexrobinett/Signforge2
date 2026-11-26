@@ -17,7 +17,7 @@ vi.mock('~/server/screens.functions', () => ({ getScreens: vi.fn(), getScreenSta
 vi.mock('~/server/schedule.functions', () => ({ getSchedule: vi.fn() }));
 
 const ORG = 'org_1';
-const front: GroupView = { id: 'grp_front', name: 'Front', screenIds: ['scr_1', 'scr_old'], version: 4, createdAt: 0, updatedAt: 0 };
+const front: GroupView = { id: 'grp_front', name: 'Front', screenIds: ['scr_1', 'scr_old'], selector: null, version: 4, createdAt: 0, updatedAt: 0 };
 const router = { state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
 const calls = () => callTool.mock.calls.map(([name, input]: unknown[]) => ({ name, input }));
 const answer = (out: unknown) => callTool.mockResolvedValueOnce(out);

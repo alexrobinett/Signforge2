@@ -104,7 +104,7 @@ describe("a found screen's and group's actions (#180)", () => {
   });
 
   it("shows a group's screens on the Screens page", () => {
-    const group = { id: 'grp_1', name: 'North', screenIds: [], version: 1, createdAt: 0, updatedAt: 0 };
+    const group = { id: 'grp_1', name: 'North', screenIds: [], selector: null, version: 1, createdAt: 0, updatedAt: 0 };
     expect(targetActions({ kind: 'group', group }, listed('viewer'), false)).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
   });
 });

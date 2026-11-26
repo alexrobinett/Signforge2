@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { format, matches, systemLabels, type Selector } from '../src/selector';
+import { format, matches, systemLabels, type Selector, groupsOf } from '../src/selector';
 
 const lobby = {
   region: 'North',
@@ -122,5 +122,43 @@ describe('format', () => {
     expect(format(one('region', 'eq', '"north"'))).toBe('region="\\"north\\""');
     expect(format(one('region', 'neq', 'a\\b'))).toBe('region!="a\\\\b"');
     expect(format(one('region', 'in', 'say "hi"', '(east)', ' padded ', ''))).toBe('region in ("say \\"hi\\"", "(east)", " padded ", "")');
+  });
+});
+
+describe("each screen's groups (#186)", () => {
+  const screen = (id: string, labels: Record<string, string>, orientation: 'landscape' | 'portrait' = 'landscape') => ({
+    id,
+    labels,
+    orientation,
+    kind: 'device' as const,
+    timezone: 'UTC',
+    locale: null,
+  });
+
+  it('puts a screen in a list group by its rows and in a smart group by its rule, system labels included', () => {
+    const screens = [screen('a', { region: 'North', type: 'drive-thru' }), screen('b', { region: 'north' }, 'portrait'), screen('c', {})];
+    // grp_list is a list group: rows, no rule.
+    const rules = [
+      {
+        id: 'grp_north_drive',
+        selector: {
+          all: [
+            { key: 'region', op: 'eq' as const, values: ['north'] },
+            { key: 'type', op: 'eq' as const, values: ['drive-thru'] },
+          ],
+        },
+      },
+      { id: 'grp_portrait', selector: { all: [{ key: 'orientation', op: 'eq' as const, values: ['portrait'] }] } },
+    ];
+    const members = [
+      { groupId: 'grp_list', screenId: 'c' },
+      // A row left under a group that has become a rule counts for nothing: the rule decides.
+      { groupId: 'grp_north_drive', screenId: 'c' },
+    ];
+    expect(Object.fromEntries(groupsOf(screens, rules, members))).toEqual({
+      a: ['grp_north_drive'],
+      b: ['grp_portrait'],
+      c: ['grp_list'],
+    });
   });
 });

@@ -7,6 +7,8 @@ import { checkSize, FeedError, LIMITS } from './errors';
 
 export interface TableOptions {
   maxBytes?: number;
+  /** CSV only: the most cells the table may have; a table spot's is what can fit a snapshot (`MAX_CELLS`). */
+  maxCells?: number;
   /** JSON only: the dot path to the list of objects. Absent: the document is the list. */
   rowsPath?: string;
 }
@@ -22,8 +24,8 @@ const malformed = (message: string) => new FeedError('malformed', message);
  */
 const MAX_CELLS = MAX_SNAPSHOT_BYTES / 2;
 
-function refuseOversized(columns: number, rows: number): void {
-  if (columns * rows > MAX_CELLS) throw new FeedError('too-large', `${columns} columns by ${rows} rows cannot fit a snapshot`);
+function refuseOversized(columns: number, rows: number, maxCells = MAX_CELLS): void {
+  if (columns * rows > maxCells) throw new FeedError('too-large', `${columns} columns by ${rows} rows is more than the ${maxCells} cells a table may have`);
 }
 
 /**
@@ -32,12 +34,17 @@ function refuseOversized(columns: number, rows: number): void {
  * (a header and a row per cell) can never fit a snapshot, so reading stops there as `too-large`
  * rather than hold an array for each of a million one-character lines.
  */
-function records(text: string): string[][] {
+function records(text: string, maxCells: number): { out: string[][]; rowAt: number[] } {
   const out: string[][] = [];
+  /** Each record's row as a spreadsheet shows the file: blank records counted, a quoted line break not. */
+  const rowAt: number[] = [];
+  let read = 0;
   const keep = (r: string[]) => {
+    read++;
     if (!r.some((c) => c.trim() !== '')) return;
-    if (out.length > MAX_CELLS) throw new FeedError('too-large', `more than ${MAX_CELLS} rows cannot fit a snapshot`);
+    if (out.length > maxCells) throw new FeedError('too-large', `the file has more than ${maxCells} rows`);
     out.push(r);
+    rowAt.push(read);
   };
   let row: string[] = [];
   let cell = '';
@@ -87,17 +94,28 @@ function records(text: string): string[][] {
     end();
     keep(row);
   }
-  return out;
+  return { out, rowAt };
 }
 
 /** A CSV file as a TableFeed. Blank lines are skipped, short rows padded with empty cells, and empty columns with no name dropped. */
 export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
+  const { columns, rows } = readCsv(body, options);
+  return { columns, rows };
+}
+
+/**
+ * A CSV file as `parseCsv` reads it, with each row's number as a spreadsheet shows the file (`rowAt`, the header
+ * row 1), for a reader that names the row a problem is in.
+ */
+export function readCsv(body: string, options: TableOptions = {}): { columns: string[]; rows: string[][]; rowAt: number[] } {
   checkSize(body, options.maxBytes ?? LIMITS.maxBytes);
-  const [header, ...rest] = records(body.replace(/^﻿/, ''));
+  const read = records(body.replace(/^﻿/, ''), options.maxCells ?? MAX_CELLS);
+  const [header, ...rest] = read.out;
+  const rowAt = read.rowAt.slice(1);
   if (!header) throw malformed('the file has no header row');
   rest.forEach((r, i) => {
     if (r.length > header.length && r.slice(header.length).some((c) => c.trim() !== ''))
-      throw malformed(`row ${i + 1} has ${r.length} cells and the header ${header.length}`);
+      throw malformed(`row ${rowAt[i]} has ${r.length} cells and the header ${header.length}`);
   });
   const names = header.map((h) => h.trim());
   // One pass over the cells, and one over the names: a scan of every row per column, or of every
@@ -112,9 +130,9 @@ export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
   const seen = new Set<string>();
   const twice = columns.find((c) => seen.size === seen.add(c).size);
   if (twice !== undefined) throw malformed(`two columns are named "${twice.slice(0, 40)}"`);
-  refuseOversized(columns.length, rest.length);
+  refuseOversized(columns.length, rest.length, options.maxCells);
   // Short rows padded with empty cells.
-  return { columns, rows: rest.map((r) => keep.map((k) => r[k] ?? '')) };
+  return { columns, rows: rest.map((r) => keep.map((k) => r[k] ?? '')), rowAt };
 }
 
 /** A JSON value as a cell: text and numbers as they are, true and false as words, anything else empty. */

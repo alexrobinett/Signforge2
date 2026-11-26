@@ -341,6 +341,33 @@ describe('publishOrg', () => {
     expect(last.screens.map((s) => s.manifest?.schedule.map((e) => e.id))).toEqual(last.screens.map(() => [x('evening-takeover'), x('b-now'), x('a-held')]));
   });
 
+  it("reaches exactly a smart group's matching screens, and a label edit only at the next publish (#186)", async () => {
+    const { org, lobby, hall } = await seedSmallOrg('pub-smart');
+    await org.commit((await org.screens.labels.stage.update([hall.id], { set: { region: 'North' }, remove: [] })).writes);
+    const north = await org.screenGroups.insert({ name: 'North', selectorJson: JSON.stringify({ all: [{ key: 'region', op: 'eq', values: ['north'] }] }) });
+    await org.scheduleEntries.insert({ id: x('north-only'), playlistId: x('evenings'), target: 'group', groupId: north.id, priority: 9 });
+    const ids = (r: Awaited<ReturnType<typeof publishOrg>>, screenId: string) =>
+      r.screens.find((s) => s.screenId === screenId)!.manifest!.schedule.map((e) => e.id);
+    // As the publish tool stores it: the batch, and each screen's desired manifest.
+    const commit = (r: Awaited<ReturnType<typeof publishOrg>>) =>
+      org.commit([...r.writes, ...r.screens.flatMap((x) => (x.manifest ? org.screens.stage.setDesiredManifest(x.screenId, x.manifest.id, null).writes : []))]);
+    const first = await publishOrg(org, opts);
+    await commit(first);
+    // Matched case-insensitively, as a selector matches: the hall, not the lobby.
+    expect(ids(first, hall.id)).toContain(x('north-only'));
+    expect(ids(first, lobby.id)).not.toContain(x('north-only'));
+
+    // Labelled into the group: nothing changes on the lobby until a publish.
+    const before = (await org.screens.get(lobby.id))!.desiredManifestId;
+    await org.commit((await org.screens.labels.stage.update([lobby.id], { set: { region: 'north' }, remove: [] })).writes);
+    expect(before).toBe(first.screens.find((x) => x.screenId === lobby.id)!.manifest!.id);
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(before);
+    const next = await publishOrg(org, opts);
+    await commit(next);
+    expect(ids(next, lobby.id)).toContain(x('north-only'));
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).not.toBe(before);
+  });
+
   it('reports a screen it cannot publish without stopping the others', async () => {
     const { org, lobby, hall } = await seedSmallOrg('pub-one-bad');
     const other = await addImage(org, sha('e'), sha('f'));
