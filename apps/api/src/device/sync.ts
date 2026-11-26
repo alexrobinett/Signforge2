@@ -10,6 +10,7 @@
  * ended, so each (hour, spot) row is written about once.
  */
 import {
+  canPlay,
   MAX_SYNC_REQUEST_BYTES,
   MAX_SYNC_RESPONSE_BLOBS,
   MAX_SYNC_SOURCES,
@@ -17,7 +18,6 @@ import {
   type DataSnapshot,
   type DeviceCommand,
   type DisplayOverride,
-  type SyncRequest,
   type SyncResponse,
 } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
@@ -44,11 +44,6 @@ const ASK_KEPT = 16;
 const FUTURE_SLACK_MS = 3_600_000;
 
 const refuse = (status: number, error: string) => new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
-
-/** Whether the screen's player can play `m`: its schema, and every template's frame protocol. */
-function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
-  return (!Number.isInteger(m.schema) || player.manifestSchemas.includes(m.schema)) && m.protocols.every((p) => player.protocols.includes(p));
-}
 
 /**
  * Of the desired manifest's sources: the snapshots newer than the screen holds, when those it

@@ -34,8 +34,7 @@
 import {
   MAX_SYNC_BLOBS,
   MAX_SYNC_SOURCES,
-  SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
+  THIS_PLAYER,
   isDisplayOutput,
   parseSyncResponse,
   type DeviceCommand,
@@ -866,7 +865,7 @@ async function apiSync(): Promise<void> {
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
-    player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
+    player: { version: __SF_PLAYER_VERSION__, ...THIS_PLAYER },
     manifest: {
       ...(manifest ? { active: manifest.id } : {}),
       filesMissing: filesMissing(),

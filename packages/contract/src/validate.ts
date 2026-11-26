@@ -29,7 +29,6 @@ import {
   MAX_IMAGE_BOX,
   MAX_URL_BYTES,
   SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
   TABLE_ROWS_PATH,
   TEMPLATE_BUDGET,
   TEMPLATE_CHECKS,
@@ -61,6 +60,7 @@ import {
   type TemplateCheckReport,
   type TemplateManifest,
 } from './shapes.ts';
+import { playsProtocol, playsSchema, THIS_PLAYER } from './playable.ts';
 import { accepted, assertSame, custom, type Infer, is, listOf, object, optional, refused, said, type Same, type Shape, within } from './shape.ts';
 import { bundleScripts } from './scripts.ts';
 
@@ -828,7 +828,7 @@ export function requiredFiles(manifest: ScreenManifest): Set<string> {
 export function validateManifest(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number))
+  if (!playsSchema(THIS_PLAYER, m.schema))
     errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
   if (!isText(m.id)) errors.push('id is missing');
   if (!isInstant(m.generatedAt)) errors.push('generatedAt must be an ISO 8601 time');
@@ -1398,7 +1398,7 @@ function checkBundle(input: { manifest: unknown; html: string; sources: Record<s
 
   const manifestProblems = validateTemplateManifest(manifest);
   const protocol = (manifest as Partial<TemplateManifest> | null)?.protocol;
-  if (protocol !== undefined && !SUPPORTED_PROTOCOLS.includes(protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
+  if (protocol !== undefined && !playsProtocol(THIS_PLAYER, protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
 
   const network: string[] = [];
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
