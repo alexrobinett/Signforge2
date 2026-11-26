@@ -271,7 +271,7 @@ async function auth<T extends { error: { message?: string; code?: string; status
   return res;
 }
 
-/** `whsec_` and 32 random bytes in base64url: what `set_webhook_alert_channel` asks for. */
+/** `whsec_` and 32 random bytes in base64url: what `set_alert_channel` asks of a webhook. */
 function newSigningSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return `whsec_${btoa(String.fromCharCode(...bytes))
@@ -435,13 +435,18 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     },
 
     connectSlack: (orgId, webhookUrl, ifVersion) =>
-      run(notifications(orgId), 'slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }, orgId), 'Slack connected'),
+      run(
+        notifications(orgId),
+        'slack',
+        () => callTool('set_alert_channel', { kind: 'slack', webhookUrl: webhookUrl.trim(), ifVersion }, orgId),
+        'Slack connected',
+      ),
     async setWebhook(orgId, webhookUrl, ifVersion) {
       const secret = ifVersion === undefined ? newSigningSecret() : undefined;
       const saved = await run(
         notifications(orgId),
         'webhook',
-        () => callTool('set_webhook_alert_channel', { webhookUrl: webhookUrl.trim(), signingSecret: secret, ifVersion }, orgId),
+        () => callTool('set_alert_channel', { kind: 'webhook', webhookUrl: webhookUrl.trim(), signingSecret: secret, ifVersion }, orgId),
         'Webhook saved',
       );
       if (saved && secret) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
@@ -452,7 +457,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       const saved = await run(
         notifications(orgId),
         'webhook',
-        () => callTool('set_webhook_alert_channel', { signingSecret: secret, ifVersion }, orgId),
+        () => callTool('set_alert_channel', { kind: 'webhook', signingSecret: secret, ifVersion }, orgId),
         'New signing secret set',
       );
       if (saved) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));

@@ -290,10 +290,10 @@ describe('tools', () => {
     const { access_token, clientId } = await agentToken(t, owner, org.id, ['content:read', 'org:manage']);
     const { grantId } = (await check(access_token))!;
     const invited = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: 'pending-321@signforge.test', role: 'viewer' });
-    // Inviting is a person's: refused at the dispatcher, as /mcp lists it to no agent.
+    // Inviting is a person's, in the CMS: no tool does it (#345).
     expect(await call(access_token, 'invite_member', { email: 'sam-321@signforge.test', role: 'viewer' })).toMatchObject({
       isError: true,
-      structuredContent: { error: 'forbidden' },
+      structuredContent: { error: 'unknown_tool' },
     });
     expect(await call(access_token, 'cancel_invitation', { invitationId: invited.id })).toMatchObject({ structuredContent: { canceled: invited.id } });
     const org_ = scoped(env.DB, org.id);

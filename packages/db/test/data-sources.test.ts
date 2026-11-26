@@ -92,7 +92,7 @@ describe('storing a feed photo', () => {
     await b.scope.dataSources.update(b.dataSource, { format: 'rss', etag: '"b"', lastModified: 'Tue', photoUrlsJson });
     const before = (await a.scope.dataSources.get(a.dataSource))!;
     await a.scope.feedPhotos.put({ url, sourceId: a.dataSource, nextCheckAt: NOW });
-    const validators = { etag: null, lastModified: null };
+    const validators = { etag: null, lastModified: null, validatedFrom: 'https://cdn.example/a.jpg' };
     await a.scope.feedPhotos.delivered(url, {
       result: 'reused',
       now: NOW,

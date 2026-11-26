@@ -59,8 +59,7 @@ describe('every registered tool', () => {
   it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
     // An update tool is named for the change (update_*, rename_*, save_*, which creates or changes) or replaces a list (set_*_members).
     // update_screen_labels merges, as save_group's add does, so it drops nothing it did not read and needs no version.
-    // update_member_role sets one field of Better Auth's row, which has no version, and D1 guards the last owner (#292).
-    const unversioned = new Set(['update_screen_labels', 'update_member_role']);
+    const unversioned = new Set(['update_screen_labels']);
     const updates = all.filter((t) => /^(update|rename|save)_|^set_\w+_members$/.test(t.name) && !unversioned.has(t.name));
     expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['update_screen', 'save_group']));
     for (const t of updates) {

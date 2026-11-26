@@ -186,8 +186,6 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // The member tools' rows. Role changes and removals are Better Auth's, faked here: they write nothing of their own.
   // A cancel writes the invitation through the org's scope (#321).
   cancel_invitation: (o) => seedTeam(env.DB, o.orgId),
-  update_member_role: (o) => seedTeam(env.DB, o.orgId),
-  remove_member: (o) => seedTeam(env.DB, o.orgId),
 };
 /** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
 const INPUT: Record<string, (o: SeededOrg, example: unknown) => unknown> = {

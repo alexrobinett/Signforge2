@@ -142,8 +142,9 @@ describe('the cost of each path (the Free plan: 50 D1 queries an invocation)', (
     const t = await team();
     const { token, spotId, version } = await agentEdited(t);
     await editors(t.org.id, 30);
-    await t.owner.ok('/api/tools/set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0COST/B0COST/secretpart' });
-    await t.owner.ok('/api/tools/set_webhook_alert_channel', {
+    await t.owner.ok('/api/tools/set_alert_channel', { kind: 'slack', webhookUrl: 'https://hooks.slack.com/services/T0COST/B0COST/secretpart' });
+    await t.owner.ok('/api/tools/set_alert_channel', {
+      kind: 'webhook',
       webhookUrl: 'https://ops.example.com/hooks/sf',
       signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD',
     });

@@ -227,7 +227,7 @@ describe('asking', () => {
   });
 
   it('tells the members who may approve by email and the channels its rule names, never with the reason, and sends them now', async () => {
-    await call(person('owner'), 'set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
+    await call(person('owner'), 'set_alert_channel', { kind: 'slack', webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
     await call(person('owner'), 'update_org_settings', { alerts: { publish_requested: { slack: true } } });
     // Edited, so not the seeded request's pin, which asking again would return.
     const version = await editSpot(agent(), o.templateSpot, 11_000);
@@ -416,7 +416,7 @@ describe('brand kits, which have no draft (review of #386)', () => {
 
 describe('asking again (review of #386)', () => {
   it('returns the waiting request for the same pins, in any order, and sends no second alert', async () => {
-    await call(person('owner'), 'set_slack_alert_channel', { webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
+    await call(person('owner'), 'set_alert_channel', { kind: 'slack', webhookUrl: 'https://hooks.slack.com/services/T0A/B0B/secret' });
     await call(person('owner'), 'update_org_settings', { alerts: { publish_requested: { slack: true } } });
     const other = await otherSpot();
     const pins = [

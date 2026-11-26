@@ -164,6 +164,8 @@ export const ACTIONS: Record<string, { group: string; words: string; unlisted?: 
   register_template_version: { group: 'Templates', words: 'Version registered' },
   set_template_version_status: { group: 'Templates', words: 'Version status changed' },
   update_org_settings: { group: 'Organization', words: 'Settings changed' },
+  // Not a What option of its own: Slack channel set and Webhook set find its rows (list_audit_log, #345).
+  set_alert_channel: { group: 'Alerts', words: 'Channel set', unlisted: true },
   set_slack_alert_channel: { group: 'Alerts', words: 'Slack channel set' },
   set_webhook_alert_channel: { group: 'Alerts', words: 'Webhook set' },
   remove_alert_channel: { group: 'Alerts', words: 'Channel removed' },
@@ -218,7 +220,7 @@ const SAVES: Record<string, { id: string; created: string; changed: string }> = 
   save_data_source: { id: 'dataSourceId', created: 'create_data_source', changed: 'update_data_source' },
 };
 
-/** A delete, a takeover and an upload (#345 PR 5), each said as the tool it replaced said it, by its type, action or kind. */
+/** A delete, a takeover, an upload (#345 PR 5) and an alert channel set (PR 6), each said as the tool it replaced said it, by its type, action or kind. */
 const MERGED: Record<string, { by: string; was: Record<string, string> }> = {
   delete: {
     by: 'type',
@@ -227,6 +229,7 @@ const MERGED: Record<string, { by: string; was: Record<string, string> }> = {
   takeover: { by: 'action', was: { publish: 'publish_takeover', end: 'end_takeover' } },
   start_upload: { by: 'kind', was: { image: 'create_asset_upload', video: 'create_video_upload' } },
   finalize_upload: { by: 'kind', was: { image: 'finalize_asset', video: 'finalize_video_upload' } },
+  set_alert_channel: { by: 'kind', was: { slack: 'set_slack_alert_channel', webhook: 'set_webhook_alert_channel' } },
 };
 
 /** What each of `screen_command`'s commands did, as the tools it replaced said it. */

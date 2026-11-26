@@ -50,17 +50,12 @@ const REFUSED: Record<string, Record<string, unknown>> = {
   // Who publishes, how long the trail is kept, and who hears an agent was refused.
   update_org_settings: { auditRetentionDays: 30 },
   // Where alerts go: an agent could silence or redirect every one (review of #419).
-  set_slack_alert_channel: { webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX' },
-  set_webhook_alert_channel: { webhookUrl: 'https://evil.example/hook' },
+  set_alert_channel: { kind: 'webhook', webhookUrl: 'https://evil.example/hook' },
   remove_alert_channel: { channel: 'webhook' },
   test_alert_channel: { channel: 'email' },
   retry_alert_delivery: { alertDeliveryId: 'dlv_boundaries' },
   // Pairing a screen: a code planted in a feed would pair a device that gets every publish (review of #419).
   claim_screen: { code: 'ABCDEF', name: 'Lobby', timezone: 'UTC', orientation: 'landscape' },
-  // Members: who joins (#321), role changes and removals.
-  invite_member: { email: 'sam@example.com', role: 'viewer' },
-  update_member_role: { memberId: 'mem_boundaries', role: 'owner' },
-  remove_member: { memberId: 'mem_boundaries' },
   // The model key: who pays, and what data leaves SignForge.
   save_ai_provider: { provider: 'anthropic', apiKey: 'sk-ant-api03-example-key-0000000000000000' },
   test_ai_provider: {},
@@ -102,6 +97,12 @@ describe("an agent, even an owner's with every scope", () => {
       ok: true,
       output: { settings: { editorsPublish: false, auditRetentionDays: 400 } },
     });
+  });
+
+  it('finds no tool that invites, changes a role or removes a member: a person does, in the CMS (#321, #345; agent-security.test.ts in apps/api checks Better Auth refuses its token)', async () => {
+    for (const name of ['invite_member', 'update_member_role', 'remove_member'])
+      for (const [via, caller] of Object.entries(agents()))
+        expect(await dispatch(registry, name, {}, caller), `${name} via ${via}`).toMatchObject({ ok: false, error: 'unknown_tool' });
   });
 
   it('is refused every people-only tool, at the dispatcher, before its input is read', async () => {

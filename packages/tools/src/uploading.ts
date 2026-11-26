@@ -4,7 +4,6 @@
  * ./assets.ts and ./videos.ts. Both need `@signforge/media` or `@signforge/media-check` on the uploading side to make
  * what they claim, so a chat agent rarely calls them; they stay on /mcp until M4-14 (owner decision on #345).
  */
-import { VIDEO_SPEC } from '@signforge/contract';
 import { z } from 'zod';
 import { finalizeImage, renditionsInput, renewImageUpload, requireAsset, startImageUpload } from './assets';
 import { id, idempotencyKey, name } from './fields';
@@ -16,7 +15,8 @@ const VIDEO_ONLY = ['sha256', 'type', 'size'] as const;
 
 const startUpload = defineTool({
   name: 'start_upload',
-  description: `Start an upload; PUT its files, then call finalize_upload. kind image: two renditions made with @signforge/media, each the smallest that covers its screen box (landscape 1920x1080, portrait 1080x1920), JPEG, PNG or WebP (an SVG as it is, for both), each with its SHA-256, type, bytes, pixel size and, if raster without transparency, its sample. Returns { asset, uploads }: a PUT URL and headers per file the server lacks, until expiresAt. kind image with a pending image's assetId alone: new URLs for its files not yet PUT. kind video: an H.264 MP4 screens play as it is (${VIDEO_SPEC.maxBytes / 1e6} MB at most; @signforge/media-check checks it), by SHA-256, type and size. Returns { asset, upload }: a multipart upload, part n being bytes from (n-1)*partBytes; keep each part's ETag. upload is null when the file is held already. Pass an idempotencyKey so a retry makes one asset.`,
+  description:
+    "Start an upload; PUT its files, then call finalize_upload. kind image: two renditions made with @signforge/media, each the smallest that covers its screen box (landscape 1920x1080, portrait 1080x1920), JPEG, PNG or WebP (an SVG as it is, for both), each with its SHA-256, type, bytes, pixel size and, if raster without transparency, its sample. Returns { asset, uploads }: a PUT URL and headers per file the server lacks, until expiresAt. kind image with a pending image's assetId alone: new URLs for its files not yet PUT. kind video: an MP4 screens play as it is (describe(asset) has the spec), by SHA-256, type and size. Returns { asset, upload }: a multipart upload, part n being bytes from (n-1)*partBytes; keep each part's ETag. upload is null when the file is held already. Pass an idempotencyKey so a retry makes one asset.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,

@@ -26,7 +26,7 @@ const saves = (save: string, idKey: string, created: string, changed: string) =>
 
 /**
  * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
- * changed it too (#243). A screen command, a group's save, a content save, a delete, a takeover and an upload (#345) do
+ * changed it too (#243). A screen command, a group's save, a content save, a delete, a takeover, an upload and an alert channel set (#345) do
  * what the tools they replaced did: their rows are found under those tools' names, by the input they recorded (or, for
  * an upload's finish, the kind it checked).
  */
@@ -56,6 +56,8 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
   create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
   finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
   finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
+  set_slack_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"slack"' },
+  set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
 };
 
 const listAuditLog = defineTool({

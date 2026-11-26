@@ -102,6 +102,7 @@ function imagesStub({ failWith, avifSize = { w: 2400, h: 1600 } }: { failWith?: 
   const decoded = (b: Uint8Array) => {
     if (failWith) throw failWith();
     if (new TextDecoder().decode(b).includes('BROKEN')) throw new Error('ERROR 9412: Input image could not be decoded');
+    if (new TextDecoder().decode(b).includes('HUGE')) throw new Error('ERROR 9413: Input image is too large');
     const v = new DataView(b.buffer, b.byteOffset);
     if (b[0] === 0xff) return { w: v.getUint16(9), h: v.getUint16(7) };
     if (b[0] === 0x89) return { w: v.getUint32(16), h: v.getUint32(20) };
@@ -1667,9 +1668,21 @@ describe("a CDN's copy at the size the screen needs", () => {
     await poll({ now: NOW, guards: web({ [feedUrl]: { body: feedOf(1, () => feedPhoto) } }).guards });
     const photos = web(answers);
     const stub = imagesStub();
-    await consume(take(), { guards: photos.guards, images: stub.images });
-    return { asked: photos.requests.map((r) => r.url), draws: stub.draws, stored: await row(feedPhoto) };
+    const jobs = take();
+    await consume(jobs, { guards: photos.guards, images: stub.images });
+    return { asked: photos.requests.map((r) => r.url), draws: stub.draws, stored: await row(feedPhoto), jobs };
   }
+
+  /** The photo's recheck, as its weekly poll queues it: each request's URL and the ETag it sent. */
+  async function rechecked(jobs: FeedImageJob[], answers: Parameters<typeof web>[0]) {
+    const photos = web(answers);
+    await consume(jobs, { guards: photos.guards, images: imagesStub().images }, NOW + DAY_MS * 7);
+    return photos.requests.map((r) => [r.url, r.headers.get('if-none-match')]);
+  }
+
+  /** An answer with ETag `etag`, a 304 to a request that sends it: BBC's, the same for every size of a photo. */
+  const tagged = (etag: string, body: Uint8Array) => (req: Request) =>
+    req.headers.get('if-none-match') === etag ? { status: 304 } : { body, headers: { etag } };
 
   it("fetches the CDN's copy and stores it under the feed's URL", async () => {
     const { feedPhoto, copy } = bbc();
@@ -1704,6 +1717,82 @@ describe("a CDN's copy at the size the screen needs", () => {
     const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { status: 503 }, [feedPhoto]: { body: jpeg(240, 135) } });
     expect(asked).toEqual([copy]);
     expect(stored).toMatchObject({ fileSha256: null, lastError: 'http-status', nextCheckAt: NOW + RETRY_MS });
+  });
+
+  // #518: a 429 is the CDN's own trouble, like a 5xx: the copy is asked for again later, not the feed's small photo now.
+  it('waits and asks for the copy again after a 429', async () => {
+    const { feedPhoto, copy } = bbc();
+    const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { status: 429 }, [feedPhoto]: { body: jpeg(240, 135) } });
+    expect(asked).toEqual([copy]);
+    expect(stored).toMatchObject({ fileSha256: null, lastError: 'http-status', nextCheckAt: NOW + RETRY_MS });
+  });
+
+  // #518: a copy over the 8 MB a photo may be loses nothing: the feed's own is stored.
+  it('falls back when the copy is too large to fetch', async () => {
+    const { feedPhoto, copy } = bbc();
+    const thumb = jpeg(240, 135, 'tiny');
+    const { asked, stored } = await delivered(
+      { feedPhoto },
+      { [copy]: { body: jpeg(1920, 1080), headers: { 'content-length': '9000000' } }, [feedPhoto]: { body: thumb } },
+    );
+    expect(asked).toEqual([copy, feedPhoto]);
+    expect(stored).toMatchObject({ fileSha256: await sha256Hex(thumb), lastError: null });
+  });
+
+  // #518: a copy Images refuses as too large (9413) falls back too.
+  it('falls back when Images refuses the copy as too large', async () => {
+    const { feedPhoto, copy } = bbc();
+    const thumb = jpeg(240, 135, 'fits');
+    const { asked, stored } = await delivered({ feedPhoto }, { [copy]: { body: jpeg(1920, 1080, 'HUGE') }, [feedPhoto]: { body: thumb } });
+    expect(asked).toEqual([copy, feedPhoto]);
+    expect(stored).toMatchObject({ fileSha256: await sha256Hex(thumb), lastError: null });
+  });
+
+  // #518: BBC answers every size of a photo with one ETag, so validators go only to the URL they came from.
+  describe('at its recheck', () => {
+    it('asks the copy conditionally when the copy is what it holds', async () => {
+      const { feedPhoto, copy } = bbc();
+      const { jobs } = await delivered({ feedPhoto }, { [copy]: tagged('"e1"', jpeg(1920, 1080, 'held')) });
+      expect(await rechecked(jobs, { [copy]: tagged('"e1"', jpeg(1920, 1080, 'held')) })).toEqual([[copy, '"e1"']]);
+    });
+
+    it('asks the copy afresh after falling back to the feed’s photo, and keeps the larger one', async () => {
+      const { feedPhoto, copy } = bbc();
+      const { jobs } = await delivered({ feedPhoto }, { [copy]: { status: 404 }, [feedPhoto]: tagged('"e2"', jpeg(240, 135, 'fell')) });
+      const lead = jpeg(1920, 1080, 'back');
+      expect(await rechecked(jobs, { [copy]: tagged('"e2"', lead) })).toEqual([[copy, null]]);
+      expect(await row(feedPhoto)).toMatchObject({ fileSha256: await sha256Hex(lead), validatedFrom: copy });
+    });
+
+    it('asks the copy afresh for a photo stored from the feed’s URL before #512', async () => {
+      const { feedPhoto, copy } = bbc();
+      const { jobs } = await delivered({ feedPhoto }, { [copy]: { status: 404 }, [feedPhoto]: tagged('"e3"', jpeg(240, 135, 'old')) });
+      // As a row written before #512: the feed's 240, with BBC's ETag, and no record of where it came from.
+      await env.DB.prepare('UPDATE feed_images SET validated_from = NULL WHERE url = ?').bind(feedPhoto).run();
+      const lead = jpeg(1920, 1080, 'new');
+      expect(await rechecked(jobs, { [copy]: tagged('"e3"', lead) })).toEqual([[copy, null]]);
+      expect(await row(feedPhoto)).toMatchObject({ fileSha256: await sha256Hex(lead), validatedFrom: copy });
+    });
+
+    // Review of #520: the feed's 240 would take the place of the 1920 a screen shows.
+    it('keeps the copy it holds when the CDN refuses it, and records the refusal', async () => {
+      const { feedPhoto, copy } = bbc();
+      const lead = jpeg(1920, 1080, 'kept');
+      const { jobs } = await delivered({ feedPhoto }, { [copy]: tagged('"e5"', lead) });
+      expect(await rechecked(jobs, { [copy]: { status: 404 }, [feedPhoto]: tagged('"e5"', jpeg(240, 135, 'small')) })).toEqual([[copy, '"e5"']]);
+      expect(await row(feedPhoto)).toMatchObject({ fileSha256: await sha256Hex(lead), validatedFrom: copy, lastError: 'http-status' });
+    });
+
+    it('asks a photo no CDN rewrites conditionally, as before', async () => {
+      const url = `https://plain-${++n}.test/a.jpg`;
+      const feedUrl = `https://plain-${n}.test/rss`;
+      await news(feedUrl);
+      await poll({ now: NOW, guards: web({ [feedUrl]: { body: feedOf(1, () => url) } }).guards });
+      const jobs = take();
+      await consume(jobs, { guards: web({ [url]: tagged('"e4"', jpeg(800, 450)) }).guards, images: imagesStub().images });
+      await env.DB.prepare('UPDATE feed_images SET validated_from = NULL WHERE url = ?').bind(url).run();
+      expect(await rechecked(jobs, { [url]: tagged('"e4"', jpeg(800, 450)) })).toEqual([[url, '"e4"']]);
+    });
   });
 
   it("records the feed's failure when both are refused", async () => {
