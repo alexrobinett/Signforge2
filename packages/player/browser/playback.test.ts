@@ -126,3 +126,29 @@ describe('playback loop', () => {
     expect(s.skipped).toBe(0);
   });
 });
+
+// Every way the bundle worker can fail falls back to the page in silence, so nothing else fails if the built worker
+// stops loading (#570). Its own script, as the build emits it, must load and say it is ready.
+describe('the built bundle worker', () => {
+  it('loads and says it is ready', async () => {
+    // Its URL as the page starts it, kept should the page end it later.
+    const started: string[] = [];
+    const p = await h.openPlayer(
+      (s) => s.publish(h.content([{ id: 'a', durationMs: 800 }])),
+      {},
+      { before: async (page) => page.on('worker', (w) => started.push(w.url())) },
+    );
+    await expect.poll(() => started.some((u) => /bundle-worker/.test(u))).toBe(true);
+    const url = started.find((u) => /bundle-worker/.test(u))!;
+    const said = await p.page.evaluate(
+      (u) =>
+        new Promise((resolve, reject) => {
+          const w = new Worker(u, { type: 'module' });
+          w.onmessage = (e) => resolve(e.data);
+          w.onerror = () => reject(new Error('the bundle worker failed to load'));
+        }),
+      url,
+    );
+    expect(said).toEqual({ ready: true });
+  });
+});
