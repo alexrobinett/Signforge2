@@ -1345,3 +1345,116 @@ The worker's hang limit (`HUNG_MS`, 750 ms in `packages/player/src/bundles.ts`) 
 - **Every read was answered by the worker, and none hung** (180 reads, `__sf.bundleHangs` 0).
 - **750 ms has the margin**: the slowest answer, a read queued behind another, took 103 ms, about a seventh of it. A read would need six or seven 400 kB parses ahead of it to reach the limit; the player has at most two in flight (a prepare and the read-ahead's one).
 - **The worker parses a 400 kB bundle in about 45 ms**, against 65 to 250 ms for the page's main thread at a prepare (#232): it parses with nothing else on its thread.
+
+## The template set on master (issue #203, 2026-11-26)
+
+Every base template at master `c08fbb3f` (after the motion refresh, #501 and #527, and the read-ahead of #555), each in every look: the look kit's four (Pop, Poster, Night, Corporate) for Announcement, Countdown, Info frame, News and Room status; Alert's four severities; Menu board's two themes; Agenda, Clock, C-store promo, Photo promo and Weather as they come. 31 spots per orientation.
+
+**Content.** Built with `sf build` from the stress example's spots (`examples/stress`, its canonical media): each spot 10 s, its look set, its live-data bindings left out, so it plays its own data (no feed waits; News without row photos, Info frame and Room status with their sample data). Announcement over the 4K river photo with a QR code, Info frame over the 4K kitchen photo with its crawl, Photo promo the 4K river photo, Weather the rain scene, Agenda the meeting room. No brand kit; cut only. Built once per orientation (the screen's `orientation`), portrait with the output rotated (`wlr-randr --transform 90`) and restored afterwards.
+
+**Method.** The master player served beside the deployed one at `http://localhost:8090/m203/<orientation>/`, the supervisor and the soak logger stopped while measured. Per spot, a fresh page load playing it alone (`?spots=`, the HTTP cache and the origin's storage cleared, as `isolate.py` does): its first prepare as the page made it; then, from 10 s after the load, 30 s measured with the counters reset (as `isolate.py`): frames by phase, stalls, the prepares made meanwhile (repeats of the same spot) and the worst frame. "Over budget" marks a repeat prepare over 500 ms, more than 1% dropped overall, and a first prepare over the cold-start budget proposed in #232 (about 600 ms, pending the owner). Specs over budget, and those with a single long frame, were measured twice more.
+
+
+**Landscape**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| announcement-pop | 613 ms | 326, 327, 325 | 0.39% | 0.00% | 11.7% | 67 ms | first > 600 ms |
+| announcement-poster | 594 ms | 329, 328, 344 | 0.39% | 0.00% | 11.5% | 67 ms | - |
+| announcement-night | 613 ms | 313, 312, 311 | 0.33% | 0.00% | 10.5% | 50 ms | first > 600 ms |
+| announcement-corporate | 611 ms | 313, 312, 311 | 0.33% | 0.00% | 10.5% | 50 ms | first > 600 ms |
+| countdown-pop | 614 ms | 213, 226, 225 | 0.22% | 0.00% | 9.8% | 50 ms | first > 600 ms |
+| countdown-poster | 612 ms | 230, 247, 229 | 0.22% | 0.00% | 9.3% | 50 ms | first > 600 ms |
+| countdown-night | 582 ms | 246, 247, 244 | 0.33% | 0.00% | 13.3% | 50 ms | - |
+| countdown-corporate | 587 ms | 196, 210, 208 | 0.22% | 0.00% | 10.5% | 50 ms | - |
+| info-frame-pop | 693 ms | 380, 398, 377 | 0.39% | 0.00% | 10.0% | 67 ms | first > 600 ms |
+| info-frame-poster | 696 ms | 361, 376, 359 | 0.44% | 0.00% | 11.9% | 67 ms | first > 600 ms |
+| info-frame-night | 716 ms | 398, 345, 394 | 0.67% | 0.06% | 15.7% | 100 ms | first > 600 ms |
+| info-frame-corporate | 680 ms | 379, 360, 375 | 0.50% | 0.00% | 13.2% | 67 ms | first > 600 ms |
+| news-pop | 539 ms | 197, 197, 195 | 0.22% | 0.00% | 11.1% | 50 ms | - |
+| news-poster | 550 ms | 191, 191, 205 | 1.11% | 0.91% | 11.4% | 283 ms | over 1% dropped |
+| news-night | 577 ms | 395, 192, 193, 193 | 0.28% | 0.00% | 10.6% | 50 ms | - |
+| news-corporate | 561 ms | 190, 203, 202 | 0.22% | 0.00% | 11.4% | 50 ms | - |
+| room-status-pop | 638 ms | 212, 211, 209 | 0.28% | 0.00% | 12.8% | 50 ms | first > 600 ms |
+| room-status-poster | 560 ms | 217, 217, 216 | 0.28% | 0.00% | 12.8% | 50 ms | - |
+| room-status-night | 566 ms | 232, 229, 229 | 0.33% | 0.00% | 14.3% | 50 ms | - |
+| room-status-corporate | 558 ms | 214, 228, 210 | 0.28% | 0.00% | 12.5% | 50 ms | - |
+| alert-emergency | 366 ms | 199, 194, 195 | 0.11% | 0.00% | 5.6% | 33 ms | - |
+| alert-warning | 357 ms | 187, 154, 168 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| alert-advisory | 340 ms | 194, 162, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| alert-notice | 336 ms | 179, 161, 159 | 0.72% | 0.73% | 0.0% | 233 ms | - |
+| menu-dark | 297 ms | 162, 159, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| menu-light | 292 ms | 162, 161, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| agenda | 307 ms | 144, 326, 142 | 0.22% | 0.00% | 10.5% | 67 ms | - |
+| clock | 322 ms | 167, 164, 165 | 0.11% | 0.00% | 6.7% | 33 ms | - |
+| cstore-promo | 337 ms | 175, 178, 180 | 0.11% | 0.00% | 6.2% | 33 ms | - |
+| photo-promo | 375 ms | 266, 279, 262 | 0.11% | 0.00% | 4.1% | 33 ms | - |
+| weather | 829 ms | 373, 508, 413 | 1.89% | 1.28% | 15.6% | 117 ms | repeat prepare > 500 ms; over 1% dropped; first > 600 ms |
+
+**Portrait**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| announcement-pop | 1133 ms | 410, 409, 408 | 0.33% | 0.00% | 8.0% | 50 ms | first > 600 ms |
+| announcement-poster | 1016 ms | 399, 415, 413 | 0.17% | 0.00% | 4.1% | 33 ms | first > 600 ms |
+| announcement-night | 970 ms | 424, 406, 448 | 0.44% | 0.06% | 9.0% | 50 ms | first > 600 ms |
+| announcement-corporate | 990 ms | 425, 422, 439 | 0.33% | 0.06% | 6.3% | 50 ms | first > 600 ms |
+| countdown-pop | 629 ms | 242, 223, 222 | 0.17% | 0.00% | 7.3% | 33 ms | first > 600 ms |
+| countdown-poster | 594 ms | 308, 304, 303 | 0.44% | 0.00% | 14.5% | 67 ms | - |
+| countdown-night | 578 ms | 228, 210, 208 | 0.17% | 0.00% | 7.5% | 33 ms | - |
+| countdown-corporate | 584 ms | 230, 229, 227 | 0.22% | 0.00% | 9.5% | 50 ms | - |
+| info-frame-pop | 825 ms | 392, 395, 415 | 0.28% | 0.00% | 6.8% | 50 ms | first > 600 ms |
+| info-frame-poster | 811 ms | 396, 411, 418 | 0.22% | 0.00% | 5.4% | 50 ms | first > 600 ms |
+| info-frame-night | 762 ms | 394, 396, 391 | 0.33% | 0.00% | 8.1% | 50 ms | first > 600 ms |
+| info-frame-corporate | 762 ms | 392, 406, 371 | 0.33% | 0.00% | 8.3% | 50 ms | first > 600 ms |
+| news-pop | 551 ms | 188, 203, 200 | 0.28% | 0.00% | 13.9% | 50 ms | - |
+| news-poster | 557 ms | 188, 206, 204 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| news-night | 565 ms | 189, 208, 204 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| news-corporate | 558 ms | 195, 193, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| room-status-pop | 596 ms | 239, 229, 236 | 0.28% | 0.00% | 11.9% | 50 ms | - |
+| room-status-poster | 574 ms | 222, 228, 226 | 0.22% | 0.00% | 9.8% | 50 ms | - |
+| room-status-night | 573 ms | 297, 282, 297 | 0.78% | 0.29% | 16.7% | 100 ms | - |
+| room-status-corporate | 573 ms | 238, 221, 234 | 0.33% | 0.06% | 12.2% | 50 ms | - |
+| alert-emergency | 401 ms | 246, 280, 261 | 0.28% | 0.00% | 10.4% | 50 ms | - |
+| alert-warning | 387 ms | 192, 194, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| alert-advisory | 379 ms | 188, 188, 187 | 0.06% | 0.00% | 2.8% | 33 ms | - |
+| alert-notice | 378 ms | 179, 193, 191 | 0.06% | 0.00% | 2.9% | 33 ms | - |
+| menu-dark | 296 ms | 179, 178, 177 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| menu-light | 301 ms | 174, 174, 173 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| agenda | 310 ms | 150, 150, 147 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| clock | 325 ms | 202, 199, 215 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| cstore-promo | 349 ms | 197, 197, 198 | 0.17% | 0.00% | 8.6% | 33 ms | - |
+| photo-promo | 724 ms | 716, 780, 747 | 0.72% | 0.12% | 8.2% | 67 ms | repeat prepare > 500 ms; first > 600 ms |
+| weather | 437 ms | 472, 441, 773 | 5.06% | 4.12% | 21.2% | 100 ms | repeat prepare > 500 ms; over 1% dropped |
+
+
+**Re-runs, landscape**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| news-poster | 563 ms | 196, 194, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| alert-notice | 363 ms | 177, 159, 159 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| weather | 481 ms | 426, 425, 428 | 1.89% | 1.16% | 18.7% | 117 ms | over 1% dropped |
+| news-poster | 567 ms | 192, 192, 192 | 0.22% | 0.00% | 11.4% | 50 ms | - |
+| alert-notice | 334 ms | 168, 154, 168 | 0.06% | 0.00% | 3.2% | 33 ms | - |
+| weather | 471 ms | 380, 377, 470 | 2.00% | 1.33% | 17.8% | 117 ms | over 1% dropped |
+
+**Re-runs, portrait**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| photo-promo | 538 ms | 721, 705, 767 | 0.50% | 0.18% | 4.5% | 50 ms | repeat prepare > 500 ms |
+| weather | 523 ms | 514, 477, 561 | 5.22% | 4.16% | 24.7% | 117 ms | repeat prepare > 500 ms; over 1% dropped |
+| announcement-pop | 948 ms | 414, 410, 410 | 0.17% | 0.00% | 4.0% | 33 ms | first > 600 ms |
+| room-status-night | 570 ms | 281, 298, 270 | 0.44% | 0.00% | 15.7% | 67 ms | - |
+| photo-promo | 719 ms | 781, 756, 747 | 0.72% | 0.12% | 8.0% | 67 ms | repeat prepare > 500 ms; first > 600 ms |
+| weather | 554 ms | 472, 507, 480 | 6.00% | 4.79% | 29.5% | 133 ms | repeat prepare > 500 ms; over 1% dropped |
+| announcement-pop | 964 ms | 416, 415, 431 | 0.39% | 0.00% | 9.2% | 50 ms | first > 600 ms |
+| room-status-night | 573 ms | 283, 283, 281 | 0.72% | 0.23% | 17.6% | 83 ms | - |
+
+**Over budget, repeatably:**
+- **Weather, rain.** Landscape 1.89 to 2.00% dropped (1.16 to 1.33% playing, worst 117 ms) in three runs, where #96 measured landscape within budget; portrait 5.06 to 6.00% (4.12 to 4.79% playing), repeat prepares up to 773 ms. #96.
+- **Photo promo, 4K photo, portrait.** Repeat prepares 705 to 781 ms in all three runs (first 538 to 724 ms); drops within budget (0.50 to 0.72%). Landscape is within (262 to 279 ms).
+- **First prepares after a page load** over the proposed ~600 ms cold-start budget: Announcement in portrait (948 to 1,133 ms, every look; its repeats 399 to 448 ms are within the 500 ms budget, which #229's 662 ms Pop portrait median no longer misses); Info frame (680 to 716 ms landscape, 762 to 825 ms portrait; repeats 345 to 418 ms); and just over it, Announcement in landscape but Poster (611 to 613 ms), Countdown's Pop and Poster in landscape and Pop in portrait (612 to 629 ms) and Room status's Pop in landscape (638 ms). Every other kit template's first prepare is 539 to 598 ms, and every other template's 292 to 437 ms (Weather's in landscape was 829 ms in the first pass, 471 and 481 ms in the re-runs; Photo promo's portrait ones are above).
+
+**Within budget:** every other spec, in both orientations: repeat prepares 142 to 448 ms, 0.00 to 0.78% dropped. Two single long frames while playing in the first pass (News Poster landscape, 283 ms, 1.11% overall; Alert notice landscape, 233 ms) did not come again in two re-runs each (0.17 to 0.22%, 0.00 to 0.06%). The worst frame is 50 to 100 ms while the next spot loads in most kit specs, as in every earlier run of them; while playing it stays at 17 to 50 ms but for Weather.
