@@ -390,9 +390,9 @@ h1 {
    the moment the left half starts. 12 o'clock is under the start cap. */
 [data-look='night'] .seam {
   position: absolute;
-  left: calc(50% - 0.2vmin);
+  left: calc(50% - 0.1vmin);
   bottom: 0;
-  width: 0.4vmin;
+  width: 0.2vmin;
   height: 8vmin;
   background: var(--lk-primary);
   animation: cd-show 0s linear calc(0.5s + var(--t1, 0s)) both;
@@ -400,25 +400,22 @@ h1 {
 [data-look='night'] .ring:not([data-past-half]) .seam {
   display: none;
 }
+/* A hairline ring: the number is the one lit thing. */
 [data-look='night'] .hole {
   position: absolute;
-  inset: 5.2vmin;
+  inset: 1.1vmin;
   border-radius: 50%;
   background: var(--lk-bg);
 }
 [data-look='night'] .cap {
   position: absolute;
   top: 0;
-  left: calc(50% - 2.6vmin);
+  left: calc(50% - 0.55vmin);
   box-sizing: border-box;
-  width: 5.2vmin;
-  height: 5.2vmin;
+  width: 1.1vmin;
+  height: 1.1vmin;
   border-radius: 50%;
   background: var(--lk-primary);
-}
-[data-look='night'] .cap.ping {
-  background: none;
-  border: 0.37vmin solid var(--lk-primary);
 }
 [data-look='night'] .arm {
   transform: rotate(var(--a, 0deg));
@@ -439,10 +436,11 @@ h1 {
 [data-look='night'] .number {
   font: var(--lk-display-weight) calc(26.9vmin * var(--size) * var(--rest-k)) / 1.04 var(--lk-font-display);
   letter-spacing: -0.04em;
+  color: var(--lk-primary-ink-large);
 }
 [data-look='night'] .sub {
-  font: 400 3.1vmin / 1.3 var(--lk-font-label);
-  color: var(--lk-accent-ink);
+  font: 500 3.7vmin / 1.3 var(--lk-font-body);
+  color: var(--lk-muted);
 }
 [data-look='night'] .done {
   font: var(--lk-display-weight) calc(10vmin * var(--fit)) / 1.1 var(--lk-font-display);
@@ -460,36 +458,38 @@ h1 {
   gap: 3.7vmin;
 }
 [data-look='night'] .unit-row {
-  font: 400 2.6vmin / 1.3 var(--lk-font-label);
-  color: var(--lk-accent-ink);
+  font: 500 3.7vmin / 1.3 var(--lk-font-body);
+  color: var(--lk-muted);
 }
 [data-look='night'] .title {
   font: 700 calc(8.9vmin * var(--lk-scale) * var(--fit)) / 1.08 var(--lk-font-display);
-  color: var(--lk-primary-ink-large);
   -webkit-line-clamp: 4;
 }
+/* The facts as ruled rows, the label beside the value. */
 [data-look='night'] .facts {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1.85vmin;
+  flex-direction: column;
+  border-top: max(1px, 0.12vmin) solid var(--lk-rule-color);
 }
 [data-look='night'] .fact {
   --lk-motion: var(--lk-badge-motion);
-  max-width: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 0.74vmin;
-  padding: 2vmin 2.8vmin;
-  border: 0.19vmin solid color-mix(in srgb, var(--lk-text) 22%, var(--lk-bg));
-  border-radius: var(--lk-radius-small);
+  display: grid;
+  grid-template-columns: 14vmin minmax(0, 1fr);
+  align-items: baseline;
+  padding: 1.8vmin 0;
+  border-bottom: max(1px, 0.12vmin) solid var(--lk-rule-color);
 }
 [data-look='night'] .fact dt {
-  font: 400 2vmin / 1.2 var(--lk-font-label);
+  min-width: 0;
+  padding-right: 2vmin;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 2.8vmin / 1.2 var(--lk-font-label);
   color: var(--lk-muted);
 }
 [data-look='night'] .fact dd {
-  font: 500 3.3vmin / 1.2 var(--lk-font-body);
+  font: 500 3.7vmin / 1.2 var(--lk-font-body);
 }
 
 /* Corporate: an annual report's page, hairlines and a light number on a twelve-column grid. */

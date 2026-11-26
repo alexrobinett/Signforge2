@@ -75,16 +75,16 @@ describe('countdown (#198)', () => {
     const done = { state: 'done', number: null, rest: null, unit: null, done: "It's here!" };
     const progress = (p: string | null) => ({ detail: 'Sunday, November 29 · 6:00 PM', progress: p });
     expect(seen).toEqual({
-      '12 days before, in days': { ...count('12', null), ...progress('Day 2 of 14') },
-      'in days and hours': { ...count('12', '03 h'), ...progress('Day 2 of 14') },
-      'in days, hours and minutes': { ...count('12', '03 h 00 min'), ...progress('Day 2 of 14') },
+      '12 days before, in days': { ...count('12', null), ...progress(null) },
+      'in days and hours': { ...count('12', '3 h'), ...progress(null) },
+      'in days, hours and minutes': { ...count('12', '3 h 0 min'), ...progress(null) },
       // On the day itself: no days to go, and the progress full.
-      'a minute and a half before, in days': { ...count('0', null), ...progress('Day 14 of 14') },
+      'a minute and a half before, in days': { ...count('0', null), ...progress(null) },
       // Rounded up: the last minute shows a minute to go, not none.
-      'a minute and a half before, in minutes': { ...count('0', '00 h 02 min'), ...progress('Day 14 of 14') },
+      'a minute and a half before, in minutes': { ...count('0', '0 h 2 min'), ...progress(null) },
       'at the target': { ...done, ...progress(null) },
       'a day after': { ...done, ...progress(null) },
-      'after, with no done text': { ...count('0', '00 h 00 min'), ...progress(null) },
+      'after, with no done text': { ...count('0', '0 h 0 min'), ...progress(null) },
     });
   });
 
@@ -107,10 +107,10 @@ describe('countdown (#198)', () => {
       seen[name] = [r.number, r.rest, r.unit];
     }
     expect(seen).toEqual({
-      'down, over the night the clocks go back': ['2', '00 h 00 min', 'days to go'],
+      'down, over the night the clocks go back': ['2', '0 h 0 min', 'days to go'],
       'down, in days, the same night': ['2', null, 'days to go'],
-      'down, over the night the clocks go forward': ['2', '00 h', 'days to go'],
-      'up, over the night the clocks go back': ['2', '00 h 00 min', 'days since'],
+      'down, over the night the clocks go forward': ['2', '0 h', 'days to go'],
+      'up, over the night the clocks go back': ['2', '0 h 0 min', 'days since'],
       'up, in days, late in the evening': ['1', null, 'day since'],
     });
   });
@@ -120,7 +120,7 @@ describe('countdown (#198)', () => {
     // 01:30 on the night the clocks go back is its first pass, 05:30 UTC; at 01:15 on the second
     // pass (06:15 UTC) it has gone, though the wall clock is a quarter of an hour behind it.
     const f = await s.show({ look: 'corporate', target: '2026-11-01T01:30', units: minutes, doneText: '' }, Date.parse('2026-11-01T06:15:00Z'));
-    expect(await reads(f)).toMatchObject({ state: 'count', number: '0', rest: '00 h 00 min' });
+    expect(await reads(f)).toMatchObject({ state: 'count', number: '0', rest: '0 h 0 min' });
   });
 
   it("draws a countdown's progress over its last progressDays, only moving forward", async () => {
@@ -143,14 +143,14 @@ describe('countdown (#198)', () => {
     expect(seen).toEqual({
       '16 of 14': ['off', null, null],
       '15 of 14': ['off', null, null],
-      '14 of 14': ['on', 'Day 0 of 14', '0'],
-      '13 of 14': ['on', 'Day 1 of 14', String(1 / 14)],
-      '7 of 14': ['on', 'Day 7 of 14', '0.5'],
-      '1 of 14': ['on', 'Day 13 of 14', String(13 / 14)],
-      '0 of 14': ['on', 'Day 14 of 14', '1'],
+      '14 of 14': ['on', 'Today', '0'],
+      '13 of 14': ['on', 'Today', String(1 / 14)],
+      '7 of 14': ['on', 'Today', '0.5'],
+      '1 of 14': ['on', 'Today', String(13 / 14)],
+      '0 of 14': ['on', 'Today', '1'],
       '31 of 30': ['off', null, null],
-      '30 of 30': ['on', 'Day 0 of 30', '0'],
-      '29 of 30': ['on', 'Day 1 of 30', String(1 / 30)],
+      '30 of 30': ['on', 'Today', '0'],
+      '29 of 30': ['on', 'Today', String(1 / 30)],
     });
   });
 
@@ -195,15 +195,16 @@ describe('countdown (#198)', () => {
         });
       }
     expect(seen).toEqual({
-      'pop, a record of 301': ['on', 'on', '210', 'Best: 301 days', '69% of the way to the record'],
+      // The bar says how far on its own: only a beaten record has a caption.
+      'pop, a record of 301': ['on', 'on', '210', 'Best: 301 days'],
       'pop, a record of 200': ['on', 'on', '210', 'Best: 200 days', 'A new record'],
       'pop, no record': ['off', 'off', '210'],
       'poster, a record of 301': ['on', 'on', '210', 'Record to beat301days, 92 more to beat it'],
       'poster, a record of 200': ['on', 'on', '210', 'Record to beat200days, now beaten'],
       // Poster's progress is its tiles' split, which needs no record.
       'poster, no record': ['off', 'on', '210'],
-      'night, a record of 301': ['on', 'on', '210', 'record301 days', 'to beat it92 more days'],
-      'night, a record of 200': ['on', 'on', '210', 'record200 days', 'to beat itA new record'],
+      'night, a record of 301': ['on', 'on', '210', 'Record301 days', 'To beat it92 more days'],
+      'night, a record of 200': ['on', 'on', '210', 'Record200 days', 'To beat itA new record'],
       'night, no record': ['off', 'off', '210'],
       'corporate, a record of 301': ['on', 'on', '210', '210 days of 301Record', 'Record301 days', 'To beat it92 more days'],
       'corporate, a record of 200': ['on', 'on', '210', '210 days of 200Record', 'Record200 days', 'To beat itA new record'],
@@ -263,12 +264,12 @@ describe('countdown (#198)', () => {
     // Played 10 s into the minute, read at 11, 59, 61, 62 and 122 s: the minutes go down as each
     // minute turns, nothing else is written, and nothing at all once stopped.
     expect(ticks).toEqual([
-      ['days · 03h · 00m · 85%', []],
-      ['days · 03h · 00m · 85%', []],
-      ['days · 02h · 59m · 85%', ['days · 02h · 59m · 85%']],
-      ['days · 02h · 59m · 85%', []],
-      ['days · 02h · 58m · 85%', ['days · 02h · 58m · 85%']],
-      ['days · 02h · 58m · 85%', []],
+      ['days · 3 h · 0 min', []],
+      ['days · 3 h · 0 min', []],
+      ['days · 2 h · 59 min', ['days · 2 h · 59 min']],
+      ['days · 2 h · 59 min', []],
+      ['days · 2 h · 58 min', ['days · 2 h · 58 min']],
+      ['days · 2 h · 58 min', []],
     ]);
   });
 
@@ -396,10 +397,33 @@ describe('countdown (#198)', () => {
         );
       }
     }
-    // Night: the ping, two halves and the arm. Pop's wobbling tile and stickers, its pulsing dot and Corporate's breathing
+    // Night: two halves and the arm (the ping went with the board's hairline ring). Pop's wobbling tile and stickers, its pulsing dot and Corporate's breathing
     // marker are retired with D's motion (long holds, nothing bouncing on text).
-    expect(moving).toEqual({ landscape: [0, 0, 4, 0], portrait: [0, 0, 0, 0] });
+    expect(moving).toEqual({ landscape: [0, 0, 3, 0], portrait: [0, 0, 0, 0] });
   });
+
+  // The board's countdown (#news-design), shown in Night: the number the one lit thing in a hairline ring with no ping,
+  // no "//" before the unit, the title in the text colour and the facts as ruled rows.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`lights only Night's number, in a hairline ring, with ruled facts, ${orientation}`, async () => {
+      const s = await screen(orientation);
+      const f = await s.show({ look: 'night', target: '2026-11-29T18:00', facts: [{ label: 'Where', value: 'Pier 9 roof terrace' }] });
+      const seen = await f.evaluate(() => {
+        for (const a of document.getAnimations()) a.currentTime = 3000;
+        const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+        const vmin = Math.min(innerWidth, innerHeight) / 100;
+        const ring = document.querySelector('.track')!.getBoundingClientRect();
+        const hole = document.querySelector('.hole')!.getBoundingClientRect();
+        return {
+          ring: Math.round(((ring.width - hole.width) / 2 / vmin) * 10) / 10,
+          ping: document.querySelectorAll('.ping').length,
+          unit: document.querySelector('.unit-row')!.textContent!.trim().startsWith('//'),
+          lit: style('.number').color !== style('.title').color && style('.title').color === style('body').color,
+          rows: [...document.querySelectorAll('.fact')].every((el) => getComputedStyle(el).display === 'grid'),
+        };
+      });
+      expect(seen).toEqual({ ring: 1.1, ping: 0, unit: false, lit: true, rows: true });
+    });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const s = await screen();

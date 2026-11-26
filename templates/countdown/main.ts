@@ -127,8 +127,8 @@ defineTemplate({
     const beaten = days > record;
     const more = record + 1 - days;
     const toBeat = beaten ? 'A new record' : plural(more, 'more day', 'more days');
-    const pct = share === undefined ? '' : `${Math.floor(share * 100)}%`;
-    const progressLabel = up ? (beaten ? 'A new record' : `${pct} of the way to the record`) : `Day ${span - days} of ${span}`;
+    // A bar or ring says how far with no label of its own: a percentage or "Day 3 of 14" is framing the spot never set.
+    const progressLabel = up && beaten ? 'A new record' : '';
 
     put('.title', String(data.title));
     put('.detail', up ? `Since ${when}` : when);
@@ -150,10 +150,10 @@ defineTemplate({
       row.style.setProperty('--lk-i', String(4 + list!.childElementCount));
       list!.append(row);
     };
-    if (look === 'night') fact(up ? 'since' : 'when', when, 'detail');
+    if (look === 'night') fact(up ? 'Since' : 'When', when, 'detail');
     if (look === 'night' || look === 'corporate') {
-      fact(look === 'night' ? 'record' : 'Record', plural(record, 'day', 'days'), 'record');
-      fact(look === 'night' ? 'to beat it' : 'To beat it', toBeat, 'record');
+      fact('Record', plural(record, 'day', 'days'), 'record');
+      fact('To beat it', toBeat, 'record');
     }
     if (look === 'poster') put('.band .lk-crawl', facts.map((f) => `${f.label}: ${f.value}`).join('  ·  '));
     else for (const f of facts) fact(f.label, f.value, 'facts');
@@ -162,7 +162,7 @@ defineTemplate({
       progress(look, share, {
         label: progressLabel,
         dots: up ? MAX_DOTS : Math.min(span, MAX_DOTS),
-        from: up ? `${plural(days, 'day', 'days')} of ${record.toLocaleString(ctx.locale)}` : progressLabel,
+        from: up ? `${plural(days, 'day', 'days')} of ${record.toLocaleString(ctx.locale)}` : 'Today',
         to: up ? 'Record' : date,
       });
     if (look === 'poster') tiles(units);
@@ -188,8 +188,8 @@ defineTemplate({
     if (band) crawl(band, ctx);
 
     // The figures that follow the time, written now and again by the timer whenever they change.
+    // Hours and minutes as numbers, not zero-padded for show; a flip clock's tiles keep two digits.
     const two = (n: number) => String(n).padStart(2, '0');
-    const ringPct = el('.ring') ? [pct] : [];
     show = (t: Date) => {
       const { values } = count(t);
       const set = (e: Element, text: string) => {
@@ -202,12 +202,12 @@ defineTemplate({
           e,
           values
             .slice(1)
-            .map((v, i) => `${two(v)} ${i ? 'min' : 'h'}`)
+            .map((v, i) => `${v} ${i ? 'min' : 'h'}`)
             .join(' '),
         );
       for (const e of document.querySelectorAll('.unit')) set(e, unit);
-      const sub = [values[0] === 1 ? 'day' : 'days', ...values.slice(1).map((v, i) => `${two(v)}${i ? 'm' : 'h'}`)];
-      for (const e of document.querySelectorAll('.sub')) set(e, [...sub, ...ringPct].join(' · '));
+      const sub = [values[0] === 1 ? 'day' : 'days', ...values.slice(1).map((v, i) => `${v} ${i ? 'min' : 'h'}`)];
+      for (const e of document.querySelectorAll('.sub')) set(e, sub.join(' · '));
       document.querySelectorAll('.tile .v').forEach((e, i) => set(e, i ? two(values[i]!) : values[0]!.toLocaleString(ctx.locale)));
     };
     show(now);
@@ -253,7 +253,9 @@ function progress(look: Look, share: number, { label, dots: n, from, to }: { lab
       dot.append(inner);
       dots.append(dot);
     }
-    document.querySelector('.progress-label')!.textContent = label;
+    const caption = document.querySelector('.progress-label')!;
+    if (label) caption.textContent = label;
+    else caption.remove();
   } else if (look === 'night') {
     // Two half-discs, each turned inside its own half of the circle: transforms only, no stroke.
     const angle = share * 360;
