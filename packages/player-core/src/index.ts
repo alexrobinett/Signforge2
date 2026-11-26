@@ -351,7 +351,8 @@ export function staleAge(source: { format: string; refreshS: number }): { staleS
 /**
  * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its `staleS`, or a day
  * (`SNAPSHOT_STALE_MS`) without one, or with no `checkedAt` the screen can read. On a clock the screen does not trust
- * (`Clock.trusted`: a Pi restarted from a saved clock, before its first sync) the age cannot be told, so a snapshot
+ * (`Clock.trusted`: its corrected time is before the player's build or its last sync, such as a reboot that lost the
+ * time) the age cannot be told, so a snapshot
  * with a shorter `staleS` than a day is stale, and any other is judged by the day as before: a menu keeps playing
  * offline. A stale snapshot plays the spot's fallback, which the template is told of (`InitPayload.fallback`).
  */

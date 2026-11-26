@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import {
+  MIN_REFRESH_S,
   SCREEN_BOX,
   coverSize,
   parseBrandKit,
@@ -387,6 +388,8 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
   let failed = 0;
   for (const [id, src] of Object.entries(sources)) {
     try {
+      // The project's own file: a refreshS that is not whole seconds would make a stale age no screen accepts.
+      if (!Number.isSafeInteger(src.refreshS) || src.refreshS < MIN_REFRESH_S) throw new Error(`refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
       const res = await fetch(src.url, { headers: { 'user-agent': 'signforge-dev' }, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.text();

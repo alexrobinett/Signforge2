@@ -668,7 +668,7 @@ describe('files', () => {
       'spot "b" is listed under a different id ("not-b")',
       'schedule entry "e1": priority must be a number',
       'playlist "all": transition must be cut, fade or crossfade with ms between 1 and 10000',
-      'data source "w": refreshS must be at least 60',
+      'data source "w": refreshS must be whole seconds, at least 60',
     ]);
   });
 
