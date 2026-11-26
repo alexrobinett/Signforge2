@@ -63,6 +63,23 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   await expect(page.getByRole('checkbox', { name: /Make and edit drafts/ })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: /Publish to live screens/ })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: /Manage the organisation/ })).not.toBeChecked();
+  // Hover shades only a choice not chosen: a checked one keeps its tint, and a disabled one gets no hover (#416).
+  const card = (name: RegExp) => page.locator('label').filter({ has: page.getByRole('checkbox', { name }) });
+  const background = (name: RegExp) => card(name).evaluate((e) => getComputedStyle(e).backgroundColor);
+  const hovered = async (name: RegExp) => {
+    const before = await background(name);
+    await card(name).hover();
+    const during = await background(name);
+    await page.mouse.move(0, 0);
+    return { before, during };
+  };
+  for (const kept of [/Make and edit drafts/, /See your content and screens/]) {
+    const { before, during } = await hovered(kept);
+    expect(during, String(kept)).toBe(before);
+  }
+  const unchosen = await hovered(/Publish to live screens/);
+  expect(unchosen.during).not.toBe(unchosen.before);
+  expect(unchosen.during).not.toBe(await background(/Make and edit drafts/));
   await axe(page);
   // Tall enough for the whole card, the buttons and the note under it.
   await page.setViewportSize({ width: 1440, height: 1150 });

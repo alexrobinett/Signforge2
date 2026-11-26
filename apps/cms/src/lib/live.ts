@@ -50,6 +50,13 @@ function shellOrg(matches: Matches): string | undefined {
  */
 export const orgOnScreen = (router: AnyRouter) => shellOrg(router.state.matches);
 
+/** Whether the shell lists `publish` for the member, as `useCanPublish` reads it, for a store action. */
+export const publishesOnScreen = (router: AnyRouter) => {
+  const shell: unknown = router.state.matches.find((m) => m.routeId === '/_app')?.loaderData;
+  if (typeof shell !== 'object' || shell === null || !('tools' in shell) || !Array.isArray(shell.tools)) return false;
+  return shell.tools.some((t: unknown) => typeof t === 'object' && t !== null && 'name' in t && t.name === 'publish');
+};
+
 /** The same, for a component that may render outside the app shell (the invitation page). */
 export const useOrgOnScreen = () => useRouterState({ select: (s) => shellOrg(s.matches) });
 

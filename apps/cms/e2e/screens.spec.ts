@@ -384,12 +384,15 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await sync(request, credential, { on: true }, await publishImage(page, screenId, 'Specials'));
   await expect(tile.getByText('Playing Specials · as scheduled')).toBeVisible({ timeout: 30_000 });
 
-  // It stops syncing; the page, left open, says so within a poll. Its last sync is put 20 minutes
-  // before the page's own clock, fixed, so the minutes it shows do not depend on how long this takes.
-  const at = Date.now();
-  await page.clock.setFixedTime(at);
-  await d1(`UPDATE screens SET last_seen_at = ${at - 20 * 60_000} WHERE id = '${screenId}'`);
-  await expect(tile.getByText('Unreachable 20 min · still playing Specials')).toBeVisible({ timeout: 30_000 });
+  // It stops syncing: the page, left open, says so within a poll. The page shows the later of the server's time and
+  // its own, fixed 30 minutes ahead, which the server's cannot reach: 50 minutes, however long this takes (#416).
+  const ahead = 30 * 60_000;
+  expect(test.info().timeout).toBeLessThan(ahead);
+  // On a minute, as the page's clock ticks by them: its last sync 50 minutes before it.
+  const shown = Math.ceil((Date.now() + ahead) / 60_000) * 60_000;
+  await page.clock.setFixedTime(shown);
+  await d1(`UPDATE screens SET last_seen_at = ${shown - 50 * 60_000} WHERE id = '${screenId}'`);
+  await expect(tile.getByText('Unreachable 50 min · still playing Specials')).toBeVisible({ timeout: 30_000 });
   await expect(tile.getByText('Online')).toBeHidden();
   expect(await page.evaluate(() => 'sfStayed' in window)).toBe(true);
   await axe(page);

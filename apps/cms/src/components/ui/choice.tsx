@@ -5,7 +5,8 @@ import { cn } from '~/lib/utils';
 /**
  * The one "selected" look (#373): a tint with the primary edge, the same for a toggle button
  * (`aria-pressed`) and for a card around a radio or checkbox (`has-checked`). Not selected, an
- * outline on the card; hover only shades it (never a disabled one), so it never looks chosen.
+ * outline on the card; hover only shades it (never a disabled one), so it never looks chosen, and never a
+ * selected one, which keeps its tint (#416).
  * `stage` is the same look on a screen's dark surround, from the stage tokens; not selected, its
  * edge is transparent.
  *
@@ -19,7 +20,7 @@ export const choiceVariants = cva(
     variants: {
       tone: {
         default:
-          'border-border-strong bg-card text-foreground hover:not-disabled:not-has-disabled:bg-muted focus-visible:ring-ring has-focus-visible:ring-ring aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-accent-foreground has-checked:border-primary has-checked:bg-accent has-checked:text-accent-foreground',
+          'border-border-strong bg-card text-foreground hover:not-disabled:not-has-disabled:not-aria-pressed:not-has-checked:bg-muted focus-visible:ring-ring has-focus-visible:ring-ring aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-accent-foreground has-checked:border-primary has-checked:bg-accent has-checked:text-accent-foreground',
         stage:
           'border-transparent text-stage-muted-foreground hover:not-disabled:text-stage-foreground focus-visible:ring-stage-ring aria-pressed:border-stage-ring aria-pressed:bg-stage-ring/20 aria-pressed:text-stage-foreground',
       },
