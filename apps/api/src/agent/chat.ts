@@ -31,6 +31,7 @@
  */
 import { scoped } from '@signforge/db';
 import {
+  agentOutput,
   CMS_AGENT_CLIENT_ID,
   type Caller,
   describeInput,
@@ -507,7 +508,8 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             const shown = asked?.success ? readCard(asked.data.type, asked.data.ids !== undefined, out.ok ? out.output : undefined) : undefined;
             const name = shown?.tool ?? t.name;
             return out.ok
-              ? { card: card(name, shown?.summary ?? summaryOf(name, out.output), true), content: asData(out.output) }
+              ? // Times as an agent reads them, ISO 8601 (#345): those the tool's output schema declares.
+                { card: card(name, shown?.summary ?? summaryOf(name, out.output), true), content: asData(agentOutput(t.name, input, out.output)) }
               : { card: card(name, `Could not ${name.replaceAll('_', ' ')}`, false), content: `refused: ${asData(out.message)}`, refused: true };
           }),
       })),
@@ -577,7 +579,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
                 : { tool: name, ok: false, message: `Not done: ${out.message}. This card is spent: ask again for a new one.` };
               shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
               return out.ok
-                ? { card: card(name, done.message, true), content: asData(out.output) }
+                ? { card: card(name, done.message, true), content: asData(agentOutput(confirmable.tools[0] ?? name, pressedInput, out.output)) }
                 : { card: card(name, `Not done: ${out.message}`, false), content: `refused: ${asData(out.message)}`, refused: true };
             }),
         })),
