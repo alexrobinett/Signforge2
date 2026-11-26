@@ -28,7 +28,7 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
+import { groupMoves, loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
@@ -124,9 +124,11 @@ async function switchScreens(
   restoresId?: string,
   changes?: PublishView['changes'],
   targetsJson: string | null = null,
+  /** The latest publish, if the caller read it already (`runPublish`, with its record). */
+  latest?: { id: string } | null,
 ) {
   const { org, actor, write, notify } = ctx;
-  const [previous] = await org.publishes.history({ limit: 1 });
+  const previous = latest === undefined ? (await org.publishes.history({ limit: 1 }))[0] : latest;
   const changesJson = changes ? JSON.stringify(changes) : null;
   const made = write(
     org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson, targetsJson }),
@@ -254,9 +256,14 @@ export async function runPublish(
     const playlistId = (removed ? published(e)?.playlistId : undefined) ?? e.playlistId;
     return playlistName(playlistId, removed || !promotedPlaylists.has(playlistId));
   };
+  // The publish before, with its record of whom each group reached: the smart groups this one moves screens in or out
+  // of are named in its changes, so its history row says why it changed screens with no draft (#187, review of #621).
+  const [latest] = await org.publishes.history({ limit: 1, targets: true });
+  const groupsMoved = latest?.targetsJson ? groupMoves(readTargets(latest.targetsJson), result.graph, new Set(changed.map((m) => m.screen.id))) : [];
   const changes = summarizeChanges([
     ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
     ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d, true), removed: true })),
+    ...groupsMoved.map((g) => ({ kind: 'group' as const, name: g.name, removed: false })),
   ]);
   const made = await switchScreens(
     ctx,
@@ -266,6 +273,7 @@ export async function runPublish(
     changes,
     // Whom each group reached, as this publish resolved them (#187), with its row in the same batch.
     recordTargets(result.graph),
+    latest ?? null,
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -565,8 +573,8 @@ export const CHANGES_BYTES = 4096;
  * What a publish changed, by kind (#370): exact counts, and the first names of each, each once, while the whole is
  * under `CHANGES_BYTES`. A publish of thousands of drafts with long names keeps its counts and a few of them.
  */
-export function summarizeChanges(items: readonly { kind: DraftKind; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
-  const groups = (['spot', 'playlist', 'schedule_entry'] as const).flatMap((kind) =>
+export function summarizeChanges(items: readonly { kind: DraftKind | 'group'; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
+  const groups = (['spot', 'playlist', 'schedule_entry', 'group'] as const).flatMap((kind) =>
     [false, true].flatMap((removed) => {
       const these = items.filter((i) => i.kind === kind && i.removed === removed);
       if (!these.length) return [];

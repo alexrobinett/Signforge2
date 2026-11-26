@@ -248,7 +248,8 @@ const checkPublishRequestResult = z.object({
  */
 export const publishChanges = z.array(
   z.object({
-    kind: z.enum(DRAFT_KINDS),
+    // `group`: smart groups whose screens it moved in or out, named (#187); drafts' kinds otherwise.
+    kind: z.enum([...DRAFT_KINDS, 'group']),
     removed: z.boolean().describe('Schedule entries this publish deleted; false for drafts it made live'),
     count: z.number().int().nonnegative().describe('How many drafts, exactly'),
     names: z.array(z.string()).describe("Some of their names, each once, as published: a schedule entry's is its playlist's"),

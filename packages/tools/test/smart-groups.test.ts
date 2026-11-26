@@ -197,6 +197,8 @@ describe('a publish preview and its recorded targets (#187)', () => {
     expect(switched(await call('publish', {}))).toEqual(previewed(preview));
     const { targets } = await call('get_publish', { targets: true });
     expect(targets.find((g: { groupId: string }) => g.groupId === zone.id).screenIds).toEqual([a.id, c.id].toSorted());
+    // Its history row names the group it moved screens of, as no draft changed (review of #621).
+    expect((await call('get_publish', {})).publish.changes).toEqual([{ kind: 'group', removed: false, count: 1, names: ['Zone N'], omitted: 0 }]);
   });
 
   it('leaves out a move no screen plays differently, so it does not linger after a publish that changes nothing (review of #620)', async () => {
