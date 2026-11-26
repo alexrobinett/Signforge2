@@ -161,22 +161,32 @@ function rng(seed: number): () => number {
   };
 }
 
+/** Rain falls this many tiles down for each tile across: its slant is atan(1 / SLANT), 14 degrees. */
+const SLANT = 4;
+
 /**
  * Rain or snow, drawn once into a small seamless tile. Each layer is an element with the tile as
- * a repeating background, one tile taller than the field, sliding down by exactly one tile
- * forever. The browser rasterizes it into its usual small tiles once; after that the GPU only
- * moves it. (A whole-screen canvas does the same job but is one huge texture, which stalled.)
- * Two layers at different speeds and sizes give depth.
+ * a repeating background, one tile larger than the screen, sliding by exactly one tile forever.
+ * The browser rasterizes it into its usual small tiles once; after that the GPU only moves it.
+ * (A whole-screen canvas does the same job but is one huge texture, which stalled.) Two layers at
+ * different speeds and sizes give depth.
+ *
+ * Rain falls at a slant drawn into its tile, not by rotating the field (#96): rotated content
+ * inside a clip, here the template's own frame, cost an offscreen pass of the whole field every
+ * frame, and dropped 1.9% of frames on a Pi 4 in landscape, 5% in portrait. Its layer slides one
+ * tile across and SLANT tiles down a turn, along the slant, which moves the tile's pattern onto
+ * itself: the tile stays square, so the rain repeats no more often than the rotated field did.
  */
 async function precipitation(condition: Condition, viewport: { width: number; height: number }): Promise<void> {
   const kind = condition === 'snow' ? 'snow' : condition === 'rain' || condition === 'storm' ? 'rain' : undefined;
   if (!kind) return;
   const host = document.getElementById('fx')!;
-  if (kind === 'rain') host.classList.add('slant');
   const heavy = condition === 'storm';
   // The size the player gives us, not innerWidth: the frame may not be laid out yet.
   const unit = Math.min(viewport.width, viewport.height) / 100;
   const tile = Math.round(unit * 40);
+  // How far rain slides a turn, in tiles: as fast along the slant as one tile straight down took before.
+  const turn = Math.hypot(1, SLANT);
   // Rain and snow in the kit's text colour (its background on a light kit), against a sky mixed from the kit.
   const light = document.getElementById('stage')!.classList.contains('light-kit');
   const [cr, cg, cb] = tokenRgb(light ? '--sf-bg' : '--sf-text') ?? [220, 235, 255];
@@ -187,8 +197,8 @@ async function precipitation(condition: Condition, viewport: { width: number; he
           { count: 12, size: 1.0, alpha: 0.95, secs: 4 },
         ]
       : [
-          { count: heavy ? 60 : 40, size: 0.65, alpha: 0.3, secs: 0.42 },
-          { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 },
+          { count: heavy ? 60 : 40, size: 0.65, alpha: 0.3, secs: 0.42 * turn },
+          { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 * turn },
         ];
 
   // Built in parallel, appended in order: the slow far layer must stay behind the near one, and
@@ -214,8 +224,10 @@ async function precipitation(condition: Condition, viewport: { width: number; he
               g.arc(x + ox, y + oy, rad, 0, 6.2832);
               g.fill();
             } else {
+              // Down and to the left, along the slant: SLANT down for each one across.
               const len = (2.5 + r * 3) * u;
-              const grad = g.createLinearGradient(0, y + oy, 0, y + oy + len);
+              const [dx, dy] = [-len / Math.hypot(1, SLANT), (len * SLANT) / Math.hypot(1, SLANT)];
+              const grad = g.createLinearGradient(x + ox, y + oy, x + ox + dx, y + oy + dy);
               grad.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, 0)`);
               grad.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, ${l.alpha})`);
               g.strokeStyle = grad;
@@ -223,7 +235,7 @@ async function precipitation(condition: Condition, viewport: { width: number; he
               g.lineCap = 'round';
               g.beginPath();
               g.moveTo(x + ox, y + oy);
-              g.lineTo(x + ox, y + oy + len);
+              g.lineTo(x + ox + dx, y + oy + dy);
               g.stroke();
             }
           }
@@ -239,6 +251,7 @@ async function precipitation(condition: Condition, viewport: { width: number; he
       const layer = document.createElement('div');
       layer.className = `fall ${kind}`;
       layer.style.setProperty('--tile', `${tile}px`);
+      if (kind === 'rain') layer.style.setProperty('--drop', `${tile * SLANT}px`);
       layer.style.backgroundImage = `url(${url})`;
       layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
       return layer;

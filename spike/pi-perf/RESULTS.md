@@ -1542,3 +1542,30 @@ Each cell is **Pi 1080p / N100 1080p / N100 4K**. The repeat prepare is the medi
 - **Nothing was skipped** in any pass.
 
 **A rig fault, not a template's.** In the first pass of each landscape run, the player stopped getting any spot ready partway through: from the 11th spot at 4K and the 3rd at 1080p, every load reported `not ready within 2000 ms`. It stayed that way across fresh page loads, until the next `wlr-randr` mode change. The kiosk's journal had DRM page-flip errors (`Atomic commit failed: Device or resource busy`) as each stall began. Those errors also came during passes that ran clean, so they don't explain the stall alone. Plex (LXC 102) shares the iGPU, but its logs show no transcoding at those times. Both landscape passes were rerun spot by spot with memory logged, and came back whole: 31 of 31 each, memory steady (used 555 to 1,393 MB of 2,048, the most during Weather), with 13 of the same errors during the 1080p rerun and no stall. The tables use the reruns; the first passes are kept as `first-pass-*.jsonl`. On this rig, a run that stops getting spots ready is the rig: change the mode or restart the kiosk, and run it again.
+
+## Weather's rain without the rotated field (issue #96, 2026-11-26)
+
+Weather 1.6.0's rain was two layers in a field 150% of the screen, rotated 14°. **A trace showed where the cost went:** a Pi 4 at 1080p60 in landscape drew 3 render passes per frame, against 2 with no rain at all; the other is the player's. The GPU process spent about 200 ms per second finishing passes, against 38 ms with no rain. Rotated content inside a clip needs an offscreen pass of its whole area every frame, and the template's own frame is such a clip. It isn't one that can be removed: taking `overflow: hidden` off the field dropped one pass, and taking it off `.stage` too dropped none.
+
+**Weather 1.6.1** draws the slant into the rain's tile instead. The tile is 40 by 40 vmin, as master's was, so drawing it costs a prepare no more, and its pattern repeats no more often. Each layer slides one tile left and four tiles down per turn (atan(1/4), 14°), which lands the pattern on itself, at the same speed along the slant. It draws 2 passes per frame, as with no rain. A browser test pins the slide and checks that each layer covers the frame through its turn, at 16:9, 9:16, 8:1, 1:8 and 1:1.
+
+**A first version was held in review.** It used a 20 by 80 vmin tile (one across, one down) and showed columns that repeated every 20 vmin, with the card and clouds hidden. On the Pi it measured the same as 1.6.1.
+
+**Measured** on the Pi 400 at 1080p60: master's player with the stress example's rain spot alone, 10 s, cut, `isolate.py 30`, with the supervisor and soak logger stopped. ABBA twice, A = 1.6.0 and B = 1.6.1. Portrait with the output rotated (`wlr-randr --transform 90`) and restored.
+
+| | Overall | Playing | Loading next | Worst frame | Repeat prepares |
+| --- | --- | --- | --- | --- | --- |
+| landscape, 1.6.0 | 1.89, 1.94, 2.06, 1.83% | 1.21, 1.10, 1.22, 1.22% | 16–21% | 117 ms | 369–542 ms |
+| landscape, 1.6.1 | 0.50, 0.72, 0.50, 0.78% | 0.00, 0.35, 0.00, 0.23% | 11–15% | 50–100 ms | 327–427 ms |
+| portrait, 1.6.0 | 5.84, 6.00, 5.44, 5.83% | 4.69, 4.84, 4.43, 4.86% | 18–29% | 83–117 ms | 474–826 ms |
+| portrait, 1.6.1 | 1.39, 1.17, 1.33, 1.33% | 0.23, 0.23, 0.12, 0.18% | 19–25% | 67–83 ms | 462–836 ms |
+
+- **Landscape is within budget.**
+- **Portrait isn't, but not because of the rain.** With no rain at all (the field hidden), portrait dropped 0.94 and 1.05%, with prepares up to 643 ms. What is left over 1% is the rest of the template while the next spot loads.
+- **Repeat prepares** are the same in both builds, with one or two outliers over 800 ms in each.
+- **On the N100 at 3840x2160@60,** two rounds, the same builds and spot. 1.6.1 is better than 1.6.0 but less steady than the held 20 × 80 version. Its layer is taller (4 tiles above the screen, not 2), which at 4K is 4704 × 5616 px per layer.
+
+| N100 4K60 | 1.6.0 | 1.6.1 | held 20 × 80 |
+| --- | --- | --- | --- |
+| landscape, overall | 0.83, 2.06, 1.78, 1.56% | 1.11, 1.00, 1.61, 0.61% | 0.44, 0.44% |
+| portrait, overall | 3.78, 3.00, 3.49, 2.17% | 2.17, 0.89, 1.89, 0.33% | 0.89, 0.17% |
