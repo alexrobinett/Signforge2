@@ -859,14 +859,21 @@ describe('the publish tools (M3-18)', () => {
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
     const manifest = (await org.screens.get(lobby.id))!.desiredManifestId!;
     await org.screens.reportManifest(lobby.id, manifest, { arrivedAt: Date.now() });
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() });
     await org.screens.update(hall.id, { lastSeenAt: Date.now() - 3_600_000 });
 
     const latest = await ok(call('get_publish', {}));
     expect(latest.publish).toMatchObject({ id: first.publish!.id, revision: 1, by: { kind: 'user', id: 'user-1' }, screens: 2, playing: 1, replaced: 0 });
     expect(latest.screens).toEqual([
-      expect.objectContaining({ screenId: hall.id, name: 'Hall', outcome: 'offline' }),
-      expect.objectContaining({ screenId: lobby.id, name: 'Lobby', outcome: 'playing', manifestId: manifest }),
+      expect.objectContaining({ screenId: hall.id, name: 'Hall', outcome: 'unreachable', state: 'needs_you' }),
+      expect.objectContaining({ screenId: lobby.id, name: 'Lobby', outcome: 'playing', manifestId: manifest, state: 'online' }),
     ]);
+    // Lobby played it, then went quiet: its outcome stays playing, and its state says it is unreachable now (#345).
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() - 3_600_000 });
+    expect((await ok(call('get_publish', {}))).screens).toContainEqual(
+      expect.objectContaining({ screenId: lobby.id, outcome: 'playing', state: 'unreachable' }),
+    );
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() });
     await editDeal(org, 'Three for $5');
     await ok(p.call('publish', {}));
     expect((await ok(call('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ revision: 1, playing: 1, replaced: 1 });

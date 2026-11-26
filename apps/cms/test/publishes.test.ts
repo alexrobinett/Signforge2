@@ -11,6 +11,7 @@ const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<R
   filesMissing: null,
   wakesAt: null,
   lastSeenAt: null,
+  state: 'online',
   ...more,
 });
 
@@ -23,7 +24,7 @@ describe('a rollout', () => {
         screen('Deli', 'playing'),
         screen('Window', 'downloading', { filesMissing: 3 }),
         screen('Register', 'playing'),
-        screen('Café', 'offline', { lastSeenAt: NOW - 26 * 3_600_000 }),
+        screen('Café', 'unreachable', { lastSeenAt: NOW - 26 * 3_600_000 }),
         screen('Coffee', 'downloading', { filesMissing: 2 }),
       ],
       NOW,
@@ -32,7 +33,7 @@ describe('a rollout', () => {
       ['playing', 2, ['Deli', 'Register']],
       ['downloading', 2, ['Window', 'Coffee']],
       ['asleep', 1, ['Kitchen']],
-      ['offline', 1, ['Café']],
+      ['unreachable', 1, ['Café']],
     ]);
     expect(segs[0]!.label).toBe('playing v15');
     expect(segs[1]!.why).toBe('5 files still to fetch, then they switch.');
@@ -45,7 +46,7 @@ describe('a rollout', () => {
     expect(segs[2]!.label).toMatch(/^asleep, update at /);
     expect(segs[3]!.why).toBe('Unreachable for 26 h, playing what they have from their cache.');
     expect(rolloutLabel({ revision: 15, restoresRevision: null }, segs, 6)).toMatch(
-      /^Rollout of v15: 2 playing v15, 2 downloading, 1 asleep, update at .+, 1 offline, update when back, of 6 screens$/,
+      /^Rollout of v15: 2 playing v15, 2 downloading, 1 asleep, update at .+, 1 unreachable, update when back, of 6 screens$/,
     );
   });
 

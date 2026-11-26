@@ -3,7 +3,7 @@
 // playlist (owner decision); Save and publish makes it the default, publishes, and reaches the screen,
 // which plays it, instead of compiling no manifest and leaving it blank. Axe at desktop and phone.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool, toolResponse } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs, testScreenToPair, tool, toolResponse } from './helpers';
 
 /** This spec's own client address, so its sign-ins have their own rate limits. */
 const ADDRESS = '192.0.2.181';
@@ -35,12 +35,10 @@ test('a new org with no default playlist plays a playlist on its screen: the pub
   } = await tool(page, 'save_playlist', { name: 'Opening week', transition: { type: 'cut' }, spotIds: [spot.id] });
 
   // A test screen, paired by its code, as the Screens page pairs one. No default playlist is chosen.
-  const screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
+  const { screen, code } = await testScreenToPair(browser);
   // Claimed from this spec's own address: `tool` posts from the one every spec shares, and claims
   // are limited per address (10 a minute), which the specs running beside this one use up.
-  const claimed = await toolResponse(page, 'claim_screen', { code: (await playing(screen))!.pairing, name: 'Door', timezone: 'UTC', orientation: 'landscape' });
+  const claimed = await toolResponse(page, 'claim_screen', { code, name: 'Door', timezone: 'UTC', orientation: 'landscape' });
   expect(claimed.status(), await claimed.text()).toBe(200);
   const { screen: paired } = (await claimed.json()) as { screen: { id: string } };
 

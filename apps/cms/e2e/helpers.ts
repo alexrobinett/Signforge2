@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, request as playwrightRequest, type Frame, type Locator, type Page, type Route } from '@playwright/test';
+import { type Browser, expect, request as playwrightRequest, type Frame, type Locator, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
 import { slugify } from '../src/lib/paths';
@@ -497,4 +497,13 @@ export async function joinAsEditor(owner: Page, page: Page, email: string, addre
   await signInAs(page, email, address);
   const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
   expect(accepted.status(), await accepted.text()).toBe(200);
+}
+
+/** A test screen in a new tab, the real player, showing its pairing code as the Screens page pairs one: the tab, and the code. */
+export async function testScreenToPair(browser: Browser): Promise<{ screen: Page; code: string }> {
+  const screen = await (await browser.newContext()).newPage();
+  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
+  const pairing = () => screen.evaluate(() => (window as Window & { __sf?: { pairing: string } }).__sf?.pairing ?? '');
+  await expect.poll(pairing, { timeout: 20_000 }).not.toBe('');
+  return { screen, code: await pairing() };
 }
