@@ -9,6 +9,7 @@ import { build } from 'esbuild';
 import {
   brandColourWarnings,
   checkTemplateBundle,
+  parseTemplateManifest,
   PROTOCOL_VERSION,
   TEMPLATE_BUDGET,
   type TemplateCheckReport,
@@ -31,9 +32,14 @@ export interface BuiltTemplate {
 
 /** Bundle a template directory into a single HTML file with its script, styles and fonts inlined. */
 export async function buildTemplate(dir: string): Promise<BuiltTemplate> {
-  const authored = JSON.parse(readFileSync(join(dir, 'template.json'), 'utf8')) as TemplateManifest;
+  const authored: TemplateManifest = JSON.parse(readFileSync(join(dir, 'template.json'), 'utf8'));
   // The bundle embeds this build's SDK, so it speaks this protocol for as long as it exists.
-  const manifest: TemplateManifest = { ...authored, protocol: PROTOCOL_VERSION };
+  const written: TemplateManifest = { ...authored, protocol: PROTOCOL_VERSION };
+  // As the server parses it, a key the contract does not declare left out: a manifest's id is hashed over this, and the
+  // server hashes what it parses (review of #585). One that does not read keeps its problems in the report below, which
+  // fail the build, and is carried as written meanwhile so the rest of the build can still say what else is wrong.
+  const read = parseTemplateManifest(written);
+  const manifest = read.ok ? read.value : written;
   const problems: string[] = [];
 
   const common = { bundle: true, minify: true, write: false, target: 'chrome120', logLevel: 'silent' } as const;

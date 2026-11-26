@@ -6,9 +6,10 @@
  *   screen           <-> server   the device API: pairing, sync, socket messages
  *
  * Nothing here depends on a browser or on Node. The shapes and their constants are in
- * `shapes.ts`, the runtime checks for every shape in `validate.ts`, and `parse.ts` turns each check
- * into a parser that hands back the typed value. The device messages, the screen manifest and the data snapshot are declared once with `shape.ts`'s
- * combinators, so their check and their type cannot drift and a parse keeps only their declared fields. `frame.ts` holds the few values a template bundle
+ * `shapes.ts`, and each is declared once in `validate.ts` with `shape.ts`'s combinators: its rules in the words they
+ * always had, then its shape, held equal to its type at compile time, so a check cannot drift from its type.
+ * `parse.ts` names each shape's read, which gives back exactly the shape, any key it does not declare left out.
+ * `frame.ts` holds the few values a template bundle
  * carries; the template SDK imports them alone, as `@signforge/contract/frame`, and `sample.ts` those
  * of an image's sample, as `@signforge/contract/sample`, which only a template that reads one carries.
  *

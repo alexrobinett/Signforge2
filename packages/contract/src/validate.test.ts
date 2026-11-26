@@ -510,20 +510,6 @@ const parsers: [string, (v: unknown) => { ok: true; value: unknown } | { ok: fal
   ['parseTemplateRuntimeReport', parseTemplateRuntimeReport, validateTemplateRuntimeReport],
 ];
 
-/** Read by a declared shape (#156): the value is the input's declared fields, not the input itself. */
-const READ = new Set<unknown>([
-  parseManifest,
-  parseDataSnapshot,
-  parsePairStartRequest,
-  parsePairStartResponse,
-  parsePairPollResponse,
-  parseSyncRequest,
-  parseSyncResponse,
-  parseDeviceCommand,
-  parseServerSocketMessage,
-  parseDeviceSocketMessage,
-]);
-
 /** Whether `part` is `whole` with some object keys left out, at any depth. */
 const keptFrom = (part: unknown, whole: unknown): boolean =>
   Array.isArray(part)
@@ -538,15 +524,13 @@ const keptFrom = (part: unknown, whole: unknown): boolean =>
 describe('every parser gives back what its validator accepts', () => {
   for (const [name, parse, validate] of parsers) {
     const fixture = validators.find(([v]) => v === validate.name)?.[2];
-    const read = READ.has(parse);
-    it(`${name} returns ${read ? 'its declared fields of the value' : 'the value itself'} when valid, or the validator's problems`, () => {
+    it(`${name} returns its declared fields of the value when valid, or the validator's problems`, () => {
       fc.assert(
         fc.property(fixture ? fc.oneof(json, mutated(fixture)) : json, (v) => {
           const problems = validate(v);
           const parsed = parse(v);
           if (problems.length) expect(parsed).toEqual({ ok: false, problems });
           else if (!parsed.ok) throw new Error(`${name} refused what its validator accepts: ${parsed.problems}`);
-          else if (!read) expect(parsed.value).toBe(v);
           else {
             expect(keptFrom(parsed.value, v)).toBe(true);
             // What it keeps reads back as itself: nothing it needs was left out.
@@ -1146,7 +1130,7 @@ describe('validateManifest', () => {
 });
 
 describe("a manifest's shape (#156)", () => {
-  it('parseManifest leaves out keys the contract does not declare, and keeps a template manifest, spot data and brand as they are', () => {
+  it('parseManifest leaves out keys the contract does not declare, at any depth, and keeps spot data as it is', () => {
     const m = validManifest();
     const c = structuredClone(m);
     const sent = {
@@ -1158,7 +1142,8 @@ describe("a manifest's shape (#156)", () => {
     };
     const parsed = parseManifest(sent);
     expect(parsed).toEqual({ ok: true, value: m });
-    expect(parsed.ok && parsed.value.templates['base/menu@1.0.0']!.manifest).toBe(sent.templates['base/menu@1.0.0']!.manifest);
+    const menu = parsed.ok ? parsed.value.spots.menu : undefined;
+    expect(menu?.kind === 'template' && menu.data).toBe(c.spots.menu?.kind === 'template' && c.spots.menu.data);
   });
 
   it('reads a manifest the rules refuse when it is the shape: a stored one this player is kept on', () => {

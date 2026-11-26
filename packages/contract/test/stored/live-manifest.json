@@ -1,0 +1,760 @@
+{
+  "schema": 8,
+  "screen": {
+    "id": "live-screen",
+    "name": "Live feeds test screen",
+    "timezone": "America/New_York",
+    "orientation": "landscape"
+  },
+  "files": {
+    "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8": {
+      "size": 90089,
+      "type": "text/html"
+    },
+    "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b": {
+      "size": 81204,
+      "type": "text/html"
+    },
+    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
+      "size": 383288,
+      "type": "text/html"
+    }
+  },
+  "templates": {
+    "base/agenda@1.4.0": {
+      "manifest": {
+        "id": "agenda",
+        "version": "1.4.0",
+        "name": "Agenda",
+        "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Coming up",
+            "maxLength": 32
+          },
+          "subtitle": {
+            "type": "text",
+            "label": "Subtitle",
+            "default": "",
+            "maxLength": 48
+          },
+          "events": {
+            "type": "list",
+            "label": "Events",
+            "maxItems": 25,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Title",
+                "maxLength": 80
+              },
+              "start": {
+                "type": "text",
+                "label": "Start (YYYY-MM-DD or ISO time)"
+              },
+              "end": {
+                "type": "text",
+                "label": "End",
+                "default": ""
+              },
+              "allDay": {
+                "type": "boolean",
+                "label": "All day",
+                "default": false
+              },
+              "location": {
+                "type": "text",
+                "label": "Location",
+                "default": ""
+              }
+            }
+          },
+          "rows": {
+            "type": "number",
+            "label": "Most events to show (as many as fit, up to this)",
+            "default": 25,
+            "min": 1,
+            "max": 25
+          },
+          "empty": {
+            "type": "text",
+            "label": "Shown when there is nothing coming up",
+            "default": "Nothing scheduled",
+            "maxLength": 48
+          },
+          "accent": {
+            "type": "color",
+            "label": "Accent colour",
+            "default": "$brand.accent"
+          }
+        },
+        "duration": {
+          "defaultMs": 10000,
+          "minMs": 5000,
+          "maxMs": 120000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#0d1117",
+        "live": {
+          "source": "ical",
+          "fields": {
+            "events": "events"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
+    },
+    "base/news@2.1.2": {
+      "manifest": {
+        "id": "news",
+        "version": "2.1.2",
+        "name": "News",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Latest news",
+            "maxLength": 32
+          },
+          "source": {
+            "type": "text",
+            "label": "Source credit",
+            "default": "",
+            "maxLength": 40
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              },
+              "summary": {
+                "type": "text",
+                "label": "Summary",
+                "default": "",
+                "maxLength": 240
+              },
+              "image": {
+                "type": "image",
+                "label": "Photo"
+              }
+            }
+          },
+          "language": {
+            "type": "text",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "default": "",
+            "maxLength": 35
+          },
+          "rotationSeconds": {
+            "type": "number",
+            "label": "Seconds per lead story",
+            "default": 8,
+            "min": 4,
+            "max": 30
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": ["pop", "poster", "night", "corporate"],
+            "default": "pop"
+          },
+          "showImages": {
+            "type": "boolean",
+            "label": "Show photos",
+            "default": true
+          },
+          "showSummary": {
+            "type": "boolean",
+            "label": "Show the summary",
+            "default": true
+          },
+          "showList": {
+            "type": "boolean",
+            "label": "Show the story strip",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show the source and age",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 32000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": [],
+        "background": "#000000",
+        "live": {
+          "source": "rss",
+          "fields": {
+            "items": "items",
+            "language": "language"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
+    },
+    "base/weather@1.6.0": {
+      "manifest": {
+        "id": "weather",
+        "version": "1.6.0",
+        "name": "Weather Now",
+        "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
+        "fields": {
+          "city": {
+            "type": "text",
+            "label": "City",
+            "default": "Atlanta",
+            "maxLength": 24
+          },
+          "temp": {
+            "type": "number",
+            "label": "Temperature",
+            "default": 72
+          },
+          "high": {
+            "type": "number",
+            "label": "Today's high",
+            "default": 78
+          },
+          "low": {
+            "type": "number",
+            "label": "Today's low",
+            "default": 61
+          },
+          "code": {
+            "type": "number",
+            "label": "WMO weather code",
+            "default": 1
+          },
+          "isDay": {
+            "type": "number",
+            "label": "Daytime (1) or night (0)",
+            "default": 1
+          },
+          "sunrise": {
+            "type": "number",
+            "label": "Sunrise, Unix seconds (0: none)",
+            "default": 0
+          },
+          "sunset": {
+            "type": "number",
+            "label": "Sunset, Unix seconds (0: none)",
+            "default": 0
+          },
+          "wind": {
+            "type": "number",
+            "label": "Wind speed",
+            "default": 5
+          },
+          "humidity": {
+            "type": "number",
+            "label": "Humidity %",
+            "default": 50
+          },
+          "unit": {
+            "type": "select",
+            "label": "Temperature unit",
+            "options": ["°F", "°C"],
+            "default": "°F"
+          },
+          "windUnit": {
+            "type": "select",
+            "label": "Wind unit",
+            "options": ["mph", "km/h"],
+            "default": "mph"
+          }
+        },
+        "duration": {
+          "defaultMs": 8000,
+          "minMs": 4000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape", "portrait"],
+        "uses": ["canvas"],
+        "background": "#0b1a33",
+        "live": {
+          "source": "open-meteo",
+          "fields": {
+            "temp": "current.temperature_2m",
+            "high": "daily.temperature_2m_max.0",
+            "low": "daily.temperature_2m_min.0",
+            "code": "current.weather_code",
+            "isDay": "current.is_day",
+            "sunrise": "daily.sunrise.0",
+            "sunset": "daily.sunset.0",
+            "wind": "current.wind_speed_10m",
+            "humidity": "current.relative_humidity_2m"
+          },
+          "place": "city",
+          "units": {
+            "temperature": "unit",
+            "wind": "windUnit"
+          }
+        },
+        "protocol": 2
+      },
+      "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
+    }
+  },
+  "spots": {
+    "holidays-uk": {
+      "id": "holidays-uk",
+      "name": "Bank holidays United Kingdom (live)",
+      "kind": "template",
+      "template": "base/agenda@1.4.0",
+      "data": {
+        "title": "Bank holidays",
+        "subtitle": "United Kingdom",
+        "events": [],
+        "rows": 25,
+        "empty": "Nothing scheduled",
+        "accent": "#f59e0b"
+      },
+      "assets": {},
+      "durationMs": 10000,
+      "bindings": {
+        "events": {
+          "source": "holidays-uk",
+          "path": "events"
+        }
+      }
+    },
+    "holidays-us": {
+      "id": "holidays-us",
+      "name": "Holidays United States (live)",
+      "kind": "template",
+      "template": "base/agenda@1.4.0",
+      "data": {
+        "title": "Holidays",
+        "subtitle": "United States",
+        "events": [],
+        "rows": 25,
+        "empty": "Nothing scheduled",
+        "accent": "#f59e0b"
+      },
+      "assets": {},
+      "durationMs": 10000,
+      "bindings": {
+        "events": {
+          "source": "holidays-us",
+          "path": "events"
+        }
+      }
+    },
+    "news-bbc": {
+      "id": "news-bbc",
+      "name": "BBC News (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "World",
+        "source": "BBC News",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-bbc",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-bbc",
+          "path": "language"
+        }
+      }
+    },
+    "news-hn": {
+      "id": "news-hn",
+      "name": "Hacker News (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Front page",
+        "source": "Hacker News",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-hn",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-hn",
+          "path": "language"
+        }
+      }
+    },
+    "news-lemonde": {
+      "id": "news-lemonde",
+      "name": "Le Monde (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "À la une",
+        "source": "Le Monde",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-lemonde",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-lemonde",
+          "path": "language"
+        }
+      }
+    },
+    "news-npr": {
+      "id": "news-npr",
+      "name": "NPR (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Latest news",
+        "source": "NPR",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-npr",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-npr",
+          "path": "language"
+        }
+      }
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "name": "The New York Times (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Top stories",
+        "source": "The New York Times",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-nyt",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-nyt",
+          "path": "language"
+        }
+      }
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "name": "The Verge (live)",
+      "kind": "template",
+      "template": "base/news@2.1.2",
+      "data": {
+        "title": "Tech",
+        "source": "The Verge",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "pop",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 15000,
+      "bindings": {
+        "items": {
+          "source": "news-verge",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-verge",
+          "path": "language"
+        }
+      }
+    },
+    "weather-atlanta": {
+      "id": "weather-atlanta",
+      "name": "Weather Atlanta (live)",
+      "kind": "template",
+      "template": "base/weather@1.6.0",
+      "data": {
+        "city": "Atlanta",
+        "temp": 72,
+        "high": 78,
+        "low": 61,
+        "code": 1,
+        "isDay": 1,
+        "sunrise": 0,
+        "sunset": 0,
+        "wind": 5,
+        "humidity": 50,
+        "unit": "°F",
+        "windUnit": "mph"
+      },
+      "assets": {},
+      "durationMs": 10000,
+      "bindings": {
+        "temp": {
+          "source": "weather-atlanta",
+          "path": "current.temperature_2m"
+        },
+        "code": {
+          "source": "weather-atlanta",
+          "path": "current.weather_code"
+        },
+        "isDay": {
+          "source": "weather-atlanta",
+          "path": "current.is_day"
+        },
+        "wind": {
+          "source": "weather-atlanta",
+          "path": "current.wind_speed_10m"
+        },
+        "humidity": {
+          "source": "weather-atlanta",
+          "path": "current.relative_humidity_2m"
+        },
+        "high": {
+          "source": "weather-atlanta",
+          "path": "daily.temperature_2m_max.0"
+        },
+        "low": {
+          "source": "weather-atlanta",
+          "path": "daily.temperature_2m_min.0"
+        },
+        "sunrise": {
+          "source": "weather-atlanta",
+          "path": "daily.sunrise.0"
+        },
+        "sunset": {
+          "source": "weather-atlanta",
+          "path": "daily.sunset.0"
+        }
+      }
+    },
+    "weather-reykjavik": {
+      "id": "weather-reykjavik",
+      "name": "Weather Reykjavík (live)",
+      "kind": "template",
+      "template": "base/weather@1.6.0",
+      "data": {
+        "city": "Reykjavík",
+        "temp": 72,
+        "high": 78,
+        "low": 61,
+        "code": 1,
+        "isDay": 1,
+        "sunrise": 0,
+        "sunset": 0,
+        "wind": 5,
+        "humidity": 50,
+        "unit": "°F",
+        "windUnit": "mph"
+      },
+      "assets": {},
+      "durationMs": 10000,
+      "bindings": {
+        "temp": {
+          "source": "weather-reykjavik",
+          "path": "current.temperature_2m"
+        },
+        "code": {
+          "source": "weather-reykjavik",
+          "path": "current.weather_code"
+        },
+        "isDay": {
+          "source": "weather-reykjavik",
+          "path": "current.is_day"
+        },
+        "wind": {
+          "source": "weather-reykjavik",
+          "path": "current.wind_speed_10m"
+        },
+        "humidity": {
+          "source": "weather-reykjavik",
+          "path": "current.relative_humidity_2m"
+        },
+        "high": {
+          "source": "weather-reykjavik",
+          "path": "daily.temperature_2m_max.0"
+        },
+        "low": {
+          "source": "weather-reykjavik",
+          "path": "daily.temperature_2m_min.0"
+        },
+        "sunrise": {
+          "source": "weather-reykjavik",
+          "path": "daily.sunrise.0"
+        },
+        "sunset": {
+          "source": "weather-reykjavik",
+          "path": "daily.sunset.0"
+        }
+      }
+    }
+  },
+  "playlists": {
+    "live": {
+      "id": "live",
+      "name": "Live feeds",
+      "transition": {
+        "type": "fade",
+        "ms": 600
+      },
+      "items": [
+        {
+          "spot": "news-npr"
+        },
+        {
+          "spot": "news-bbc"
+        },
+        {
+          "spot": "news-nyt"
+        },
+        {
+          "spot": "news-verge"
+        },
+        {
+          "spot": "news-hn"
+        },
+        {
+          "spot": "news-lemonde"
+        },
+        {
+          "spot": "holidays-us"
+        },
+        {
+          "spot": "holidays-uk"
+        },
+        {
+          "spot": "weather-atlanta"
+        },
+        {
+          "spot": "weather-reykjavik"
+        }
+      ]
+    }
+  },
+  "dataSources": {
+    "news-npr": {
+      "id": "news-npr",
+      "refreshS": 300
+    },
+    "news-bbc": {
+      "id": "news-bbc",
+      "refreshS": 300
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "refreshS": 300
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "refreshS": 300
+    },
+    "news-hn": {
+      "id": "news-hn",
+      "refreshS": 300
+    },
+    "news-lemonde": {
+      "id": "news-lemonde",
+      "refreshS": 300
+    },
+    "holidays-us": {
+      "id": "holidays-us",
+      "refreshS": 3600
+    },
+    "holidays-uk": {
+      "id": "holidays-uk",
+      "refreshS": 3600
+    },
+    "weather-atlanta": {
+      "id": "weather-atlanta",
+      "refreshS": 300
+    },
+    "weather-reykjavik": {
+      "id": "weather-reykjavik",
+      "refreshS": 300
+    }
+  },
+  "schedule": [],
+  "defaultPlaylist": "live",
+  "id": "18b7e9ef03a64c34279c54171458d72f52f2a2fc10449667cbc44dda8adec387",
+  "generatedAt": "2026-11-26T13:25:41.906Z"
+}

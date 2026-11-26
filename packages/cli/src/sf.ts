@@ -38,7 +38,7 @@ import sharp from 'sharp';
 import {
   SCREEN_BOX,
   coverSize,
-  validateBrandKit,
+  parseBrandKit,
   templateKey,
   type ScreenBox,
   type Binding,
@@ -350,8 +350,10 @@ async function readBrand(
     const onLight = b.logo.onLight ? await addMedia(b.logo.onLight, 'brand') : undefined;
     kit.logo = { onDark, ...(onLight ? { onLight } : {}) };
   }
-  problems.add('brand', validateBrandKit(kit));
-  return kit;
+  // As the server parses it, a key the contract does not declare (an extra colour) left out, as for a template's manifest.
+  const read = parseBrandKit(kit);
+  if (!read.ok) problems.add('brand', read.problems);
+  return read.ok ? read.value : kit;
 }
 
 /**

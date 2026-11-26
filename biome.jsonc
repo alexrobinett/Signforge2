@@ -63,8 +63,8 @@
     },
     {
       // Type assertions belong here: test doubles, fixtures and the template tests' harness, Drizzle row typing in the db layer,
-      // the contract's validators, which read untrusted JSON field by field, the contract's parsers and
-      // shape.ts's object reader, which cast a checked value to its shape, and throwaway spikes.
+      // the contract's validators, which read untrusted JSON field by field, shape.ts's readers, which cast a checked
+      // value to its shape, and throwaway spikes.
       "includes": [
         "**/test/**",
         "**/*.test.ts",
@@ -73,7 +73,6 @@
         "packages/player/browser/**",
         "packages/template-test/**",
         "packages/db/src/**",
-        "packages/contract/src/parse.ts",
         "packages/contract/src/shape.ts",
         "packages/contract/src/validate.ts",
         "spike/**"
