@@ -1235,3 +1235,18 @@ The new News template in each look, its lead turning every 6 s through four stor
 - Portrait is the template as shipped. Landscape was measured just before one change: a story without a photo then sat at the foot of the lead, not in its middle (layout only).
 
 **The N100 at 4K60, a second check** (Proxmox host `pve`, LXC 105, a virtual 4K60 HDMI display, real DRM scan-out; `isolate.py 45`, landscape, each look cut and fade): 0.00 to 0.15% of frames dropped, worst frames 17 to 50 ms, prepares 115 to 167 ms. At 4K the N100 has room to spare; the Pi sets the budget.
+
+### News 2.0.2: small photos framed smaller (#492, 2026-11-26)
+
+The same bench with every photo 700x560, as The Guardian's feed sends them, so each lead takes the smaller frame (at most 1.25 times its size) and the first story's prepare waits for its photo to load. `isolate.py 60 cut`, each look, the lead turning every 6 s:
+
+| Look | Landscape: all%, play% | Landscape prepares (ms) | Portrait: all%, play% | Portrait prepares (ms) |
+| --- | --- | --- | --- | --- |
+| Pop | 0.14, 0.03 | 413, 411 | 0.11, 0.00 | 547, 510 |
+| Poster | 0.11, 0.00 | 418, 415 | 0.14, 0.03 | 512, 526 |
+| Night | 1.30, 1.18 (two stalls in play, 283 and 450 ms); again 0.11, 0.00 and 0.17, 0.00 | 429, 411; 412, 428; 429, 397 | 0.14, 0.03 | 517, 513 |
+| Corporate | 0.11, 0.00 | 380, 362 | 0.11, 0.00 | 496, 530 |
+
+- Within the budget in landscape. Night's first run dropped 1.30% to two long frames while playing; two more runs of it dropped 0.11 and 0.17%, so it is not the layout.
+- Portrait prepares, 496 to 547 ms, are where 2.0.0's were with large photos (478 to 530): a small photo decodes faster and the wait for its load costs about as much. Over the budget by up to 47 ms in 7 of 8, as accepted for 2.0.0.
+

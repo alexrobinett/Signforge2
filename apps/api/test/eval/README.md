@@ -4,7 +4,7 @@ A fixed set of agent tasks, run against SignForge's agent tools, so the tool con
 
 ## What it runs
 
-- **Tasks** (`tasks.ts`): 23 tasks covering reads across the types, the common writes (spot, playlist, schedule), publishing, confirmation cards from the drawer, refusals and multi-step work. Each task names the role it runs as, the arms it runs in and a script: the calls a model that knows the tools makes.
+- **Tasks** (`tasks.ts`): 25 tasks covering reads across the types, the common writes (spot, playlist, schedule), publishing, confirmation cards from the drawer, refusals and multi-step work. Each task names the role it runs as, the arms it runs in and a script: the calls a model that knows the tools makes.
 - **The org** (`harness.ts`, `seed`): every run gets a new org, built the same way through the scoped repositories and the CMS's own tool route. It has four screens in two groups, three spots in three playlists (one is the default), a schedule entry, three templates, a publish, and one unpublished change.
 - **Two arms:**
   - **/mcp**: the MCP SDK's own client (`@modelcontextprotocol/client`) with an OAuth token the member consented to, and a plain loop over Anthropic's Messages API. The system prompt holds the server's instructions, as a client such as Claude Code does.
@@ -46,7 +46,7 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 - The key goes only into the test worker's bindings. The drawer seals it as the org's key, as Settings does.
 - Results are written to `test/eval/out/<model>-<commit>.json` and `.md` (gitignored), and the table is printed. Success and checks count every attempt. Tool calls, refusals and tokens are means over the completed runs, those with no errors, with the count of completed runs beside them. Post the table on the PR.
-- A full run is 38 task-arm pairs × 3 runs, about 7M input tokens. That is under $1 on Haiku 5.5 and about $15 on Sonnet 5.5, at list prices without caching.
+- A full run is 41 task-arm pairs × 3 runs, about 7M input tokens. That is under $1 on Haiku 5.5 and about $15 on Sonnet 5.5, at list prices without caching.
 - The default model is `claude-haiku-5-5`. It is the cheapest model, and the demo model is a fast model of its class. Run Sonnet 5.5 too when a change touches how the drawer's capable model chooses tools.
 
 ## The catalogue budget
@@ -55,11 +55,11 @@ EVAL_MODEL=scripted pnpm eval:agents                  # the whole pipeline, offl
 
 | Model-facing | Owner | Editor | Viewer |
 |---|---|---|---|
-| /mcp request | 39 tools · 14,616 tokens | 36 · 13,180 | 6 · 1,726 |
-| Drawer request | 20 · 6,879 | 18 · 6,577 | 10 · 3,573 |
-| /mcp `tools/list` (discovery) | 39 · 15,648 | 36 · 14,131 | 6 · 1,882 |
+| /mcp request | 45 tools · 16,886 tokens | 42 · 15,450 | 6 · 1,726 |
+| Drawer request | 22 · 7,992 | 20 · 7,690 | 11 · 4,334 |
+| /mcp `tools/list` (discovery) | 45 · 18,079 | 42 · 16,562 | 6 · 1,882 |
 
-The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Since PR 4, one `save_*` tool per content type creates or changes it (spot, playlist, schedule entry, brand kit, data source), and the drawer drafts a spot's name, length and fields alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882; after PR 3, /mcp 16,871 / 15,435 / 1,726, drawer 8,034 / 7,732 / 4,376, and discovery 18,064 / 16,547 / 1,882.
+The /mcp request carries each tool's name, description and input schema, and leaves out the title and annotations. The drawer's request carries TanStack AI's own fields (`type`, `cache_control`). Since #345 PR 1, no input schema carries `$schema`, the id pattern or the safe-integer bounds, `ifVersion` and `idempotencyKey` have short texts, and the drawer offers only the cards a role can press. Since PR 2, agents read every type with `read` and learn a type with `describe`; each type's own read stays in the registry, unlisted. Since PR 3, `update_screen`, `screen_command` and `save_group` replace ten screen and group writes, and the drawer drafts a screen's name alone. Before PR 1 the pins were /mcp 25,388 / 23,667 / 6,472, drawer 13,548 / 13,429 / 13,429, and discovery 27,214 / 25,405 / 7,264; after PR 1, /mcp 21,312 / 19,783 / 5,532, drawer 12,122 / 11,715 / 8,221, and discovery 23,519 / 21,883 / 6,489; after PR 2, /mcp 17,444 / 16,008 / 1,726, drawer 8,211 / 7,909 / 4,384, and discovery 18,824 / 17,307 / 1,882.
 
 ## Adding a task
 

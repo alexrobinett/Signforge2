@@ -252,8 +252,9 @@ const updateScreen = defineTool({
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
+  // Strict: a field it does not take (a stray state, a group's name) is refused by name, not dropped.
   input: z
-    .object({
+    .strictObject({
       screenId: id('screen'),
       name: name('screen').optional(),
       timezone: timezone.optional(),
@@ -299,7 +300,7 @@ const screenCommand = defineTool({
   mutates: true,
   // Identify and restart act on the screen, not the database: audited though they stage nothing.
   alwaysAudited: true,
-  input: z.object({ screenId: id('screen'), command: z.enum(SCREEN_COMMANDS).describe('identify, restart, display_on, display_off or display_auto') }),
+  input: z.strictObject({ screenId: id('screen'), command: z.enum(SCREEN_COMMANDS).describe('identify, restart, display_on, display_off or display_auto') }),
   output: outputs.screen_command,
   example: { screenId: 'scr_example', command: 'identify' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),

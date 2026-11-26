@@ -301,6 +301,23 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     }
   }
 
+  it("finds nothing of org A's in save_group's screens, whichever membership: remove ignores a screen not in the group, as of another org", async () => {
+    const theirs = s.a.screen;
+    for (const input of [
+      { name: 'Theirs', screenIds: [s.b.screen, theirs] },
+      { groupId: s.b.group, screenIds: [theirs], membership: 'set' },
+      { groupId: s.b.group, screenIds: [theirs], membership: 'add' },
+    ])
+      expect(await dispatch(registry, 'save_group', input, callerB), JSON.stringify(input)).toMatchObject({
+        ok: false,
+        error: 'not_found',
+        message: expect.stringContaining(theirs),
+      });
+    const removed = await dispatch(registry, 'save_group', { groupId: s.b.group, screenIds: [theirs], membership: 'remove' }, callerB);
+    expect(removed.ok, JSON.stringify(removed)).toBe(true);
+    expect(JSON.stringify(removed)).not.toContain(theirs);
+  });
+
   it("finds nothing of org A in a change to org B's spot either: an asset, or a binding's source (#345 PR 4)", async () => {
     for (const input of [
       { spotId: s.b.imageSpot, assetId: s.a.asset },

@@ -984,6 +984,17 @@ describe('confirmation cards (#269)', () => {
     }
   });
 
+  it('says which screen command a press did, as the tool it replaced said it (review of #499)', async () => {
+    const steps: Step[] = [];
+    const s = await setup({ steps });
+    const [screen] = await s.scope.screens.list();
+    steps.push({ calls: [{ name: 'screen_command', input: { screenId: screen?.id, command: 'restart' } }] }, ANSWER);
+    const shown = pressOf(await raw(await s.ask('q')), 'q');
+    steps.push(ANSWER);
+    const pressed = await raw(await s.member.post('/api/agent/chat', shown.body));
+    expect(pressed.find((e) => e.name === CHAT_EVENTS.done)?.value).toMatchObject({ tool: 'screen_command', ok: true, message: 'Restarted a screen' });
+  });
+
   it('stops at an address card showing the address in full, audits a confirmed read, and a live screen command at a card naming the screen', async () => {
     const steps: Step[] = [];
     const s = await setup({ steps });
@@ -1085,6 +1096,8 @@ describe('confirmation cards (#269)', () => {
     expect(await promptOf(owner)).not.toContain('What they may not do here');
     const viewer = await setup({ role: 'viewer', steps: [ANSWER] });
     expect(await promptOf(viewer)).toMatch(/What they may not do here, and who may: publish[^:]*: You can view only: ask an editor\./);
+    // A screen command names the three it stands for (review of #499).
+    expect(await promptOf(viewer)).toContain('display on or off, restart screen, identify screen');
     const editor = await setup({ role: 'editor', steps: [ANSWER] });
     const publishing = await promptOf(editor);
     expect(publishing).toContain('cancel an invitation');
@@ -1366,7 +1379,7 @@ async function drafting(options: Parameters<typeof setup>[0] & { script: (ids: {
     const row = await s.scope.spots.get(spot.id);
     return { version: row?.rowVersion, data: JSON.parse(row?.dataJson ?? '{}') };
   };
-  return { ...s, spot, web, apply, stored };
+  return { ...s, spot, web, apply, stored, steps };
 }
 
 const CUT = JSON.stringify({ type: 'cut' });
@@ -1497,6 +1510,17 @@ describe('the drawer drafting changes (#268)', () => {
     }
     // Not offered at all: refused unrun.
     expect(results[4][0]).toBe(true);
+  });
+
+  it("refuses a draft of a screen's setting in the turn by name, rather than proposing its name alone (review of #499)", async () => {
+    const d = await drafting({ script: () => [] });
+    const [screen] = await d.scope.screens.list();
+    d.steps.push({ calls: [{ name: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo' } }] }, ANSWER);
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts).toEqual([]);
+    const [[refused, content]] = d.model.asked[1].messages.at(-1).content.map((r: { is_error: boolean; content: string }) => [r.is_error, r.content]);
+    expect(refused).toBe(true);
+    expect(content).toMatch(/name alone, not its timezone/);
   });
 
   it("drafts a screen's name alone: offered no setting, and refused one at save (#345)", async () => {

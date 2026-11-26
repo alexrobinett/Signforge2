@@ -44,14 +44,14 @@ describe('news 2.0 (#202)', () => {
     image: img,
     ...over,
   });
-  /** Each story's photo and thumbnail, but for the indices in `missing`: their blobs never arrived. */
-  const photos = (n: number, missing: number[] = []) =>
+  /** Each story's photo (`lead` wide, as the server stores a large one) and thumbnail, but for the indices in `missing`: their blobs never arrived. */
+  const photos = (n: number, missing: number[] = [], lead = '1920x1080') =>
     Object.fromEntries(
       Array.from({ length: n }, (_, i) => i)
         .filter((i) => !missing.includes(i))
         .flatMap((i) => [
-          [rowAsset('items', i, 'image'), '64x36: #4b86b4; #1b2a3a 0,22,64,14'],
-          [rowAsset('items', i, 'image', 'thumb'), '32x18: #a0522d; #1b2a3a 0,11,32,7'],
+          [rowAsset('items', i, 'image'), `${lead}: #4b86b4`],
+          [rowAsset('items', i, 'image', 'thumb'), '480x270: #a0522d'],
         ]),
     );
   /** Every text at its longest: 30 stories, each headline at 200 characters and summary at 240. */
@@ -89,13 +89,16 @@ describe('news 2.0 (#202)', () => {
 
   for (const orientation of ['landscape', 'portrait'] as const)
     for (const look of looks)
-      it(`${look}, ${orientation}: in every toggle setting, at the longest copy, with and without a lead photo, nothing overflows, overlaps or runs off`, async () => {
+      it(`${look}, ${orientation}: in every toggle setting, at the longest copy, with a large, a small and no lead photo, nothing overflows, overlaps or runs off`, async () => {
         const r = await frame(orientation);
         const found: string[] = [];
-        for (const bare of [false, true])
+        for (const lead of ['large', 'small', 'none'] as const)
           for (const set of settings) {
-            const f = await r.show({ look, items: longest(bare), ...set }, photos(30, bare ? [0] : []));
-            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${bare ? 'no lead photo' : 'lead photo'}, ${named(set)}: ${fault}`);
+            const f = await r.show(
+              { look, items: longest(lead === 'none'), ...set },
+              photos(30, lead === 'none' ? [0] : [], lead === 'small' ? '700x560' : '1920x1080'),
+            );
+            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${lead} lead photo, ${named(set)}: ${fault}`);
           }
         expect(found).toEqual([]);
       }, 300_000);
@@ -184,25 +187,25 @@ describe('news 2.0 (#202)', () => {
     expect(await turns({ items: [story(0)], rotationSeconds: 4 }, 16_000)).toBe(1);
   });
 
-  it('shows every photo, some, or none, a story without one as a bigger headline with its initial in the list, and never decodes a photo switched off', async () => {
+  it('shows every photo, some, or none, a story without one as a bigger headline with its place in the list, and never decodes a photo switched off', async () => {
     const r = await frame();
     const read = (f: Frame) =>
       f.evaluate(() => ({
         images: document.documentElement.dataset.images,
         bare: [...document.querySelectorAll('.story')].map((s) => s.classList.contains('no-photo')),
         thumbs: [...document.querySelectorAll('.row')].map((row) =>
-          row.querySelector('.thumb img[src]') ? 'photo' : (row.querySelector('.initial')?.textContent ?? 'none'),
+          row.querySelector('.thumb img[src]') ? 'photo' : (row.querySelector('.number')?.textContent ?? 'none'),
         ),
         srcs: document.querySelectorAll('img[src]').length,
         sizes: [...document.querySelectorAll('.headline')].map((h) => Number.parseFloat(getComputedStyle(h).fontSize)),
       }));
     const items = [story(0), story(1, { image: undefined, source: 'weather desk' }), story(2), story(3, { source: '' })];
     const all = await read(await r.show({ items, rotationSeconds: 8 }, photos(4, [1]), demo, 32_000));
-    expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', 'W', 'photo', 'photo'] });
+    expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', '02', 'photo', 'photo'] });
     expect(all.sizes[1]).toBeGreaterThan(all.sizes[0]!);
-    // A photo whose blob never arrived plays as a story without one; with no source, the feed's credit gives the initial.
-    const missing = await read(await r.show({ items, source: 'Harbor Times', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
-    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', 'W', 'photo', 'H'] });
+    // A photo whose blob never arrived plays as a story without one; each row without a photo is numbered by its place.
+    const missing = await read(await r.show({ items, source: 'The Guardian', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
+    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', '02', 'photo', '04'] });
     expect(await read(await r.show({ items, rotationSeconds: 8 }, {}, demo, 32_000))).toMatchObject({
       images: 'off',
       bare: [true, true, true, true],
@@ -230,7 +233,7 @@ describe('news 2.0 (#202)', () => {
           bare: lead.classList.contains('no-photo'),
           rows: [...document.querySelectorAll('.row')].map((row) => [
             row.querySelector('.rtitle')!.textContent,
-            row.querySelector('.thumb img') ? 'photo' : row.querySelector('.initial')!.textContent,
+            row.querySelector('.thumb img') ? 'photo' : row.querySelector('.number')!.textContent,
           ]),
         };
       }),
@@ -240,7 +243,7 @@ describe('news 2.0 (#202)', () => {
       src: 'Metro Desk',
       bare: true,
       rows: [
-        [items[1]!.title, 'M'],
+        [items[1]!.title, '01'],
         [items[2]!.title, 'photo'],
       ],
     });
@@ -268,6 +271,247 @@ describe('news 2.0 (#202)', () => {
   it(`takes the feed's summaries at their longest, NEWS_SUMMARY_MAX characters`, () => {
     const items = t().manifest.fields.items;
     expect(items?.type === 'list' && items.item.summary).toMatchObject({ maxLength: NEWS_SUMMARY_MAX });
+  });
+
+  // Descenders (g, j, p, q, y) stand below a tight display line: no text box may clip them (owner's report on #476:
+  // "Long." and "Surge." in Poster's lead). Copy that fits, so turning every text box's clipping off changes no pixel.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`clips no descender in any text box, in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const deep = [
+        story(0, { title: 'Jumpy prices dip; July gets quiet', summary: 'Gloomy pygmy yaks jog by; quaint jugglers pay up.', source: 'Pygmy Daily' }),
+        ...[1, 2, 3, 4].map((i) => story(i, { title: `Jogging quaggy pygmy yaks, page ${i}`, source: 'gypsy jay' })),
+      ];
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show({ look, items: deep }, photos(5, bare ? [0] : []));
+          await r.hst.post('fresh', 'play');
+          await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+          const clip = await f.evaluate(() => {
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = 4000;
+            }
+            // The thumbnails square, in both shots: with a clip gone, Linux draws a few pixels of their round corners
+            // some levels apart, and no text is clipped by them.
+            const square = document.createElement('style');
+            square.textContent = '.thumb { border-radius: 0 !important; }';
+            document.head.append(square);
+            const b = document.querySelector('.stage')!.getBoundingClientRect();
+            return { x: b.x, y: b.y, width: b.width, height: b.height };
+          });
+          const clipped = await r.hst.page.screenshot({ clip });
+          await f.evaluate(() => {
+            const el = document.createElement('style');
+            el.id = 'unclipped';
+            el.textContent = '.headline, .rtitle, .summary, .meta, .src, .credit, .lk-mask { overflow: visible !important; }';
+            document.head.append(el);
+          });
+          if (!(await r.hst.page.screenshot({ clip })).equals(clipped)) found.push(`${look}, ${bare ? 'bare lead' : 'photo lead'}`);
+          await f.evaluate(() => document.getElementById('unclipped')!.remove());
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  // A feed's small photo (some send 700 px) drawn across the lead looks soft: it is framed at most 1.25 times its size,
+  // and the headline takes the space (owner decision on #476).
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`frames a small lead photo at most 1.25 times its size, and fills the lead with a large one, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const read = (f: Frame) =>
+        f.evaluate(() => {
+          for (const a of document.getAnimations()) {
+            a.pause();
+            a.currentTime = 3000;
+          }
+          const story = document.querySelector('.story')!;
+          const media = story.querySelector('.media')!.getBoundingClientRect();
+          const card = story.querySelector('.card')!.getBoundingClientRect();
+          const overlap =
+            Math.min(media.right, card.right) - Math.max(media.left, card.left) > 1 && Math.min(media.bottom, card.bottom) - Math.max(media.top, card.top) > 1;
+          return { small: story.classList.contains('small'), width: Math.round(media.width), overlap };
+        });
+      for (const look of looks) {
+        expect(await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3, [], '700x560'))), look).toMatchObject({
+          small: true,
+          overlap: false,
+        });
+        expect((await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3, [], '700x560')))).width, look).toBeLessThanOrEqual(875);
+        expect(await read(await r.show({ look, items: [0, 1, 2].map((i) => story(i)) }, photos(3))), look).toMatchObject({ small: false });
+      }
+    });
+
+  it("frames a later story's small photo when it loads, in play", async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    await hst.init(
+      'fresh',
+      spotData(t().manifest, { items: [0, 1].map((i) => story(i)), rotationSeconds: 8 }),
+      photos(2, [], '700x560'),
+      NOW,
+      demo,
+      false,
+      16_000,
+    );
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    await hst.post('fresh', 'play');
+    // The second story's photo loads 3 s before its turn at 8 s.
+    for (let i = 0; i < 60; i++) await hst.page.clock.runFor(100);
+    await f.waitForFunction(() => document.querySelectorAll('.story')[1]!.classList.contains('small'));
+  });
+
+  // Poster's and Night's headline slides up out of a mask with room below for descenders: as its intro starts, none of
+  // it shows yet (review of #492: the top of a short headline showed in that room). In every look, as the others fade in.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`paints none of the headline as its intro starts, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show({ look, items: [story(0, { title: 'Short one' }), story(1)] }, photos(2, bare ? [0] : []));
+          await r.hst.post('fresh', 'play');
+          await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+          const clip = await f.evaluate(() => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const start = Math.max(
+              ...h
+                .getAnimations()
+                .map((a) => Number(a.effect!.getComputedTiming().delay ?? 0))
+                .filter((d) => d < 5000),
+            );
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = start;
+            }
+            const b = h.closest('.card')!.getBoundingClientRect();
+            return { x: b.x, y: b.y, width: b.width, height: b.height };
+          });
+          const before = await r.hst.page.screenshot({ clip });
+          await f.evaluate(() => document.querySelector<HTMLElement>('.story .headline')!.style.setProperty('color', 'transparent'));
+          if (!(await r.hst.page.screenshot({ clip })).equals(before)) found.push(`${look}, ${bare ? 'bare lead' : 'photo lead'}`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  // A headline with nowhere to cut on a word (200 characters and no space) still keeps to its lines (review of #492).
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a headline with no spaces to its lines, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const lead of ['large', 'small', 'none'] as const) {
+          const items = [story(0, { title: 'W'.repeat(200), ...(lead === 'none' ? { image: undefined } : {}) }), story(1)];
+          const f = await r.show({ look, items }, photos(2, lead === 'none' ? [0] : [], lead === 'small' ? '700x560' : '1920x1080'));
+          const lines = await f.evaluate(() => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const s = getComputedStyle(h);
+            return {
+              lines: Math.round(h.offsetHeight / Number.parseFloat(s.lineHeight)),
+              max: Number(s.getPropertyValue('--nw-lines')),
+              cut: h.textContent!.endsWith('…'),
+            };
+          });
+          if (lines.lines > lines.max || !lines.cut)
+            found.push(`${look}, ${lead} lead photo: ${lines.lines} lines of ${lines.max}${lines.cut ? '' : ', not cut'}`);
+          for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${look}, ${lead} lead photo: ${fault}`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  // Review of #492: the cut read each word's line from the balanced layout, and counted a word out once its glyph box
+  // passed the lines, so a cut headline kept one line less than it holds.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`cuts a long headline with every line it holds filled, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      const long = sentence.repeat(2).slice(0, 200).trim();
+      let cuts = 0;
+      for (const look of looks)
+        for (const lead of ['large', 'none'] as const) {
+          const f = await r.show(
+            { look, items: [story(0, { title: long, ...(lead === 'none' ? { image: undefined } : {}) }), story(1)] },
+            photos(2, lead === 'none' ? [0] : []),
+          );
+          const got = await f.evaluate((full) => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const s = getComputedStyle(h);
+            const line = Number.parseFloat(s.lineHeight);
+            const max = Number(s.getPropertyValue('--nw-lines'));
+            const cut = h.textContent!;
+            const lines = Math.round(h.offsetHeight / line);
+            // One word more, with its "…", takes a line more than the headline has: the cut kept all its lines hold.
+            const kept = cut.slice(0, -1).trim().split(/\s+/).length;
+            h.textContent = `${full
+              .split(/\s+/)
+              .slice(0, kept + 1)
+              .join(' ')}…`;
+            return { lines, max, cut: cut.endsWith('…'), full: h.offsetHeight > max * line + 1 };
+          }, long);
+          // 200 characters fit some looks' widest lines whole: only a cut is judged.
+          if (!got.cut) continue;
+          cuts++;
+          if (got.lines !== got.max || !got.full)
+            found.push(`${look}, ${lead} lead photo: ${got.lines} lines of ${got.max}${got.full ? '' : ', a word more fits'}`);
+        }
+      expect(found).toEqual([]);
+      expect(cuts).toBeGreaterThan(4);
+    }, 120_000);
+
+  // Review of #492: beside or above a small frame, a headline within its lines could still push the summary off the lead.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a small-framed story's text inside the lead at every headline length, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const showList of [true, false])
+          for (const length of [56, 80, 110, 135]) {
+            const title = sentence.repeat(2).slice(0, length).trim();
+            const items = [story(0, { title, summary: sentence.repeat(3).slice(0, 240) }), story(1), story(2)];
+            const f = await r.show({ look, showList, items }, photos(3, [], '700x560'));
+            const where = `${look}, list ${showList ? 'on' : 'off'}, ${length} characters`;
+            const out = await f.evaluate(() => {
+              const story = document.querySelector<HTMLElement>('.story')!;
+              const card = story.querySelector<HTMLElement>('.card')!;
+              return story.classList.contains('small') && (card.offsetTop < -1 || card.offsetTop + card.offsetHeight > story.clientHeight + 1);
+            });
+            if (out) found.push(`${where}: the text runs off the lead`);
+            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${where}: ${fault}`);
+          }
+      expect(found).toEqual([]);
+    }, 300_000);
+
+  // Review of #492: a later story is fitted again when its small photo loads, in play, from its own title, not from the
+  // cut that prepare made for the larger frame.
+  it("fits a later story's headline as it fits the first's, once its small photo loads", async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    const long = sentence.repeat(2).slice(0, 200).trim();
+    await hst.init(
+      'fresh',
+      spotData(t().manifest, { look: 'night', items: [0, 1].map((i) => story(i, { title: long })), rotationSeconds: 8 }),
+      photos(2, [], '700x560'),
+      NOW,
+      demo,
+      false,
+      16_000,
+    );
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    await hst.post('fresh', 'play');
+    for (let i = 0; i < 60; i++) await hst.page.clock.runFor(100);
+    await f.waitForFunction(() => document.querySelectorAll('.story')[1]!.classList.contains('small'));
+    const [first, second] = await f.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.story')].map((s) => `${s.style.getPropertyValue('--fit')}: ${s.querySelector('.headline')!.textContent}`),
+    );
+    expect(second).toBe(first);
   });
 
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {

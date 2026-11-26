@@ -238,6 +238,23 @@ export const TASKS: Task[] = [
     },
   },
   {
+    id: 'write-group-add',
+    prompt: 'Add the Harbor lobby screen to the Cafe group.',
+    role: 'editor',
+    // The drawer drafts no group change: /mcp's.
+    script: {
+      mcp: (w) => [
+        [{ name: 'read', input: { type: 'group' } }],
+        [{ name: 'save_group', input: { groupId: w.groups.cafe, screenIds: [w.screens.harbor], membership: 'add' } }],
+      ],
+    },
+    async check(o) {
+      const members = await o.scope.screenGroups.members(o.world.groups.cafe);
+      if (!members.includes(o.world.screens.harbor)) return 'Harbor lobby is not in Cafe';
+      return members.includes(o.world.screens.cafe) ? undefined : 'Cafe lost its own screen';
+    },
+  },
+  {
     id: 'write-spot-duration',
     prompt: 'Make the Weather spot show for 15 seconds.',
     role: 'editor',
@@ -449,6 +466,20 @@ export const TASKS: Task[] = [
     script: both((w) => [[{ name: 'read', input: { type: 'playlist' } }], [{ name: 'delete_playlist', input: { playlistId: w.playlists.winter } }]]),
     async check(o) {
       return (await o.scope.playlists.get(o.world.playlists.winter)) ? 'Winter promo is still there' : undefined;
+    },
+  },
+  {
+    id: 'card-screen-sleep',
+    prompt: "Put the Cafe screen's display to sleep now.",
+    role: 'editor',
+    press: true,
+    script: both((w) => [
+      [{ name: 'read', input: { type: 'screen' } }],
+      [{ name: 'screen_command', input: { screenId: w.screens.cafe, command: 'display_off' } }],
+    ]),
+    async check(o) {
+      const override = (await o.scope.screens.get(o.world.screens.cafe))?.displayOverrideJson;
+      return override && JSON.parse(override).state === 'off' ? undefined : `the Cafe screen's display override is ${override}`;
     },
   },
   {

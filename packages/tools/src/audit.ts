@@ -18,6 +18,18 @@ import { ACTOR_KINDS, outputs } from './outputs';
  */
 const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
 
+/**
+ * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
+ * changed it too (#243). A screen command (#345) does what the tool it replaced did: its rows are found under that one's
+ * name, by the command its input recorded.
+ */
+const ALSO: Record<string, { actions: readonly string[]; detailHas: string }> = {
+  set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
+  identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
+  restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
+  set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
+};
+
 const listAuditLog = defineTool({
   name: 'list_audit_log',
   description:
@@ -31,7 +43,12 @@ const listAuditLog = defineTool({
       .object({ kind: z.enum(ACTOR_KINDS).optional(), id: z.string().min(1).max(200).optional().describe('One actor, as an entry names it') })
       .optional()
       .describe('Only what this kind of actor, or this one actor, did'),
-    action: z.string().min(1).max(64).optional().describe('Only this action, such as update_screen'),
+    action: z
+      .string()
+      .min(1)
+      .max(64)
+      .optional()
+      .describe('Only this action, such as update_screen; identify_screen, restart_screen and set_display_override find those screen_command sent too'),
     target: z
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
       .optional()
@@ -54,8 +71,7 @@ const listAuditLog = defineTool({
           actorKind: actor?.kind,
           actorId: actor?.id,
           action,
-          // A publish, or an approval's (M4-09), that made the org's first default changed it too (#243): the filter finds them.
-          alsoAction: action === 'set_default_playlist' ? { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' } : undefined,
+          alsoAction: action === undefined ? undefined : ALSO[action],
           targetKind: target?.kind,
           targetId: target?.id,
           from,

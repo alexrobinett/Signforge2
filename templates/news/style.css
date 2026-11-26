@@ -176,19 +176,29 @@ ol {
   flex: none;
   color: var(--lk-muted);
 }
+/* The headline's size, on its story: the kit's mask around it takes its room for descenders from it. */
+.story {
+  --nw-hl-size: calc(var(--nw-headline) * var(--lk-scale, 1) * var(--fit, 1));
+}
+.story.no-photo {
+  --nw-hl-size: calc(var(--nw-headline) * var(--nw-bare-step) * var(--lk-scale, 1) * var(--fit, 1));
+}
+/* Set solid (Poster at 0.94), a line's descenders (g, j, p, q, y) stand below its box, and Poster's J swings left of it:
+   nothing clips the headline, and the mask it slides out of (Poster, Night) has room for them below and at the sides,
+   without moving what is around it (owner's report on #476). Too long a headline is cut on a word to its lines in
+   main.ts, not clamped. */
+.story .lk-mask {
+  padding: 0 calc(var(--nw-hl-size) * 0.15) calc(var(--nw-hl-size) * 0.3);
+  margin: 0 calc(var(--nw-hl-size) * -0.15) calc(var(--nw-hl-size) * -0.3);
+}
 .headline {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--nw-lines);
-  overflow: hidden;
   overflow-wrap: anywhere;
-  font: var(--lk-display-weight) calc(var(--nw-headline) * var(--lk-scale, 1) * var(--fit, 1)) / var(--lk-display-leading) var(--lk-font-display);
+  font: var(--lk-display-weight) var(--nw-hl-size) / var(--lk-display-leading) var(--lk-font-display);
   letter-spacing: var(--lk-display-tracking);
   text-wrap: balance;
 }
 .no-photo .headline {
   --nw-lines: var(--nw-bare-lines);
-  font-size: calc(var(--nw-headline) * var(--nw-bare-step) * var(--lk-scale, 1) * var(--fit, 1));
 }
 .summary {
   display: -webkit-box;
@@ -245,10 +255,13 @@ ol {
   height: 100%;
   object-fit: cover;
 }
+/* A row without a photo: its place in the list, as a ranked list numbers it. */
 .thumb.none {
-  background: var(--lk-primary);
-  color: var(--lk-on-primary);
-  font: var(--lk-display-weight) calc(var(--nw-row-h) * 0.45) / 1 var(--lk-font-display);
+  background: var(--lk-surface);
+  color: var(--lk-text);
+  font: var(--lk-figure-weight) calc(var(--nw-row-h) * 0.42) / 1 var(--lk-font-display);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 .rtitle {
   display: -webkit-box;
@@ -304,6 +317,7 @@ ol {
 /* ---------------------------------------------------------------- Each look's sizes and marks */
 :root {
   --nw-lines: 3;
+  --nw-small-lines: 6;
   --nw-bare-lines: 4;
   --nw-summary-lines: 2;
   --nw-bare-step: 1.25;
@@ -317,6 +331,7 @@ ol {
 }
 :root[data-orientation='portrait'] {
   --nw-lines: 4;
+  --nw-small-lines: 3;
   --nw-bare-lines: 6;
   --nw-summary-lines: 3;
   --nw-card-w: 100%;
@@ -425,4 +440,54 @@ ol {
   --nw-ticker-h: 7.4vmin;
   --nw-ticker-pad: 2.6vmin;
   --nw-ticker-text: 2.6vmin;
+}
+
+/* A photo the lead would draw more than 1.25 times its size, as some feeds' are (700 px wide): framed at that or less,
+   beside the text in landscape and above it in portrait, the headline taking the space it leaves (owner decision on
+   #476). main.ts sets the frame's size. */
+.story.small {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--nw-gap);
+}
+.story.small .media {
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 2;
+  width: var(--nw-photo-w);
+  height: var(--nw-photo-h);
+}
+.story.small .card {
+  --nw-card-rule: 0;
+  grid-area: 1 / 1;
+  max-width: none;
+  margin: 0;
+}
+.story.small .headline {
+  --nw-lines: var(--nw-small-lines);
+}
+:root[data-orientation='portrait'] .story.small {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: start;
+}
+:root[data-orientation='portrait'] .story.small .media {
+  grid-area: 1 / 1;
+  justify-self: center;
+}
+:root[data-orientation='portrait'] .story.small .card {
+  grid-area: 2 / 1;
+}
+
+/* Poster's and Night's headline slides up out of its mask. The mask has room below it for descenders (0.3 of the
+   headline's size), where the kit's start, 110% of the headline's height down, left the top of a short headline showing
+   for the first few frames (review of #492): it starts below the room instead. */
+@keyframes nw-mask-up {
+  from {
+    transform: translateY(calc(100% + var(--nw-hl-size) * 0.5));
+  }
+}
+:root:is([data-look='poster'], [data-look='night']) .story .headline {
+  --lk-motion: nw-mask-up;
 }

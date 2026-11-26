@@ -55,7 +55,9 @@ app.route('/', mcp);
 
 const FIVE_MIN_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
-const FEED_IMAGE_CLEANUP_MS = 60 * 60_000;
+const HOUR_MS = 60 * 60_000;
+/** The feed photos' sweep's minute: half past every hour, each run taking a bounded share of what is due (review of #497). */
+const FEED_IMAGE_CLEANUP_MS = 30 * 60_000;
 /** The storage sweep's minute (#235): 02:00 UTC, its own invocation as the feed photos' is. */
 const STORAGE_SWEEP_MS = 2 * 60 * 60_000;
 
@@ -63,7 +65,7 @@ const STORAGE_SWEEP_MS = 2 * 60 * 60_000;
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
   '* * * * *': (env, now) =>
-    now % DAY_MS === FEED_IMAGE_CLEANUP_MS
+    now % HOUR_MS === FEED_IMAGE_CLEANUP_MS
       ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now)
       : now % DAY_MS === STORAGE_SWEEP_MS
         ? sweepStorage(env.DB, env.BLOBS, () => Date.now())

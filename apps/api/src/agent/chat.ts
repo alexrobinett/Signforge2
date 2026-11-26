@@ -156,7 +156,8 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   cancel_invitation: { title: 'Cancel an invitation', did: 'Cancelled an invitation' },
   delete_schedule_entry: { title: 'Remove schedule entry', did: 'Removed a schedule entry' },
   revoke_screen_credential: { title: 'Revoke credential', did: "Revoked a screen's credential" },
-  screen_command: { title: 'Screen command', did: 'Sent the command to the screen' },
+  // Its title names the three it stands for, as a role that may not press it is told (#345); `didOf` says what each command did.
+  screen_command: { title: 'Display on or off, restart screen, identify screen', did: 'Sent the command to the screen' },
   read_table: { title: 'Read a table', did: 'Read a table from its address' },
   save_data_source: { title: 'Data source', did: 'Saved a data source' },
   set_spot_url: { title: 'Web page address', did: "Set a web page spot's address" },
@@ -164,6 +165,17 @@ export const TOOL_CARDS: Readonly<Record<string, { title: string; did: string }>
   read: { title: 'Read', did: 'Read {n}' },
   describe: { title: 'A type', did: 'Read what a type holds' },
 };
+
+/** What a press did, as its card said it would: a screen command its own command's, as the tools it replaced said it. */
+const COMMANDS_DID: Readonly<Record<string, string>> = {
+  identify: 'Identified a screen',
+  restart: 'Restarted a screen',
+  display_on: "Turned a screen's display on",
+  display_off: "Turned a screen's display off",
+  display_auto: 'Set a screen to follow its display hours again',
+};
+const didOf = (name: string, input: Record<string, unknown>) =>
+  (name === 'screen_command' && typeof input.command === 'string' ? COMMANDS_DID[input.command] : undefined) ?? TOOL_CARDS[name]?.did ?? 'Done';
 
 /**
  * The `org:manage` reads the drawer offers all the same, each only to whom its own scope and role allow (`describeTools`):
@@ -550,10 +562,11 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
                 org: scoped(c.env.DB, org.orgId),
                 confirmed: { summary: record.summary, runId: record.runId, callId: record.toolCallId },
               };
-              const out = await confirmable.run(own, Object.fromEntries(Object.entries(parsedJson(record.inputJson) ?? {})));
+              const pressedInput = Object.fromEntries(Object.entries(parsedJson(record.inputJson) ?? {}));
+              const out = await confirmable.run(own, pressedInput);
               // What it did, from its own result: the drawer says done or not from this, never from the model's answer after it.
               const done: ConfirmDone = out.ok
-                ? { tool: name, ok: true, message: TOOL_CARDS[name]?.did ?? 'Done' }
+                ? { tool: name, ok: true, message: didOf(name, pressedInput) }
                 : { tool: name, ok: false, message: `Not done: ${out.message}. This card is spent: ask again for a new one.` };
               shown.push({ type: 'CUSTOM', name: CHAT_EVENTS.done, value: done, timestamp: Date.now() });
               return out.ok

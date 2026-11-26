@@ -3,6 +3,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PHOTO_BUDGET,
   DELETE_LEASE_MS,
   DeleteInFlightError,
   expiredFeedImages,
@@ -14,7 +15,7 @@ import {
   photoRead,
   RECHECK_MS,
 } from '../src/index';
-import { seedOrg, type SeededOrg } from '../src/testing';
+import { seedOrg, type SeededOrg, testScope } from '../src/testing';
 
 const NOW = Date.UTC(2026, 10, 23, 9);
 const MIN = 60_000;
@@ -63,7 +64,7 @@ function pollSaves(
   return o.scope.dataSources.savePoll(id, {
     source: { nextPollAt: read.now + 5 * MIN, failures: 0, lastError: null, etag: '"feed"', lastModified: null },
     snapshot: { version, fetchedAt: read.now, checkedAt: read.now, dataJson },
-    photos: { read, stories: { version, urls: stories.map((s) => s.url) }, hold },
+    photos: { read, stories: { version, urls: stories.map((s) => s.url) }, hold: hold && { ...hold, budget: DEFAULT_PHOTO_BUDGET } },
   });
 }
 
@@ -169,7 +170,7 @@ describe('a poll and a delivery at once', () => {
     const held = await o.scope.dataSources.savePoll(id, {
       source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
       checkedAt: NOW,
-      photos: { read: await pollReads(id, NOW), hold: { again: [url], fresh: [] } },
+      photos: { read: await pollReads(id, NOW), hold: { again: [url], fresh: [], budget: DEFAULT_PHOTO_BUDGET } },
     });
     expect(held).toEqual({ stood: true, held: [url] });
 
@@ -252,7 +253,7 @@ describe('the sweep and a delivery at once', () => {
     expect(
       await o.scope.dataSources.savePoll(id, {
         source: { nextPollAt: NOW + 5 * MIN, failures: 0, lastError: null },
-        photos: { read: await pollReads(id, NOW), hold: { again: [replaced], fresh: [] } },
+        photos: { read: await pollReads(id, NOW), hold: { again: [replaced], fresh: [], budget: DEFAULT_PHOTO_BUDGET } },
       }),
     ).toEqual({ stood: true, held: [replaced] });
     await stored(replaced, id, 'g', NOW);
@@ -388,5 +389,43 @@ describe('the sweep and a delivery at once', () => {
     await stored(again, id, 'k', at + DELETE_LEASE_MS);
     expect(blobs.has(sha('k'))).toBe(true);
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).not.toContain(sha('k'));
+  });
+});
+
+describe("the sweep's lookups (review of #497)", () => {
+  it('asks whether a row still names each queued blob on the file and thumbnail indexes, not by reading every row for each', async () => {
+    const mine = await seedOrg(env.DB, 'sweep-lookups');
+    const scope = testScope(env.DB, mine.orgId);
+    const at = 1_000;
+    // 2,000 photos still named; 100 forgotten, their 200 blobs queued past their grace.
+    await scope.feedPhotos.putMany(
+      Array.from({ length: 2100 }, (_, k) => ({
+        url: `https://l.example/${k}.jpg`,
+        sourceId: 'src',
+        fileSha256: `f-${k}`,
+        thumbSha256: `t-${k}`,
+        nextCheckAt: k < 100 ? at : at + 10 * RECHECK_MS,
+        createdAt: at,
+      })),
+    );
+    const due = Array.from({ length: 100 }, (_, k) => `https://l.example/${k}.jpg`);
+    const expireAt = at + FEED_IMAGE_TTL_MS + 1;
+    expect(await scope.feedPhotos.expire(due, expireAt)).toBe(100);
+    const queued = (await scope.feedPhotos.deletes()).map((d) => d.sha256);
+    expect(queued).toHaveLength(200);
+    const read: number[] = [];
+    const batch = env.DB.batch.bind(env.DB);
+    env.DB.batch = async <T = unknown>(q: D1PreparedStatement[]) => {
+      const res = await batch<T>(q);
+      for (const r of res) read.push(r.meta.rows_read);
+      return res;
+    };
+    try {
+      expect(await scope.feedPhotos.deleteBlobs(queued, expireAt + FEED_IMAGE_DELETE_GRACE_MS, async () => undefined)).toBe(200);
+    } finally {
+      env.DB.batch = batch;
+    }
+    // A few rows a blob: a scan for each would read 200 × 2,000.
+    expect(Math.max(...read)).toBeLessThan(2000);
   });
 });

@@ -36,6 +36,8 @@ interface Target {
   out: string;
   /** The only fields the drawer drafts, where its tool takes more: the model is shown these alone, and refused the rest. */
   fields?: readonly string[];
+  /** What the drawer says the draft does, with `fields`: its tool's own description would offer the rest. */
+  says?: string;
   /** Whether a call without the id is a creation the drawer drafts too; otherwise the id is required. */
   creates?: boolean;
 }
@@ -47,7 +49,14 @@ const DRAFTS: Record<string, Target> = {
   save_playlist: { kind: 'playlist', read: 'get_playlist', id: 'playlistId', out: 'playlist', fields: ['name', 'transition', 'spotIds'] },
   save_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry', creates: true },
   // A screen's settings change what it plays when, so the drawer drafts its name alone (#345).
-  update_screen: { kind: 'screen', read: 'get_screen', id: 'screenId', out: 'screen', fields: ['name'] },
+  update_screen: {
+    kind: 'screen',
+    read: 'get_screen',
+    id: 'screenId',
+    out: 'screen',
+    fields: ['name'],
+    says: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
+  },
 };
 
 /** At most this many drafts in a turn, and in one save. */
@@ -105,7 +114,7 @@ export function draftTools(grant: Grant) {
       .object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!])))
       .required({ [target.id]: true })
       .loose();
-    return [{ name, description: tool.description, input }];
+    return [{ name, description: target.says ?? tool.description, input }];
   });
 }
 
