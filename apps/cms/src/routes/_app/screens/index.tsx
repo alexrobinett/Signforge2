@@ -829,7 +829,7 @@ function LabelImportDialog({ screens }: { screens: ScreenView[] }) {
   const close = useAppStore((s) => s.closeLabelImport);
   const apply = useAppStore((s) => s.applyLabelImport);
   if (!imp) return null;
-  const plan = imp.file ? importPlan(imp.file.columns, imp.file.rows, screens, imp.mode) : null;
+  const plan = imp.file ? importPlan(imp.file, screens, imp.mode) : null;
   const n = plan ? `${plan.changes.length} ${plan.changes.length === 1 ? 'screen' : 'screens'}` : '';
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
@@ -850,7 +850,17 @@ function LabelImportDialog({ screens }: { screens: ScreenView[] }) {
         >
           <div className="grid gap-1.5">
             <Label htmlFor={`${id}-file`}>File</Label>
-            <Input id={`${id}-file`} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && void readLabelFile(e.target.files[0])} />
+            <Input
+              id={`${id}-file`}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Emptied once read, so the same file chosen again after it is fixed is read again (review of #612).
+                e.target.value = '';
+                if (file) void readLabelFile(file);
+              }}
+            />
           </div>
           <fieldset className="grid gap-2">
             <legend className="mb-1.5 text-sm font-medium">An empty cell</legend>
@@ -877,8 +887,18 @@ function LabelImportDialog({ screens }: { screens: ScreenView[] }) {
           </fieldset>
           {plan && (
             <section aria-label="What it changes" className="grid gap-3">
+              {/* One short line read out as the preview comes or changes; the lists are read when someone moves to them (review of #612). */}
+              <p role="status" className="sr-only">
+                {[
+                  plan.problems.length ? `${plan.problems.length} ${plan.problems.length === 1 ? 'problem' : 'problems'} to fix before saving.` : '',
+                  plan.changes.length ? `Changes ${n}.` : 'Changes no screen.',
+                  plan.skipped.length ? `${plan.skipped.length} ${plan.skipped.length === 1 ? 'row' : 'rows'} skipped.` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              </p>
               {plan.problems.length > 0 && (
-                <div role="alert" className="grid gap-1 rounded-lg border border-destructive/40 p-3 text-sm">
+                <div className="grid gap-1 rounded-lg border border-destructive/40 p-3 text-sm">
                   <p className="font-medium text-destructive">Nothing can be saved until the file is fixed:</p>
                   <ul className="list-disc pl-5">
                     {plan.problems.map((p) => (

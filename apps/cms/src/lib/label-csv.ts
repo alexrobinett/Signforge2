@@ -5,15 +5,36 @@
  * (`labelProblem` in `@signforge/compiler/selector`), in their words, so the preview refuses what the server would.
  */
 import { labelProblem, SYSTEM_KEYS } from '@signforge/compiler/selector';
-import { FeedError, parseCsv } from '@signforge/feeds';
+import { FeedError, readCsv } from '@signforge/feeds';
 import type { ScreenView } from './screen-types';
 
 /** The columns every file has: which screen a row is, by id, else by name. */
 export const ID_COLUMN = 'screen_id';
 export const NAME_COLUMN = 'name';
 
-/** A cell as the file writes it: quoted when it holds a quote, a comma, a line break or spaces at an edge. */
-const cell = (v: string) => (/[",\r\n]|^\s|\s$/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
+/**
+ * A value a spreadsheet would run as a formula, or a cell that starts with the `'` that guards one (review of #612):
+ * labels and names are anyone's text, an agent's included, and a download is opened in Excel or Sheets.
+ */
+const FORMULA = /^[=+\-@\t\r']/;
+
+/**
+ * A cell as the file writes it: a formula's first character guarded by a `'`, which a spreadsheet shows as text and
+ * an import drops; quoted when it holds a quote, a comma, a line break or spaces at an edge.
+ */
+function cell(value: string) {
+  const v = FORMULA.test(value) ? `'${value}` : value;
+  return /[",\r\n]|^\s|\s$/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
+}
+
+/** A cell as it was before `cell` guarded it: one leading `'` dropped where a guarded character follows it. */
+const unguard = (v: string) => (v.startsWith("'") && FORMULA.test(v.slice(1)) ? v.slice(1) : v);
+
+/**
+ * The largest file an import reads (review of #612): a table spot's cell limit has no bearing on a label file. Sized
+ * for 5,000 screens by an org's 100 keys and the two screen columns, and the bytes of a screen's 32 labels at most.
+ */
+const LABEL_FILE = { maxCells: 5000 * 102, maxBytes: 5000 * (32 * 66 + 200) };
 
 /** The screens' labels as a CSV file: `screen_id, name`, then each key any of them has, in order; CRLF lines. */
 export function labelsCsv(screens: readonly Pick<ScreenView, 'id' | 'name' | 'labels'>[]): string {
@@ -22,11 +43,18 @@ export function labelsCsv(screens: readonly Pick<ScreenView, 'id' | 'name' | 'la
   return `${lines.map((l) => l.map(cell).join(',')).join('\r\n')}\r\n`;
 }
 
-/** A file's rows by column, or why it cannot be read: parsed once, here. */
-export function readLabelCsv(text: string): { ok: true; columns: string[]; rows: string[][] } | { ok: false; error: string } {
+/** A file read: its columns, its rows, and each row's number as a spreadsheet shows the file. */
+export interface LabelFile {
+  columns: string[];
+  rows: string[][];
+  rowAt: number[];
+}
+
+/** A file's rows by column, or why it cannot be read: parsed once, here, each cell as it was before the export guarded it. */
+export function readLabelCsv(text: string): ({ ok: true } & LabelFile) | { ok: false; error: string } {
   try {
-    const t = parseCsv(text);
-    return { ok: true, columns: t.columns, rows: t.rows.map((r) => r.map((c) => String(c))) };
+    const t = readCsv(text, LABEL_FILE);
+    return { ok: true, columns: t.columns.map(unguard), rows: t.rows.map((r) => r.map(unguard)), rowAt: t.rowAt };
   } catch (err) {
     if (err instanceof FeedError) return { ok: false, error: `The file cannot be read: ${err.message}.` };
     throw err;
@@ -61,7 +89,7 @@ export interface ImportPlan {
  * else by exact name; a header is a key as the editor takes one (trimmed, lowercased). `screens` are the org's, as
  * the page has them.
  */
-export function importPlan(columns: readonly string[], rows: readonly string[][], screens: readonly ScreenView[], mode: ImportMode): ImportPlan {
+export function importPlan({ columns, rows, rowAt }: LabelFile, screens: readonly ScreenView[], mode: ImportMode): ImportPlan {
   const problems: string[] = [];
   const skipped: string[] = [];
   const at = (name: string) => columns.findIndex((c) => c.trim().toLowerCase() === name);
@@ -82,11 +110,12 @@ export function importPlan(columns: readonly string[], rows: readonly string[][]
   }
   const byId = new Map(screens.map((s) => [s.id, s]));
   const byName = new Map<string, ScreenView[]>();
-  for (const s of screens) byName.set(s.name, [...(byName.get(s.name) ?? []), s]);
+  // Trimmed, as a cell is: a name with a space at an edge is found by it.
+  for (const s of screens) byName.set(s.name.trim(), [...(byName.get(s.name.trim()) ?? []), s]);
   const named = new Set<string>();
   const changes: ScreenImport[] = [];
   rows.forEach((row, r) => {
-    const line = r + 2;
+    const line = rowAt[r]!;
     const id = idAt < 0 ? '' : (row[idAt] ?? '').trim();
     const name = nameAt < 0 ? '' : (row[nameAt] ?? '').trim();
     const sameName = byName.get(name) ?? [];

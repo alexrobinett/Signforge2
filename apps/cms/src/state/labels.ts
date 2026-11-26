@@ -5,7 +5,7 @@
  */
 import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
-import { importPlan, readLabelCsv, type ImportMode } from '~/lib/label-csv';
+import { importPlan, readLabelCsv, type ImportMode, type LabelFile } from '~/lib/label-csv';
 import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
 import { orgOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
@@ -39,7 +39,7 @@ interface LabelImport {
   orgId: string;
   fileName: string | null;
   /** The file's columns and rows, parsed once when it was chosen; null until one reads. */
-  file: { columns: string[]; rows: string[][] } | null;
+  file: LabelFile | null;
   mode: ImportMode;
   pending: boolean;
   error: string | null;
@@ -110,7 +110,10 @@ export const labelRowsOf = (s: LabelsState, target: LabelTarget) => s.rows[keyOf
 /** A bulk Labels draft belongs to the visit it was opened on: back on the page with the same rows ticked, none opens (#605). */
 export function connectLabels(store: AppStore, { router }: StoreDeps) {
   router.subscribe('onBeforeNavigate', ({ pathChanged }) => {
-    if (pathChanged && store.getState().labels.bulk) store.getState().closeBulkLabels();
+    if (!pathChanged) return;
+    if (store.getState().labels.bulk) store.getState().closeBulkLabels();
+    // An import's file belongs to the visit too: back on the page, its old preview is not waiting (review of #612).
+    if (store.getState().labels.import) store.getState().closeLabelImport();
   });
 }
 
@@ -179,14 +182,14 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
       labelImport((i) => ({
         ...i,
         fileName: file.name,
-        file: read.ok ? { columns: read.columns, rows: read.rows } : null,
+        file: read.ok ? { columns: read.columns, rows: read.rows, rowAt: read.rowAt } : null,
         error: read.ok ? null : read.error,
       }));
     },
     async applyLabelImport(screens) {
       const i = get().labels.import;
       if (!i?.file || i.pending) return;
-      const { changes, problems } = importPlan(i.file.columns, i.file.rows, screens, i.mode);
+      const { changes, problems } = importPlan(i.file, screens, i.mode);
       if (problems.length) return labelImport((x) => ({ ...x, error: 'Fix the file and choose it again: nothing is written while it has a problem.' }));
       if (!changes.length) return labelImport((x) => ({ ...x, error: 'The file changes no screen’s labels.' }));
       if (changes.length > MAX_BULK_SCREENS)

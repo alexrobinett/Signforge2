@@ -28,6 +28,26 @@ describe('the download', () => {
       ['scr_3', 'Plain', '', '', ''],
     ]);
   });
+
+  it('writes no cell a spreadsheet would run as a formula, and reads each back as it was (review of #612)', () => {
+    const labels = { link: '=HYPERLINK("https://x.test/?"&A1,"open")', sum: '+SUM(1)', at: '@x', minus: '-2+3', quote: "'kept", plain: 'north' };
+    const csv = labelsCsv([screen('scr_1', '=1+1', labels)]);
+    const [header, row] = csv.split('\r\n');
+    expect(header).toBe('screen_id,name,at,link,minus,plain,quote,sum');
+    expect(row).toBe(`scr_1,'=1+1,'@x,"'=HYPERLINK(""https://x.test/?""&A1,""open"")",'-2+3,north,''kept,'+SUM(1)`);
+    expect(read(csv).rows).toEqual([['scr_1', '=1+1', '@x', labels.link, '-2+3', 'north', "'kept", '+SUM(1)']]);
+    // A `'` the person typed before other text is theirs, and stays.
+    expect(read("screen_id,note\nscr_1,'tis\n").rows).toEqual([['scr_1', "'tis"]]);
+  });
+
+  it("reads back a large fleet's download: 1,000 screens with 31 keys (review of #612)", () => {
+    const keys = Array.from({ length: 31 }, (_, k) => `key-${String(k).padStart(2, '0')}`);
+    const screens = Array.from({ length: 1000 }, (_, i) => screen(`scr_${i}`, `Screen ${i}`, Object.fromEntries(keys.map((k) => [k, `v${i}`]))));
+    const back = read(labelsCsv(screens));
+    expect(back.columns).toHaveLength(33);
+    expect(back.rows).toHaveLength(1000);
+    expect(importPlan(back, screens, 'replace')).toEqual({ changes: [], problems: [], skipped: [] });
+  });
 });
 
 describe('reading a file', () => {
@@ -49,10 +69,7 @@ describe('an import’s plan', () => {
     screen('scr_3', 'Twin', {}),
     screen('scr_4', 'Twin', {}),
   ];
-  const plan = (text: string, mode: 'merge' | 'replace' = 'merge') => {
-    const { columns, rows } = read(text);
-    return importPlan(columns, rows, screens, mode);
-  };
+  const plan = (text: string, mode: 'merge' | 'replace' = 'merge') => importPlan(read(text), screens, mode);
 
   it('says each screen’s labels added, changed and removed; merge ignores an empty cell, replace removes the label', () => {
     const text = 'screen_id,name,region,store,type\nscr_1,,north,,kiosk\n,Till,North ,9,\n';
@@ -97,5 +114,14 @@ describe('an import’s plan', () => {
 
   it('needs a column that finds the screen', () => {
     expect(plan('region\nnorth\n').problems).toEqual(["The file needs a screen_id or a name column to find each row's screen."]);
+  });
+
+  it('names a row as the spreadsheet does: a blank line counted, a quoted line break not (review of #612)', () => {
+    expect(plan('screen_id,note\nscr_1,"two\nlines"\n\nscr_9,x\n').skipped).toEqual(['Row 4: no screen scr_9.']);
+  });
+
+  it('finds a screen whose name has a space at an edge by its name (review of #612)', () => {
+    const spaced = [screen('scr_5', ' Kiosk ', {})];
+    expect(importPlan(read('name,region\nKiosk,north\n'), spaced, 'merge').changes.map((c) => c.screenId)).toEqual(['scr_5']);
   });
 });

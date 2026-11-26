@@ -109,6 +109,10 @@ const importScreenLabels = defineTool({
   }),
   output: outputs.import_screen_labels,
   example: { screens: [{ screenId: 'scr_example', set: { region: 'north' }, remove: ['legacy'] }] },
+  // As update_screen_labels: one screen's import is in its events (review of #612).
+  target: (input) => (input.screens.length === 1 ? { kind: 'screen', id: input.screens[0]!.screenId } : undefined),
+  // The row's input lists the first 100 screens, as every audit row cuts a list; the count says how many it changed.
+  auditDetail: (output) => ({ screenCount: output.screens.length }),
   handler: async ({ org, input, write }) => {
     const rows = await org.screens.labels.list();
     const over = overLimit(rows, input.screens);

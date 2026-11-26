@@ -66,7 +66,7 @@ Agents read every type with one tool, `read({ type, ids?, filter?, query?, detai
 | `revoke_screen_credential` | screens:manage | owner | `{ screenId, credentialId }` | `{ credential }` |
 | `claim_screen` | screens:manage | editor, people | `{ code, name, timezone, orientation, locale?, displayHours?, labels?, idempotencyKey? }` | `{ screen }`; 404 for a code that is not open, 429 over the rate limit |
 | `update_screen_labels` | screens:manage | editor | `{ screenIds, set?, remove? }` | `{ screens: [{ id, labels }] }`, by id; 409 past a label limit |
-| `import_screen_labels` | screens:manage | editor, people | `{ screens: [{ screenId, set?, remove? }] }` (≤ 1000, each screen once) | `{ screens: [{ id, labels }] }`, by id; all written or none |
+| `import_screen_labels` | screens:manage | editor, people | `{ screens: [{ screenId, set?, remove? }] }` (≤ 1000, each screen once) | `{ screens: [{ id, labels }] }`, by id; all written or none; audited on the screen when one, with `screenCount` beside the input's first 100 |
 | `list_label_keys` | content:read | viewer | `{ limit?, cursor? }` | `{ keys: [{ key, system, screens, values: [{ value, screens }] }], next }`, by key |
 | `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `save_group` | screens:manage | editor | `{ groupId?, name?, screenIds?, membership?: 'add' \| 'remove' \| 'set', ifVersion?, idempotencyKey? }` | `{ group }` |

@@ -316,6 +316,21 @@ describe('claim_screen', () => {
 });
 
 describe('import_screen_labels (#188)', () => {
+  it("is audited as update_screen_labels is: one screen's in its events, and a large one's count beside the first 100 (review of #612)", async () => {
+    const one = await newScreen('Import audit');
+    await call('import_screen_labels', { screens: [{ screenId: one.id, set: { store: '0142' } }] });
+    const [mine] = await org.auditLog.list({ limit: 1, target: { kind: 'screen', id: one.id } });
+    expect(mine).toMatchObject({ action: 'import_screen_labels' });
+    const many = [];
+    for (let i = 0; i < 101; i++) many.push(await newScreen(`Import audit ${i}`));
+    await call('import_screen_labels', { screens: many.map((s) => ({ screenId: s.id, set: { store: 'bulk' } })) });
+    const [row] = await org.auditLog.list({ limit: 1 });
+    const detail = JSON.parse(row!.detailJson ?? '{}');
+    expect(row).toMatchObject({ action: 'import_screen_labels', targetId: null });
+    expect(detail.input.screens).toHaveLength(100);
+    expect(detail.detail).toEqual({ screenCount: 101 });
+  });
+
   it('gives each screen its own merge, in one batch', async () => {
     const a = await newScreen('Import A');
     const b = await newScreen('Import B');

@@ -231,6 +231,44 @@ describe('"Import labels…" (#188)', () => {
   const till = { id: 'scr_2', name: 'Till', labels: {}, systemLabels: {} } as unknown as ScreenView;
   const file = (text: string) => new File([text], 'labels.csv', { type: 'text/csv' });
 
+  it('leaves an import opened since alone when a cancelled one answers, as a refusal or as done (review of #612)', async () => {
+    for (const reply of [
+      { status: 409, body: { error: 'conflict', message: 'a screen has at most 32 labels' } },
+      { status: 200, body: {} },
+    ]) {
+      const s = store();
+      let answer: () => void = () => {};
+      const answered = new Promise<void>((r) => (answer = r));
+      vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+        calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+        await answered;
+        return new Response(JSON.stringify(reply.body), { status: reply.status });
+      });
+      s.getState().openLabelImport(ORG);
+      await s.getState().readLabelFile(file('screen_id,store\nscr_1,0142\n'));
+      const saving = s.getState().applyLabelImport([lobby, till]);
+      // Cancelled while it saves, and another import opened, with its own file, before the reply comes.
+      s.getState().closeLabelImport();
+      s.getState().openLabelImport(ORG);
+      await s.getState().readLabelFile(file('screen_id,region\nscr_2,south\n'));
+      answer();
+      await saving;
+      expect(s.getState().labels.import).toMatchObject({ file: { columns: ['screen_id', 'region'] }, pending: false, error: null });
+    }
+  });
+
+  it('closes when the page is left, so coming back shows no old file (review of #612)', async () => {
+    const s = store();
+    let navigated: (e: { pathChanged: boolean }) => void = () => {};
+    connectLabels(s as never, { router: { subscribe: (_: string, fn: typeof navigated) => (navigated = fn) } } as never);
+    s.getState().openLabelImport(ORG);
+    await s.getState().readLabelFile(file('screen_id,store\nscr_1,0142\n'));
+    navigated({ pathChanged: false });
+    expect(s.getState().labels.import?.file).not.toBeNull();
+    navigated({ pathChanged: true });
+    expect(s.getState().labels.import).toBeNull();
+  });
+
   it('reads the file once, and sends each screen its own change in one import_screen_labels', async () => {
     const s = store();
     s.getState().openLabelImport(ORG);
