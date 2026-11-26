@@ -124,13 +124,7 @@ async function setup(
   if (options.role) {
     member = new Client(t);
     await member.signIn(email(options.role));
-    const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
-      email: (await member.session()).body.user.email,
-      role: options.role,
-      organizationId: org.id,
-    });
-    await member.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
-    await member.setActive(org.id);
+    await member.join(owner, org.id, options.role);
   }
   const ask = (text = 'Why are 2 screens behind?', history: ChatTurn[] = [], who = member) => who.post('/api/agent/chat', run(text, history));
   return { owner, member, org, scope, model: m, ask };

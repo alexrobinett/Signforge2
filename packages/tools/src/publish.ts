@@ -28,7 +28,7 @@ import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
 import { keysetPage, pageInput } from './paging';
-import { loadOrg, publishOrg, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
+import { groupMoves, loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
 import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
@@ -123,11 +123,16 @@ async function switchScreens(
   rows: { screenId: string; manifestId: string; photoSources: string[] | null }[],
   restoresId?: string,
   changes?: PublishView['changes'],
+  targetsJson: string | null = null,
+  /** The latest publish, if the caller read it already (`runPublish`, with its record). */
+  latest?: { id: string } | null,
 ) {
   const { org, actor, write, notify } = ctx;
-  const [previous] = await org.publishes.history({ limit: 1 });
+  const previous = latest === undefined ? (await org.publishes.history({ limit: 1 }))[0] : latest;
   const changesJson = changes ? JSON.stringify(changes) : null;
-  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson }));
+  const made = write(
+    org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson, targetsJson }),
+  );
   const switched = rows.map(({ screenId, manifestId }) => ({ screenId, manifestId }));
   write(org.publishes.stage.addScreens(made.id, switched));
   for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId, r.photoSources));
@@ -251,9 +256,14 @@ export async function runPublish(
     const playlistId = (removed ? published(e)?.playlistId : undefined) ?? e.playlistId;
     return playlistName(playlistId, removed || !promotedPlaylists.has(playlistId));
   };
+  // The publish before, with its record of whom each group reached: the smart groups this one moves screens in or out
+  // of are named in its changes, so its history row says why it changed screens with no draft (#187, review of #621).
+  const [latest] = await org.publishes.history({ limit: 1, targets: true });
+  const groupsMoved = latest?.targetsJson ? groupMoves(readTargets(latest.targetsJson), result.graph, new Set(changed.map((m) => m.screen.id))) : [];
   const changes = summarizeChanges([
     ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
     ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d, true), removed: true })),
+    ...groupsMoved.map((g) => ({ kind: 'group' as const, name: g.name, removed: false })),
   ]);
   const made = await switchScreens(
     ctx,
@@ -261,6 +271,9 @@ export async function runPublish(
     changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id, photoSources: manifestPhotoSources(m) })),
     undefined,
     changes,
+    // Whom each group reached, as this publish resolved them (#187), with its row in the same batch.
+    recordTargets(result.graph),
+    latest ?? null,
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -295,7 +308,7 @@ export const sampleAcks = z
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, each at the version given (a conflict, details { id, version }, if one changed since); with drafts: [], none, but every screen compiled again, as a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why. Set a default playlist first, or its screens get nothing. describe(publish) has the rules: the default playlist, what is removed, and a spot still holding sample text, which refuses it. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
+    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, at the versions given; with drafts: [], none, but every screen compiled again. describe(publish) has the rules: versions and held drafts, the default playlist, what is removed, sample text (which refuses it) and the if* guards. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -305,35 +318,21 @@ const publish = defineTool({
     ifDefault: id('playlist')
       .nullable()
       .optional()
-      .describe(
-        "Publish only while this playlist is the organization's default (null: while it has none): for drafts pinned because they are the default (it and its spots). Refused with a conflict, details { defaultPlaylistId }, otherwise, checked again as it commits",
-      ),
+      .describe('Publish only while this playlist is the default (null: while there is none); else a conflict { defaultPlaylistId }'),
     ifBrand: z
       .string()
       .max(200_000)
       .optional()
-      .describe(
-        "Publish only while the brand kits and their assignments are as they were shown: their state as the agent drawer's publish card read it. Refused with a conflict, details { brand: true }, otherwise, checked again as it commits",
-      ),
-    ifScreens: z
-      .array(id('screen'))
-      .max(5000)
-      .optional()
-      .describe(
-        'Publish only if it switches exactly these screens, as they were shown. Refused with a conflict, details { screens }, the ones it would switch now, otherwise; a screen added or deleted before it commits makes it read again',
-      ),
+      .describe('Publish only while the brand kits are as the publish card read them; else a conflict { brand: true }'),
+    ifScreens: z.array(id('screen')).max(5000).optional().describe('Publish only if it switches exactly these screens; else a conflict { screens }'),
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
       .max(500)
       .optional()
-      .describe(
-        'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
-      ),
+      .describe('Each at the version you chose it at; omit for every changed draft, [] for none'),
     allowSample: sampleAcks
       .optional()
-      .describe(
-        'People only: the spots a sample_text refusal named, { spotId, version, fields } as it named them, once a person has seen them and chose to publish them anyway. It covers that version of each and those fields only: any other refuses again. Refused to an agent',
-      ),
+      .describe('People only: the spots a sample_text refusal named, as it named them, once a person chose to publish them anyway'),
   }),
   output: outputs.publish,
   example: {},
@@ -544,7 +543,8 @@ const rollBackPublish = defineTool({
         return { ...r, photoSources: obj ? manifestPhotoSources(await obj.json<ScreenManifest>()) : null };
       }),
     );
-    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id) };
+    // Screens go back to what that publish sent, so whom its groups reached is theirs again: the next preview compares with it (review of #620).
+    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id, undefined, target.targetsJson) };
   },
 });
 
@@ -559,8 +559,8 @@ export const CHANGES_BYTES = 4096;
  * What a publish changed, by kind (#370): exact counts, and the first names of each, each once, while the whole is
  * under `CHANGES_BYTES`. A publish of thousands of drafts with long names keeps its counts and a few of them.
  */
-export function summarizeChanges(items: readonly { kind: DraftKind; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
-  const groups = (['spot', 'playlist', 'schedule_entry'] as const).flatMap((kind) =>
+export function summarizeChanges(items: readonly { kind: DraftKind | 'group'; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
+  const groups = (['spot', 'playlist', 'schedule_entry', 'group'] as const).flatMap((kind) =>
     [false, true].flatMap((removed) => {
       const these = items.filter((i) => i.kind === kind && i.removed === removed);
       if (!these.length) return [];
@@ -633,11 +633,15 @@ const listPublishes = defineTool({
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens }, or { publish: null } if there has been no publish.",
+    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens, targets }, or { publish: null } if there has been no publish; targets (asked for): whom each group reached then.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ publishId: id('publish').optional().describe('Omit for the latest publish') }),
+  input: z.object({
+    publishId: id('publish').optional().describe('Omit for the latest publish'),
+    // Every group's screen ids can be large: a page that polls the rollout leaves them out (review of #620).
+    targets: z.boolean().default(false).describe('Also return whom each group reached'),
+  }),
   output: outputs.get_publish,
   example: {},
   handler: async ({ org, input }) => {
@@ -648,8 +652,8 @@ const getPublish = defineTool({
       // The history from this publish down: its first row is this one, with its rollout counts.
       beforeRevision = asked.revision + 1;
     }
-    const [found] = await org.publishes.history({ limit: 1, beforeRevision });
-    if (!found) return { publish: null, screens: [] };
+    const [found] = await org.publishes.history({ limit: 1, beforeRevision, targets: input.targets });
+    if (!found) return { publish: null, screens: [], targets: null };
     const [rows, afterMs] = await Promise.all([org.publishes.rollout(found.id), unreachableAfterMs(org)]);
     const now = Date.now();
     const screens = rows.map((r) => {
@@ -666,7 +670,7 @@ const getPublish = defineTool({
         state: { kind: state.kind, reason: state.reason },
       };
     });
-    return { publish: publishView(found), screens };
+    return { publish: publishView(found), screens, targets: found.targetsJson === null ? null : readTargets(found.targetsJson) };
   },
 });
 

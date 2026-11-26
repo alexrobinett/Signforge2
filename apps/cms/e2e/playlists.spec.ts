@@ -1,5 +1,5 @@
 import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, innerCorner, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, deleteQuestionGivesFocusBack, disabledOnServer, hydrated, innerCorner, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.44';
@@ -190,29 +190,10 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 });
 
 test('the delete question, opened from ⋯ by keyboard, gives focus back to ⋯ on Escape and on Cancel (#378)', async () => {
-  // Radix gave it back once the question's closing had played, the page's body focused until then.
   const { playlist } = await tool(page, 'save_playlist', { name: 'Keyboard loop', spotIds: [spots.Opening], idempotencyKey: `keyboard-loop-${Date.now()}` });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
-  const more = page.getByRole('button', { name: 'More actions: delete' });
-  const question = page.getByRole('alertdialog');
-  for (const close of ['Escape', 'Cancel'] as const) {
-    await more.focus();
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(question).toBeVisible();
-    // Read, as a person would: the menu has gone by then, and its Delete… item with it.
-    await expect(page.getByRole('menu')).toHaveCount(0);
-    if (close === 'Cancel') {
-      await question.getByRole('button', { name: 'Cancel' }).focus();
-      await page.keyboard.press('Enter');
-    } else await page.keyboard.press('Escape');
-    // At once, in the key's own event: not after the question's closing has played, with the body focused meanwhile.
-    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), close).toBe('More actions: delete');
-    await expect(question).toBeHidden();
-    await expect(more, close).toBeFocused();
-  }
+  await deleteQuestionGivesFocusBack(page);
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {

@@ -7,32 +7,9 @@ import type { ScheduleEntry, ScreenManifest } from '@signforge/contract';
 import { resolvePlaylist } from '@signforge/player-core';
 import { describe, expect, it } from 'vitest';
 import { describeWhen, entryPreview, publishedEntries, weekOf, type ScheduleEntryView } from '../src/lib/schedule';
+import { scheduleEntry } from './schedule-entry';
 
-const entry = (id: string, over: Partial<ScheduleEntryView>): ScheduleEntryView => ({
-  id,
-  playlistId: 'main',
-  target: 'org',
-  groupId: null,
-  screenId: null,
-  priority: 0,
-  startDate: null,
-  endDate: null,
-  days: null,
-  from: null,
-  to: null,
-  startsAt: null,
-  endsAt: null,
-  takeover: false,
-  deleted: false,
-  live: null,
-  version: 1,
-  published: false,
-  draftChanged: true,
-  publishedAt: null,
-  createdAt: 0,
-  updatedAt: 0,
-  ...over,
-});
+const entry = (id: string, over: Partial<ScheduleEntryView>) => scheduleEntry(id, { playlistId: 'main', ...over });
 
 const lobby = { id: 'scr_lobby', timezone: 'America/New_York' };
 const groups = [

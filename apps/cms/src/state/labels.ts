@@ -7,7 +7,7 @@ import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
 import { importPlan, readLabelCsv, type ImportMode, type LabelFile } from '~/lib/label-csv';
 import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
-import { orgOnScreen } from '~/lib/live';
+import { orgOnScreen, publishesOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
 import { labelKeysQuery, screensQuery } from '~/queries/screens';
@@ -101,9 +101,11 @@ const NONE: LabelRow[] = [];
 
 /**
  * When a label change reaches screens, said once for every label edit (#185): the next publish resolves labels and
- * selectors, so nothing changes on screen until then. #187's preview will say how many screens would change.
+ * selectors, so nothing changes on screen until then.
  */
 export const NEXT_PUBLISH = 'Takes effect at the next publish.';
+/** "Takes effect at the next publish: 3 screens would change", from `preview_publish` (#187). */
+export const nextPublishWords = (n: number) => `Takes effect at the next publish: ${n} ${n === 1 ? 'screen' : 'screens'} would change.`;
 /** The rows an editor holds: none until one is opened or typed in. */
 export const labelRowsOf = (s: LabelsState, target: LabelTarget) => s.rows[keyOf(target)] ?? NONE;
 
@@ -122,6 +124,26 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const rows = (target: LabelTarget, change: (r: LabelRow[]) => LabelRow[]) =>
     labels((l) => ({ ...l, rows: { ...l.rows, [keyOf(target)]: change(labelRowsOf(l, target)) } }));
   /**
+   * A label change said in a toast, which then says how many screens the next publish would change (#187): a smart
+   * group's members move with labels, and `preview_publish` works that out as the publish will. Unread, it says less.
+   */
+  function toldNextPublish(orgId: string, title: string) {
+    const id = toast.success(title, { description: NEXT_PUBLISH });
+    void callTool('preview_publish', {}, orgId).then(
+      (p) =>
+        orgOnScreen(router) === orgId &&
+        toast.success(title, {
+          id,
+          description: nextPublishWords(p.screens.length),
+          // No draft may be waiting, so the sidebar shows no Publish: this one asks as it does, with the same preview.
+          // Only for someone who may publish (review of #621).
+          ...(p.screens.length && publishesOnScreen(router) ? { action: { label: 'Publish…', onClick: () => void get().askPublishAll(orgId) } } : {}),
+        }),
+      // The toast already says when it takes effect; the count is a help, not the news.
+      () => undefined,
+    );
+  }
+  /**
    * The one way labels are sent from the Screens page, a bulk edit or an import (#188): the call, then the screens and
    * the keys read again, and the toast; the refusal's words, or null when it went.
    */
@@ -132,7 +154,7 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
         queryClient.invalidateQueries({ queryKey: screensQuery(orgId).queryKey }),
         queryClient.invalidateQueries({ queryKey: labelKeysQuery(orgId).queryKey }),
       ]);
-      if (orgOnScreen(router) === orgId) toast.success(done, { description: NEXT_PUBLISH });
+      if (orgOnScreen(router) === orgId) toldNextPublish(orgId, done);
       return null;
     } catch (err) {
       return toolMessage(err);
@@ -246,7 +268,7 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
         await callTool('update_screen_labels', { screenIds: [screen.id], ...change });
         await Promise.all([router.invalidate(), queryClient.invalidateQueries({ queryKey: labelKeysQuery(orgId).queryKey })]);
         if (get().labels.editor?.screenId === screen.id) get().closeLabelEditor();
-        if (orgOnScreen(router) === orgId) toast.success('Labels saved', { description: NEXT_PUBLISH });
+        if (orgOnScreen(router) === orgId) toldNextPublish(orgId, 'Labels saved');
       } catch (err) {
         editor((e) => (e.screenId === screen.id ? { ...e, pending: false, error: toolMessage(err) } : e));
       }

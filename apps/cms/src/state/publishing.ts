@@ -66,7 +66,14 @@ export interface PublishAll {
   noDefault: { makes: string | null } | null;
   /** A takeover goes with it: no Undo, as on the Schedule page. */
   takeover: boolean;
+  /**
+   * What it would change on screens (#187, `preview_publish`): which screens and why, and who joins or leaves each
+   * group. Undefined while it is read; null when it could not be read, which the dialog does without.
+   */
+  preview?: PublishPreview | null;
 }
+
+export type PublishPreview = ToolOutput<'preview_publish'>;
 
 /** The most drafts one publish pins (`publish`'s `drafts`, at most 500). */
 export const MAX_PINS = 500;
@@ -457,7 +464,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   /**
    * Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. `byDefault` is
    * what `defaultPlan` gave: the default set on the way, which a refusal or a held publish says, as it
-   * stays set, and the default its pins are published only while it is (`ifDefault`). `acks`: the
+   * stays set, and the default its pins are published only while it is (`ifDefault`); `ifScreens`, the screens a
+   * publish of no draft showed it would change, which it changes exactly or is refused (#187). `acks`: the
    * sample text the person said Publish anyway to, sent as `allowSample`. Refused for sample text it
    * does not cover (#360), it asks about those, and with Publish anyway sends it again acknowledging
    * them too. Whether it was published.
@@ -467,10 +475,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     pins: Pin[],
     undo = true,
     refused = 'Not published',
-    byDefault: { made?: string; ifDefault?: string } = {},
+    byDefault: { made?: string; ifDefault?: string; ifScreens?: string[] } = {},
     acks: SampleSpot[] = [],
   ): Promise<boolean> {
-    const { made, ifDefault } = byDefault;
+    const { made, ifDefault, ifScreens } = byDefault;
     // Asked in an org the tab has left, or is leaving (a drawer's Publish answered late): it is not sent (#479), and
     // said, as the sidebar's Publish says it (#495).
     if (!showing(orgId)) {
@@ -483,7 +491,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       const drafts = [...new Map(pins.map((p) => [`${p.kind}:${p.id}`, p])).values()];
       const allowSample = acks.length ? { allowSample: sampleAcks(acks) } : {};
       // Named: the org the pins were read in, not the one a switch is taking the tab to (#361).
-      const r = await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...allowSample }, orgId);
+      const r = await callTool('publish', { drafts, ...(ifDefault ? { ifDefault } : {}), ...(ifScreens ? { ifScreens } : {}), ...allowSample }, orgId);
       await told(orgId, r, undo, refused, made);
       await refresh(orgId);
       // Held back, or nothing to publish: no publish was made, which the toast says.
@@ -502,6 +510,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       const pinned = details !== undefined && 'id' in details && pins.some((p) => p.id === details.id);
       // `ifDefault` refused: the default the pins were for is no longer it, the one this set included.
       if (details && 'defaultPlaylistId' in details) toast.error(refused, { description: 'Someone changed the default playlist. Reload to see it.' });
+      // `ifScreens` refused: the screens it would change are not the ones the question showed (review of #621).
+      else if (ifScreens && details && 'screens' in details)
+        toast.error(refused, { description: 'Which screens it would change has changed since you were shown. Press Publish again to see them.' });
       // Any other conflict (the publish lost its race until it gave up): what changed is not known, nor whether a default set is still it.
       else if (details && !pinned) toast.error(refused, { description: 'Something changed while publishing. Reload and try again.' });
       else {
@@ -524,7 +535,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       }
       const mine = ++asked;
       showAll({ orgId, asked: mine, pins: null, counts: { spots: 0, playlists: 0, schedule: 0 }, tooMany: false, noDefault: null, takeover: false });
-      const drafts = await readDrafts(orgId, 'Not published');
+      // Read beside the drafts, so the dialog shows what it would change on screens with what it publishes (#187).
+      const [drafts, preview] = await Promise.all([readDrafts(orgId, 'Not published'), callTool('preview_publish', {}, orgId).catch(() => null)]);
       // Cancelled, or asked again, meanwhile: this read is no one's.
       if (get().publishing.all?.asked !== mine) return;
       if (!drafts || !showing(orgId)) {
@@ -547,6 +559,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         tooMany: pins.length > MAX_PINS,
         noDefault: noDefaultOf(drafts.playlists, entries),
         takeover: entries.some((e) => e.takeover),
+        preview,
       });
       // Nothing to publish after all: the counts were behind, so they are read again.
       if (!pins.length) void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
@@ -554,14 +567,18 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
     async confirmPublishAll() {
       const all = get().publishing.all;
-      // Never an empty publish: `drafts: []` would compile every screen again for nothing.
-      if (!all?.pins?.length || all.tooMany) return false;
+      // Never an empty publish for nothing: `drafts: []` only when the preview says screens would change, as labels moved
+      // a smart group's members since the last publish (#187).
+      if (!all?.pins || all.tooMany || (!all.pins.length && !all.preview?.screens.length)) return false;
       showAll(null);
       if (!showing(all.orgId)) {
         toast.error('Not published', { description: 'The organization is changing. Publish once it shows.' });
         return false;
       }
       // Exactly what was shown, at the versions read: one edited since refuses it as changed. Sample text asks as any publish does (#360).
+      // With no draft, it publishes only to the screens the preview showed: any other set is refused, not sent (review of #621).
+      if (!all.pins.length && all.preview)
+        return publish(all.orgId, [], !all.takeover, 'Not published', { ifScreens: all.preview.screens.map((s) => s.screenId) });
       return publish(all.orgId, all.pins, !all.takeover);
     },
 

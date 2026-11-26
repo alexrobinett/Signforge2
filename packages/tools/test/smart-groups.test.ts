@@ -1,6 +1,7 @@
 // Smart groups (#186): a group defined by a selector. save_group takes its rule, list_groups computes its screens,
 // membership changes are refused while it is a rule, removing a key its rule names is said, and a takeover reaches
-// the screens it matches when sent, held to them by its card's reach. The publish's resolution: publishing.test.ts.
+// the screens it matches when sent, held to them by its card's reach; a publish preview names the screens it would
+// change and why, and each publish records whom each group reached (#187). The publish's resolution: publishing.test.ts.
 // Each call's idempotency key is its own: the run's database keeps a key's first answer.
 import { seedOrg, seedTeam, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
@@ -131,5 +132,107 @@ describe('a takeover of a smart group (owner decision on #179)', () => {
     const input = { action: 'publish', playlistId: o.playlist, target: 'group', groupId: group.id, endsAt, ifReach: group.screenIds };
     const out = await dispatch(registry, 'takeover', input, { ...owner, org: testScope(raced, o.orgId) });
     expect(out).toMatchObject({ ok: false, error: 'conflict' });
+  });
+});
+
+// What a publish would do (#187): `preview_publish` names the screens the publish then switches, and why, against
+// the last publish's record of whom each group reached (`get_publish`'s targets). On a key of its own, `area`.
+describe('a publish preview and its recorded targets (#187)', () => {
+  const switched = (out: { screens: { screenId: string; outcome: string }[] }) =>
+    out.screens.flatMap((s) => (s.outcome === 'updated' ? [s.screenId] : [])).toSorted();
+  const previewed = (out: { screens: { screenId: string }[] }) => out.screens.map((s) => s.screenId).toSorted();
+  let a: { id: string };
+  let b: { id: string };
+  let c: { id: string };
+  let zone: { id: string };
+
+  beforeAll(async () => {
+    a = await scope().screens.insert({ name: 'Zone A', timezone: 'Europe/London', orientation: 'landscape' });
+    b = await scope().screens.insert({ name: 'Zone B', timezone: 'Europe/London', orientation: 'landscape' });
+    c = await scope().screens.insert({ name: 'Zone C', timezone: 'Europe/London', orientation: 'landscape' });
+    await call('update_screen_labels', { screenIds: [a.id, b.id], set: { area: 'n' } });
+    ({ group: zone } = await call('save_group', {
+      name: 'Zone N',
+      selector: { all: [{ key: 'area', op: 'eq', values: ['n'] }] },
+      idempotencyKey: crypto.randomUUID(),
+    }));
+    await call('publish', {});
+  });
+
+  it('records every group with the screens the publish resolved, which get_publish returns', async () => {
+    const { targets } = await call('get_publish', { targets: true });
+    expect(targets).toEqual(
+      expect.arrayContaining([
+        { groupId: zone.id, name: 'Zone N', rule: true, screenIds: [a.id, b.id].toSorted() },
+        { groupId: o.group, name: `${o.orgId} group`, rule: false, screenIds: expect.any(Array) },
+      ]),
+    );
+  });
+
+  it('says nothing would change right after a publish, and writes nothing', async () => {
+    const before = (await call('list_publishes', {})).publishes.length;
+    expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [], failed: [], samples: [] });
+    expect((await call('list_publishes', {})).publishes.length).toBe(before);
+  });
+
+  it('names the screens an entry for a smart group would change, and the publish switches exactly those', async () => {
+    await call('save_schedule_entry', { playlistId: o.playlist, target: 'group', groupId: zone.id, priority: 1, idempotencyKey: crypto.randomUUID() });
+    const preview = await call('preview_publish', {});
+    expect(preview.screens.map((s: { name: string; reasons: string[] }) => [s.name, s.reasons])).toEqual([
+      ['Zone A', [expect.stringMatching(/^entry .* added$/)]],
+      ['Zone B', [expect.stringMatching(/^entry .* added$/)]],
+    ]);
+    expect(switched(await call('publish', {}))).toEqual(previewed(preview));
+  });
+
+  it('says who joins and leaves as labels move, before any screen has it, and the publish then records them', async () => {
+    await call('update_screen_labels', { screenIds: [c.id], set: { area: 'N' } });
+    await call('update_screen_labels', { screenIds: [b.id], set: { area: 's' } });
+    const preview = await call('preview_publish', {});
+    expect(preview.groups).toEqual([{ groupId: zone.id, name: 'Zone N', joined: [c.id], left: [b.id] }]);
+    expect(preview.screens).toEqual([
+      { screenId: b.id, name: 'Zone B', reasons: ['left Zone N'] },
+      { screenId: c.id, name: 'Zone C', reasons: ['joined Zone N'] },
+    ]);
+    expect(switched(await call('publish', {}))).toEqual(previewed(preview));
+    const { targets } = await call('get_publish', { targets: true });
+    expect(targets.find((g: { groupId: string }) => g.groupId === zone.id).screenIds).toEqual([a.id, c.id].toSorted());
+    // Its history row names the group it moved screens of, as no draft changed (review of #621).
+    expect((await call('get_publish', {})).publish.changes).toEqual([{ kind: 'group', removed: false, count: 1, names: ['Zone N'], omitted: 0 }]);
+  });
+
+  it('leaves out a move no screen plays differently, so it does not linger after a publish that changes nothing (review of #620)', async () => {
+    await call('save_group', { name: 'Shelf', selector: { all: [{ key: 'shelf', op: 'exists' }] }, idempotencyKey: crypto.randomUUID() });
+    await call('publish', {});
+    // Labelled into a group no entry aims at: no manifest changes, so nothing is news, now or after the publish.
+    await call('update_screen_labels', { screenIds: [a.id], set: { shelf: 'top' } });
+    expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [] });
+    expect((await call('publish', {})).publish).toBeNull();
+    expect(await call('preview_publish', {})).toMatchObject({ screens: [], groups: [] });
+  });
+
+  it('says a screen paired since the last publish gets its first, not that something was compiled again (review of #620)', async () => {
+    const fresh = await scope().screens.insert({ name: 'Zone new', timezone: 'Europe/London', orientation: 'landscape' });
+    const preview = await call('preview_publish', {});
+    // It also joins the rule of a missing key an earlier test made: a new screen has no labels.
+    expect(preview.screens).toEqual([{ screenId: fresh.id, name: 'Zone new', reasons: ['first publish to this screen', 'joined No zone'] }]);
+    expect(switched(await call('publish', {}))).toEqual([fresh.id]);
+  });
+
+  it('copies the record of the publish a roll back restores, so the next preview compares with what screens have (review of #620)', async () => {
+    const { publish: restored, targets } = await call('get_publish', { targets: true });
+    await call('update_screen_labels', { screenIds: [a.id], set: { area: 'away' } });
+    await call('publish', {});
+    const rolled = await call('roll_back_publish', { publishId: restored.id });
+    expect(rolled.publish).not.toBeNull();
+    expect((await call('get_publish', { targets: true })).targets).toEqual(targets);
+    // A's manifest went back to the group's: the next publish takes it out again, said as leaving Zone N.
+    const preview = await call('preview_publish', {});
+    expect(preview.screens).toEqual([{ screenId: a.id, name: 'Zone A', reasons: ['left Zone N'] }]);
+    expect(preview.groups).toEqual([{ groupId: zone.id, name: 'Zone N', joined: [], left: [a.id] }]);
+  });
+
+  it('gives no targets unless asked: the rollout a page polls stays small (review of #620)', async () => {
+    expect((await call('get_publish', {})).targets).toBeNull();
   });
 });

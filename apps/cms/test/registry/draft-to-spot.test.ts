@@ -64,6 +64,7 @@ function stressOrg(change: { timezone?: string | null; status?: AssetView['statu
   return {
     screens: [],
     groupsOf: new Map(),
+    groups: [],
     rules: [],
     labels: [],
     templateVersions,

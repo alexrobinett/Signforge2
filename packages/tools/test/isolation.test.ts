@@ -4,7 +4,7 @@
 // own rows, so a check on one id cannot hide a missing check on another. A new tool is covered as
 // soon as it is registered; a new kind of id field fails here until it is mapped below.
 import { scoped, startPairing } from '@signforge/db';
-import { seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
+import { ORG_ROW_IDS, seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -20,31 +20,10 @@ const FILES = {
 
 /** An org's row for each kind of id a tool input can name (`screenId` → `screen`). */
 const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
-  screen: (o) => o.screen,
-  group: (o) => o.group,
-  credential: (o) => o.credential,
+  ...ORG_ROW_IDS,
   manifest: (o) => files(o).manifest,
-  template: (o) => o.template,
-  templateVersion: (o) => o.templateVersion,
-  spot: (o) => o.templateSpot,
-  playlist: (o) => o.playlist,
-  scheduleEntry: (o) => o.scheduleEntry,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
-  asset: (o) => o.asset,
-  brandKit: (o) => o.brandKit,
-  logoOnDarkAsset: (o) => o.asset,
-  logoOnLightAsset: (o) => o.asset,
-  dataSource: (o) => o.dataSource,
-  alertDelivery: (o) => o.alertDelivery,
-  connection: (o) => o.connection,
-  publish: (o) => o.publish,
-  // An agent grant (M4-07's tools): `grantId`.
-  grant: (o) => o.agentGrant,
-  publishRequest: (o) => o.publishRequest,
-  // Better Auth's rows, as seedTeam names them.
-  member: (o) => `${o.orgId}-member`,
-  invitation: (o) => `${o.orgId}-invitation`,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 

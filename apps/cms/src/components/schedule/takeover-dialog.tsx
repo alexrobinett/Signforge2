@@ -8,12 +8,12 @@ import { useId, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
-import { NativeSelect } from '~/components/ui/select';
 import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, firstDefaultOf } from '~/state/schedule';
 import { FirstDefaultChoice, UnpublishedDefault } from './first-default-note';
+import { PlaylistField } from './playlist-field';
 import { TargetPicker } from './target-picker';
 
 const DAY_MS = 86_400_000;
@@ -71,21 +71,7 @@ export function TakeoverDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid grid-cols-1 gap-4">
-          <div className="grid gap-1.5">
-            <label htmlFor={`${id}-playlist`} className="text-sm font-medium">
-              Playlist
-            </label>
-            <NativeSelect id={`${id}-playlist`} value={d.playlistId} onChange={(e) => edit({ playlistId: e.target.value })}>
-              <option value="" disabled>
-                Choose a playlist
-              </option>
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
+          <PlaylistField id={`${id}-playlist`} value={d.playlistId} playlists={playlists} onPick={(playlistId) => edit({ playlistId })} />
           <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} sentNow onPick={edit} />
           <div className="grid gap-1.5">
             <label htmlFor={`${id}-until`} className="text-sm font-medium">

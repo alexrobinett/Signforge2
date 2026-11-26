@@ -11,7 +11,6 @@ import { useId, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
-import { NativeSelect } from '~/components/ui/select';
 import { DAYS } from '~/lib/days';
 import { useCanPublish } from '~/lib/live';
 import type { PlaylistView } from '~/lib/playlists';
@@ -21,6 +20,7 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, entryProblems, entryWhen, everywhereAlways, firstDefaultOf } from '~/state/schedule';
 import { FirstDefaultChoice, FirstDefaultNote, UnpublishedDefault } from './first-default-note';
+import { PlaylistField } from './playlist-field';
 import { TargetPicker } from './target-picker';
 
 export function EntryDialog({
@@ -95,21 +95,7 @@ export function EntryDialog({
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid grid-cols-1 gap-4">
-          <div className="grid gap-1.5">
-            <label htmlFor={`${id}-playlist`} className="text-sm font-medium">
-              Playlist
-            </label>
-            <NativeSelect id={`${id}-playlist`} value={d.playlistId} onChange={(e) => edit({ playlistId: e.target.value })}>
-              <option value="" disabled>
-                Choose a playlist
-              </option>
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
+          <PlaylistField id={`${id}-playlist`} value={d.playlistId} playlists={playlists} onPick={(playlistId) => edit({ playlistId })} />
           {/* Near the top, where it is seen before Save and publish (#243). */}
           {canPublish &&
             (everywhereAlways(d) ? (

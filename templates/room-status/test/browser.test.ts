@@ -282,6 +282,9 @@ describe('room status (#199)', () => {
       },
     ],
     ['empty', { ...longest, events: [] }],
+    // A room's name on two lines with "Booked by" on left the meeting line less than a line (review of #606).
+    ['busy, a one-line title', { ...longest, events: [booking('Quarterly budget review with finance', -0.25, 0.75, 'Priya Shah')] }],
+    ['busy, a shorter room', { room: 'Executive boardroom, east wing', events: [booking(long, -0.25, 0.75, 'Priya Shah')] }],
     // The calendar not updating (#225), its fallback a busy day.
     ['unavailable', { ...longest, events: [booking(long, -0.25, 0.75, 'Priya Shah')] }, ['events']],
   ];
@@ -291,12 +294,44 @@ describe('room status (#199)', () => {
   /** Every toggle on, each one off on its own, and all of them off. */
   const toggleSets: Data[] = [allOn, ...toggles.map((t) => ({ ...allOn, [t]: false })), allOff];
 
-  /** The layout's faults, the now line and the pin counted as text, and a schedule drawn empty. */
+  /**
+   * The layout's faults, the now line and the pin counted as text, a schedule drawn empty, and a line of text its own
+   * box or one around it cuts through, not at a line's edge: a clamp ends on a whole line.
+   */
   const faults = async (f: Frame) => [
     ...(await layoutFaults(f, '.nowline, .pin-pill')),
     ...(await f.evaluate(() => {
+      const found: string[] = [];
       const schedule = document.querySelector('.schedule');
-      return schedule && !schedule.querySelector('.item, .block, .free-day') ? ['an empty schedule'] : [];
+      if (schedule && !schedule.querySelector('.item, .block, .free-day')) found.push('an empty schedule');
+      for (const el of document.querySelectorAll<HTMLElement>('.stage *'))
+        for (const n of el.childNodes) {
+          if (n.nodeType !== Node.TEXT_NODE || !n.textContent!.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          // The line box, centred on the glyph box: a tight leading's glyphs stand past it, into the clamp's hidden line.
+          const lh = Number.parseFloat(getComputedStyle(el).lineHeight) || 0;
+          for (const r of range.getClientRects()) {
+            const h = lh || r.height;
+            let [top, bottom] = [r.top + (r.height - h) / 2, r.top + (r.height + h) / 2];
+            let past = false;
+            for (let p: HTMLElement | null = el; p && p !== document.body; p = p.parentElement) {
+              const s = getComputedStyle(p);
+              if (s.overflowY === 'visible') continue;
+              const c = p.getBoundingClientRect();
+              // A line after a clamp's last starts at its content's edge and is not painted, though its padding shows.
+              if (s.webkitLineClamp !== 'none' && s.display !== 'flex' && top >= c.bottom - Number.parseFloat(s.paddingBottom) - 1) past = true;
+              [top, bottom] = [Math.max(top, c.top), Math.min(bottom, c.bottom)];
+            }
+            if (past) continue;
+            const shown = (bottom - top) / h;
+            if (shown > 0.1 && shown < 0.9) {
+              found.push(`${el.className || el.tagName} cut through a line (${Math.round(shown * 100)}% shown)`);
+              break;
+            }
+          }
+        }
+      return found;
     })),
   ];
 
@@ -314,6 +349,11 @@ describe('room status (#199)', () => {
             for (const fault of await faults(await r.show({ look, ...data, ...set }, undefined, NOW, 'UTC', fallback)))
               found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
+      // The light kit's faces set the lines a little taller.
+      for (const look of looks)
+        for (const [day, data] of days.slice(-2))
+          for (const fault of await faults(await r.show({ look, ...data, ...allOn }, noDemoAndLight(LIGHT_KIT).at(-1)![1])))
+            found.push(`${look}, ${day}, the light kit: ${fault}`);
       // The timeline's hours across a change of clocks and from midnight.
       for (const look of looks)
         for (const [day, now, events] of zoned)
@@ -378,10 +418,41 @@ describe('room status (#199)', () => {
         unended: [],
         unknown: [],
       });
-      // D's motion, read by seeking; the clock's colon and Night's glow are the room's own loops.
-      expect(await motionContract(f, durationMs, { loops: '.lk-crawl, .lk-ping, .colon, .glow' }), look).toEqual([]);
+      // D's motion, read by seeking: nothing loops, not even the clock's colon.
+      expect(await motionContract(f, durationMs, { loops: '' }), look).toEqual([]);
     }
   });
+
+  // The board's room status (#news-design): the room's name at title size, no text under 2.6vmin in any look, nothing
+  // blinking or pinging, and Night's day as solid bars on a hairline track rather than chips cut to three letters.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`leads with the room's name, keeps every text at 2.6vmin or more and nothing looping, ${orientation}`, async () => {
+      const r = await room(orientation);
+      const found: string[] = [];
+      const day = { events: [booking('Design review', -0.25, 0.75), booking('Quarterly planning', 2, 3), booking('Vendor demo', 4.5, 5)] };
+      for (const look of looks) {
+        const seen = await (await r.show({ look, ...day })).evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 3000;
+          const vmin = Math.min(innerWidth, innerHeight) / 100;
+          const shown = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+          const texts = [...document.querySelectorAll('.stage *')].filter(
+            (el) => shown(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim()),
+          );
+          const small = texts.filter((el) => Number.parseFloat(getComputedStyle(el).fontSize) < 2.6 * vmin - 0.5).map((el) => el.className || el.tagName);
+          return {
+            room: Number.parseFloat(getComputedStyle(document.querySelector('.room')!).fontSize) / vmin,
+            small: [...new Set(small)],
+            loops: document.getAnimations().filter((a) => a.effect!.getComputedTiming().iterations === Number.POSITIVE_INFINITY).length,
+            chips: [...document.querySelectorAll('.block .what')].filter(shown).length,
+          };
+        });
+        if (seen.room < 6.5) found.push(`${look}: the room's name is ${seen.room.toFixed(1)}vmin`);
+        if (seen.small.length) found.push(`${look}: under 2.6vmin: ${seen.small.join(', ')}`);
+        if (seen.loops) found.push(`${look}: ${seen.loops} loops`);
+        if (look === 'night' && seen.chips) found.push(`night: ${seen.chips} chips on the track`);
+      }
+      expect(found).toEqual([]);
+    });
 
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const r = await room();

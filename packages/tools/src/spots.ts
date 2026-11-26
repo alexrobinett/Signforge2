@@ -40,10 +40,8 @@ const durationMs = z
   .min(1000)
   .max(24 * 3600_000)
   .describe('How long the spot stays on screen, in ms');
-const data = z
-  .record(z.string(), z.unknown())
-  .describe("The template's field values by field name: the whole set, replacing the draft's. A field left out takes its default");
-const assets = z.record(z.string(), id('asset')).describe("Image fields to verified asset ids, by field name: the whole set, replacing the draft's");
+const data = z.record(z.string(), z.unknown()).describe("The template's field values by name, the whole set; one left out takes its default");
+const assets = z.record(z.string(), id('asset')).describe('Image fields to verified asset ids, by name, the whole set');
 const url = z.string().refine(safeUrl, 'must be an https URL').describe('An https page on another origin');
 const binding = z.object({
   dataSourceId: id('data source'),
@@ -269,7 +267,7 @@ const getSpot = defineTool({
 const saveSpot = defineTool({
   name: 'save_spot',
   description:
-    "Create a spot as a draft, or change one's draft. Without spotId it creates one: a name and a kind. kind template: a templateVersionId (an approved version from read), with optional data and assets (image fields to asset ids); fields left out take their defaults, and the data must pass the template's checks. kind image or video: an assetId and a fit. kind url: an https url. durationMs defaults to the template's default, or 10 s. Pass an idempotencyKey so a retry cannot create it twice. With spotId it changes what you give: name, durationMs; for a template spot data and assets (each the whole set, replacing the draft's); for an image or video spot assetId and fit; for a URL spot url. A spot's kind and template are fixed once made. Pass the version you read as ifVersion so a change made since is not overwritten. Nothing reaches a screen until it is published. Returns { spot }.",
+    "Create a spot as a draft, or change one's draft. Without spotId, a name, a kind and an idempotencyKey: kind template, a templateVersionId (an approved version from read) with optional data and assets; kind image or video, an assetId and a fit; kind url, an https url. With spotId and the ifVersion you read, the fields you give change, each of data, assets and bindings as a whole set. describe(spot) has the rules: defaults, the template's checks, what is fixed once made, sample copy and bindings. Returns { spot }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -283,12 +281,7 @@ const saveSpot = defineTool({
     durationMs: durationMs.optional(),
     templateVersionId: id('template version').optional().describe("A new template spot's template version; fixed once made"),
     ...kindInput,
-    sample: z
-      .boolean()
-      .optional()
-      .describe(
-        "A new template spot: start the texts and lists with the template's sample copy (its defaults; live fields stay empty), in place of data, and record them as sampleFields until each is edited. publish refuses the spot while any is left, unless a person allows it",
-      ),
+    sample: z.boolean().optional().describe("A new template spot: start with the template's sample copy in place of data (describe(spot))"),
     ifVersion,
     idempotencyKey,
   }),
