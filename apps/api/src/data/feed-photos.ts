@@ -17,7 +17,7 @@
  *   reusing `file` when within NEWS_THUMB_BOX, written under `o/<org>/f/<sha256>` (`feedBlobKey`)
  *   through `PhotoBlobs`, and recorded with `org.feedPhotos.delivered`.
  * - **The hourly sweep (`sweepFeedPhotos`, at :30)**: expires rows unnamed for a week past their check
- *   and deletes unreferenced blobs past their grace window, bounded to 14 D1 calls per run.
+ *   and deletes unreferenced blobs past their grace window, bounded to 11 D1 calls and 3 R2 deletes per run.
  *
  * Ports: `PhotoBlobs` (R2 in production via `r2PhotoBlobs`) and `PhotoQueue` (FEED_IMAGES in
  * production via `cfPhotoQueue`). Every timestamp comes from the injected `now`.
@@ -58,7 +58,7 @@ const ATTEMPTS = 3;
  * What one hourly sweep run takes of what is due (rows unnamed past their check, blobs past their grace), the oldest
  * first, from up to CLEANUP_ORGS_PER_RUN orgs: 24 runs a day forget 7,200 rows and delete 14,400 blobs, so the sweep
  * keeps up with three orgs at MOST_PER_ORG_PER_DAY whatever their cap, and a cap lowered later strands nothing. A run
- * stays within 14 D1 calls and R2 deletes, and each statement's list of URLs within a few hundred kB (review of #497).
+ * stays within 11 D1 calls and 3 R2 deletes, and each statement's list of URLs within a few hundred kB (review of #497).
  */
 const FORGET_PER_RUN = 300;
 const DELETE_PER_RUN = 600;
@@ -297,7 +297,8 @@ function imagesCode(e: unknown): number | undefined {
  * with a backoff, so a photo that keeps failing leaves the queue until a poll names it again later.
  */
 export async function storeFeedImages(batch: MessageBatch<FeedImageJob>, db: D1Database, deps: PhotoDeps): Promise<void> {
-  // The month's transformations used up: no photo is fetched, each recorded as waiting for the next month (#500).
+  // The month's transformations used up: no new photo is fetched, each recorded as waiting for the next month (#500).
+  // A D1 error here fails the batch, which the queue retries whole: nothing was fetched or written yet (#508).
   const spent = await deps.transforms.spent();
   for (const message of batch.messages) {
     const job = message.body;
@@ -380,7 +381,8 @@ async function deliverFeedPhoto(
   const larger = rendition(url);
   const holdsCopy = !!row.fileSha256 && row.validatedFrom === larger;
   try {
-    if (spent) throw new PhotoFailure('images-month-budget');
+    // A held copy is still rechecked: unchanged bytes cost none, and a changed one is refused by `take` and kept (#508).
+    if (spent && !row.fileSha256) throw new PhotoFailure('images-month-budget');
     if (!larger) await storeFrom(httpsOf(url));
     else
       await storeFrom(larger).catch((e: unknown) => {
@@ -498,7 +500,7 @@ function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T
 }
 
 /**
- * The hourly sweep, bounded to 14 D1 calls for Free D1's 50-query limit:
+ * The hourly sweep, bounded to 11 D1 calls and 3 R2 deletes for Free D1's 50-query limit:
  * 1. Expire `feed_images` rows unnamed for a week past their check (`expiredFeedImages`), keeping
  *    any still named by a snapshot, and durably queue their hashes into `feed_image_deletes`.
  * 2. Drain `feed_image_deletes` rows whose grace window has elapsed (`pendingFeedImageDeletes`),

@@ -68,6 +68,13 @@ function rateLimits() {
   return JSON.stringify(Object.fromEntries(ratelimits.map((r: { name: string; simple: { limit: number; period: number } }) => [r.name, r.simple])));
 }
 
+// DEPLOYED_VARS: each environment's Worker vars, by environment, so a test parses them as the Worker does and a
+// malformed one fails CI, not every queue batch once deployed (#508).
+function deployedVars() {
+  const config = new URL('wrangler.jsonc', import.meta.url).pathname;
+  return JSON.stringify(Object.fromEntries(['dev', 'demo', 'prod'].map((env) => [env, unstable_readConfig({ config, env }, { hideWarnings: true }).vars])));
+}
+
 // FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.
 function fontFiles() {
   const root = new URL('../../', import.meta.url).pathname;
@@ -90,6 +97,7 @@ export const workers = (extra: Record<string, string> = {}) =>
         TEMPLATE_BUILDS: await templateBuilds(),
         FONT_FILES: fontFiles(),
         RATE_LIMITS: rateLimits(),
+        DEPLOYED_VARS: deployedVars(),
         ...extra,
       },
       serviceBindings: { TEMPLATE_CHECK: templateCheck },

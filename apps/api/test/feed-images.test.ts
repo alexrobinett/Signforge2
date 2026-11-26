@@ -998,6 +998,16 @@ describe('budgets, resilience and cleanup', () => {
     await consume(take(), { guards: photos.guards, images, transforms: d1TransformBudget(env.DB, 2, at + 5 * MIN) }, at + 5 * MIN);
     expect(photos.requests).toHaveLength(fetched);
     expect(await row(later!)).toMatchObject({ fileSha256: null, lastError: 'images-month-budget' });
+    // Spent, a held photo is still rechecked: its unchanged bytes cost none, and it keeps its copy (#508).
+    const held = (await row(big!))!;
+    const recheck = at + RECHECK_MS + 10 * MIN;
+    await o.scope.dataSources.update(id, { nextPollAt: recheck, etag: null });
+    await poll({ now: recheck, guards: web({ 'https://month.test/rss': { body: feedOf(1, () => big!) } }).guards });
+    const beforeRecheck = photos.requests.length;
+    await consume(take(), { guards: photos.guards, images, transforms: d1TransformBudget(env.DB, 2, recheck) }, recheck);
+    expect(photos.requests.length).toBeGreaterThan(beforeRecheck);
+    expect(await row(big!)).toMatchObject({ fileSha256: held.fileSha256, lastError: null });
+    expect((await row(big!))!.nextCheckAt).toBeGreaterThan(held.nextCheckAt);
     // A new month starts again.
     const next = Date.UTC(2031, 1, 1);
     await o.scope.dataSources.update(id, { nextPollAt: next, etag: null });
@@ -1030,6 +1040,16 @@ describe('budgets, resilience and cleanup', () => {
       );
     expect(monthlyTransforms({})).toBe(4500);
     expect(monthlyTransforms({ IMAGES_MONTHLY_TRANSFORMS: '2000' })).toBe(2000);
+  });
+
+  it("reads every environment's photo caps and month's ceiling as the Worker does, so a malformed one fails here (#508)", () => {
+    const vars: Record<string, Record<string, string | undefined>> = JSON.parse(env.DEPLOYED_VARS);
+    expect(Object.keys(vars)).toEqual(['dev', 'demo', 'prod']);
+    for (const [name, v] of Object.entries(vars)) {
+      expect(() => photoBudget(v), name).not.toThrow();
+      expect(() => monthlyTransforms(v), name).not.toThrow();
+    }
+    expect(monthlyTransforms(vars.demo!) + monthlyTransforms(vars.prod!)).toBeLessThan(5000);
   });
 
   it('resumes a day later: the 24 hours since a photo was held are what count', async () => {

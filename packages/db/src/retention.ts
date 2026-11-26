@@ -109,7 +109,7 @@ async function deleteInBatches(db: ReturnType<typeof drizzle>, batch: SQL): Prom
  * Each org's feed photos that may expire at `now` (`expiredRow`, ./feed-photos.ts), oldest first,
  * at most `limit`. Rows a snapshot names are excluded before the limit so they cannot starve
  * expiry in other orgs. `feedPhotos.expire` checks each again as it expires it. A named exception
- * to org isolation: the daily sweep reads every org's rows, by the module's rule.
+ * to org isolation: the hourly sweep reads every org's rows, by the module's rule.
  */
 export async function expiredFeedImages(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; url: string }[]> {
   return drizzle(d1).select({ orgId: fi.orgId, url: fi.url }).from(fi).where(expiredRow(now)).orderBy(fi.nextCheckAt).limit(limit).all();

@@ -7,8 +7,8 @@
  * the photos of news feeds' stories that the poller queues (src/data/feed-photos.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
- * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's 01:00 UTC run
- * sweeps unneeded feed photos (src/data/feed-photos.ts), and at 02:00 UTC what an org stores that nothing needs (src/storage.ts).
+ * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's run at half
+ * past each hour sweeps unneeded feed photos (src/data/feed-photos.ts), and at 02:00 UTC what an org stores that nothing needs (src/storage.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.

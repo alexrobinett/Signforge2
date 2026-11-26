@@ -72,7 +72,7 @@
       },
       // Decodes and scales the stories' photos off the Worker's CPU (src/data/feed-photos.ts).
       "images": { "binding": "IMAGES" },
-      // The data-source poller every minute (feed-photo cleanup takes its 01:00 UTC invocation) and the offline alert check every 5;
+      // The data-source poller every minute (feed-photo cleanup takes each hour's :30 invocation, storage cleanup 02:00 UTC's) and the offline alert check every 5;
       // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       // A placeholder id: dev only ever runs locally.
