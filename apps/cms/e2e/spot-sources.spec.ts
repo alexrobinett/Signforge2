@@ -260,10 +260,10 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   const feed = (await tool(page, 'list_data_sources', {})).dataSources.find((d: { name: string }) => d.name === 'Frame desk');
   const { spot } = await tool(page, 'get_spot', { spotId });
-  // The forecast reads only the temperature, so it is a source of its own, not the weather spots' one.
+  // The forecast reads only the temperature, which every weather source asks for: the weather spots' own source (#345).
   const weatherId: string = spot.bindings.temp.dataSourceId;
   expect(weatherId).toMatch(/^weather-4180439-f-mph-/);
-  expect(weatherId).not.toBe((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId);
+  expect(weatherId).toBe((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId);
   expect(spot.bindings).toEqual({ temp: { dataSourceId: weatherId, path: 'current.temperature_2m' }, items: { dataSourceId: feed.id, path: 'items' } });
 
   // Both polls land: each block shows its own source's values, and the stage plays both.

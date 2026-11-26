@@ -466,7 +466,7 @@ export const dataSourceOutput = z.object({
   refreshS: z.number(),
   horizonDays: z.number().nullable(),
   rowsPath: z.string().nullable().describe('A json-table source: the path to its list of objects; null for the whole document'),
-  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. Ignored for other formats"),
+  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. False for every other format"),
   nextPollAt: z.number(),
   failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
   lastError: z
