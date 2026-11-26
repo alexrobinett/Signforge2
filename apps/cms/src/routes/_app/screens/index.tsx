@@ -44,7 +44,7 @@ import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { needingAttention } from '~/lib/groups';
 import { matchesTerms, searchFinds, sectionsBy, termsOf, termsParam, typedTerm, withTerm, type LabelSection, type LabelTerm } from '~/lib/label-filter';
-import type { LabelKey } from '~/lib/labels';
+import { acrossWords, labelsAcross, lonelyValue, type LabelKey } from '~/lib/labels';
 import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
@@ -54,6 +54,7 @@ import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/target
 import { labelKeysQuery, screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
+import { NEXT_PUBLISH } from '~/state/labels';
 import { searchText, selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
@@ -578,7 +579,8 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
  * Only the ticked rows the table shows count, so a filter changed since never acts on hidden ones.
  * The actions wrap, so more fit beside them.
  */
-function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: string[]; groups: GroupView[] }) {
+function SelectionBar({ orgId, selected, groups, screens }: { orgId: string; selected: string[]; groups: GroupView[]; screens: ScreenView[] }) {
+  const openBulkLabels = useAppStore((s) => s.openBulkLabels);
   const busy = useAppStore((s) => s.screens.bulkPending);
   const add = useAppStore((s) => s.addScreensToGroup);
   const remove = useAppStore((s) => s.removeScreensFromGroup);
@@ -619,10 +621,146 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
             ),
         )}
       </div>
+      <Button variant="outline" size="sm" onClick={() => openBulkLabels(orgId, selected)}>
+        Labels…
+      </Button>
+      <BulkLabelsDialog screens={screens} />
       <Button variant="ghost" size="sm" onClick={clear} className="ml-auto">
         <XIcon aria-hidden /> Clear selection
       </Button>
     </section>
+  );
+}
+
+/**
+ * Bulk "Labels…" (#185): one key set to one value on every selected screen, or removed from each, in one
+ * `update_screen_labels`. Each key the selection has is listed with its values across it, so a fix is made from what
+ * is there ("region: north (6), south (2), none (4)").
+ */
+function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
+  const id = useId();
+  const bulk = useAppStore((s) => s.labels.bulk);
+  const chooseBulkKey = useAppStore((s) => s.chooseBulkKey);
+  const chooseBulkMode = useAppStore((s) => s.chooseBulkMode);
+  const typeBulkValue = useAppStore((s) => s.typeBulkValue);
+  const close = useAppStore((s) => s.closeBulkLabels);
+  const apply = useAppStore((s) => s.applyBulkLabels);
+  const keys = useQuery(labelKeysQuery(useOrgId())).data?.keys ?? [];
+  if (!bulk) return null;
+  const across = labelsAcross(screens.filter((s) => bulk.screenIds.includes(s.id)));
+  const key = bulk.key.trim().toLowerCase();
+  const values = keys.find((k) => k.key === key && !k.system)?.values ?? [];
+  // The typo guard, worded for a selection: a new store's value is often new to every screen.
+  const warning = bulk.mode === 'set' && lonelyValue(keys, { key, value: bulk.value }) ? `${bulk.value.trim()}: no screen has this value yet` : undefined;
+  const n = `${bulk.screenIds.length} ${bulk.screenIds.length === 1 ? 'screen' : 'screens'}`;
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Labels on {n}</DialogTitle>
+          <DialogDescription>{NEXT_PUBLISH}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void apply();
+          }}
+        >
+          {across.length > 0 ? (
+            <dl aria-label="Their labels now" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              {across.map((k) => (
+                <div key={k.key} className="contents">
+                  <dt className="font-medium">
+                    <button
+                      type="button"
+                      className="rounded underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      onClick={() => chooseBulkKey(k.key)}
+                    >
+                      {k.key}
+                    </button>
+                  </dt>
+                  <dd className="text-muted-foreground tabular-nums">{acrossWords(k)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-sm text-muted-foreground">None of them has a label yet.</p>
+          )}
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-key`}>Label</Label>
+            <Input
+              id={`${id}-key`}
+              list={`${id}-keys`}
+              value={bulk.key}
+              onChange={(e) => chooseBulkKey(e.target.value)}
+              placeholder="region"
+              maxLength={63}
+              autoComplete="off"
+            />
+            <datalist id={`${id}-keys`}>
+              {keys
+                .filter((k) => !k.system)
+                .map((k) => (
+                  <option key={k.key} value={k.key} />
+                ))}
+            </datalist>
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">On all {n}</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name={`${id}-mode`} className="size-4 accent-primary" checked={bulk.mode === 'set'} onChange={() => chooseBulkMode('set')} />
+              Set it to
+            </label>
+            {bulk.mode === 'set' && (
+              <div className="grid gap-1 pl-6">
+                <Input
+                  aria-label="Value"
+                  list={`${id}-values`}
+                  value={bulk.value}
+                  onChange={(e) => typeBulkValue(e.target.value)}
+                  placeholder="north"
+                  maxLength={63}
+                  autoComplete="off"
+                  aria-describedby={warning ? `${id}-warn` : undefined}
+                />
+                <datalist id={`${id}-values`}>
+                  {values.map((v) => (
+                    <option key={v.value} value={v.value} />
+                  ))}
+                </datalist>
+                {warning && (
+                  <p id={`${id}-warn`} className="text-xs text-status-needs-you-foreground">
+                    {warning}
+                  </p>
+                )}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={bulk.mode === 'remove'}
+                onChange={() => chooseBulkMode('remove')}
+              />
+              Remove it
+            </label>
+          </fieldset>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {bulk.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={bulk.pending}>
+              {bulk.mode === 'set' ? `Set on ${n}` : `Remove from ${n}`}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -711,7 +849,9 @@ function ScreenTable({
     // The checkboxes change the store, so they wait for the page to hydrate (#140).
     <EditorFields>
       <div className="space-y-3">
-        {canManage && selected.length > 0 && <SelectionBar orgId={orgId} selected={selected} groups={groups} />}
+        {canManage && selected.length > 0 && (
+          <SelectionBar orgId={orgId} selected={selected} groups={groups} screens={screens.filter((s) => selected.includes(s.id))} />
+        )}
         <div className="relative overflow-x-auto rounded-xl border bg-card">
           <table className="w-full min-w-[68rem] border-collapse text-sm">
             <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">

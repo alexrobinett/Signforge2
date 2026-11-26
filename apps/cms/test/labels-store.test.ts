@@ -139,3 +139,36 @@ describe('the Screens page’s search and "+ Filter" (review of #601)', () => {
     expect(s.getState().labels.filter?.values).toEqual(['NORTH ']);
   });
 });
+
+describe('bulk "Labels…" on a selection', () => {
+  it('sets one key to one value on every screen in one call, or removes it, and closes', async () => {
+    const s = store();
+    s.getState().openBulkLabels(ORG, ['scr_1', 'scr_2', 'scr_3']);
+    s.getState().chooseBulkKey(' Store ');
+    s.getState().typeBulkValue(' 0142 ');
+    await s.getState().applyBulkLabels();
+    expect(calls).toEqual([{ name: 'update_screen_labels', input: { screenIds: ['scr_1', 'scr_2', 'scr_3'], set: { store: '0142' } } }]);
+    expect(s.getState().labels.bulk).toBeNull();
+
+    s.getState().openBulkLabels(ORG, ['scr_1']);
+    s.getState().chooseBulkKey('store');
+    s.getState().chooseBulkMode('remove');
+    await s.getState().applyBulkLabels();
+    expect(calls[1]).toEqual({ name: 'update_screen_labels', input: { screenIds: ['scr_1'], remove: ['store'] } });
+  });
+
+  it('sends nothing without a key, or a value to set, and keeps a refusal on the dialog', async () => {
+    const s = store();
+    s.getState().openBulkLabels(ORG, ['scr_1']);
+    s.getState().chooseBulkKey('store');
+    await s.getState().applyBulkLabels();
+    expect(calls).toEqual([]);
+    expect(s.getState().labels.bulk?.error).toBe('Choose a label and a value.');
+
+    s.getState().typeBulkValue('0142');
+    replies.push({ status: 409, body: { error: { code: 'conflict', message: 'a screen has at most 32 labels' } } });
+    await s.getState().applyBulkLabels();
+    expect(s.getState().labels.bulk).toMatchObject({ pending: false });
+    expect(s.getState().labels.bulk?.error).toBeTruthy();
+  });
+});
