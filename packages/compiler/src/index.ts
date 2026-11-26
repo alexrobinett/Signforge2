@@ -20,22 +20,18 @@ import {
   validateSpotData,
   type DataSource,
   type Playlist,
-  type ScheduleEntry,
   type ScreenManifest,
   type Sha256,
   type Spot,
   type TemplateManifest,
 } from '@signforge/contract';
 import { chooseBrandKit, DEFAULT_BRAND_COLORS, isBrandColor, tokenName, type BrandChoice } from './brand';
+import { screenSchedule, type TargetedEntry } from './schedule';
 
 export * from './brand';
 export { brandFont, FONTS, fontById, fontFilePath, isCatalogueFontFile, MAX_FONT_FAMILY_BYTES, type CatalogueFont } from './fonts';
 
-/** A schedule entry as the org stores it: its target level plus which group or screen it targets. */
-export type TargetedEntry = ScheduleEntry & {
-  /** The group or screen id for `group` and `screen` entries; unused for `org`. */
-  targetId?: string;
-};
+export { reaches, screenSchedule, type ScheduleScreen, type TargetedEntry } from './schedule';
 
 export interface CompileInput {
   screen: ScreenManifest['screen'];
@@ -147,10 +143,7 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
   // Entries are checked first: one that cannot be placed cannot be said to miss this screen.
   const problems = input.schedule.flatMap((e) => entryProblems(e).map((p) => `schedule entry ${e.id}: ${p}`));
 
-  const targets = (e: TargetedEntry) =>
-    e.target === 'org' || (e.target === 'group' && input.groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId === input.screen.id);
-  // The screen ranks entries by level itself; it never learns which other groups or screens exist.
-  const schedule = input.schedule.filter(targets).map(({ targetId: _t, ...e }) => e);
+  const schedule = screenSchedule(input.schedule, { id: input.screen.id, groups: input.groups });
 
   // Only what this screen's schedule can reach: smaller downloads, and no screen holds another's content.
   const reachable = new Set([input.defaultPlaylist, ...schedule.map((e) => e.playlist)]);
