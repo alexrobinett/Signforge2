@@ -47,7 +47,8 @@ interface HourCount {
 interface OrgAlerts {
   start: number;
   count: number;
-  byMember: Record<string, number>;
+  /** Absent in a record from before #347. */
+  byMember?: Record<string, number>;
 }
 const REFUSALS_KEY = 'refusals';
 const ORG_ALERTS_KEY = 'org_alerts';
@@ -103,8 +104,10 @@ export class AgentGrantObject extends DurableObject<Env> {
     const start = now - (now % HOUR_MS);
     const stored = this.ctx.storage.kv.get<HourCount>(REFUSALS_KEY);
     const hour = stored?.start === start ? stored : { start, count: 0 };
+    // A record from before #347 has no flag: it alerted at its third refusal.
+    const alerted = hour.alerted ?? hour.count >= REFUSALS_TO_ALERT;
     hour.count++;
-    const alert = hour.count >= REFUSALS_TO_ALERT && !hour.alerted;
+    const alert = hour.count >= REFUSALS_TO_ALERT && !alerted;
     if (alert) hour.alerted = true;
     this.ctx.storage.kv.put(REFUSALS_KEY, hour);
     return { alert, refusals: hour.count, hour: hour.start };
@@ -128,9 +131,11 @@ export class AgentGrantObject extends DurableObject<Env> {
     const start = now - (now % HOUR_MS);
     const stored = this.ctx.storage.kv.get<OrgAlerts>(ORG_ALERTS_KEY);
     const hour: OrgAlerts = stored?.start === start ? stored : { start, count: 0, byMember: {} };
-    const mine = hour.byMember[member] ?? 0;
+    // A record from before #347 counted the org alone: its hour has no members yet.
+    const byMember = hour.byMember ?? {};
+    const mine = byMember[member] ?? 0;
     if (hour.count >= ORG_ALERTS_PER_HOUR || mine >= MEMBER_ALERTS_PER_HOUR) return false;
-    this.ctx.storage.kv.put(ORG_ALERTS_KEY, { start, count: hour.count + 1, byMember: { ...hour.byMember, [member]: mine + 1 } });
+    this.ctx.storage.kv.put(ORG_ALERTS_KEY, { start, count: hour.count + 1, byMember: { ...byMember, [member]: mine + 1 } });
     return true;
   }
 

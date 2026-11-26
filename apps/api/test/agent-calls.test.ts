@@ -3,6 +3,7 @@
 // `forbidden` three times in an hour alerts the org once; and each path's cost per call: D1 writes,
 // data points and Durable Object requests. The SQL API cannot be reached from tests: its queries and
 // answers are tested as text and rows here, with a stand-in fetch.
+import { runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentCallLog, callOfRow, callSql, pointOf, rowsOf } from '../src/agents/calls';
@@ -302,6 +303,19 @@ describe("the refusals' cost and the org's cap", () => {
     // The next clock hour starts again.
     vi.setSystemTime(now - (now % HOUR) + 4 * HOUR + 60_000);
     expect(await org.orgAlertDue('m4')).toBe(true);
+  });
+
+  it('reads the hour a record from before #347 counted: an org with no members counted yet, a grant already alerted', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    const hour = now - (now % HOUR) + 6 * HOUR;
+    vi.setSystemTime(hour + 60_000);
+    const org = env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`org:old-${crypto.randomUUID()}`));
+    const grant = env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`agt_old_${crypto.randomUUID()}`));
+    await runInDurableObject(org, (_: unknown, state: DurableObjectState) => state.storage.kv.put('org_alerts', { start: hour, count: 1 }));
+    await runInDurableObject(grant, (_: unknown, state: DurableObjectState) => state.storage.kv.put('refusals', { start: hour, count: 3 }));
+    expect(await org.orgAlertDue('m1')).toBe(true);
+    expect(await grant.refused()).toMatchObject({ alert: false, refusals: 4 });
   });
 
   it("keeps a grant's alert when the org's check fails, and sends it at the next refusal (#347)", async () => {
