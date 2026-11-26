@@ -115,7 +115,7 @@ export function photoDeps(env: Env, now: number): PhotoDeps {
   return { now, blobs: r2PhotoBlobs(env.BLOBS), guards: feedGuards(env, workerFetch), images: env.IMAGES };
 }
 
-/** Photo state for one RSS poll: whether photos are shown on any published spot, and the D1 read token. */
+/** Photo state for one RSS poll: whether anything shows its photos (a screen's desired manifest or a published spot), and the D1 read token. */
 export interface PhotoPoll {
   shown: boolean;
   read: PhotoRead;

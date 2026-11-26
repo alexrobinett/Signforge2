@@ -114,22 +114,22 @@ export function photoRead(row: DataSourceRow, shown: boolean, now: number): Phot
     rowVersion: row.rowVersion,
     generation: row.photoGeneration,
     now,
-    readWhole: shown && (row.photoUrlsJson === null || readFrom(row.photoUrlsJson) === null),
+    readWhole: shown && (row.photoUrlsJson === null || !readWithVersion(row.photoUrlsJson)),
     lastSeen: shown && row.photoUrlsJson ? lastSeenOf(row.photoUrlsJson) : [],
   };
 }
 
 /**
- * The snapshot version a row's `photo_urls_json` was read from (`{ version, stories }`), or null for one written before
- * it said (#481). Every read with photos shown records it, so a row without one may never have been read for photos (a
- * feed that answered 304 since photos were turned on): it is read whole once more, and its photos queued.
+ * Whether a row's `photo_urls_json` says the snapshot version it was read from (`{ version, stories }`, #481). Every read
+ * with photos shown records it, so a row without one may never have been read for photos (a feed that answered 304 since
+ * photos were turned on): it is read whole once more, and its photos queued.
  */
-function readFrom(raw: string): string | null {
+function readWithVersion(raw: string): boolean {
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && 'version' in parsed && typeof parsed.version === 'string' ? parsed.version : null;
+    return !!parsed && typeof parsed === 'object' && 'version' in parsed && typeof parsed.version === 'string';
   } catch {
-    return null;
+    return false;
   }
 }
 

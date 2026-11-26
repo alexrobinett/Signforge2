@@ -5,7 +5,9 @@
  * published spots bind to it by the rule a screen keeps a snapshot by (player-core's
  * `snapshotFit`), and written only when the data changed. Screens get the snapshots on their next
  * sync. A table (`csv`, `json-table`) that lacks a column a published spot maps fails
- * as `missing-column`, whatever else it fills: the person renamed or dropped a column.
+ * as `missing-column`, whatever else it fills: the person renamed or dropped a column. Whether a
+ * news source's photos are shown counts what screens play as well (their desired manifests, an
+ * `sf push`'s too, #481); its fit counts published spots alone, each screen checking its own.
  *
  * A provider source (`format: 'provider'`) is read through its connection's adapter instead
  * (../connectors): the provider's fixed hosts only, with the connection's grant, refreshed
@@ -94,8 +96,10 @@ interface Run {
   photoQueue: PhotoQueue;
   /** Per connection, the grant this run uses (and per connection again, `!` after its id, the one it refreshed after a refusal): shared by its sources. */
   grants: Map<string, Promise<Held>>;
-  /** Cached per-org published bound fields (`sourceId -> BoundField[]`), loaded in `pollInit` once per org per run. */
+  /** Per org, the fields published spots bind to each source (`snapshotFit` and photos), loaded in `pollInit` once per org per run. */
   boundByOrg: Map<string, Map<string, BoundField[]>>;
+  /** Per org, the fields its screens' desired manifests bind (#481): for whether photos are shown, never for fit. */
+  playedByOrg: Map<string, Map<string, BoundField[]>>;
 }
 
 /** A grant, and as it is stored: what a refresh of it is saved over. */
@@ -115,7 +119,7 @@ export async function pollDataSources(
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps; photoQueue?: PhotoQueue } = {},
 ): Promise<void> {
   const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
-  const pass: Run = { env, now, guards, connectors, photoQueue, grants: new Map(), boundByOrg: new Map() };
+  const pass: Run = { env, now, guards, connectors, photoQueue, grants: new Map(), boundByOrg: new Map(), playedByOrg: new Map() };
   // Load each org's claimed sources, snapshot versions, and published bound spots in one D1 batch per org.
   const idsByOrg = new Map<string, string[]>();
   for (const { orgId, id } of claimed) {
@@ -124,21 +128,29 @@ export async function pollDataSources(
     idsByOrg.set(orgId, list);
   }
   const rowsByKey = new Map<string, { org: OrgScope; source: DataSourceRow; snapshotVersion: string | null }>();
-  await Promise.all(
+  // One org's load failing (D1, or R2 for its manifests) skips that org's sources this run, never another org's: they stay
+  // leased, and are polled again once the lease runs out. Never as "photos not shown", which would save a snapshot without
+  // the photos a screen holds.
+  const loads = await Promise.allSettled(
     [...idsByOrg].map(async ([orgId, ids]) => {
       const org = scoped(env.DB, orgId);
       const init = await org.dataSources.pollInit(ids);
-      for (const item of init.rows) {
-        rowsByKey.set(`${orgId}:${item.source.id}`, { org, ...item });
-      }
       const bound = computeBoundFields(init.spots, init.locales);
       // What screens play counts too (#481): a manifest `sf push` uploaded has no published spot behind it. Read from R2
-      // only when a claimed source's photos are on and no published spot shows them, as sync and the blob route do.
+      // only when a claimed source's photos are on and no published spot shows them, as sync and the blob route read them.
       const unshown = init.rows.some(({ source }) => source.format === 'rss' && source.photos && !hasBoundListImage(bound.get(source.id) ?? []));
-      if (unshown) await addManifestBound(env.BLOBS, orgId, init.manifests, bound);
+      const played = new Map<string, BoundField[]>();
+      if (unshown) {
+        const summaries = await Promise.all(init.manifests.map((m) => manifestSummary(env.BLOBS, orgId, m.screenId, m.manifestId)));
+        for (const summary of summaries)
+          for (const [sourceId, fields] of summary?.bound ?? []) played.set(sourceId, [...(played.get(sourceId) ?? []), ...fields]);
+      }
       pass.boundByOrg.set(orgId, bound);
+      pass.playedByOrg.set(orgId, played);
+      for (const item of init.rows) rowsByKey.set(`${orgId}:${item.source.id}`, { org, ...item });
     }),
   );
+  for (const l of loads) if (l.status === 'rejected') console.error("[poller] an org's sources could not be loaded", l.reason);
   const hosts = new Map<string, Promise<void>[]>();
   const one = async ({ orgId, id }: { orgId: string; id: string }) => {
     const loaded = rowsByKey.get(`${orgId}:${id}`);
@@ -167,7 +179,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
   const { now } = run;
   const nextPollAt = now + row.refreshS * 1000;
   const bound = run.boundByOrg.get(org.orgId)?.get(row.id) ?? [];
-  const photo = startPhotoPoll(row, bound, now);
+  const photo = startPhotoPoll(row, [...bound, ...(run.playedByOrg.get(org.orgId)?.get(row.id) ?? [])], now);
   try {
     if (!locator) throw new PollFailure('sealed-url');
     const ok = { nextPollAt, failures: 0, lastError: null };
@@ -330,21 +342,6 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizon
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-
-/**
- * Adds to `bound` what the screens' desired manifests bind, each manifest read once (its id is its body's hash) and
- * kept for the isolate, as the device routes read them (../device/manifests.ts).
- */
-async function addManifestBound(
-  bucket: R2Bucket,
-  orgId: string,
-  manifests: readonly { screenId: string; manifestId: string }[],
-  bound: Map<string, BoundField[]>,
-): Promise<void> {
-  const one = new Map(manifests.map((m) => [m.manifestId, m.screenId]));
-  const read = await Promise.all([...one].map(([manifestId, screenId]) => manifestSummary(bucket, orgId, screenId, manifestId)));
-  for (const summary of read) for (const [sourceId, fields] of summary?.bound ?? []) bound.set(sourceId, [...(bound.get(sourceId) ?? []), ...fields]);
-}
 
 /**
  * The fields published spots bind to each source in an org (drafts do not count: screens play what

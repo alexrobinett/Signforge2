@@ -804,9 +804,62 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss"');
   });
 
+  it("decides fit by published spots alone, whatever else the run claims: a pushed manifest's fields are for photos only", async () => {
+    const org = await seedOrg(env.DB, `push-481-fit-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://pushed-fit.test/rss';
+    const rss = await news(feed, { org, bind: false });
+    const jsonUrl = 'https://pushed-fit.test/data.json';
+    const json = `json-${++n}`;
+    await org.scope.dataSources.insert({
+      id: json,
+      name: json,
+      format: 'json',
+      urlEncrypted: await feedUrlSealer(env).seal({ orgId: org.orgId, id: json }, jsonUrl),
+      refreshS: 300,
+      nextPollAt: NOW,
+    });
+    // Both bound by the pushed manifest's stories; the JSON has none, which no published spot asks of it.
+    await pushed(org, [rss, json]);
+    await poll({ now: NOW, guards: web({ [feed]: { body: feedOf(1, () => undefined) }, [jsonUrl]: { body: '{"other":1}' } }).guards });
+    expect(await org.scope.dataSources.get(json)).toMatchObject({ lastError: null, failures: 0 });
+    expect(await org.scope.dataSources.snapshot(json)).toMatchObject({ dataJson: '{"other":1}' });
+  });
+
+  it("skips only the org whose manifests cannot be read, never another org's sources, and saves none as if photos were off", async () => {
+    const broken = await seedOrg(env.DB, `push-481-r2-${++n}`);
+    extraPollOrgs.add(broken.orgId);
+    await broken.scope.dataSources.update(broken.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const brokenFeed = 'https://pushed-r2.test/rss';
+    const theirs = await news(brokenFeed, { org: broken, bind: false });
+    await pushed(broken, [theirs]);
+    const fine = 'https://unbroken-r2.test/rss';
+    const ours = await news(fine);
+    const blobs = new Proxy(env.BLOBS, {
+      get(target, prop) {
+        if (prop === 'get') return (key: string) => (key.startsWith(`o/${broken.orgId}/`) ? Promise.reject(new Error('R2 is down')) : target.get(key));
+        const v = Reflect.get(target, prop, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const feeds = web({
+      [brokenFeed]: { body: feedOf(1, () => 'https://cdn.pushed-r2.test/0.jpg') },
+      [fine]: { body: feedOf(1, () => 'https://cdn.unbroken-r2.test/0.jpg') },
+    });
+    await poll({ now: NOW, guards: feeds.guards }, { ...env, BLOBS: blobs });
+    logged.mockRestore();
+    expect(feeds.requests.map((r) => new URL(r.url).host)).toEqual(['unbroken-r2.test']);
+    expect(await o.scope.dataSources.snapshot(ours)).toBeDefined();
+    expect(await broken.scope.dataSources.snapshot(theirs)).toBeUndefined();
+  });
+
   it("keeps a poll of 5 sources a pushed manifest shows under the Free plan's D1 limits", async () => {
     const org = await seedOrg(env.DB, `push-481-budget-${++n}`);
     extraPollOrgs.add(org.orgId);
+    // Only the five: the seeded org's own source is not due.
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
     const answers: Record<string, Answer> = {};
     const ids: string[] = [];
     for (let s = 0; s < 5; s++) {
@@ -818,8 +871,8 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     const counter = countingDb(env.DB);
     await poll({ now: NOW, guards: web(answers).guards }, { ...env, DB: counter.db });
     // Measured: pollInit is one batch, the screens' manifests a statement in it; the manifests themselves are R2 reads, not D1.
-    // 13 calls is what D1 counts against an invocation's 50.
-    expect(counter.counts()).toEqual({ apiCalls: 13, statements: 38 });
+    // 12 calls is what D1 counts against an invocation's 50.
+    expect(counter.counts()).toEqual({ apiCalls: 12, statements: 36 });
     expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(NEW_PER_ORG_PER_DAY);
   });
 });
