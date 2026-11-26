@@ -10,7 +10,7 @@ import { published } from '@signforge/db';
 import { z } from 'zod';
 import { sha256Hex } from './dispatch';
 import { outputs } from './outputs';
-import { dryPublish, readTargets, type OrgGraph } from './publishing';
+import { dryPublish, groupMoves, readTargets, type OrgGraph } from './publishing';
 import { defineTool } from './tool';
 
 /** A graph's published schedule and playlists, each parsed once (review of #620): what a screen plays, by entry and playlist. */
@@ -89,21 +89,9 @@ export const previewPublish = defineTool({
       if (!reasons.length) reasons.push('compiled again: a brand kit, template, data source or its settings changed');
       return { screenId, name: names.get(screenId) ?? screenId, reasons };
     });
-    // Each group's joins and leaves against the last publish's record, only of screens this publish would change: a
-    // move no screen plays differently is not news, and a publish that changes nothing records nothing anew, so it would
-    // otherwise show in every later preview (review of #620). A group deleted since is left by all it had.
-    const moving = new Set(changed.map((s) => s.screenId));
-    const ids = [...new Set([...graph.groups.map((g) => g.id), ...(before ?? []).map((g) => g.groupId)])];
-    const groups =
-      before === null
-        ? []
-        : ids.flatMap((id) => {
-            const members = new Set([...graph.groupsOf].flatMap(([screen, gs]) => (gs.includes(id) ? [screen] : [])));
-            const had = new Set(before.find((x) => x.groupId === id)?.screenIds);
-            const joined = [...members].filter((x) => !had.has(x) && moving.has(x)).toSorted();
-            const left = [...had].filter((x) => !members.has(x) && moving.has(x)).toSorted();
-            return joined.length || left.length ? [{ groupId: id, name: groupName.get(id) ?? id, joined, left }] : [];
-          });
+    // Joins and leaves of the screens it would change only: a publish that changes nothing records nothing anew, so a
+    // move no screen plays differently would otherwise show in every later preview (review of #620).
+    const groups = before === null ? [] : groupMoves(before, graph, new Set(changed.map((s) => s.screenId)));
     return {
       screens: screens.toSorted((a, b) => a.name.localeCompare(b.name) || (a.screenId < b.screenId ? -1 : 1)),
       unchanged: result.screens.filter((s) => s.manifest && s.manifest.id === s.current).length,

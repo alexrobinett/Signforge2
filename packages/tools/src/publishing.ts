@@ -764,3 +764,19 @@ export function readTargets(json: string): GroupReach[] {
     .map((g) => ({ groupId: g.id, name: g.name, rule: g.rule, screenIds: g.members.map((i) => record.screens[i]!) }))
     .toSorted((a, b) => a.name.localeCompare(b.name) || (a.groupId < b.groupId ? -1 : 1));
 }
+
+/**
+ * Each group's joins and leaves in `graph` against a publish's record of it, of the screens in `moving` only (#187): a
+ * move no screen plays differently is not news. A group deleted since is left by all it had. Names as `graph` has them.
+ */
+export function groupMoves(before: readonly GroupReach[], graph: Pick<OrgGraph, 'groups' | 'groupsOf'>, moving: ReadonlySet<string>) {
+  const names = new Map([...before.map((g) => [g.groupId, g.name] as const), ...graph.groups.map((g) => [g.id, g.name] as const)]);
+  const ids = [...new Set([...graph.groups.map((g) => g.id), ...before.map((g) => g.groupId)])];
+  return ids.flatMap((id) => {
+    const members = new Set([...graph.groupsOf].flatMap(([screen, gs]) => (gs.includes(id) ? [screen] : [])));
+    const had = new Set(before.find((x) => x.groupId === id)?.screenIds);
+    const joined = [...members].filter((x) => !had.has(x) && moving.has(x)).toSorted();
+    const left = [...had].filter((x) => !members.has(x) && moving.has(x)).toSorted();
+    return joined.length || left.length ? [{ groupId: id, name: names.get(id) ?? id, joined, left }] : [];
+  });
+}
