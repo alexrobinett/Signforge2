@@ -45,7 +45,7 @@ export function PairingCodeInput({
   }
 
   return (
-    <fieldset aria-labelledby={labelledBy} aria-describedby={describedBy} className="flex items-center gap-2">
+    <fieldset aria-labelledby={labelledBy} aria-describedby={describedBy} className="flex w-full items-center gap-2">
       {chars.map((c, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the boxes are fixed positions in the code.
         <span key={i} className="contents">
@@ -80,7 +80,8 @@ export function PairingCodeInput({
               else if (e.key === 'ArrowRight') focus(i + 1);
             }}
             className={cn(
-              'h-15 w-11 rounded-lg border border-input bg-card text-center font-mono text-2xl font-semibold uppercase shadow-xs outline-none sm:w-13',
+              // Each box shares the row, up to its own width: at a phone's width six of them fit the card, none clipped.
+              'h-15 max-w-11 min-w-0 flex-1 rounded-lg border border-input bg-card text-center font-mono text-2xl font-semibold uppercase shadow-xs outline-none sm:max-w-13',
               'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive',
             )}
           />
