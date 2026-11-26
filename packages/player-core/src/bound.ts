@@ -51,6 +51,15 @@ export function manifestBoundFields(m: ScreenManifest): Map<string, BoundField[]
   return boundFields(spots, [screenLocale(m)]);
 }
 
+/**
+ * The sources `m` shows photos for: those a list bound to them declares an image for
+ * (`hasBoundListImage`), the rule sync and the device blob route serve feed photos by. Recorded
+ * beside a screen's desired manifest when it becomes desired, for the feed poller (#486).
+ */
+export function manifestPhotoSources(m: ScreenManifest): string[] {
+  return [...manifestBoundFields(m)].flatMap(([source, bound]) => (hasBoundListImage(bound) ? [source] : [])).sort();
+}
+
 /** Whether a snapshot's data may replace its source's last good one (`refused` null), and what is wrong with it. */
 export function snapshotFit(bound: readonly BoundField[], data: unknown): { refused: 'unfit' | 'missing-column' | null; problems: string[] } {
   const problems: string[] = [];

@@ -101,8 +101,8 @@ interface Run {
   grants: Map<string, Promise<Held>>;
   /** Per org, the fields published spots bind to each source (`snapshotFit` and photos), loaded in `pollInit` once per org per run. */
   boundByOrg: Map<string, Map<string, BoundField[]>>;
-  /** Per org, the fields its screens' desired manifests bind (#481): for whether photos are shown, never for fit. */
-  playedByOrg: Map<string, Map<string, BoundField[]>>;
+  /** Per org, the sources its screens' desired manifests show photos for (#481, #486): for whether photos are shown, never for fit. */
+  playedByOrg: Map<string, Set<string>>;
 }
 
 /** A grant, and as it is stored: what a refresh of it is saved over. */
@@ -151,14 +151,18 @@ export async function pollDataSources(
       const org = scoped(env.DB, orgId);
       const init = await org.dataSources.pollInit(ids);
       const bound = computeBoundFields(init.spots, init.locales);
-      // What screens play counts too (#481): a manifest `sf push` uploaded has no published spot behind it. Read from R2
-      // only when a claimed source's photos are on and no published spot shows them, as sync and the blob route read them.
-      const unshown = init.rows.some(({ source }) => source.format === 'rss' && source.photos && !hasBoundListImage(bound.get(source.id) ?? []));
-      const played = new Map<string, BoundField[]>();
-      if (unshown) {
-        const summaries = await Promise.all(init.manifests.map((m) => manifestSummary(env.BLOBS, orgId, m.screenId, m.manifestId)));
-        for (const summary of summaries)
-          for (const [sourceId, fields] of summary?.bound ?? []) played.set(sourceId, [...(played.get(sourceId) ?? []), ...fields]);
+      // What screens play counts too (#481): a manifest `sf push` uploaded has no published spot behind it. Each desired
+      // manifest's photo sources were recorded when it became desired (#486). Only a screen whose are not known (made
+      // desired before migration 0050, or by a path that records none) has its manifest read from R2, and only when a
+      // claimed source's photos are on and nothing known shows them, by the rule sync and the blob route serve them by.
+      const played = new Set(init.manifests.flatMap((m) => m.photoSources ?? []));
+      const unknown = init.manifests.filter((m) => m.photoSources === null);
+      const unshown = init.rows.some(
+        ({ source }) => source.format === 'rss' && source.photos && !played.has(source.id) && !hasBoundListImage(bound.get(source.id) ?? []),
+      );
+      if (unshown && unknown.length) {
+        const summaries = await Promise.all(unknown.map((m) => manifestSummary(env.BLOBS, orgId, m.screenId, m.manifestId)));
+        for (const summary of summaries) for (const [sourceId, fields] of summary?.bound ?? []) if (hasBoundListImage(fields)) played.add(sourceId);
       }
       pass.boundByOrg.set(orgId, bound);
       pass.playedByOrg.set(orgId, played);
@@ -194,7 +198,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
   const { now } = run;
   const nextPollAt = now + row.refreshS * 1000;
   const bound = run.boundByOrg.get(org.orgId)?.get(row.id) ?? [];
-  const photo = startPhotoPoll(row, [...bound, ...(run.playedByOrg.get(org.orgId)?.get(row.id) ?? [])], now);
+  const photo = startPhotoPoll(row, hasBoundListImage(bound) || !!run.playedByOrg.get(org.orgId)?.has(row.id), now);
   try {
     if (!locator) throw new PollFailure('sealed-url');
     const ok = { nextPollAt, failures: 0, lastError: null };

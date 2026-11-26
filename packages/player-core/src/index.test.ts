@@ -17,6 +17,7 @@ import {
   boundImageHashes,
   hasBoundListImage,
   manifestBoundFields,
+  manifestPhotoSources,
   manifestSnapshotFiles,
   snapshotFit,
   spotFiles,
@@ -676,6 +677,9 @@ describe('files', () => {
     });
     const bound = manifestBoundFields(m).get('feed') ?? [];
     expect(hasBoundListImage(bound)).toBe(true);
+    // What the feed poller is told the manifest shows photos for (#486); a manifest with no list image shows none.
+    expect(manifestPhotoSources(m)).toEqual(['feed']);
+    expect(manifestPhotoSources(manifest())).toEqual([]);
     const data = {
       items: [
         { title: 'One', image: { file: f1, thumb: t1 } },

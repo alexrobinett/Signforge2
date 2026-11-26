@@ -379,6 +379,18 @@ function manifestReport(observedAt: number | undefined, arrivedAt: number) {
   return { at, takes: `(reported_manifest_at IS NULL OR ? ${op} reported_manifest_at)`, takesArgs: [at] };
 }
 
+/**
+ * The sources a screen's desired manifest shows photos for, as `stage.setDesiredManifest` recorded them (#486), or
+ * null when not known: never recorded, recorded for another manifest (one made desired by a path that records
+ * none, or a Worker from before it).
+ */
+function photoSourcesOf(json: string | null, manifestId: string): string[] | null {
+  if (!json) return null;
+  // Written by `stage.setDesiredManifest` alone.
+  const recorded: { manifest: string; sources: string[] } = JSON.parse(json);
+  return recorded.manifest === manifestId ? recorded.sources : null;
+}
+
 /** What one screen sync writes (`screens.sync`). Hours are UTC hour starts in ms. */
 export interface SyncWrite {
   at: number;
@@ -803,8 +815,12 @@ export function scoped(d1: D1Database, orgId: string) {
               : 0;
           return { row: undefined, writes: [staleGuard(db, orgId, 'screens', 0, sql`${now} = ${want}`, stale)] };
         },
-        /** As `setDesiredManifest`, staged. Stages nothing for a screen the org does not have. */
-        setDesiredManifest: (screenId: string, manifestId: string): Staged => {
+        /**
+         * As `setDesiredManifest`, staged, with the sources the manifest shows photos for (`manifestPhotoSources`,
+         * #486), or null when they could not be worked out (the feed poller then reads the manifest). Stages nothing
+         * for a screen the org does not have.
+         */
+        setDesiredManifest: (screenId: string, manifestId: string, photoSources: readonly string[] | null): Staged => {
           const sc = s.screens;
           return staged(
             undefined,
@@ -813,6 +829,7 @@ export function scoped(d1: D1Database, orgId: string) {
               .set({
                 previousManifestId: sql`CASE WHEN ${sc.desiredManifestId} IS ${manifestId} THEN ${sc.previousManifestId} ELSE ${sc.desiredManifestId} END`,
                 desiredManifestId: manifestId,
+                desiredPhotoSourcesJson: photoSources && JSON.stringify({ manifest: manifestId, sources: photoSources }),
               })
               .where(and(eq(sc.orgId, orgId), eq(sc.id, screenId))),
           );
@@ -2032,7 +2049,7 @@ export function scoped(d1: D1Database, orgId: string) {
             .leftJoin(tv, sql`${tv.id} = json_extract(${sp.publishedJson}, '$.templateVersionId') AND (${tv.orgId} IS NULL OR ${tv.orgId} = ${sp.orgId})`)
             .where(and(eq(sp.orgId, orgId), isNotNull(sp.publishedJson))),
           db
-            .select({ screenId: s.screens.id, manifestId: s.screens.desiredManifestId })
+            .select({ screenId: s.screens.id, manifestId: s.screens.desiredManifestId, photoSourcesJson: s.screens.desiredPhotoSourcesJson })
             .from(s.screens)
             .where(and(eq(s.screens.orgId, orgId), isNotNull(s.screens.desiredManifestId))),
           db.selectDistinct({ locale: s.screens.locale }).from(s.screens).where(eq(s.screens.orgId, orgId)),
@@ -2041,7 +2058,9 @@ export function scoped(d1: D1Database, orgId: string) {
         return {
           rows: rows.map((r) => ({ source: r.source, snapshotVersion: r.snapshotVersion ?? null })),
           spots: spots.filter((r): r is { id: string; publishedJson: string; manifestJson: string | null } => r.publishedJson !== null),
-          manifests: manifests.flatMap((r) => (r.manifestId === null ? [] : [{ screenId: r.screenId, manifestId: r.manifestId }])),
+          manifests: manifests.flatMap((r) =>
+            r.manifestId === null ? [] : [{ screenId: r.screenId, manifestId: r.manifestId, photoSources: photoSourcesOf(r.photoSourcesJson, r.manifestId) }],
+          ),
           locales: screenLocales.length ? screenLocales.map((r) => r.locale) : [settings[0]?.locale ?? null],
         };
       },

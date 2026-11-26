@@ -72,7 +72,7 @@ async function publish(org: OrgScope) {
   const result = await publishOrg(org, opts);
   await org.commit([
     ...result.writes,
-    ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+    ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id, null).writes : [])),
   ]);
   return result;
 }

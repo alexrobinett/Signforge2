@@ -40,7 +40,6 @@ import {
 } from '@signforge/db';
 import { rendition, type ParsedNews } from '@signforge/feeds';
 import { readImageInfo } from '@signforge/media/image-info';
-import { type BoundField, hasBoundListImage } from '@signforge/player-core';
 import { workerFetch } from '../connectors';
 import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedImageFetch } from './fetch';
 
@@ -199,14 +198,15 @@ export interface PhotoPlan {
 }
 
 /**
- * Start the photo half of a poll: only RSS sources take a read token and check whether anything shows photos, by the
- * rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose rows
- * declare an `image` property, in a screen's desired manifest (a CMS publish's or an `sf push`'s, #481) or a published
- * spot. A source bound only by text-only templates (News 1.4.1, Info frame's crawl) does no photo work.
+ * Start the photo half of a poll: only RSS sources take a read token. `shownBy`: whether anything shows its photos, by
+ * the rule sync and the device blob route serve them by (`hasBoundListImage`, #196): a list bound to the feed whose rows
+ * declare an `image` property, in a screen's desired manifest (a CMS publish's or an `sf push`'s, #481, recorded when
+ * it became desired, #486) or a published spot. A source bound only by text-only templates (News 1.4.1, Info frame's
+ * crawl) does no photo work.
  */
-export function startPhotoPoll(row: DataSourceRow, bound: readonly BoundField[], now: number): PhotoPoll | undefined {
+export function startPhotoPoll(row: DataSourceRow, shownBy: boolean, now: number): PhotoPoll | undefined {
   if (row.format !== 'rss') return undefined;
-  const shown = row.photos && hasBoundListImage(bound);
+  const shown = row.photos && shownBy;
   return { shown, read: photoRead(row, shown, now) };
 }
 
