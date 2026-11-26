@@ -739,6 +739,20 @@ describe('confirmation cards (#269)', () => {
     expect((await s.member.post('/api/agent/chat', card.body)).status).toBe(409);
   });
 
+  it.for([
+    ['no target', (c: Record<string, unknown>) => delete c.target, /publish needs target/],
+    ['org with a screenId', (c: Record<string, unknown>) => Object.assign(c, { screenId: 'scr_lobby' }), /give groupId for a group entry/],
+    ['a scheduleEntryId', (c: Record<string, unknown>) => Object.assign(c, { scheduleEntryId: 'sch_other' }), /scheduleEntryId is for end/],
+  ] as const)("makes no card of a takeover its tool's rules refuse, %s, and tells the model why (review of #553)", async ([, change, said]) => {
+    const s = await takeover();
+    change(s.called);
+    const all = await raw(await s.ask('q'));
+    expect(all.find((e) => e.name === CHAT_EVENTS.confirm)).toBeUndefined();
+    const told = s.model.asked[1].messages.at(-1).content[0];
+    expect(told).toMatchObject({ type: 'tool_result', is_error: true });
+    expect(JSON.stringify(told.content)).toMatch(said);
+  });
+
   it('refuses, unread, a press that carries a call or a resume of its own: the card stays, and pressed as shown it runs', async () => {
     const s = await takeover();
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
@@ -1237,7 +1251,7 @@ describe('confirmation cards (#269)', () => {
       const row = (await s.scope.spots.get(spot.id))!;
       expect((await s.owner.tool('save_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
       expect((await s.owner.tool('publish', {})).status).toBe(200);
-      await refusedPress(s, body, 'takeover', /its playlist, or a spot of it, was published again since it was shown/);
+      await refusedPress(s, body, 'takeover', /Storm closure, or a spot of it, was published again since it was shown/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
     });
   });

@@ -7,7 +7,8 @@ import { seedOrganization, testScope } from '@signforge/db/testing';
 import { resolvePlaylist } from '@signforge/player-core';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dispatch, manifestKey, registry } from '../src';
+import type { OrgScope } from '@signforge/db';
+import { type Caller, dispatch, manifestKey, registry } from '../src';
 import { editorCalls, ok, racing } from './calls';
 import { memberOf } from './member';
 
@@ -449,6 +450,32 @@ describe('schedule entries', () => {
   });
 });
 
+/**
+ * `caller` whose org runs `before` once, the first time `repo`'s `method` (its `stage`'s, with `staged`) is called: a
+ * change landing at that point of a call, between two of its reads, whatever the machine's speed.
+ */
+function beforeFirst(caller: Caller, repo: 'scheduleEntries', method: string, before: () => Promise<unknown>, staged = false): Caller {
+  const org = caller.org as OrgScope;
+  const rows = org[repo];
+  const target: Record<string, unknown> = staged ? rows.stage : rows;
+  let done = false;
+  const hooked = new Proxy(target, {
+    get: (t, k) => {
+      const real = Reflect.get(t, k);
+      if (k !== method || typeof real !== 'function') return real;
+      return async (...args: unknown[]) => {
+        if (!done) {
+          done = true;
+          await before();
+        }
+        return Reflect.apply(real, t, args);
+      };
+    },
+  });
+  const repoOf = staged ? new Proxy(rows, { get: (t, k) => (k === 'stage' ? hooked : Reflect.get(t, k)) }) : hooked;
+  return { ...caller, org: new Proxy(org, { get: (t, k) => (k === repo ? repoOf : Reflect.get(t, k)) }) };
+}
+
 describe("a takeover's or a delete's card, held to the commit (#408)", () => {
   afterEach(() => vi.useRealTimers());
   const start = (flash: string, more: Record<string, unknown> = {}) => ({
@@ -476,6 +503,49 @@ describe("a takeover's or a delete's card, held to the commit (#408)", () => {
     expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: null });
   });
 
+  it("holds an end to the version shown between the tool's read and the publish's (review of #553)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash } = await setup('card-end-window');
+    const made = entryOf(await ok(call('takeover', start(flash))));
+    // Edited after the tool read the takeover and before the publish reads the org's entries.
+    const edited = beforeFirst(memberOf(org, 'editor'), 'scheduleEntries', 'list', () =>
+      ok(call('save_schedule_entry', { scheduleEntryId: made.id, endsAt: '2026-11-17T13:00:00Z', ifVersion: made.version })),
+    );
+    expect(await dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: made.id, ifVersion: made.version }, edited)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'the takeover of Flash has changed since it was read',
+    });
+    expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: null });
+  });
+
+  it('checks what a takeover plays on the read its publish uses: a publish between the check and the batch refuses it (review of #553)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash, still } = await setup('card-plays-window');
+    const playlist = (await org.playlists.get(flash))!;
+    const spot = (await org.spots.get(still))!;
+    const plays = { playlist: playlist.publishedVersion, spots: { [still]: spot.publishedVersion } };
+    // Published after the tool checked what it plays and before the takeover is staged.
+    const republished = beforeFirst(
+      memberOf(org, 'editor'),
+      'scheduleEntries',
+      'insert',
+      async () => {
+        await ok(call('save_spot', { spotId: still, durationMs: 7000, ifVersion: spot.rowVersion }));
+        await ok(call('publish', {}));
+      },
+      true,
+    );
+    expect(await dispatch(registry, 'takeover', start(flash, { ifPlays: plays }), republished)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'Flash, or a spot of it, was published again since it was shown',
+    });
+    expect((await org.scheduleEntries.list()).filter((e) => e.endsAt !== null)).toEqual([]);
+  });
+
   it('deletes a playlist only at the version shown: one renamed just before the batch is refused and kept', async () => {
     const { org, call, breakfast } = await setup('card-delete');
     const row = (await org.playlists.get(breakfast))!;
@@ -483,8 +553,16 @@ describe("a takeover's or a delete's card, held to the commit (#408)", () => {
     expect(await dispatch(registry, 'delete', { type: 'playlist', id: breakfast, ifVersion: row.rowVersion }, raced)).toMatchObject({
       ok: false,
       error: 'conflict',
+      message: 'the playlist Brunch has changed since it was read',
     });
     expect(await org.playlists.get(breakfast)).toMatchObject({ name: 'Brunch' });
+    // A takeover of a playlist deleted since its card says so, not that it was published again.
+    await ok(call('delete', { type: 'playlist', id: breakfast }));
+    expect(await call('takeover', start(breakfast, { ifPlays: { playlist: 1, spots: {} } }))).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'its playlist was deleted since it was shown',
+    });
   });
 
   it('takes over only the screens shown: a member or a screen added just before the batch refuses it, making nothing', async () => {

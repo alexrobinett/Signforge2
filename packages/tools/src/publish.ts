@@ -372,6 +372,22 @@ const cardGuards = {
     .describe("publish: its playlist's and each of its spots' published version (null: never); refused with a conflict if one moved since"),
 };
 
+const takeoverShape = z.strictObject({ ...takeoverInput, ...cardGuards });
+
+/** What each action needs and refuses, on the tool's input and on the one it is listed. */
+function takeoverRules(v: Partial<z.output<typeof takeoverShape>>, ctx: z.RefinementCtx) {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+  if (v.action === 'end') {
+    if (v.scheduleEntryId === undefined) issue('scheduleEntryId', 'end needs the takeover: scheduleEntryId');
+    for (const k of PUBLISH_ONLY) if (v[k] !== undefined) issue(k, `${k} is for publish: end takes scheduleEntryId alone`);
+    return;
+  }
+  if (v.scheduleEntryId !== undefined) issue('scheduleEntryId', 'publish makes a new takeover: scheduleEntryId is for end');
+  if (v.ifVersion !== undefined) issue('ifVersion', 'publish makes a new takeover: ifVersion is for end');
+  for (const k of ['playlistId', 'target', 'endsAt'] as const) if (v[k] === undefined) issue(k, `publish needs ${k}`);
+  if (!aimed(v)) issue('target', AIMED);
+}
+
 /** The same versions by id, whatever their order. */
 const sameVersions = (a: Readonly<Record<string, number | null>>, b: Readonly<Record<string, number | null>>) =>
   Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => Object.hasOwn(b, k) && b[k] === v);
@@ -384,19 +400,9 @@ const takeover = defineTool({
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: z.strictObject({ ...takeoverInput, ...cardGuards }).superRefine((v, ctx) => {
-    const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
-    if (v.action === 'end') {
-      if (v.scheduleEntryId === undefined) issue('scheduleEntryId', 'end needs the takeover: scheduleEntryId');
-      for (const k of PUBLISH_ONLY) if (v[k] !== undefined) issue(k, `${k} is for publish: end takes scheduleEntryId alone`);
-      return;
-    }
-    if (v.scheduleEntryId !== undefined) issue('scheduleEntryId', 'publish makes a new takeover: scheduleEntryId is for end');
-    if (v.ifVersion !== undefined) issue('ifVersion', 'publish makes a new takeover: ifVersion is for end');
-    for (const k of ['playlistId', 'target', 'endsAt'] as const) if (v[k] === undefined) issue(k, `publish needs ${k}`);
-    if (!aimed(v)) issue('target', AIMED);
-  }),
-  listedInput: () => z.strictObject(takeoverInput),
+  input: takeoverShape.superRefine(takeoverRules),
+  // The same rules: the drawer checks the model's call against this, and a call they refuse is no card (review of #553).
+  listedInput: () => z.strictObject(takeoverInput).superRefine(takeoverRules),
   output: outputs.takeover,
   example: { action: 'publish', playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
   // A refused press has no output (`refusedPress`): no target then, for a new one.
@@ -413,11 +419,13 @@ const takeover = defineTool({
       if (!row || row.endsAt === null) throw notFound('takeover', entryId);
       // At the version read, held to the commit: the publish's own removal is guarded at the version it reads, later.
       if (input.ifVersion !== undefined) {
-        if (row.rowVersion !== input.ifVersion)
-          throw new ToolError('conflict', `takeover ${row.id} has changed since it was read; it is now version ${row.rowVersion}`, {
+        if (row.rowVersion !== input.ifVersion) {
+          const playlist = await org.playlists.get(row.playlistId);
+          throw new ToolError('conflict', `the takeover of ${playlist?.name ?? 'its playlist'} has changed since it was read`, {
             id: row.id,
             version: row.rowVersion,
           });
+        }
         write(org.scheduleEntries.stage.unchanged(row));
       }
       return runPublish(ctx, [], [row.id]);
@@ -429,10 +437,11 @@ const takeover = defineTool({
     const read = input.ifReach || input.ifPlays ? await loadOrg(org) : undefined;
     if (read && input.ifPlays) {
       const playlist = read.playlists.find((p) => p.id === fields.playlistId);
-      const items = (playlist && published(playlist)?.items) ?? read.items.get(fields.playlistId) ?? [];
+      if (!playlist) throw new ToolError('conflict', 'its playlist was deleted since it was shown');
+      const items = published(playlist)?.items ?? read.items.get(fields.playlistId) ?? [];
       const spots = Object.fromEntries(read.spots.filter((s) => items.includes(s.id)).map((s) => [s.id, s.publishedVersion]));
-      if ((playlist?.publishedVersion ?? null) !== input.ifPlays.playlist || !sameVersions(spots, input.ifPlays.spots))
-        throw new ToolError('conflict', 'its playlist, or a spot of it, was published again since it was shown: ask again');
+      if (playlist.publishedVersion !== input.ifPlays.playlist || !sameVersions(spots, input.ifPlays.spots))
+        throw new ToolError('conflict', `${playlist.name}, or a spot of it, was published again since it was shown`);
     }
     if (read && input.ifReach) {
       const reach = read.screens
@@ -440,7 +449,7 @@ const takeover = defineTool({
         .map((s) => s.id)
         .sort();
       if (reach.join(',') !== [...input.ifReach].sort().join(','))
-        throw new ToolError('conflict', 'the screens it would play on have changed since they were shown: ask again', { screens: reach });
+        throw new ToolError('conflict', 'the screens it would play on have changed since they were shown', { screens: reach });
       // A screen deleted from the org, or a member added or removed, before the batch refuses it; one screen is the entry's own key.
       if (fields.target === 'org') write(org.screens.stage.are(reach));
       if (fields.target === 'group') write(org.screenGroups.stage.membersAre(fields.groupId!, reach));

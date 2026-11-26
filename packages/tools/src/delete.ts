@@ -8,7 +8,7 @@ import { assetTakenUp, deleteAsset } from './assets';
 import { deleteDataSource } from './data-sources';
 import { ID_PATTERN } from '@signforge/contract';
 import { ifVersion } from './fields';
-import { deletePlaylist, playlistInUse } from './playlists';
+import { deletePlaylist, playlistChangedSince, playlistInUse } from './playlists';
 import { deleteScheduleEntry } from './schedule';
 import { defineTool } from './tool';
 import { outputs } from './outputs';
@@ -52,7 +52,11 @@ const deleteTool = defineTool({
   // Taken up meanwhile (an asset by a spot or a brand kit; a playlist made the default or scheduled): the foreign keys or
   // the usage guard fail the batch, said as the check before it says it.
   refuseFailedCommit: async ({ org, input }) =>
-    input.type === 'asset' ? assetTakenUp(org, input.id) : input.type === 'playlist' ? playlistInUse(org, input.id) : undefined,
+    input.type === 'asset'
+      ? assetTakenUp(org, input.id)
+      : input.type === 'playlist'
+        ? ((await playlistInUse(org, input.id)) ?? playlistChangedSince(org, input.id, input.ifVersion))
+        : undefined,
 });
 
 export const deleteTools = [deleteTool];

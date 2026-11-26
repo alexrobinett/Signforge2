@@ -238,11 +238,24 @@ export async function playlistInUse(org: OrgScope, playlistId: string): Promise<
  * Delete a playlist, its draft and its published version, not its spots (the `delete` tool, ./delete.ts): refused with a
  * conflict while it is the default or a schedule entry plays it. Takeovers of it that have ended go with it.
  */
+/** A playlist no longer at `ifVersion`, in its name's words (review of #553). */
+const changedSince = (row: PlaylistRow, ifVersion: number) =>
+  row.rowVersion === ifVersion
+    ? undefined
+    : new ToolError('conflict', `the playlist ${row.name} has changed since it was read`, { id: row.id, version: row.rowVersion });
+
+/** Why a playlist delete's batch failed at `ifVersion`: it changed since the version read, said as `deletePlaylist` says it. */
+export async function playlistChangedSince(org: OrgScope, playlistId: string, ifVersion: number | undefined) {
+  const row = ifVersion === undefined ? undefined : await org.playlists.get(playlistId);
+  return row && ifVersion !== undefined ? changedSince(row, ifVersion) : undefined;
+}
+
 export async function deletePlaylist({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, playlistId: string, ifVersion: number | undefined) {
   const row = await requirePlaylist(org, playlistId);
   // At the version read, held to the commit: an edit landing before the batch refuses it, as the drawer's card shows it (#408).
   if (ifVersion !== undefined) {
-    if (row.rowVersion !== ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
+    const changed = changedSince(row, ifVersion);
+    if (changed) throw changed;
     write(org.playlists.stage.unchanged(row));
   }
   const used = await playlistInUse(org, playlistId);
