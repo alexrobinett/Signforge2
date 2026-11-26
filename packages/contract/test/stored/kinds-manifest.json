@@ -1,0 +1,107 @@
+{
+  "schema": 8,
+  "screen": {
+    "id": "kinds-screen",
+    "name": "Kinds",
+    "timezone": "Europe/London",
+    "orientation": "landscape"
+  },
+  "files": {
+    "6c073b85d73b9cfcd19e217f0e67d647becf04be38037754146d8a9f0fda89af": {
+      "size": 8665,
+      "type": "video/mp4"
+    },
+    "de887f76395a5960f93976e975e5e9493aeead48cdd71910164bfaa22a1a3fd2": {
+      "size": 16875,
+      "type": "text/html"
+    }
+  },
+  "templates": {
+    "base/dated-fixture@1.0.0": {
+      "manifest": {
+        "id": "dated-fixture",
+        "version": "1.0.0",
+        "name": "Dated fixture",
+        "description": "Test fixture with a date field, for the stored-copies test.",
+        "fields": {
+          "link": {
+            "type": "url",
+            "label": "Link",
+            "default": "https://example.com/"
+          },
+          "day": {
+            "type": "date",
+            "label": "Day",
+            "default": "2026-12-24",
+            "min": "2026-01-01",
+            "max": "2027-12-31"
+          }
+        },
+        "duration": {
+          "defaultMs": 8000,
+          "minMs": 4000,
+          "maxMs": 60000
+        },
+        "orientations": ["landscape"],
+        "uses": [],
+        "background": "#000",
+        "protocol": 2
+      },
+      "html": "de887f76395a5960f93976e975e5e9493aeead48cdd71910164bfaa22a1a3fd2"
+    }
+  },
+  "spots": {
+    "clip": {
+      "id": "clip",
+      "name": "Clip",
+      "kind": "video",
+      "file": "6c073b85d73b9cfcd19e217f0e67d647becf04be38037754146d8a9f0fda89af",
+      "fit": "contain",
+      "durationMs": 3000
+    },
+    "dated": {
+      "id": "dated",
+      "name": "Dated",
+      "kind": "template",
+      "template": "base/dated-fixture@1.0.0",
+      "data": {
+        "link": "https://example.com/",
+        "day": "2026-12-25"
+      },
+      "assets": {},
+      "durationMs": 8000
+    },
+    "web": {
+      "id": "web",
+      "name": "Web",
+      "kind": "url",
+      "url": "https://example.com/board",
+      "durationMs": 10000
+    }
+  },
+  "playlists": {
+    "all": {
+      "id": "all",
+      "name": "All",
+      "transition": {
+        "type": "cut"
+      },
+      "items": [
+        {
+          "spot": "dated"
+        },
+        {
+          "spot": "clip"
+        },
+        {
+          "spot": "web"
+        }
+      ]
+    }
+  },
+  "dataSources": {},
+  "schedule": [],
+  "defaultPlaylist": "all",
+  "id": "e57d59db21bd71e6a0721654d83b7db4ea0b6295411490e3cec7b5dea5dccab7",
+  "generatedAt": "2026-11-26T13:52:54.371Z"
+}

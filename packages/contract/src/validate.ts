@@ -378,8 +378,7 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
   return out;
 }
 
-/** Check a template's `template.json`. Returns problems; empty means valid. */
-/** The rules of a template's manifest beyond its shape. */
+/** The rules of a template's `template.json` beyond its shape. */
 function templateManifestRules(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
@@ -927,8 +926,7 @@ function fontProblems(where: string, f: unknown): string[] {
   return errors;
 }
 
-/** Check a brand kit as the manifest carries it. Problems are not prefixed; the manifest adds `brand: `. */
-/** The rules of a brand kit beyond its shape. */
+/** The rules of a brand kit, as the manifest carries it, beyond its shape. Problems are not prefixed; the manifest adds `brand: `. */
 function brandKitRules(b: unknown): string[] {
   if (!isObj(b)) return ['brand must be an object'];
   const errors: string[] = [];
