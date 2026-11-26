@@ -17,17 +17,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import {
-  EditorDeleteQuestion,
-  EditorFields,
-  EditorMoreMenu,
-  EditorHeader,
-  EditorSection,
-  PublishButton,
-  SaveAlert,
-  SaveDraftButton,
-  saveWord,
-} from '~/components/editor';
+import { EditorDeleteQuestion, EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, saveWord } from '~/components/editor';
 import { ProposalPanel } from '~/components/proposal';
 import { FieldForm } from '~/components/spots/field-form';
 import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
@@ -104,8 +94,8 @@ function SpotEditor() {
   const stale = mine?.stale ?? false;
   const picking = useAppStore((s) => s.spotEditor.picking === 'assetId');
   const edit = useAppStore((s) => s.editSpot);
-  const save = useAppStore((s) => s.saveSpotDraft);
   const reload = useAppStore((s) => s.reloadSpot);
+  const save = useAppStore((s) => s.saveSpotDraft);
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);
@@ -149,7 +139,6 @@ function SpotEditor() {
             Fill from a flyer
           </Button>
         )}
-        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />}
         {canPublish && (
           <PublishButton
             pending={publishing}
