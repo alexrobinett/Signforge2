@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, createOrg, d1, disabledOnServer, hydrated, innerCorner, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, innerCorner, joinAsEditor, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -496,6 +496,31 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   await page.goto(path);
   await hydrated(page);
   await expect(page.getByRole('link', { name: 'Pair it again…' })).not.toHaveAttribute('aria-disabled');
+});
+
+test('an editor who may not publish, where Play is the fix, sees no empty What it plays group (#474)', async ({ page, browser, request }) => {
+  const owner = await (await browser.newContext()).newPage();
+  await signInAs(owner, `e2e-screen-editor-owner-${Date.now()}@example.com`, '192.0.2.22');
+  await createOrg(owner, 'Northside Arcade Editors', '192.0.2.22');
+  const pairing = await startPairing(request);
+  const { screen } = await tool(owner, 'claim_screen', { code: pairing.code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
+  // Heard from with nothing published, and a playlist to play: Play is the fix.
+  await sync(request, await pairing.credential());
+  await tool(owner, 'save_playlist', { name: 'Arcade loop', spotIds: [] });
+  await tool(owner, 'update_org_settings', { editorsPublish: false });
+  await joinAsEditor(owner, page, `e2e-screen-editor-${Date.now()}@example.com`, '192.0.2.23');
+  await page.goto(`/screens/${screen.id}`);
+  await hydrated(page);
+  await expect(page.getByRole('main').locator('[data-slot="button"][data-variant="default"]')).toHaveAccessibleName('Play on this screen…');
+  await expect(page.getByRole('group', { name: 'What it plays' })).toHaveCount(0);
+  const now = page.getByRole('group', { name: 'The screen now' });
+  await expect(now.getByRole('button', { name: 'Identify (10 s)' })).toBeVisible();
+  // Nothing before it to divide it from.
+  expect(await now.evaluate((f) => getComputedStyle(f).borderLeftWidth)).toBe('0px');
+  await axe(page);
+  await shots(page, '28-screen-editor-play-fix');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '28-screen-editor-play-fix-phone');
 });
 
 test("Take over's notice keeps a name with no break inside the dialog at a phone's width (review of #453)", async ({ page, request }) => {

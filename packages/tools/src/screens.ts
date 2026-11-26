@@ -221,7 +221,7 @@ const listScreenStatus = defineTool({
 const getScreen = defineTool({
   name: 'get_screen',
   description:
-    'Get one screen by id: its settings, labels, state, last heartbeat, what it should be showing, manifests, the ids of the groups it is in, its credentials (never their secrets) and its recent events (what was done to it, newest first). Returns { screen, groupIds, credentials, events }.',
+    'Get one screen by id: its settings, labels, state, last heartbeat, what it should be showing, manifests, the publish whose version it fell back from if it fell back (null otherwise), the ids of the groups it is in, its credentials (never their secrets) and its recent events (what was done to it, newest first). Returns { screen, fallbackPublish, groupIds, credentials, events }.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
