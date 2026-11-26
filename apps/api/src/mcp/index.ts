@@ -145,8 +145,8 @@ async function recorded<T>(
 }
 
 /** A `forbidden` refusal, counted (`refusalAlertDue`); when due, the org is alerted (`agent_refused`). */
-async function refusedAgain(env: Env, refused: { orgId: string; grantId: string; tool: string; needs: string | null }, now: number) {
-  const due = await refusalAlertDue(env, refused.orgId, refused.grantId, now);
+async function refusedAgain(env: Env, refused: { orgId: string; grantId: string; member: string; tool: string; needs: string | null }, now: number) {
+  const due = await refusalAlertDue(env, refused, now);
   if (due) await alertAgentRefused(env, emailSenderFor(env), { ...refused, ...due }, now);
 }
 
@@ -278,7 +278,7 @@ mcp.post('/mcp', refuseSession, async (c) => {
     console.warn(JSON.stringify({ event: 'agent_call_refused', grant: grant.grantId, client: grant.clientId, tool: call.tool, result: call.result }));
     if (call.result !== 'forbidden') return;
     c.executionCtx.waitUntil(
-      refusedAgain(c.env, { orgId: grant.orgId, grantId: grant.grantId, tool: call.tool, needs: call.needs }, at).catch((err: unknown) =>
+      refusedAgain(c.env, { orgId: grant.orgId, grantId: grant.grantId, member: grant.userId, tool: call.tool, needs: call.needs }, at).catch((err: unknown) =>
         console.error(JSON.stringify({ event: 'agent_refused_alert_failed', grant: grant.grantId, client: grant.clientId }), err),
       ),
     );

@@ -258,23 +258,93 @@ describe("the refusals' cost and the org's cap", () => {
     expect(asked('orgAlertDue')).toBe(2);
   });
 
-  it('sends an org at most five agent.refused alerts a clock hour, however many of its agents are refused', async () => {
+  it("sends a member's agents at most two agent.refused alerts a clock hour, so another member's agent still alerts (#347)", async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const now = Date.now();
     vi.setSystemTime(now - (now % HOUR) + HOUR + 60_000);
-    const { t, owner, org } = await team();
+    const { t, owner, editor, org } = await team();
     const ownerAddress = await addressOf(owner);
     const outbox = emailSenderFor(env);
     if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev sends to its outbox');
     const capped = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    for (let agent = 0; agent < 6; agent++) {
-      const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const refusedThrice = async (by: Client) => {
+      const { access_token } = await agentToken(t, by, org.id, ['content:read']);
       for (let i = 0; i < 3; i++) await call(access_token, 'update_screen', { screenId: 'scr_any', name: 'x' });
-    }
+    };
+    const mail = () => outbox.messages.filter((m) => m.to === ownerAddress && m.subject.includes('was refused'));
+    // The owner's four agents: two alerts, the other two capped.
+    for (let agent = 0; agent < 4; agent++) await refusedThrice(owner);
+    expect(mail()).toHaveLength(2);
+    // The editor's agent, refused after them, still alerts.
+    await refusedThrice(editor);
+    expect(mail()).toHaveLength(3);
     const lines = capped.mock.calls.map((args) => String(args[0]));
     capped.mockRestore();
-    expect(outbox.messages.filter((m) => m.to === ownerAddress && m.subject.includes('was refused'))).toHaveLength(5);
-    expect(lines.filter((l) => l.includes('agent_refused_alert_capped'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('agent_refused_alert_capped'))).toHaveLength(2);
+  });
+
+  it('caps an org at five alerts a clock hour and each member at two, counting only the alerts it allows (#347)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    vi.setSystemTime(now - (now % HOUR) + 3 * HOUR + 60_000);
+    const org = env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`org:cap-${crypto.randomUUID()}`));
+    const asked: [string, boolean][] = [];
+    for (const member of ['m1', 'm1', 'm1', 'm2', 'm2', 'm3', 'm4']) asked.push([member, await org.orgAlertDue(member)]);
+    expect(asked).toEqual([
+      ['m1', true],
+      ['m1', true],
+      ['m1', false],
+      ['m2', true],
+      ['m2', true],
+      ['m3', true],
+      ['m4', false],
+    ]);
+    // The next clock hour starts again.
+    vi.setSystemTime(now - (now % HOUR) + 4 * HOUR + 60_000);
+    expect(await org.orgAlertDue('m4')).toBe(true);
+  });
+
+  it("keeps a grant's alert when the org's check fails, and sends it at the next refusal (#347)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    vi.setSystemTime(now - (now % HOUR) + 5 * HOUR + 60_000);
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const ownerAddress = await addressOf(owner);
+    const outbox = emailSenderFor(env);
+    if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev sends to its outbox');
+    // The org's object fails its first answer, as an unavailable one would.
+    let failing = true;
+    const grants = new Proxy(env.AGENT_GRANTS, {
+      get(target, key) {
+        if (key !== 'get') {
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return (id: DurableObjectId) =>
+          new Proxy(target.get(id), {
+            get(stub, method) {
+              const real = Reflect.get(stub, method);
+              if (method === 'orgAlertDue' && failing)
+                return () => {
+                  failing = false;
+                  return Promise.reject(new Error('org object unavailable'));
+                };
+              return typeof real === 'function' ? (...args: unknown[]) => Reflect.apply(real, stub, args) : real;
+            },
+          });
+      },
+    });
+    const bindings: Env = { ...env, AGENT_GRANTS: grants };
+    const failed = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const mail = () => outbox.messages.filter((m) => m.to === ownerAddress && m.subject.includes('was refused'));
+    for (let i = 0; i < 3; i++) await call(access_token, 'update_screen', { screenId: 'scr_any', name: 'x' }, bindings);
+    expect(mail()).toEqual([]);
+    expect(failed.mock.calls.map((args) => String(args[0])).filter((l) => l.includes('agent_refused_alert_failed'))).toHaveLength(1);
+    failed.mockRestore();
+    await call(access_token, 'update_screen', { screenId: 'scr_any', name: 'x' }, bindings);
+    expect(mail()).toHaveLength(1);
+    expect(mail()[0]!.subject).toBe('The agent “Test agent” was refused 4 times this hour');
   });
 });
 
