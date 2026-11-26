@@ -376,6 +376,21 @@ describe('room status (#199)', () => {
       expect(found).toEqual([]);
     }, 300_000);
 
+  // The unknown state's word is in the kit's muted ink, which a kit may make pale (review of #622: #9ca3af on white
+  // read 2.54:1): it is read against the page as free's accent is, at 3:1 for its size.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`"Schedule unavailable" reads under a kit whose muted ink is pale, in every look, ${orientation}`, async () => {
+      const r = await room(orientation);
+      const pale: FrameTheme = { colors: { ...LIGHT_KIT, muted: '#9ca3af' }, shape: 'soft', fonts: {} };
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, events: [] }, pale, NOW, 'UTC', ['events']);
+        // The word only: the look's other muted texts are its own (Night's and Corporate's labels), whatever the state.
+        for (const l of await paintedContrast(r.hst.page, f, '.stage')) if (l.startsWith('word ')) found.push(`${look}: ${l}`);
+      }
+      expect(found).toEqual([]);
+    });
+
   it('marks each toggle on the root, removes what is off, and steps the type up into a screen without the schedule', async () => {
     const r = await room();
     const read = (f: Frame) =>
