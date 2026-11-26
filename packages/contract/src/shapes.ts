@@ -94,9 +94,22 @@ export const MAX_URL_BYTES = 2048;
 /** Field types a list row (`FieldDef` of type `list`) may declare: any scalar, or an optional image (`NewsImage`). */
 export type ListItemFieldDef = ScalarFieldDef | { type: 'image'; label: string };
 
+/** The most a template may say it draws an image across, in CSS px of a 1080p screen, either way. */
+export const MAX_IMAGE_BOX = 4096;
+
 export type FieldDef =
   | ScalarFieldDef
-  | { type: 'image'; label: string }
+  | {
+      type: 'image';
+      label: string;
+      /**
+       * The largest box the template draws this image in on a portrait screen (1080x1920), at any moment of the
+       * spot, transforms included, in CSS px. With it, a portrait screen gets the smaller of the asset's renditions
+       * that still covers this box (the landscape one, for a photo in a frame); without it, the portrait rendition,
+       * which covers the whole screen (#224).
+       */
+      portraitBox?: { w: number; h: number };
+    }
   /** Repeating rows, such as menu items, calendar events or news stories. Each row holds scalar fields and optional image fields. */
   | { type: 'list'; label: string; item: Record<string, ListItemFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
 
