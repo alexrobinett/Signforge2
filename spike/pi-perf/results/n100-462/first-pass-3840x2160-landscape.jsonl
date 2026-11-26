@@ -1,0 +1,31 @@
+{"spot": "announcement-pop", "first": 273, "p": {"play": {"count": 1776, "dropped": 0}, "prepare": {"count": 24, "dropped": 0}}, "st": [], "pr": [132, 132, 132], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "announcement-poster", "first": 271, "p": {"play": {"count": 1776, "dropped": 0}, "prepare": {"count": 24, "dropped": 0}}, "st": [], "pr": [133, 134, 133], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "announcement-night", "first": 224, "p": {"play": {"count": 1776, "dropped": 0}, "prepare": {"count": 24, "dropped": 0}}, "st": [], "pr": [132, 132, 132], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "announcement-corporate", "first": 228, "p": {"play": {"count": 1777, "dropped": 0}, "prepare": {"count": 24, "dropped": 0}}, "st": [], "pr": [132, 132, 132], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "countdown-pop", "first": 197, "p": {"play": {"count": 1782, "dropped": 0}, "prepare": {"count": 18, "dropped": 0}}, "st": [], "pr": [100, 99, 100], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "countdown-poster", "first": 202, "p": {"play": {"count": 1782, "dropped": 0}, "prepare": {"count": 18, "dropped": 0}}, "st": [], "pr": [100, 99, 99], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "countdown-night", "first": 221, "p": {"play": {"count": 1782, "dropped": 0}, "prepare": {"count": 18, "dropped": 0}}, "st": [], "pr": [100, 100, 99], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "countdown-corporate", "first": 205, "p": {"play": {"count": 1783, "dropped": 0}, "prepare": {"count": 17, "dropped": 0}}, "st": [], "pr": [99, 100, 83], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "info-frame-pop", "first": 237, "p": {"play": {"count": 1777, "dropped": 0}, "prepare": {"count": 23, "dropped": 0}}, "st": [], "pr": [133, 134, 117], "worst": 17, "skipped": 0, "err": "", "played": 4}
+{"spot": "info-frame-poster", "first": 282, "p": {"play": {"count": 1043, "dropped": 0}, "prepare": {"count": 8, "dropped": 0}}, "st": [], "pr": [132], "worst": 17, "skipped": 3, "err": "info-frame-poster: not ready within 2000 ms", "played": 3}
+{"spot": "info-frame-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "info-frame-night: not ready within 2000 ms", "played": 0}
+{"spot": "info-frame-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "info-frame-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "news-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-pop: not ready within 2000 ms", "played": 0}
+{"spot": "news-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "news-poster: not ready within 2000 ms", "played": 0}
+{"spot": "news-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "news-night: not ready within 2000 ms", "played": 0}
+{"spot": "news-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "news-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-pop", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-pop: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-poster", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 11, "err": "room-status-poster: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-night", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-night: not ready within 2000 ms", "played": 0}
+{"spot": "room-status-corporate", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "room-status-corporate: not ready within 2000 ms", "played": 0}
+{"spot": "alert-emergency", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-emergency: not ready within 2000 ms", "played": 0}
+{"spot": "alert-warning", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-warning: not ready within 2000 ms", "played": 0}
+{"spot": "alert-advisory", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-advisory: not ready within 2000 ms", "played": 0}
+{"spot": "alert-notice", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "alert-notice: not ready within 2000 ms", "played": 0}
+{"spot": "menu-dark", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "menu-dark: not ready within 2000 ms", "played": 0}
+{"spot": "menu-light", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "menu-light: not ready within 2000 ms", "played": 0}
+{"spot": "agenda", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "agenda: not ready within 2000 ms", "played": 0}
+{"spot": "clock", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "clock: not ready within 2000 ms", "played": 0}
+{"spot": "cstore-promo", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "cstore-promo: not ready within 2000 ms", "played": 0}
+{"spot": "photo-promo", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "photo-promo: not ready within 2000 ms", "played": 0}
+{"spot": "weather", "first": null, "p": {}, "st": [], "pr": [], "worst": 0, "skipped": 12, "err": "weather: not ready within 2000 ms", "played": 0}

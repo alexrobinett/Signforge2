@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BrandColors } from '@signforge/contract';
+import type { BrandColors, Orientation } from '@signforge/contract';
 import { host, motionContract, noDemoAndLight, NOW, paintedContrast, screenFrame, spotData, useTemplate, type Data } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
@@ -148,8 +148,55 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
   });
 });
 
+// Rain's slant is drawn into its square tile (#96): each layer slides one tile left and four down a turn, which lands the
+// pattern on itself, and it covers the frame all the way through, whatever the screen's shape.
+describe('rain: its slide and its cover (#96)', () => {
+  const shapes: [string, Orientation, { long: number; short: number }][] = [
+    ['16:9', 'landscape', { long: 1920, short: 1080 }],
+    ['9:16', 'portrait', { long: 1920, short: 1080 }],
+    ['8:1', 'landscape', { long: 2880, short: 360 }],
+    ['1:8', 'portrait', { long: 2880, short: 360 }],
+    ['1:1', 'landscape', { long: 1080, short: 1080 }],
+  ];
+  for (const [shape, orientation, size] of shapes)
+    it(`slides a tile left and four down, and covers a ${shape} frame through its turn`, async () => {
+      const hst = await host(orientation, size);
+      await hst.open('fresh', t().html);
+      await hst.init('fresh', spotData(t().manifest, { code: 63 }));
+      await hst.waitFor('fresh', 'ready', 1);
+      const found = await hst.frame('fresh').evaluate(() => {
+        const out: string[] = [];
+        const layers = [...document.querySelectorAll<HTMLElement>('#fx .rain')];
+        if (layers.length !== 2) out.push(`${layers.length} rain layers, not 2`);
+        for (const [i, el] of layers.entries()) {
+          const tile = Number.parseFloat(el.style.getPropertyValue('--tile'));
+          const [turn] = el.getAnimations();
+          turn!.pause();
+          const ms = Number(turn!.effect!.getComputedTiming().duration);
+          const at = (part: number) => {
+            turn!.currentTime = part * ms;
+            return el.getBoundingClientRect();
+          };
+          const [start, half] = [at(0), at(0.5)];
+          const slide = [Math.round((half.left - start.left) * 2), Math.round((half.top - start.top) * 2)];
+          if (slide[0] !== -tile || slide[1] !== 4 * tile) out.push(`layer ${i} slides ${slide} a turn, not ${[-tile, 4 * tile]}`);
+          if (getComputedStyle(el).backgroundSize !== `${tile}px ${tile}px`) out.push(`layer ${i}'s tile is ${getComputedStyle(el).backgroundSize}`);
+          for (const part of [0, 0.25, 0.5, 0.75, 0.999]) {
+            const r = at(part);
+            if (r.left > 0 || r.top > 0 || r.right < innerWidth || r.bottom < innerHeight)
+              out.push(
+                `layer ${i} at ${part} of its turn leaves ${[r.left, r.top, r.right, r.bottom].map(Math.round)} of ${innerWidth}x${innerHeight} uncovered`,
+              );
+          }
+        }
+        return out;
+      });
+      expect(found).toEqual([]);
+    });
+});
+
 // D's motion (docs/template-spec.md, Motion), read by seeking: a clear day with the sun, rain by day and snow by night.
-// Drifting clouds and falling rain or snow are the weather's own loops.
+// Falling rain or snow is the weather's own loop.
 for (const orientation of ['landscape', 'portrait'] as const)
   it(`moves as D does, ${orientation}`, async () => {
     const k = await screenFrame(t(), orientation, {});
@@ -161,7 +208,40 @@ for (const orientation of ['landscape', 'portrait'] as const)
       { code: 71, isDay: 0, temp: 30, sunrise: NOW / 1000 - 11 * 3600, sunset: NOW / 1000 - 3600 },
     ];
     for (const sky of skies)
-      for (const line of await motionContract(await k.play(sky, undefined, durationMs), durationMs, { loops: '.cloud, .fall' }))
-        found.push(`${sky.code}: ${line}`);
+      for (const line of await motionContract(await k.play(sky, undefined, durationMs), durationMs, { loops: '.fall' })) found.push(`${sky.code}: ${line}`);
     expect(found).toEqual([]);
+  });
+
+// The board's weather (#news-design): the glass card kept, lighter, with a hairline edge and no shadow; no clouds parked
+// on the top edge; the city in title case, its descenders clear of the figures (Sydney); the unit at the figures' cap
+// height; two rows of tabular figures.
+for (const orientation of ['landscape', 'portrait'] as const)
+  it(`keeps a lighter glass card with no edge clouds, the city in title case and the unit at cap height, ${orientation}`, async () => {
+    const k = await screenFrame(t(), orientation, {});
+    const f = await k.play({ city: 'Sydney', code: 2, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 });
+    const seen = await f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 3000;
+      const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const vmin = Math.min(innerWidth, innerHeight) / 100;
+      // The alpha as computed: `rgba(r, g, b, a)` or `color(srgb r g b / a)`; with none it is opaque.
+      const bg = style('.info').backgroundColor;
+      const alpha = Number((bg.match(/\/\s*([\d.]+)\)$/) ?? bg.match(/^rgba\(.*,\s*([\d.]+)\)$/))?.[1] ?? 1);
+      return {
+        clouds: document.querySelectorAll('.cloud:not(.hero)').length,
+        glass: alpha < 1,
+        edge: style('.info').boxShadow.includes('inset'),
+        city: style('.city').textTransform,
+        // The city's line box holds its descenders; the figures' box starts at their cap top.
+        clear: (box('#temp').top - box('.city').bottom) / vmin >= 1,
+        // Both boxes trimmed to cap height, which the row then aligns: their box tops match whether trimmed or not.
+        unit: [style('#temp').getPropertyValue('text-box'), style('.temp .unit').getPropertyValue('text-box')].every((v) => v.includes('cap')),
+        rows: [
+          style('.range').gridTemplateColumns.split(' ').length,
+          style('.extra').gridTemplateColumns.split(' ').length,
+          style('.range').fontVariantNumeric,
+        ],
+      };
+    });
+    expect(seen).toEqual({ clouds: 0, glass: true, edge: true, city: 'none', clear: true, unit: true, rows: [2, 2, 'tabular-nums'] });
   });

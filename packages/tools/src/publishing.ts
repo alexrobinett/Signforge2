@@ -16,7 +16,8 @@
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
 import type { SampleFields } from '@signforge/contract';
-import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { brandFont, compileScreen, targetIdOf, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { resolveGroups } from './memberships';
 import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
   templateKey,
@@ -56,8 +57,11 @@ type Orientation = Screen['orientation'];
 
 export interface OrgGraph {
   screens: Screen[];
-  /** Screen id to the ids of its groups. */
+  /** Each screen's groups, list and smart, as read (`resolveGroups`, #186). */
   groupsOf: Map<string, string[]>;
+  /** The org's smart groups' rules, and its screens' labels (none read without a rule), as read: what a smart group's takeover is held to. */
+  rules: { id: string; selectorJson: string }[];
+  labels: { screenId: string; key: string; value: string }[];
   /** Template versions spots may play (approved or retired), and draft ones, by version id. */
   templateVersions: Map<string, { key: string; manifest: TemplateManifest; html: string; size: number; status: TemplateVersion['status'] }>;
   assets: Map<string, { asset: Asset; renditions: AssetRendition[] }>;
@@ -83,9 +87,11 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   // The publish revision first, before any content: a publish that commits after this read moves
   // it on, so whatever it changed cannot be in what is read below without failing the guard.
   const settings = await org.settings.get();
-  const [screens, members, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
+  const [screens, { members, rules, labels }, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
     org.screens.list(),
-    org.screenGroups.allMembers(),
+    // A smart group's members are the screens its rule matches as labelled now (#186): the labels are read only when
+    // the org has one, so an org without costs no query more.
+    org.screenGroups.membership().then(async (m) => ({ ...m, labels: m.rules.length ? await org.screens.labels.list() : [] })),
     org.templates.versions.list(),
     org.assets.list(),
     org.assets.renditions.list(),
@@ -97,8 +103,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.scheduleEntries.list(),
   ]);
   const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
-  const groupsOf = new Map<string, string[]>();
-  for (const m of members) groupsOf.set(m.screenId, [...(groupsOf.get(m.screenId) ?? []), m.groupId]);
+  const groupsOf = resolveGroups(screens, labels, rules, members);
   const templateVersions: OrgGraph['templateVersions'] = new Map();
   for (const v of versions) {
     const manifest = JSON.parse(v.manifestJson) as TemplateManifest;
@@ -110,6 +115,8 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   return {
     screens,
     groupsOf,
+    rules,
+    labels,
     templateVersions,
     assets: new Map(assets.map((a) => [a.id, { asset: a, renditions: byAsset.get(a.id) ?? [] }])),
     // The feed URL stays on the server; a screen learns the id and refresh rate.
@@ -234,13 +241,14 @@ const toPlaylist = (p: PublishedPlaylist): Playlist => ({
 /** A row as the Screen schedule takes it: sorted by when it was published. */
 function toEntry(e: ScheduleEntryRow): TargetedEntry {
   const days = json<number[] | null>(e.daysJson, null);
+  const targetId = targetIdOf(e);
   return {
     id: e.id,
     order: e.publishedAt ?? 0,
     playlist: e.playlistId,
     priority: e.priority,
     target: e.target,
-    ...(e.target === 'group' ? { targetId: e.groupId ?? undefined } : e.target === 'screen' ? { targetId: e.screenId ?? undefined } : {}),
+    ...(targetId === undefined ? {} : { targetId }),
     ...(e.startDate ? { startDate: e.startDate } : {}),
     ...(e.endDate ? { endDate: e.endDate } : {}),
     ...(days ? { days } : {}),

@@ -86,7 +86,7 @@ export function TakeoverDialog({
               ))}
             </NativeSelect>
           </div>
-          <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
+          <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} sentNow onPick={edit} />
           <div className="grid gap-1.5">
             <label htmlFor={`${id}-until`} className="text-sm font-medium">
               Until

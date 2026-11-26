@@ -27,10 +27,9 @@ defineTemplate({
     const root = document.documentElement;
     const accent = String(ctx.data.accent);
     root.style.setProperty('--accent', accent);
-    // The greeting is the accent on the background under the accent glow, at its centre the accent
-    // at 30% and 0.4 opacity: amber, for one, does not read on a light kit. It is large text at
-    // 1080p (5vmin, 54 px), where 3:1 reads.
-    const backdrop = painted(getComputedStyle(root).getPropertyValue('--bg'), [accent, 0.12]);
+    // The greeting is the accent on the background: amber, for one, does not read on a light kit.
+    // It is large text at 1080p (4.2vmin, 45 px), where 3:1 reads.
+    const backdrop = painted(getComputedStyle(root).getPropertyValue('--bg'));
     root.style.setProperty('--accent-text', readableOn(backdrop, accent, { large: true }));
     render(ctx);
   },

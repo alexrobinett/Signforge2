@@ -374,6 +374,14 @@ async function dispatchCall<D extends DataScope>(
     holdsPublish = true;
   };
 
+  // A dispatch's shared reads, made again for each run of its handler (a retried write starts afresh).
+  let shared = new Map<string, Promise<unknown>>();
+  const memo = <T>(key: string, make: () => Promise<T>): Promise<T> => {
+    // Each key is only ever made by `make` of its own type: the reads that share one agree on what it holds.
+    if (!shared.has(key)) shared.set(key, make());
+    return shared.get(key) as Promise<T>;
+  };
+
   const runRead = async (name: string, input: unknown): Promise<unknown> => {
     const other = registry.get(name);
     if (!other || other.mutates || other.people || tool.mutates) throw new Error(`${tool.name} cannot run ${name}`);
@@ -404,6 +412,7 @@ async function dispatchCall<D extends DataScope>(
       onDiscard,
       publishRight,
       run: runRead,
+      memo,
     });
     checkOutput(other, output);
     return output;
@@ -412,6 +421,7 @@ async function dispatchCall<D extends DataScope>(
   const run = async (): Promise<DispatchResult> => {
     let output: unknown;
     holdsPublish = false;
+    shared = new Map();
     try {
       output = await tool.handler({
         org: caller.org,
@@ -428,6 +438,7 @@ async function dispatchCall<D extends DataScope>(
         onDiscard,
         publishRight,
         run: runRead,
+        memo,
       });
     } catch (err) {
       if (err instanceof ToolError) {

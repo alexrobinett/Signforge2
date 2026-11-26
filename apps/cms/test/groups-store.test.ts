@@ -17,7 +17,7 @@ vi.mock('~/server/screens.functions', () => ({ getScreens: vi.fn(), getScreenSta
 vi.mock('~/server/schedule.functions', () => ({ getSchedule: vi.fn() }));
 
 const ORG = 'org_1';
-const front: GroupView = { id: 'grp_front', name: 'Front', screenIds: ['scr_1', 'scr_old'], version: 4, createdAt: 0, updatedAt: 0 };
+const front: GroupView = { id: 'grp_front', name: 'Front', screenIds: ['scr_1', 'scr_old'], selector: null, version: 4, createdAt: 0, updatedAt: 0 };
 const router = { state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
 const calls = () => callTool.mock.calls.map(([name, input]: unknown[]) => ({ name, input }));
 const answer = (out: unknown) => callTool.mockResolvedValueOnce(out);
@@ -341,5 +341,65 @@ describe('members', () => {
     const dialog = store.getState().groups.dialog;
     expect(dialog).toMatchObject({ kind: 'members', error: 'screen scr_2 not found', pending: false });
     expect(['scr_1', 'scr_2', 'scr_3'].map((id) => memberChecked(dialog, front, id))).toEqual([true, true, false]);
+  });
+});
+
+describe('a group made here, and a smart group’s rule (#186)', () => {
+  const north = { all: [{ key: 'region', op: 'eq' as const, values: ['north'] }] };
+  const smart: GroupView = { ...front, id: 'grp_north', name: 'North', screenIds: ['scr_1'], selector: north, version: 2 };
+
+  beforeEach(() => callTool.mockReset());
+
+  it('makes a smart group from its conditions, keyed by the dialog so a retry makes no second one', async () => {
+    const { store } = groupsStore();
+    const s = () => store.getState();
+    s().openNewGroup(ORG);
+    s().typeNewGroupName(' North ');
+    s().chooseNewGroupKind('rule');
+    s().changeRuleTerm(0, { key: 'region', op: 'eq', values: [' north '] });
+    const key = s().groups.dialog?.id;
+    answer({ group: smart });
+    await s().createGroup(ORG);
+    expect(calls()).toEqual([{ name: 'save_group', input: { name: 'North', idempotencyKey: key, selector: north } }]);
+    expect(s().groups.dialog).toBeNull();
+  });
+
+  it('makes a group of the screens ticked, and none for a rule it cannot save, saying why', async () => {
+    const { store } = groupsStore();
+    const s = () => store.getState();
+    s().openNewGroup(ORG);
+    s().typeNewGroupName('Front of house');
+    s().chooseNewGroupKind('rule');
+    await s().createGroup(ORG);
+    expect(calls()).toEqual([]);
+    expect(s().groups.dialog?.error).toBe('Choose a label for each condition.');
+    s().chooseNewGroupKind('list');
+    s().chooseGroupMember('scr_2', true);
+    s().chooseGroupMember('scr_3', true);
+    s().chooseGroupMember('scr_3', false);
+    answer({ group: { ...front, id: 'grp_new' } });
+    await s().createGroup(ORG);
+    expect(calls()).toMatchObject([{ name: 'save_group', input: { name: 'Front of house', screenIds: ['scr_2'] } }]);
+  });
+
+  it('saves a changed rule at the version read, and keeps a refusal on the dialog with the conditions', async () => {
+    const { store } = groupsStore();
+    const s = () => store.getState();
+    s().openGroupRule(ORG, smart);
+    s().addRuleTerm();
+    s().changeRuleTerm(1, { key: 'store', op: 'exists', values: [] });
+    refuse('conflict', 'stale', { version: 3 });
+    await s().saveGroupRule(ORG, smart);
+    expect(s().groups.dialog).toMatchObject({
+      kind: 'rule',
+      error: 'stale',
+      pending: false,
+      terms: [north.all[0], { key: 'store', op: 'exists', values: [] }],
+    });
+    s().removeRuleTerm(1);
+    answer({ group: { ...smart, version: 3 } });
+    await s().saveGroupRule(ORG, smart);
+    expect(calls()[1]).toEqual({ name: 'save_group', input: { groupId: smart.id, selector: north, ifVersion: 2 } });
+    expect(s().groups.dialog).toBeNull();
   });
 });
