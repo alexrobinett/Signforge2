@@ -1,6 +1,6 @@
 {
   "id": "news",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "name": "News",
   "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
   "fields": {

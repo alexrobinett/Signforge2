@@ -386,10 +386,10 @@
 .lk-photo,
 .lk-draw {
   will-change: transform, opacity;
-  /* `both` before the name: after it, a `--lk-motion: none` reads as the fill mode and `both` as the name. */
+  /* The fill mode before the name: after it, a name of `none` reads as the fill mode, and the fill mode as the name. */
   animation:
     var(--lk-dur) var(--lk-ease-in) calc(var(--lk-i, 0) * var(--lk-stagger)) both var(--lk-motion),
-    var(--lk-leave) var(--lk-out) var(--lk-ease-out) calc(var(--sf-duration, 8s) - var(--lk-out)) forwards;
+    var(--lk-out) var(--lk-ease-out) calc(var(--sf-duration, 8s) - var(--lk-out)) forwards var(--lk-leave);
 }
 .lk-d1 {
   --lk-i: 1;

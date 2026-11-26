@@ -8,6 +8,7 @@ import {
   layoutFaults,
   LIGHT_KIT,
   motion,
+  motionContract,
   noDemoAndLight,
   NOW,
   paintedContrast,
@@ -483,6 +484,8 @@ describe('info frame (#201)', () => {
         const f = r.hst.page.mainFrame().childFrames()[0]!;
         const seen = await motion(f, durationMs);
         expect(seen, look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [], unknown: [] });
+        // D's motion, read by seeking; the colon's blink and Night's minute bar are the clock's own loops.
+        expect(await motionContract(f, durationMs, { loops: '.lk-crawl, .lk-ping, .colon, .tick-bar' }), look).toEqual([]);
         const looping = await f.evaluate(() =>
           [
             ...new Set(

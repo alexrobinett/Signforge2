@@ -9,6 +9,7 @@ import {
   layoutFaults,
   LIGHT_KIT,
   motion,
+  motionContract,
   noDemoAndLight,
   NOW,
   paintedContrast,
@@ -681,6 +682,8 @@ describe('news 2.1 (design D, #476)', () => {
         const f = await r.show({ look, items: Array.from({ length: 4 }, (_, i) => story(i)), rotationSeconds: 8 }, photos(4), demo, durationMs);
         const seen = await motion(f, durationMs);
         expect({ props: seen.props, withinCap: seen.withinCap }, look).toEqual({ props: ['opacity', 'transform'], withinCap: true });
+        // D's motion, read by seeking: a story's parts leave as it does, and the bar and progress show where the play is.
+        expect(await motionContract(f, durationMs, { exits: '.story', progress: '.bar, .progress' }), look).toEqual([]);
         const timeline = await f.evaluate((durationMs) => {
           // Each animation as [start, length, curve], its curve the keyframes' (a CSS animation's timing function).
           const read = (el: Element) =>
@@ -716,15 +719,15 @@ describe('news 2.1 (design D, #476)', () => {
           const out = (start: number, length: number) => (last ? [] : [[until - start, length, ACC]]);
           expect(s, `${look}, story ${i + 1}`).toEqual({
             photo: [[at, 600, DEC], ...out(300, 300)],
-            meta: [[at + 100, 400, DEC], ...out(300, 250)],
-            headline: [[at + 150, 650, DEC], ...out(300, 250)],
-            summary: [[at + 300, 500, DEC], ...out(350, 250)],
+            meta: [[at + 100, 400, DEC], ...out(350, 300)],
+            headline: [[at + 150, 650, DEC], ...out(350, 300)],
+            summary: [[at + 300, 500, DEC], ...out(400, 300)],
           });
         });
         expect(timeline.top, look).toEqual([[0, 400, DEC]]);
         expect(timeline.strip, look).toEqual([[100, 500, DEC]]);
-        // The spot's end: everything fades out together over its last 400 ms.
-        expect(timeline.stage, look).toEqual([[durationMs - 400, 400, ACC]]);
+        // The spot's end: everything fades out together over its last 300 ms.
+        expect(timeline.stage, look).toEqual([[durationMs - 300, 300, ACC]]);
         expect(timeline.progress, look).toEqual([[slot, 4]]);
       }
     }, 120_000);

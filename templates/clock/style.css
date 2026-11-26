@@ -129,7 +129,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 10s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 10s) - 0.3s);
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -141,8 +143,6 @@ body {
   position: absolute;
   border-radius: 50%;
   opacity: 0.5;
-  will-change: transform;
-  animation: wander 40s ease-in-out infinite alternate;
 }
 /* The accent glow sits behind the time, wide and faint, so it reads as light, not a smudge. It is
    static: scaling a layer this size cost the Pi 4 about 4% of frames and stalls of up to half a
@@ -154,8 +154,6 @@ body {
   top: 50%;
   margin: -45vmin 0 0 -65vmin;
   opacity: 0.4;
-  animation: none;
-  will-change: auto;
   background: radial-gradient(
     closest-side,
     color-mix(in srgb, var(--accent) 30%, transparent),
@@ -174,15 +172,15 @@ body {
 .content > * {
   will-change: transform, opacity;
   animation:
-    rise-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
 .greeting {
   font-size: calc(var(--u) * 5);
   font-weight: 600;
   color: var(--accent-text);
   letter-spacing: 0.02em;
-  animation-delay: 0.1s, var(--out);
+  animation-delay: 0s, var(--out);
 }
 .time {
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
@@ -190,7 +188,7 @@ body {
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.04em;
-  animation-delay: 0.25s, var(--out);
+  animation-delay: 0.11s, var(--out);
 }
 .time .sec {
   font-size: 0.35em;
@@ -211,14 +209,14 @@ body {
   font-size: calc(var(--u) * 5.6);
   font-weight: 500;
   color: color-mix(in srgb, var(--sf-text, #fff) 82%, transparent);
-  animation-delay: 0.4s, var(--out);
+  animation-delay: 0.22s, var(--out);
 }
 .message {
   font-size: calc(var(--u) * 3.6);
   font-weight: 500;
   color: var(--sf-muted, rgba(255, 255, 255, 0.7));
   margin-top: calc(var(--u) * 4);
-  animation-delay: 0.55s, var(--out);
+  animation-delay: 0.33s, var(--out);
 }
 .message:empty {
   display: none;
@@ -228,18 +226,8 @@ body {
 }
 @keyframes rise-in {
   from {
-    transform: translateY(5vh);
     opacity: 0;
-  }
-}
-@keyframes fade-out {
-  to {
-    opacity: 0;
-  }
-}
-@keyframes wander {
-  to {
-    transform: translate(18vmin, 12vmin) scale(1.15);
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes drift {
@@ -248,5 +236,11 @@ body {
   }
   to {
     transform: translate(1.2vmin, 1vmin);
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }

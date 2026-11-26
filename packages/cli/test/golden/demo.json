@@ -101,10 +101,6 @@
     }
   },
   "files": {
-    "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b": {
-      "size": 400892,
-      "type": "text/html"
-    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
@@ -121,37 +117,21 @@
       "size": 12704,
       "type": "font/woff2"
     },
-    "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd": {
-      "size": 393916,
+    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
+      "size": 400856,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
-      "size": 125360,
-      "type": "text/html"
-    },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
     },
-    "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953": {
-      "size": 395766,
-      "type": "text/html"
-    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637": {
-      "size": 399570,
-      "type": "text/html"
-    },
-    "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
-      "size": 82306,
-      "type": "text/html"
     },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
@@ -161,6 +141,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973": {
+      "size": 399570,
+      "type": "text/html"
+    },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
       "size": 12672,
       "type": "font/woff2"
@@ -169,20 +153,36 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119": {
-      "size": 383289,
+    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
+      "size": 395766,
+      "type": "text/html"
+    },
+    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
+      "size": 393916,
+      "type": "text/html"
+    },
+    "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f": {
+      "size": 125324,
+      "type": "text/html"
+    },
+    "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080": {
+      "size": 81821,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
+    },
+    "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5": {
+      "size": 383288,
+      "type": "text/html"
     }
   },
   "templates": {
-    "base/announcement@1.1.0": {
+    "base/announcement@1.1.1": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -304,12 +304,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953"
+      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
     },
-    "base/countdown@1.1.0": {
+    "base/countdown@1.1.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -432,12 +432,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd"
+      "html": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9"
     },
-    "base/cstore-promo@1.2.5": {
+    "base/cstore-promo@1.3.0": {
       "manifest": {
         "id": "cstore-promo",
-        "version": "1.2.5",
+        "version": "1.3.0",
         "name": "C-Store Promo",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
         "fields": {
@@ -509,12 +509,12 @@
         "background": "#06122b",
         "protocol": 2
       },
-      "html": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f"
+      "html": "f35b3fdcf74161bc55ae1f6456836267dc082b99a3f4a1a6872e46bb6b0b6080"
     },
-    "base/alert@1.1.0": {
+    "base/alert@1.2.0": {
       "manifest": {
         "id": "alert",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -599,12 +599,12 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
+      "html": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f"
     },
-    "base/info-frame@1.1.0": {
+    "base/info-frame@1.2.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -889,12 +889,12 @@
         },
         "protocol": 2
       },
-      "html": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b"
+      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/news@2.1.1": {
+    "base/news@2.1.2": {
       "manifest": {
         "id": "news",
-        "version": "2.1.1",
+        "version": "2.1.2",
         "name": "News",
         "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1008,12 +1008,12 @@
         },
         "protocol": 2
       },
-      "html": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119"
+      "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
-    "base/room-status@1.1.0": {
+    "base/room-status@1.1.1": {
       "manifest": {
         "id": "room-status",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1134,7 +1134,7 @@
         },
         "protocol": 2
       },
-      "html": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637"
+      "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     }
   },
   "spots": {
@@ -1142,7 +1142,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.1.0",
+      "template": "base/announcement@1.1.1",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1177,7 +1177,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.1.0",
+      "template": "base/countdown@1.1.1",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1205,7 +1205,7 @@
       "id": "energy",
       "name": "Energy drinks 3 for $7",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.5",
+      "template": "base/cstore-promo@1.3.0",
       "data": {
         "quantity": "3",
         "price": "7",
@@ -1226,7 +1226,7 @@
       "id": "fire-drill",
       "name": "Fire drill notice",
       "kind": "template",
-      "template": "base/alert@1.1.0",
+      "template": "base/alert@1.2.0",
       "data": {
         "severity": "notice",
         "headline": "Fire drill at 2 PM today",
@@ -1246,7 +1246,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.1.0",
+      "template": "base/info-frame@1.2.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1309,7 +1309,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.1.1",
+      "template": "base/news@2.1.2",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1339,7 +1339,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.1.1",
+      "template": "base/news@2.1.2",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1369,7 +1369,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.1.1",
+      "template": "base/news@2.1.2",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1399,7 +1399,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.1.0",
+      "template": "base/room-status@1.1.1",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1421,7 +1421,7 @@
       "id": "sport-drinks",
       "name": "Sport drinks 2 for $4",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.5",
+      "template": "base/cstore-promo@1.3.0",
       "data": {
         "quantity": "2",
         "price": "4",
@@ -1524,5 +1524,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "99ff55c4ba0c8f919020399f5a7416bb89075ef16226b095190402b0c427d6e2"
+  "id": "ed1b3740641e7590019a4d0ca34f93e9dff24843f88fb77661977834bc83c498"
 }
