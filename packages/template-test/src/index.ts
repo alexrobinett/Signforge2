@@ -585,7 +585,7 @@ export function brandColourTests(
   const light = LIGHT_KIT;
   // An accent that just reaches 4.5:1 on the demo kit's background (4.69:1) and so passed when
   // measured there, where the text sits on something lighter: menu-board's card (2.94:1), the
-  // tint of agenda's row happening now, cstore-promo's copy panel.
+  // tint of agenda's row happening now, cstore-promo's promo line over its glow.
   const borderline: BrandColors = { ...demo, accent: '#d9531e' };
   // Mid-tone accents, which reach 3:1 but not 4.5:1 on the page: green on white (3.30:1) and blue
   // on the demo kit's dark background (3.66:1).
