@@ -48,8 +48,8 @@ test('a save that fails says so under the top bar at phone width, in both editor
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
   const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
-  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Morning loop', spotIds: [spot.id] });
+  const { spot } = await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Morning loop', spotIds: [spot.id] });
   const alert = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
   const bar = page
     .locator('header')
@@ -64,7 +64,7 @@ test('a save that fails says so under the top bar at phone width, in both editor
   // The spot editor: its last field, well below the editor's header.
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
-  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  await page.route('**/api/tools/save_spot', (route) => route.abort('internetdisconnected'));
   const duration = page.getByLabel('Duration');
   await duration.scrollIntoViewIfNeeded();
   await duration.fill('12');
@@ -84,16 +84,16 @@ test('a save that fails says so under the top bar at phone width, in both editor
   await expect(above).toBeFocused();
   const [field, cover] = await Promise.all([above.boundingBox(), alert.boundingBox()]);
   expect(field!.y).toBeGreaterThanOrEqual(cover!.y + cover!.height - 1);
-  await page.unroute('**/api/tools/update_spot');
+  await page.unroute('**/api/tools/save_spot');
 
   // The playlist editor: its alert under the bar too, the page scrolled to its foot.
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
-  await page.route('**/api/tools/update_playlist', (route) => route.abort('internetdisconnected'));
+  await page.route('**/api/tools/save_playlist', (route) => route.abort('internetdisconnected'));
   await page.getByLabel('Name', { exact: true }).fill('Morning loop, weekdays');
   await expect(alert).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect(alert).toBeInViewport();
   await expect.poll(underBar).toBe(0);
-  await page.unroute('**/api/tools/update_playlist');
+  await page.unroute('**/api/tools/save_playlist');
 });

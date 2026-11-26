@@ -708,10 +708,10 @@ test("a save that fails leaves the stage's toggles uncovered on a desktop, its a
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
   const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
-  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  const { spot } = await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
-  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  await page.route('**/api/tools/save_spot', (route) => route.abort('internetdisconnected'));
   const duration = page.getByLabel('Duration');
   await duration.scrollIntoViewIfNeeded();
   await duration.fill('12');
@@ -725,7 +725,7 @@ test("a save that fails leaves the stage's toggles uncovered on a desktop, its a
     [box.x + box.width / 2, box.y + box.height / 2],
   );
   expect(hit).toBe('Landscape');
-  await page.unroute('**/api/tools/update_spot');
+  await page.unroute('**/api/tools/save_spot');
 });
 
 test('a save that fails beside the agent drawer at 1280 px: the alert sticks at the top, and a field focused above it is clear of it (review of #485)', async ({
@@ -737,13 +737,13 @@ test('a save that fails beside the agent drawer at 1280 px: the alert sticks at 
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
   const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
-  const { spot } = await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
+  const { spot } = await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: {} });
   await page.goto(`/spots/${spot.id}`);
   await hydrated(page);
   // The drawer beside the page leaves the editor narrow on a wide window: its alert sticks, with no top bar above it.
   await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
   await expect(page.getByRole('dialog', { name: 'Agent' })).toBeVisible();
-  await page.route('**/api/tools/update_spot', (route) => route.abort('internetdisconnected'));
+  await page.route('**/api/tools/save_spot', (route) => route.abort('internetdisconnected'));
   const duration = page.getByLabel('Duration');
   await duration.scrollIntoViewIfNeeded();
   await duration.fill('12');
@@ -764,5 +764,5 @@ test('a save that fails beside the agent drawer at 1280 px: the alert sticks at 
   await expect(greeting).toBeFocused();
   const [field, cover] = await Promise.all([greeting.boundingBox(), alert.boundingBox()]);
   expect(field!.y).toBeGreaterThanOrEqual(cover!.y + cover!.height - 1);
-  await page.unroute('**/api/tools/update_spot');
+  await page.unroute('**/api/tools/save_spot');
 });
