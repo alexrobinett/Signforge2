@@ -1135,6 +1135,9 @@ export const MAX_IDENTIFY_SECONDS = 60;
 // The signature is Ed25519 over the UTF-8 bytes of `PlayerReleaseOffer.release.manifest` exactly, with no trailing
 // newline, in standard base64 with padding. A fixed test vector, with a key pair for tests only, is in
 // packages/contract/test/player-release/.
+//
+// The channel is server state and is not signed: a compromised API could offer a canary release to a stable screen. The
+// owner accepted that risk (#628, Security).
 
 /** A release's channel: canary screens (the demo Pi, the N100) get it first; every other screen follows `stable`. */
 export const PLAYER_CHANNELS = ['canary', 'stable'] as const;
