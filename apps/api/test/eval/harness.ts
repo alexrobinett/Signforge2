@@ -60,15 +60,14 @@ export interface World {
 const TEMPLATES = { menu: 'menu-board', announcement: 'announcement', weather: 'weather' } as const;
 /** When the Bayside screens were last heard from: a fixed morning, long before any run. */
 const BAYSIDE_SEEN = Date.UTC(2026, 10, 23, 9, 14);
+/** The Harbor and Cafe screens' time zone: the one the schedule tasks' entries play in. */
+const LONDON = 'Europe/London';
 
 /**
  * Seeds `owner`'s new org: four screens in two groups, three web page spots in three playlists (the Lobby loop
  * the default), a schedule entry, three templates and a publish of it all; then one change left unpublished (Lunch
  * specials to 15 seconds), so there is something to publish and an audit row to find.
  */
-/** The Harbor and Cafe screens' time zone: the one the schedule tasks' entries play in. */
-const LONDON = 'Europe/London';
-
 async function seed(owner: Client): Promise<World> {
   const org = await owner.createOrg('Harbor Grocers');
   const scope = testScope(env.DB, org.id);
@@ -191,8 +190,8 @@ export interface StreamEvent {
   content_block?: { type: string; name?: string };
 }
 
-/** A usage block's fields that are there: a later block's missing field leaves an earlier one's. */
-const present = (u: Usage | undefined): Usage => Object.fromEntries(Object.entries(u ?? {}).filter(([, v]) => v !== undefined));
+/** A usage block's fields that are there: a later block's missing or null field leaves an earlier one's (review of #566). */
+const present = (u: Usage | undefined): Usage => Object.fromEntries(Object.entries(u ?? {}).filter(([, v]) => v !== undefined && v !== null));
 
 /** Whether a reply ended its turn: a cut-off one (max tokens, a full context window) or a refusal did not (review of #470). */
 const FINISHED = new Set(['end_turn', 'tool_use', 'stop_sequence']);
