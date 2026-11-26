@@ -50,7 +50,7 @@ export function KitTile({ name, colors, displayFontId, className }: { name: stri
       </span>
       <span className="flex gap-1">
         {(['primary', 'accent', 'surface', 'text'] as const).map((c) => (
-          <span key={c} className="h-[18px] w-7 ring-1 ring-black/10" style={{ background: colors[c] }} />
+          <span key={c} className="h-[18px] w-7 ring-1 ring-border" style={{ background: colors[c] }} />
         ))}
       </span>
     </div>

@@ -2,10 +2,10 @@ import { cn } from '~/lib/utils';
 
 /** The SignForge mark: a screen on a stand. */
 function LogoMark({ className, inverse = false }: { className?: string; inverse?: boolean }) {
-  const ink = inverse ? 'stroke-[oklch(0.3_0.12_272)]' : 'stroke-primary-foreground';
+  const ink = inverse ? 'stroke-logo-inverse-ink' : 'stroke-primary-foreground';
   return (
     <svg viewBox="0 0 32 32" aria-hidden className={cn('size-8 shrink-0', className)}>
-      <rect width="32" height="32" rx="8" className={inverse ? 'fill-white' : 'fill-primary'} />
+      <rect width="32" height="32" rx="8" className={inverse ? 'fill-logo-inverse' : 'fill-primary'} />
       <rect x="7" y="9" width="18" height="11" rx="2" fill="none" strokeWidth="2.4" className={ink} />
       <path d="M12 24h8M16 20v4" strokeWidth="2.4" strokeLinecap="round" className={ink} />
     </svg>
