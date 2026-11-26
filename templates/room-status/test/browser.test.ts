@@ -34,8 +34,9 @@ describe('room status (#199)', () => {
     let inits = 0;
     return {
       hst,
-      async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC') {
-        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone);
+      /** `fallback`: the bound fields the screen says play their fallback (#225). */
+      async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC', fallback: string[] = []) {
+        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone, undefined, fallback);
         await hst.waitFor('fresh', 'ready', ++inits);
         return hst.frame('fresh');
       },
@@ -191,6 +192,40 @@ describe('room status (#199)', () => {
     });
   });
 
+  it('says the schedule is unavailable, in every look, while the calendar plays its fallback, whatever the fallback holds (#225)', async () => {
+    const r = await room();
+    const found: Record<string, unknown> = {};
+    for (const look of looks)
+      for (const [day, events] of [
+        ['none', []],
+        ['a meeting on now', [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)]],
+      ] as const)
+        found[`${look}, ${day}`] = await says(await r.show({ look, events: [...events] }, undefined, NOW, 'UTC', ['events']));
+    const unavailable = {
+      state: 'unknown',
+      word: 'Schedule unavailable',
+      for: null,
+      line: 'Check the booking before you use the room',
+      org: null,
+      next: null,
+      freeDay: "The room's calendar is not updating",
+      allDay: null,
+    };
+    expect(found).toEqual(Object.fromEntries(Object.keys(found).map((k) => [k, unavailable])));
+    // Neither free's colour nor busy's: the word is in the look's muted ink, in every look.
+    for (const look of looks) {
+      const f = await r.show({ look, events: [] }, undefined, NOW, 'UTC', ['events']);
+      const [word, muted] = await f.evaluate(() => {
+        const probe = document.querySelector('.stage')!.appendChild(document.createElement('i'));
+        probe.style.color = 'var(--lk-muted)';
+        return [getComputedStyle(document.querySelector('.word')!).color, getComputedStyle(probe).color];
+      });
+      expect(word, look).toBe(muted);
+    }
+    // A field the screen does not name plays live: the same room, free, when only another field is on its fallback.
+    expect(await says(await r.show({ look: 'pop', events: [] }, undefined, NOW, 'UTC', ['room']))).toMatchObject({ state: 'free', freeDay: 'Free all day' });
+  });
+
   /** A booking between two instants, as the feed writes it. */
   const between = (title: string, start: string, end: string) => ({ title, start, end, allDay: false, organizer: '' });
   /** Days in New York across a change of clocks and across midnight, each at the time it is told. */
@@ -223,7 +258,8 @@ describe('room status (#199)', () => {
   /** Copy at its longest: the room and floor at their maxLength, and titles and an organiser longer than any feed sends often. */
   const long = 'Quarterly planning with the North region store managers, the regional finance team and the new hires from the spring intake, with lunch';
   const longest = { room: 'Conference room on the north wing', floor: 'Mezzanine, west' };
-  const days: [string, Data][] = [
+  /** Each day's events, and the bound fields the screen says play their fallback. */
+  const days: [string, Data, string[]?][] = [
     ['free', { ...longest, events: [booking('Stand-up', -5, -4.5), booking(long, 0.5, 1.5, 'Priya Shah'), booking(long, 2, 2.5), booking('Booked', 3, 3.25)] }],
     [
       'busy',
@@ -249,6 +285,8 @@ describe('room status (#199)', () => {
     // A room's name on two lines with "Booked by" on left the meeting line less than a line (review of #606).
     ['busy, a one-line title', { ...longest, events: [booking('Quarterly budget review with finance', -0.25, 0.75, 'Priya Shah')] }],
     ['busy, a shorter room', { room: 'Executive boardroom, east wing', events: [booking(long, -0.25, 0.75, 'Priya Shah')] }],
+    // The calendar not updating (#225), its fallback a busy day.
+    ['unavailable', { ...longest, events: [booking(long, -0.25, 0.75, 'Priya Shah')] }, ['events']],
   ];
   const toggles = ['showSchedule', 'showNext', 'showClock', 'showFacts', 'showNowLine', 'showOrganiser'];
   const allOn: Data = Object.fromEntries(toggles.map((t) => [t, true]));
@@ -302,13 +340,14 @@ describe('room status (#199)', () => {
       const r = await room(orientation);
       const found: string[] = [];
       for (const look of looks)
-        for (const [day, data] of days)
+        for (const [day, data, fallback] of days)
           for (const set of toggleSets) {
             const off =
               Object.keys(set)
                 .filter((k) => !set[k])
                 .join(', ') || 'all on';
-            for (const fault of await faults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
+            for (const fault of await faults(await r.show({ look, ...data, ...set }, undefined, NOW, 'UTC', fallback)))
+              found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
       // The light kit's faces set the lines a little taller.
       for (const look of looks)
@@ -329,13 +368,28 @@ describe('room status (#199)', () => {
       const found: string[] = [];
       for (const [kit, theme] of noDemoAndLight(LIGHT_KIT))
         for (const look of looks)
-          for (const [day, data] of days)
+          for (const [day, data, fallback] of days)
             for (const set of day === 'empty' ? [allOn] : [allOn, allOff]) {
-              const f = await r.show({ look, ...data, ...set }, theme);
+              const f = await r.show({ look, ...data, ...set }, theme, NOW, 'UTC', fallback);
               for (const l of await paintedContrast(r.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${day}${set === allOff ? ', all off' : ''}: ${l}`);
             }
       expect(found).toEqual([]);
     }, 300_000);
+
+  // The unknown state's word is in the kit's muted ink, which a kit may make pale (review of #622: #9ca3af on white
+  // read 2.54:1): it is read against the page as free's accent is, at 3:1 for its size.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`"Schedule unavailable" reads under a kit whose muted ink is pale, in every look, ${orientation}`, async () => {
+      const r = await room(orientation);
+      const pale: FrameTheme = { colors: { ...LIGHT_KIT, muted: '#9ca3af' }, shape: 'soft', fonts: {} };
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, events: [] }, pale, NOW, 'UTC', ['events']);
+        // The word only: the look's other muted texts are its own (Night's and Corporate's labels), whatever the state.
+        for (const l of await paintedContrast(r.hst.page, f, '.stage')) if (l.startsWith('word ')) found.push(`${look}: ${l}`);
+      }
+      expect(found).toEqual([]);
+    });
 
   it('marks each toggle on the root, removes what is off, and steps the type up into a screen without the schedule', async () => {
     const r = await room();

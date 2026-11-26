@@ -99,6 +99,13 @@ describe('template SDK lifecycle', () => {
     expect(await visibility()).toBe('visible');
   });
 
+  it('gives an empty ctx.fallback for an init with no list, as a player from before #225 sends', async () => {
+    const t = await host({ label: 'Hello', mode: 'ok' });
+    await expect.poll(t.messages).toEqual(['loaded', 'ready']);
+    // The fixture writes `[...ctx.fallback]` joined; without it, `prepare` would have thrown on spreading undefined.
+    expect(await t.frame.evaluate(() => document.body.dataset.fallback)).toBe('');
+  });
+
   it('reports an error, not ready, when prepare throws', async () => {
     const t = await host({ label: 'x', mode: 'throw' });
     await expect.poll(t.messages).toEqual(['loaded', 'error:fixture prepare failed']);

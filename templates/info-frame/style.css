@@ -77,6 +77,10 @@ h1 {
   display: block;
   object-fit: cover;
 }
+/* The photo drifts inside its frame, which stays put: in Pop the caption sits right under it. */
+.photo-drift {
+  overflow: hidden;
+}
 .corner-logo {
   position: absolute;
   left: var(--if-inset);
@@ -269,20 +273,6 @@ h1 {
 .lk-crawl {
   line-height: 1.3;
 }
-.colon {
-  animation: if-blink 1s steps(1, end) infinite;
-}
-.live {
-  position: relative;
-  width: 1.48vmin;
-  height: 1.48vmin;
-}
-.live i {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--card-primary, var(--ink-primary));
-}
 
 [data-look='poster'] .cond,
 [data-look='night'] .cond {
@@ -290,7 +280,10 @@ h1 {
 }
 
 /* ---------------------------------------------------------------- Pop (Info frame A) */
+/* Type on the ground, no cards: the photo in Pop's round corners with its caption under it, the price the one tomato
+   tag, the rail the clock over a rule, the weather and the forecast as rows, and the crawl an ink band. */
 [data-look='pop'] {
+  --if-caption-h: 11.5vmin;
   --if-pad: 2.96vmin;
   --if-gap: 2.6vmin;
   --if-panel-radius: 3.7vmin;
@@ -308,12 +301,21 @@ h1 {
   --if-caption-gap: 3.7vmin;
   --if-chip-pad: 1.48vmin 2.96vmin;
   --if-chip-gap: 2.22vmin;
-  --if-ticker-h: 10.37vmin;
+  --if-ticker-h: 9vmin;
   --if-ticker-gap: 2.96vmin;
   --if-ticker-pad: 0 1.85vmin;
 }
 [data-look='pop'] .panel {
   --lk-motion: if-pop-in;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+}
+[data-look='pop'] .photo-drift {
+  bottom: var(--if-caption-h);
+  height: auto;
+  border-radius: var(--lk-radius);
+  overflow: hidden;
 }
 [data-look='pop'] .corner-logo,
 [data-look='pop'] .chip {
@@ -327,31 +329,32 @@ h1 {
   font: 800 4.44vmin / 1.1 var(--lk-font-display);
 }
 [data-look='pop'] .caption {
-  right: var(--if-inset);
-  border-radius: 2.96vmin;
-  background: var(--lk-text);
-  --ink: var(--lk-bg);
-  --ink-muted: color-mix(in srgb, var(--lk-bg) 85%, var(--lk-text));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: none;
+  height: var(--if-caption-h);
+  padding: 0;
 }
 [data-look='pop'] .title {
   font: 800 calc(var(--if-title) * var(--if-title-fit, 1)) / 1.02 var(--lk-font-display);
   letter-spacing: -0.015em;
+  -webkit-line-clamp: 1;
 }
 [data-look='pop'] .line {
-  font-size: 2.78vmin;
+  font-size: 3.1vmin;
 }
 [data-look='pop'] .price {
   padding: 1.3vmin 2.78vmin;
-  border-radius: 2.4vmin;
+  border-radius: var(--lk-radius-small);
   background: var(--lk-primary);
   --ink: var(--lk-on-primary);
-  font: 800 8.15vmin / 1 var(--lk-font-display);
-  transform: rotate(-3deg);
+  font: 800 6vmin / 1 var(--lk-font-display);
 }
 [data-look='pop'] .rail {
   --lk-motion: if-slide;
-  border-radius: var(--lk-radius);
-  background: var(--if-card);
+  gap: 3vmin;
+  padding: 0;
 }
 [data-look='pop'] .rail-time {
   font-family: var(--lk-font-display);
@@ -363,18 +366,11 @@ h1 {
   gap: 0.56vmin;
   padding-left: 0.37vmin;
 }
-[data-look='pop'] .date {
-  font-size: 2.78vmin;
-  font-weight: 600;
-}
 [data-look='pop'] .weather {
   --lk-motion: lk-rise;
   gap: 1.11vmin;
-  padding: 2.96vmin;
-  border-radius: 2.96vmin;
-  background: var(--lk-primary);
-  --ink: var(--lk-on-primary);
-  --ink-muted: var(--lk-on-primary);
+  padding-top: 3vmin;
+  border-top: 0.3vmin solid var(--lk-text);
 }
 [data-look='pop'] :is(.now, .wline, .place) {
   --lk-motion: none;
@@ -383,33 +379,36 @@ h1 {
   font-family: var(--lk-font-display);
   font-weight: 800;
 }
-[data-look='pop'] .weather .glyph {
-  --lk-pulse-motion: if-bob;
-  --lk-pulse-s: 4s;
-}
-[data-look='pop'] :is(.wline, .place) {
-  font-size: 2.59vmin;
+[data-look='pop'] :is(.date, .wline, .place) {
+  font-size: 3.1vmin;
   font-weight: 600;
 }
-[data-look='pop'] .forecast {
+[data-look='pop'] :is(.date, .wline) {
+  color: var(--lk-muted);
+}
+/* The forecast as three rows: the day, its high and its low, at the body size. */
+[data-look='pop'] .days {
   display: flex;
   flex-direction: column;
-  padding-top: 0.56vmin;
-}
-[data-look='pop'] .forecast-rule {
-  height: 0.19vmin;
-  background: currentColor;
-}
-[data-look='pop'] .days {
-  padding-top: 1.67vmin;
+  padding-top: 1vmin;
 }
 [data-look='pop'] .day {
   --lk-motion: lk-pop-press;
-  font-size: 2.22vmin;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  column-gap: 2.4vmin;
+  align-items: baseline;
+  padding: 1.1vmin 0;
+  border-bottom: max(1px, 0.12vmin) solid color-mix(in srgb, var(--lk-text) 16%, transparent);
+  font-size: 3.1vmin;
   font-weight: 600;
+  text-align: left;
 }
 [data-look='pop'] .hi {
-  font: 800 3.89vmin / 1.1 var(--lk-font-display);
+  font: 800 3.7vmin / 1.1 var(--lk-font-display);
+}
+[data-look='pop'] .lo {
+  color: var(--lk-muted);
 }
 [data-look='pop'] .rail-logo .logo {
   width: 18.5vmin;
@@ -418,18 +417,26 @@ h1 {
 }
 [data-look='pop'] .ticker {
   --lk-motion: lk-rise;
-  border-radius: var(--lk-radius-pill);
+  border-radius: var(--lk-radius-small);
+  padding: 0 3vmin;
   background: var(--lk-text);
   --ink: var(--lk-bg);
-  font-size: 3.33vmin;
+  --ink-primary: var(--lk-primary);
+  font-size: 3.1vmin;
   font-weight: 500;
 }
+/* Portrait's caption is narrower: two lines of title, a smaller size. */
+:where([data-orientation='portrait'])[data-look='pop'] {
+  --if-caption-h: 14vmin;
+}
+:where([data-orientation='portrait'])[data-look='pop'] .title {
+  font-size: calc(5.4vmin * var(--if-title-fit, 1));
+  -webkit-line-clamp: 2;
+}
+/* The label a word in tomato on the band, not a pill. */
 [data-look='pop'] .label {
-  padding: 1.11vmin 2.59vmin;
-  border-radius: var(--lk-radius-pill);
-  background: var(--lk-accent);
-  --ink: var(--lk-on-accent);
-  font: 800 2.96vmin / 1.1 var(--lk-font-display);
+  color: var(--card-primary, var(--lk-primary));
+  font: 800 3.1vmin / 1.1 var(--lk-font-display);
 }
 
 /* ---------------------------------------------------------------- Poster (Info frame B) */
@@ -682,26 +689,10 @@ h1 {
   line-height: 1.04;
   letter-spacing: -0.03em;
 }
-[data-look='night'] .seconds {
-  order: 1;
-  height: 0.37vmin;
-  border-radius: 0.19vmin;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--lk-text) 14%, var(--lk-surface));
-}
-[data-look='night'] .tick-bar {
-  display: block;
-  height: 100%;
-  background: var(--lk-accent);
-  transform-origin: left center;
-  transform: scaleX(var(--if-second, 0));
-  animation: if-minute 60s linear infinite;
-}
 [data-look='night'] .date {
   order: 2;
   color: var(--card-accent, var(--ink-accent));
   font: 400 2.41vmin / 1.3 var(--lk-font-label);
-  text-transform: lowercase;
 }
 [data-look='night'] .weather {
   --ink-accent: var(--lk-accent);
@@ -714,7 +705,6 @@ h1 {
 }
 [data-look='night'] .now .glyph {
   color: var(--card-accent, var(--ink-accent));
-  --lk-pulse-motion: none;
 }
 [data-look='night'] .now .temp-now {
   font-family: var(--lk-font-display);
@@ -722,7 +712,6 @@ h1 {
 }
 [data-look='night'] :is(.wline, .place) {
   font: 400 2.22vmin / 1.3 var(--lk-font-label);
-  text-transform: lowercase;
 }
 [data-look='night'] .days {
   gap: 1.11vmin;
@@ -866,9 +855,6 @@ h1 {
 [data-look='corporate'] .now .temp-now {
   font-weight: 300;
   letter-spacing: -0.03em;
-}
-[data-look='corporate'] .weather .glyph {
-  --lk-pulse-motion: none;
 }
 [data-look='corporate'] .wline {
   font-size: 2.41vmin;
@@ -1032,11 +1018,6 @@ h1 {
 :where([data-orientation='portrait'])[data-look='night'] .clock {
   align-self: stretch;
 }
-/* Looping motion holds still in portrait: with it running, fades into a portrait countdown
-   dropped over 1% of frames on the Pi (spike/pi-perf/RESULTS.md, Countdown; #218). The crawl runs. */
-:root:where([data-orientation='portrait']) :is(.lk-wobble, .lk-pulse, .lk-ping, .colon, .tick-bar) {
-  animation: none;
-}
 
 /* Figures that change as the time passes keep their width. After each look's `font`, which resets them. */
 [data-look] :is(.rail-time, .chip-time, .temp-now, .hi, .lo) {
@@ -1072,27 +1053,5 @@ h1 {
   from {
     opacity: 0;
     transform: translateY(-1.5vmin);
-  }
-}
-@keyframes if-bob {
-  0%,
-  100% {
-    transform: none;
-  }
-  50% {
-    transform: translateY(-0.56vmin);
-  }
-}
-@keyframes if-blink {
-  50% {
-    opacity: 0.25;
-  }
-}
-@keyframes if-minute {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
   }
 }

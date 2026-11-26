@@ -1,14 +1,14 @@
 {
-  "agenda": "1.5.0",
-  "alert": "1.3.0",
-  "announcement": "1.2.0",
-  "clock": "1.4.0",
-  "countdown": "1.1.1",
-  "cstore-promo": "1.4.0",
-  "info-frame": "1.2.0",
-  "menu-board": "1.5.0",
+  "agenda": "1.5.1",
+  "alert": "1.3.1",
+  "announcement": "1.2.1",
+  "clock": "1.4.1",
+  "countdown": "1.2.1",
+  "cstore-promo": "1.4.1",
+  "info-frame": "1.3.1",
+  "menu-board": "1.5.1",
   "news": "2.2.0",
-  "photo-promo": "1.6.0",
-  "room-status": "1.2.0",
-  "weather": "1.7.0"
+  "photo-promo": "1.6.1",
+  "room-status": "1.3.0",
+  "weather": "1.7.1"
 }

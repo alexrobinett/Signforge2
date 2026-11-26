@@ -143,7 +143,7 @@ export interface Host {
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
    * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
    * An asset under `$brand.logo`, or `logo` (a 4x1 logo of that colour), is the kit's logo, sent in `theme`. An asset `'broken'` is a
-   * PNG header and nothing that decodes.
+   * PNG header and nothing that decodes. `fallback` names the bound fields a screen says are playing their fallback (#225).
    */
   init(
     frame: string,
@@ -155,6 +155,7 @@ export interface Host {
     durationMs?: number,
     timezone?: string,
     logo?: string,
+    fallback?: string[],
   ): Promise<void>;
   /** `init` as no screen sends it: straight to the started frame, with no `reset` or `loaded` before it. For the SDK's own handling of a second init. */
   initAgain(...args: Parameters<Host['init']>): Promise<void>;
@@ -248,11 +249,12 @@ export async function host(orientation: Orientation = 'landscape', full: boolean
     durationMs = 8000,
     timezone = 'UTC',
     logo?: string,
+    fallback: string[] = [],
   ) => {
     const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
     const broken = sampled === 'broken';
     await page.evaluate(
-      async ({ how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo }) => {
+      async ({ how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo, fallback }) => {
         const w = window as unknown as {
           hosts: Record<string, Hosted>;
           msgs: Record<string, string[]>;
@@ -333,6 +335,7 @@ export async function host(orientation: Orientation = 'landscape', full: boolean
           locale: 'en-US',
           now,
           theme: theme && logoPng ? { ...theme, logo: { onDark: logoPng } } : theme,
+          fallback,
         };
         if (how === 'raw') {
           const { now: told, ...spot } = h.spot;
@@ -351,7 +354,7 @@ export async function host(orientation: Orientation = 'landscape', full: boolean
         h.started = true;
         wait.catch(failed);
       },
-      { how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo },
+      { how, frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone, logo, fallback },
     );
   };
   const frameOf = (frame: string) => page.mainFrame().childFrames()[opened.indexOf(frame)]!.childFrames()[0]!;
@@ -437,7 +440,8 @@ export async function host(orientation: Orientation = 'landscape', full: boolean
  * with its text and again with the text hidden, at rest. Each
  * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
  * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
- * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+ * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1; text a clipping box
+ * hides (a crawl's copy past its window) is not read.
  */
 export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Promise<string[]> {
   const { card, texts } = await f.evaluate((scope) => {
@@ -450,7 +454,15 @@ export async function paintedContrast(page: Page, f: Frame, scope = '.info'): Pr
       const range = document.createRange();
       range.selectNode(own[0]!);
       range.setEndAfter(own.at(-1)!);
+      // Only what its clipping boxes show: a crawl's second copy can sit past its window, where it paints nothing.
       const r = range.getBoundingClientRect();
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (getComputedStyle(p).overflow === 'visible') continue;
+        const c = p.getBoundingClientRect();
+        const [x, y] = [Math.max(r.x, c.x), Math.max(r.y, c.y)];
+        [r.width, r.height] = [Math.max(0, Math.min(r.right, c.right) - x), Math.max(0, Math.min(r.bottom, c.bottom) - y)];
+        [r.x, r.y] = [x, y];
+      }
       const s = getComputedStyle(el);
       const size = Number.parseFloat(s.fontSize);
       texts.push({

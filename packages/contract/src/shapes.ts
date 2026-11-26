@@ -571,6 +571,13 @@ export interface InitPayload {
   clock: FrameClock;
   /** Protocol 2. */
   theme?: FrameTheme;
+  /**
+   * Protocol 2: the bound fields playing their static fallback in `data` (#225), because their source is missing, its
+   * snapshot is older than `SNAPSHOT_STALE_MS`, or its value did not fit. A bound field not named here plays live data;
+   * a field with no binding is never named. Absent from players before #225: read it as none. It holds for the whole
+   * play: `data` is resolved once, at `init`, so a source that goes stale mid-play changes nothing until the next one.
+   */
+  fallback?: string[];
 }
 
 export type HostMessage =
