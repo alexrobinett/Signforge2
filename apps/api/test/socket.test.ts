@@ -585,6 +585,59 @@ describe('the order of reports (gh-44)', () => {
     s.ws.close(1000);
   });
 
+  /** Inside the screen's object: until the held credentials read has started. */
+  const readStarted = async (hold: { log: string[] }) => {
+    while (!hold.log.length) await new Promise<void>((r) => setTimeout(r, 0));
+  };
+
+  it('orders a socket report by when it reached the object, so an untimed sync started after it wins (review of #533)', async () => {
+    const c = await setUp('ws-q');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    const calls = nextTaken(1);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      await calls();
+      await readStarted(hold);
+    });
+    // A second after the report arrived, while its credentials read waits, an untimed sync says M2.
+    vi.setSystemTime(NOW + 1000);
+    await sync(c.credential, { ...syncBody(), manifest: { active: M2, filesMissing: 0 }, clock: { offsetMs: 0, trusted: false } });
+    expect(await reported(c)).toBe(M2);
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const [report] = await calls();
+      hold.release();
+      await report!.done;
+    });
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it("keeps a live socket's waiting report when a revoked socket of the same screen reports after it (review of #533)", async () => {
+    const c = await setUp('ws-r');
+    const { credential: other, secretHash } = await mintCredential(c.seed.screen);
+    const otherRow = await c.seed.scope.screens.credentials.insert({ screenId: c.seed.screen, secretHash });
+    const live = await connect(await ticketFor(c));
+    const revoked = await connect(await ticketFor({ ...c, credential: other, credentialId: otherRow.id }));
+    // Revoked in D1, its notice lost: the object learns it only at that socket's write.
+    await env.DB.prepare('UPDATE screen_credentials SET revoked_at = ? WHERE id = ?').bind(NOW, otherRow.id).run();
+    const hold = holdCredentialRead();
+    const calls = nextTaken(3);
+    live.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    live.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), () => readStarted(hold));
+    revoked.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const done = (await calls()).map((t) => t.done);
+      hold.release();
+      await Promise.all(done);
+    });
+    // The live socket's latest is written; the revoked one's is dropped and its socket closed.
+    expect(await reported(c)).toBe(M1);
+    expect(await revoked.closed).toBe(4001);
+    live.ws.close(1000);
+  });
+
   it('gives up on a send whose credentials read waits D1_LIMIT_MS, and sends nothing for it (#519)', async () => {
     const c = await setUp('ws-p');
     const s = await connect(await ticketFor(c));
