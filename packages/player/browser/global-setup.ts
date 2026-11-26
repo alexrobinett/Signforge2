@@ -23,6 +23,8 @@ declare module 'vitest' {
     brandTemplateHtml: string;
     /** The CMS origin the player is built to accept preview drafts from (`CMS_ORIGIN`). */
     cmsOrigin: string;
+    /** player-core's Frame host as a script for a page: `window.SFFrameHost.openFrameHost`. */
+    frameHostJs: string;
   }
 }
 
@@ -88,5 +90,15 @@ export default async function setup(project: TestProject): Promise<() => void> {
   project.provide('brandTemplateHtml', brandTemplateHtml);
   project.provide('templateHtml', templateHtml);
   project.provide('cmsOrigin', CMS_ORIGIN);
+  const host = await esbuild({
+    entryPoints: [join(playerRoot, '../player-core/src/frame-host.ts')],
+    bundle: true,
+    format: 'iife',
+    globalName: 'SFFrameHost',
+    target: 'chrome120',
+    write: false,
+    logLevel: 'silent',
+  });
+  project.provide('frameHostJs', host.outputFiles[0]!.text);
   return () => rmSync(outDir, { recursive: true, force: true });
 }

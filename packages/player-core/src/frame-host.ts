@@ -17,7 +17,7 @@
  * that read the rest of player-core without the DOM's types (the tools, the API) never compile it.
  */
 import type { HostMessage, InitPayload, TemplateMessage } from '@signforge/contract';
-import { READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
+import { alive, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
 
 export interface FrameHostOptions {
   /** Where the wrapper frame goes. */
@@ -41,18 +41,16 @@ export interface FrameHostOptions {
 }
 
 export interface FrameHost {
-  /** Add the template's frame and wait for its first `ready`. Resolves with the ms from `init` to `ready`; rejects on its error or a navigation. */
-  start(): Promise<number>;
-  /** `reset`, which the template answers with `loaded` and then gets `init`; resolves on its `ready`, within READY_TIMEOUT_MS. */
-  reset(): Promise<number>;
+  /**
+   * Add the template's frame and wait for its first `ready`. Resolves with the ms from `init` to `ready`, or null for
+   * a `ready` that came with no `init` sent since the wait began; rejects on its error or a navigation.
+   */
+  start(): Promise<number | null>;
+  /** `reset`, which the template answers with `loaded` and then gets `init`; resolves on its `ready` as `start` does, within READY_TIMEOUT_MS. */
+  reset(): Promise<number | null>;
   play(): void;
   resize(size: { width: number; height: number }): void;
   setTitle(title: string): void;
-}
-
-/** Throw if the host was ended while it waited. */
-function alive(signal: AbortSignal): void {
-  if (signal.aborted) throw new Error('cancelled');
 }
 
 /** Build the wrapper frame in `o.container` and resolve once it has loaded, the template's frame not yet added. */
@@ -87,19 +85,20 @@ export async function openFrameHost(o: FrameHostOptions): Promise<FrameHost> {
 
   /** Settles on the frame's next `ready` or `error`; set only while a start, or a reset, waits. */
   let waiter: { resolve: () => void; reject: (err: Error) => void } | undefined;
-  /** When the last `init` was sent: `ready` is counted from it. */
-  let initAt = 0;
+  /** When `init` was sent in the wait in progress: `ready` is counted from it. Unset while none has been. */
+  let initAt: number | undefined;
   const post = (m: HostMessage) => {
     if (frame.contentWindow) relay(frame.contentWindow, m);
   };
   /** Wait for the frame's next `ready`; `send` starts what leads to it. */
-  const nextReady = (send: () => void): Promise<number> => {
+  const nextReady = (send: () => void): Promise<number | null> => {
     waiter?.reject(new Error('superseded'));
-    return new Promise<number>((resolve, reject) => {
+    initAt = undefined;
+    return new Promise<number | null>((resolve, reject) => {
       const w = {
         resolve: () => {
           if (waiter === w) waiter = undefined;
-          resolve(Math.round((performance.now() - initAt) * 10) / 10);
+          resolve(initAt === undefined ? null : Math.round((performance.now() - initAt) * 10) / 10);
         },
         reject: (err: Error) => {
           if (waiter === w) waiter = undefined;
