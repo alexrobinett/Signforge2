@@ -203,7 +203,7 @@ describe('groups', () => {
       /idempotencyKey is for a new group/,
     );
     expect(await said({ groupId: o.group, membership: 'add' })).toMatch(/membership needs the screenIds/);
-    expect(await said({ groupId: o.group })).toMatch(/give a name or screenIds/);
+    expect(await said({ groupId: o.group })).toMatch(/give a name, screenIds or a selector/);
   });
 
   it('refuses what it does not take by name, ifVersion on a new group, and add or remove of no screens, writing nothing', async () => {

@@ -63,22 +63,45 @@ it('reads at most maxIds of each type by ids within 40 statements and under 50 q
   // Measured, as the most each may take: a new statement fails this on purpose. Look at the cap, then raise it.
   expect(costs).toEqual({
     'editor asset': '12 ids: 39 queries',
-    'editor brand_kit': '9 ids: 39 queries',
+    'editor brand_kit': '9 ids: 14 queries',
     'editor data_source': '18 ids: 39 queries',
     'editor playlist': '12 ids: 39 queries',
     'editor publish': '7 ids: 38 queries',
     'editor publish_request': '12 ids: 39 queries',
-    'editor screen': '4 ids: 35 queries',
+    'editor screen': '4 ids: 32 queries',
     'editor spot': '30 ids: 33 queries',
     'editor template': '18 ids: 39 queries',
     'owner asset': '12 ids: 38 queries',
-    'owner brand_kit': '9 ids: 38 queries',
+    'owner brand_kit': '9 ids: 13 queries',
     'owner data_source': '18 ids: 38 queries',
     'owner playlist': '12 ids: 38 queries',
     'owner publish': '7 ids: 37 queries',
     'owner publish_request': '12 ids: 38 queries',
-    'owner screen': '4 ids: 34 queries',
+    'owner screen': '4 ids: 31 queries',
     'owner spot': '30 ids: 32 queries',
     'owner template': '18 ids: 38 queries',
   });
+});
+
+it('costs no more by ids when a group chose a kit, and pins what smart groups made dearer (#186, review of #608)', async () => {
+  const t = testApp();
+  const owner = new Client(t);
+  await owner.signIn(email('read-cost-groups'));
+  const org = await owner.createOrg('Read Cost Groups');
+  const o = await seedOrg(env.DB, org.id);
+  const scope = testScope(env.DB, org.id);
+  await scope.commit((await scope.screens.labels.stage.update([o.screen], { set: { store: 'harbor' }, remove: [] })).writes);
+  const smart = await scope.screenGroups.insert({ name: 'Harbor', selectorJson: JSON.stringify({ all: [{ key: 'store', op: 'eq', values: ['harbor'] }] }) });
+  await owner.ok('/api/tools/assign_brand_kit', { brandKitId: o.brandKit, target: 'group', groupId: smart.id });
+  const cost = async (path: string, input: unknown) => (await measure((b) => as(owner, b).ok(path, input))).queries;
+  const costs = {
+    readKits: await cost('/api/tools/read', { type: 'brand_kit', ids: Array(9).fill(o.brandKit) }),
+    listKits: await cost('/api/tools/list_brand_kits', {}),
+    assign: await cost('/api/tools/assign_brand_kit', { brandKitId: o.brandKit, target: 'group', groupId: smart.id }),
+    saveRule: await cost('/api/tools/save_group', { name: 'North', selector: { all: [{ key: 'store', op: 'exists' }] }, idempotencyKey: crypto.randomUUID() }),
+    saveList: await cost('/api/tools/save_group', { name: 'List', screenIds: [o.screen], idempotencyKey: crypto.randomUUID() }),
+  };
+  expect(costs.readKits).toBeLessThan(50);
+  // Measured, as the most each may take: a new statement fails this on purpose.
+  expect(costs).toEqual({ readKits: 15, listKits: 7, assign: 11, saveRule: 7, saveList: 5 });
 });

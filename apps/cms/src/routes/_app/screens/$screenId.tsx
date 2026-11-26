@@ -13,6 +13,7 @@ import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
 import { describeHours, DisplayHoursEditor, WeekBars } from '~/components/screens/display-hours-editor';
 import { hoursProblems } from '~/lib/screen-types';
+import { LabelChips, LabelEditor } from '~/components/screens/labels';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { ScreenStatus } from '~/components/screens/status';
 import {
@@ -38,13 +39,14 @@ import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock, reachable } from '~/lib/screen-status';
 import type { PlaylistView } from '~/lib/playlists';
 import { describeWhen, howItReaches, runsAfter, stateWord, timeWord, type ScheduleEntryView } from '~/lib/schedule';
-import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
+import { isOrientation, listedGroups, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
 import { cn } from '~/lib/utils';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
+import { NEXT_PUBLISH } from '~/state/labels';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
 
 /**
@@ -151,6 +153,8 @@ function ScreenPage() {
   const openScreenSettings = useAppStore((s) => s.openScreenSettings);
   const openDisplayHours = useAppStore((s) => s.openDisplayHours);
   const askToRevoke = useAppStore((s) => s.askToRevoke);
+  const editScreenLabels = useAppStore((s) => s.editScreenLabels);
+  const labelsOpen = useAppStore((s) => s.labels.editor?.screenId === screen.id);
   const revokeScreen = useAppStore((s) => s.revokeScreen);
   // Page state belongs to one screen: another screen's notice or editor is not shown here.
   const ours = pageState.screenId === screen.id;
@@ -391,6 +395,20 @@ function ScreenPage() {
         </div>
 
         <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-4">
+          <Section
+            title="Labels"
+            action={
+              canManage && !revoked ? (
+                <Button variant="link" size="sm" className="h-auto px-0 underline" aria-label="Edit labels" onClick={() => editScreenLabels(screen)}>
+                  Edit
+                </Button>
+              ) : undefined
+            }
+          >
+            {Object.keys(screen.labels).length === 0 && <p className="text-sm text-muted-foreground">No labels yet.</p>}
+            <LabelChips labels={screen.labels} system={screen.systemLabels} />
+          </Section>
+
           <Section title="Offline cache">
             <CacheState screen={screen} />
           </Section>
@@ -457,6 +475,7 @@ function ScreenPage() {
 
       {editing === 'settings' && <SettingsDialog screen={screen} groups={groups} />}
       {editing === 'hours' && <HoursDialog screen={screen} />}
+      {labelsOpen && <LabelsDialog orgId={orgId} screen={screen} />}
       <AlertDialog open={revoking} onOpenChange={askToRevoke}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -577,8 +596,9 @@ function CacheState({ screen }: { screen: ScreenView }) {
   );
 }
 
-function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupView[] }) {
+function SettingsDialog({ screen, groups: all }: { screen: ScreenView; groups: GroupView[] }) {
   const id = useId();
+  const groups = listedGroups(all);
   const draft = useAppStore((s) => settingsDraftOf(s.screens, screen.id));
   const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const renameDraft = useAppStore((s) => s.renameDraft);
@@ -670,6 +690,45 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
             </Button>
             <Button type="submit" disabled={saving || !draft.name.trim()}>
               {saving && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The screen's labels, as rows to type; saved as one merge, so it refuses no one else's edit. */
+function LabelsDialog({ orgId, screen }: { orgId: string; screen: ScreenView }) {
+  const editor = useAppStore((s) => s.labels.editor);
+  const close = useAppStore((s) => s.closeLabelEditor);
+  const saveScreenLabels = useAppStore((s) => s.saveScreenLabels);
+  function save(e: SubmitEvent) {
+    e.preventDefault();
+    void saveScreenLabels(orgId, screen);
+  }
+  return (
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Labels</DialogTitle>
+          <DialogDescription>{NEXT_PUBLISH}</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className="grid gap-4">
+          <LabelEditor target={{ screenId: screen.id }} own={screen.labels} titled={false} />
+          <div className="grid gap-1.5">
+            <p className="text-sm font-medium">From its settings</p>
+            <LabelChips labels={{}} system={screen.systemLabels} name="From its settings" />
+          </div>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {editor?.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={editor?.pending}>
+              {editor?.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
             </Button>
           </DialogFooter>
         </form>

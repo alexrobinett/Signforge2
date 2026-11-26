@@ -303,6 +303,12 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
    * `read`). Refused with the `ToolError` dispatch would answer.
    */
   run: (name: string, input: unknown) => Promise<unknown>;
+  /**
+   * What one dispatch's reads share (#186, review of #608): `make` runs once per `key` for this call and the reads it
+   * runs (`run`), so a `read` of nine brand kits builds their context once. For a read: a write's view of what it
+   * changed reads afresh.
+   */
+  memo: <T>(key: string, make: () => Promise<T>) => Promise<T>;
 }
 
 /**

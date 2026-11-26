@@ -12,7 +12,7 @@
 import { BRAND_SHAPES, SCREEN_KINDS, TABLE_ROWS_PATH, TEMPLATE_CHECKS, type DisplayHours, type TemplateManifest } from '@signforge/contract';
 import type { CompileInput } from '@signforge/compiler';
 import { z } from 'zod';
-import { displayHours, draftOutput, orientation, version } from './fields';
+import { displayHours, draftOutput, orientation, selector, version } from './fields';
 import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -117,8 +117,9 @@ export type CredentialView = z.infer<typeof credentialOutput>;
 const groupOutput = z.object({
   id: z.string(),
   name: z.string(),
-  screenIds: z.array(z.string()).describe('The screens in the group, ordered by id'),
-  version: version.describe('Moves on when the name or the screens change; pass it as ifVersion to update only what you read'),
+  screenIds: z.array(z.string()).describe("Its screens, by id: a rule group's are those its selector matches now"),
+  selector: selector.nullable().describe("A smart group's rule; null for a group of listed screens"),
+  version: version.describe('Moves on when its name, rule or screens change; pass it as ifVersion'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -913,6 +914,9 @@ export const outputs = {
   claim_screen: z.object({ screen: screenOutput }),
   update_screen_labels: z.object({
     screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the change') })),
+  }),
+  import_screen_labels: z.object({
+    screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the import') })),
   }),
   list_label_keys: z.object({
     keys: z.array(

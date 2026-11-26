@@ -280,13 +280,87 @@ describe('the look kit (#190)', () => {
         'script animation shows progress along x and y and sx and sy',
         'script animation shows progress past full size',
       ],
-      't-flash': ['t-flash loops 10.0 times a second', 't-flash flashes from 0.00 to 1.00 opacity'],
+      't-flash': [expect.stringMatching(/^t-flash flashes (9|10) times in a second$/), 't-flash flashes from 0.00 to 1.00 opacity'],
       't-late-slide': ['t-late-slide travels 40.0vmin'],
       't-swell': expect.arrayContaining(['t-swell scales to 1.10']),
       't-late-exit': ['t-gone leaves at 6000 ms, after div.t.t-story hides at 5000'],
     });
     expect(found).toContain('t t-pseudo::before t-nowhere: no such keyframes');
     expect(found.filter((l) => l.startsWith('t t-stays'))).toEqual([]);
+  });
+
+  it('motionContract counts flashes, bounds loops that shrink, adds up moves and progress, and reads what ran early (#552)', async () => {
+    const k = await kitFrame();
+    const durationMs = 11_000;
+    const f = await k.play({ look: 'corporate' }, undefined, durationMs);
+    await f.evaluate(() => {
+      const [dec, acc, std] = ['cubic-bezier(0.05, 0.7, 0.1, 1)', 'cubic-bezier(0.3, 0, 0.8, 0.15)', 'cubic-bezier(0.2, 0, 0, 1)'];
+      // Twenty-four dips to 0.3 in a 2.4 s loop: ten a second, between the old 25 samples.
+      const dips = Array.from({ length: 48 }, (_, i) => `${((i + 1) * 100) / 49}% { opacity: ${i % 2 ? 1 : 0.3}; }`).join(' ');
+      const style = document.createElement('style');
+      style.textContent = `
+        .q { position: absolute; left: 10vmin; top: 10vmin; width: 5vmin; height: 5vmin; }
+        @keyframes q-five { 0%, 20%, 40%, 60%, 80%, 100% { opacity: 1; } 10%, 30%, 50%, 70%, 90% { opacity: 0.3; } }
+        .q-five { animation: q-five 0.5s linear infinite; }
+        @keyframes q-hidden { ${dips} }
+        .q-hidden { animation: q-hidden 2.4s linear infinite; }
+        @keyframes q-shrink { 50% { transform: scale(0); } }
+        .q-shrink { animation: q-shrink 0.1s linear infinite; }
+        @keyframes q-in { from { opacity: 0; } }
+        @keyframes q-out { to { opacity: 0; animation-timing-function: ${acc}; } }
+        .q-curve { animation: q-in 0.5s ${dec} both, q-out 0.3s linear 10.7s forwards; }
+        @keyframes q-late { from { opacity: 0; transform: translateY(30vmin); } }
+        .q-late { animation: q-late 0.5s ${dec} 20s both; }
+        .q-holder { position: absolute; inset: 0; pointer-events: none; }
+        @keyframes q-gone { to { opacity: 0; } }
+        .q-holder .q-part { animation: q-gone 0.3s ${acc} 5.7s forwards; }
+        @keyframes q-blip { from { opacity: 0; } }
+        .q-blip { animation: q-blip 0.5s ${dec}; }`;
+      document.head.append(style);
+      const add = (name: string, parent: Element = document.body) =>
+        parent.appendChild(Object.assign(document.createElement('div'), { className: `q ${name}` }));
+      for (const name of ['q-five', 'q-hidden', 'q-shrink', 'q-curve', 'q-late']) add(name);
+      // Progress flashing: opacity 0 to 1 in 100 ms, a hundred times over.
+      add('q-progress').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, iterations: 100, fill: 'both' });
+      // Three 1.5vmin moves mid-play, stacked on one element.
+      const stack = add('q-stack');
+      for (const at of [3000, 4000, 5000])
+        stack.animate([{ transform: 'none' }, { transform: 'translateY(1.5vmin)' }], {
+          duration: 400,
+          delay: at,
+          easing: std,
+          fill: 'forwards',
+          composite: 'add',
+        });
+      // Progress out, then back, written as two animations.
+      const back = add('q-back');
+      back.animate([{ transform: 'none' }, { transform: 'translateX(10vmin)' }], { duration: 1000, delay: 3000, fill: 'both' });
+      back.animate([{ transform: 'translateX(10vmin)' }, { transform: 'none' }], { duration: 1000, delay: 5000, fill: 'forwards' });
+      // A holder with no animation that hides it, and a part that leaves mid-play.
+      add('q-part', add('q-holder'));
+      // An animation that has run and kept no fill, so it is gone from the document's list.
+      for (const a of add('q-blip').getAnimations()) a.finish();
+    });
+    const found = await motionContract(f, durationMs, {
+      loops: '.lk-crawl, .lk-ping, .q-five, .q-hidden, .q-shrink',
+      progress: '.q-progress, .q-back',
+      exits: '.q-holder',
+    });
+    const of = (c: string) => found.filter((l) => l.startsWith(`div.q.${c} `)).map((l) => l.slice(`div.q.${c} `.length));
+    expect(
+      Object.fromEntries(['q-five', 'q-hidden', 'q-shrink', 'q-progress', 'q-stack', 'q-back', 'q-curve', 'q-late', 'q-part', 'q-blip'].map((c) => [c, of(c)])),
+    ).toEqual({
+      'q-five': [expect.stringMatching(/^q-five flashes (9|10) times in a second$/)],
+      'q-hidden': [expect.stringMatching(/^q-hidden flashes (9|10) times in a second$/)],
+      'q-shrink': [expect.stringMatching(/^q-shrink flashes (9|10) times in a second$/)],
+      'q-progress': [expect.stringMatching(/^script animation flashes (9|10) times in a second$/)],
+      'q-stack': ['moves 4.5vmin mid-play in all'],
+      'q-back': ['shows progress both ways along x'],
+      'q-curve': ['q-out leaves on linear'],
+      'q-late': ['q-late travels 30.0vmin'],
+      'q-part': ['q-gone leaves at 6000 ms, not as the spot ends at 11000'],
+      'q-blip': ['q-blip ran and kept no fill, so it was not read'],
+    });
   });
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames
