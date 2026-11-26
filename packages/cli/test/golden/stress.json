@@ -40,8 +40,8 @@
       "size": 360551,
       "type": "image/jpeg"
     },
-    "67e5d281f57bbedff77858ca4162530d071f531dcef7c5a2fd98984d44bed1f0": {
-      "size": 395060,
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
       "type": "text/html"
     },
     "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f": {
@@ -335,7 +335,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "67e5d281f57bbedff77858ca4162530d071f531dcef7c5a2fd98984d44bed1f0"
+      "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
     },
     "base/clock@1.3.0": {
       "manifest": {
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "e9656cc315d1482d0623d7277009d80541814759e7d1fb15bb0c92151393578f"
+  "id": "61ef6fcac0cae73ca2fae24cc6582a466ac72221c4d33e83ce1faef80ca052a9"
 }

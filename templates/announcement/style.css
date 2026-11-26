@@ -229,7 +229,9 @@ body {
   padding: 6.7vmin 8.9vmin;
   gap: 8.9vmin;
 }
+/* The code holds its size to scan, so at max-length copy the space between blocks, and the code's label, step down with the body. */
 [data-look='pop'] .copy {
+  --pop-gap: calc(var(--lk-gap) * var(--fit-body));
   grid-template-rows: min-content min-content min-content min-content minmax(0, 1fr) min-content;
   grid-template-areas:
     'eyebrow eyebrow logo'
@@ -240,7 +242,7 @@ body {
     'meta meta qr';
 }
 [data-look='pop'] .eyebrow {
-  margin-bottom: var(--lk-gap);
+  margin-bottom: var(--pop-gap);
 }
 [data-look='pop'] .pill {
   font-size: 3.1vmin;
@@ -251,7 +253,7 @@ body {
 }
 [data-look='pop'] .body,
 [data-look='pop'] .facts {
-  margin-top: var(--lk-gap);
+  margin-top: var(--pop-gap);
 }
 [data-look='pop'] .body {
   max-width: 24em;
@@ -272,14 +274,14 @@ body {
 }
 [data-look='pop'] .qr,
 [data-look='pop'] .meta {
-  margin-top: var(--lk-gap);
+  margin-top: var(--pop-gap);
   align-self: end;
 }
 [data-look='pop'] .qr {
   margin-left: 3.7vmin;
   font-family: var(--lk-font-display);
   font-weight: 700;
-  font-size: 3.1vmin;
+  font-size: max(2.6vmin, 3.1vmin * var(--fit-body));
   line-height: 1.25;
 }
 [data-look='pop'] .qr-label {
@@ -311,7 +313,7 @@ body {
     'qr meta meta';
 }
 :where([data-orientation='portrait'])[data-look='pop'] .qr {
-  margin: var(--lk-gap) 3.7vmin 0 0;
+  margin: var(--pop-gap) 3.7vmin 0 0;
 }
 :where([data-orientation='portrait'])[data-look='pop'] .photo {
   flex-basis: 30vh;
