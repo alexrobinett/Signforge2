@@ -57,7 +57,6 @@ type Orientation = Screen['orientation'];
 
 export interface OrgGraph {
   screens: Screen[];
-  /** Screen id to the ids of its groups. */
   /** Each screen's groups, list and smart, as read (`resolveGroups`, #186). */
   groupsOf: Map<string, string[]>;
   /** The org's smart groups' rules, and its screens' labels (none read without a rule), as read: what a smart group's takeover is held to. */

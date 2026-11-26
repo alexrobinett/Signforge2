@@ -12,7 +12,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { isOrientation, type GroupView } from '~/lib/screen-types';
+import { isOrientation, listedGroups, type GroupView } from '~/lib/screen-types';
 import { useOrgId } from '~/lib/live';
 import { byName } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
@@ -49,8 +49,9 @@ const useBrowserZone = () => useSyncExternalStore(noChange, browserZone, () => '
 /** The form is on the Screens page, whose loader reads the org's defaults for new screens. */
 const screensPage = getRouteApi('/_app/screens/');
 
-export function PairScreenForm({ groups, compact = false }: { groups: GroupView[]; compact?: boolean }) {
+export function PairScreenForm({ groups: all, compact = false }: { groups: GroupView[]; compact?: boolean }) {
   const id = useId();
+  const groups = listedGroups(all);
   const browser = useBrowserZone();
   const orgDefaults = screensPage.useLoaderData({ select: (d) => d.settings });
   const { code, name, timezone: chosenZone, orientation, groupIds, hours: chosenHours, pending, error } = useAppStore((s) => s.screens.pairing);

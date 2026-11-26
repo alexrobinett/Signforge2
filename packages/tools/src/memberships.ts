@@ -34,23 +34,29 @@ export function resolveGroups(
   );
 }
 
-/** The org's groups, and each screen's, as they are now. */
-export async function orgGroups(org: OrgScope) {
-  const [screens, labels, groups, { members, rules }] = await Promise.all([
+/**
+ * Each screen's groups as they are now, reading only what that needs (review of #608): the screens and every
+ * membership and rule in two calls, the labels only when the org has a rule, and the groups themselves only for a
+ * caller that lists them (`groups`).
+ */
+export async function orgGroups(org: OrgScope, { groups: withGroups = false } = {}) {
+  const [screens, { members, rules }, groups] = await Promise.all([
     org.screens.list(),
-    org.screens.labels.list(),
-    org.screenGroups.list(),
     org.screenGroups.membership(),
+    withGroups ? org.screenGroups.list() : Promise.resolve([]),
   ]);
-  const of = resolveGroups(screens, labels, rules, members);
+  let labels = rules.length ? await org.screens.labels.list() : undefined;
+  const of = resolveGroups(screens, labels ?? [], rules, members);
   /** The ids of the screens in `groupId`, sorted. */
   const screensIn = (groupId: string) => [...of].flatMap(([screenId, ids]) => (ids.includes(groupId) ? [screenId] : [])).toSorted();
-  const byScreen = labelsByScreen(labels);
-  /** The ids of the screens `rule` matches now, sorted: a rule not stored yet. */
-  const matching = (rule: Selector) =>
-    screens
+  /** The ids of the screens `rule` matches now, sorted: a rule not stored yet, whose labels are read if they were not. */
+  const matching = async (rule: Selector) => {
+    labels ??= await org.screens.labels.list();
+    const byScreen = labelsByScreen(labels);
+    return screens
       .filter((s) => matches(rule, { ...systemLabels(s), ...byScreen.get(s.id) }))
       .map((s) => s.id)
       .toSorted();
+  };
   return { screens, groups, groupsOf: of, screensIn, matching };
 }

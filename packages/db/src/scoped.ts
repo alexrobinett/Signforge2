@@ -936,17 +936,30 @@ export function scoped(d1: D1Database, orgId: string) {
             .all(),
         stage: {
           /**
-           * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless the org's labels are exactly
-           * `rows`, so a smart group's takeover plays on the screens its card showed, whoever labelled one meanwhile (#186).
+           * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless what a smart group's rule reads
+           * is as read (#186, review of #608): the labels of its `keys` (`rows`, those read), and, when it names a system
+           * label, each screen's settings it comes from (`screens`). A label of another key edited meanwhile changes
+           * nothing the rule reads, and does not refuse it.
            */
-          are: (rows: readonly { screenId: string; key: string; value: string }[]): Staged => {
-            const line = (r: { screenId: string; key: string; value: string }) => `${r.screenId}\u001f${r.key}\u001f${r.value}`;
-            const want = rows
-              .map(line)
-              .toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-              .join('\u001e');
-            const now = sql`COALESCE((SELECT group_concat(${sl.screenId} || char(31) || ${sl.key} || char(31) || ${sl.value}, char(30) ORDER BY ${sl.screenId}, ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId}), '')`;
-            return holdsGuard('labels', sql`${now} = ${want}`);
+          are: (
+            keys: readonly string[],
+            rows: readonly { screenId: string; key: string; value: string }[],
+            screens?: readonly { id: string; orientation: string; kind: string; timezone: string; locale: string | null }[],
+          ): Staged => {
+            const join = (lines: string[], by: string) => lines.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(by);
+            const labelsNow = sql`COALESCE((SELECT group_concat(${sl.screenId} || char(31) || ${sl.key} || char(31) || ${sl.value}, char(30) ORDER BY ${sl.screenId}, ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.key} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))), '')`;
+            const labelsWant = join(
+              rows.filter((r) => keys.includes(r.key)).map((r) => `${r.screenId}\u001f${r.key}\u001f${r.value}`),
+              '\u001e',
+            );
+            if (!screens) return holdsGuard('labels', sql`${labelsNow} = ${labelsWant}`);
+            const sc = s.screens;
+            const screensNow = sql`COALESCE((SELECT group_concat(${sc.id} || char(31) || ${sc.orientation} || char(31) || ${sc.kind} || char(31) || ${sc.timezone} || char(31) || COALESCE(${sc.locale}, ''), char(30) ORDER BY ${sc.id}) FROM ${sc} WHERE ${sc.orgId} = ${orgId}), '')`;
+            const screensWant = join(
+              screens.map((x) => `${x.id}\u001f${x.orientation}\u001f${x.kind}\u001f${x.timezone}\u001f${x.locale ?? ''}`),
+              '\u001e',
+            );
+            return holdsGuard('labels', sql`${labelsNow} = ${labelsWant} AND ${screensNow} = ${screensWant}`);
           },
           /**
            * A merge into each screen's labels: a key in `set` takes that value, a key in `remove`
@@ -1002,15 +1015,6 @@ export function scoped(d1: D1Database, orgId: string) {
           },
         },
       },
-      /** Ids of the groups a screen belongs to. */
-      groupsOf: async (screenId: string) =>
-        (
-          await db
-            .select({ id: m.groupId })
-            .from(m)
-            .where(and(eq(m.orgId, orgId), eq(m.screenId, screenId)))
-            .all()
-        ).map((r) => r.id),
     },
 
     /**

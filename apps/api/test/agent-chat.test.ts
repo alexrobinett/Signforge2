@@ -676,6 +676,23 @@ describe('confirmation cards (#269)', () => {
     return { ...s, playlist, called };
   }
 
+  it("says a smart group's reach as its rule matches now, within the turn's budget (#186, review of #608)", async () => {
+    const s = await takeover();
+    const screens = await s.scope.screens.list();
+    const bayside = screens.filter((x) => x.name.startsWith('Bayside')).map((x) => x.id);
+    await s.scope.commit((await s.scope.screens.labels.stage.update(bayside, { set: { store: 'bayside' }, remove: [] })).writes);
+    const group = await s.scope.screenGroups.insert({ name: 'Bayside', selectorJson: JSON.stringify({ all: [{ key: 'store', op: 'eq', values: ['Bayside'] }] }) });
+    s.called.target = 'group';
+    (s.called as Record<string, unknown>).groupId = group.id;
+    let all: any[] = [];
+    const cost = await measure(async (b) => {
+      all = await raw(await as(s.member, b).post('/api/agent/chat', run('Close Bayside for the storm')));
+    });
+    expect(pressOf(all, 'q').card.lines[0]).toBe('Plays Storm closure on the Bayside group (2 screens), over anything scheduled.');
+    // Measured, as the most it may take: the card's reach is the screens, the memberships and rules, and the labels.
+    expect(cost).toEqual({ statements: 10, queries: 10, rpcs: ['takeTurn', 'offerConfirmation'] });
+  });
+
   it("stops the turn at a card that says what would happen, running nothing, and streams none of the model's input", async () => {
     const s = await takeover();
     const all = await raw(await s.ask('Bayside closes at 2 for the storm: put the closure up everywhere'));

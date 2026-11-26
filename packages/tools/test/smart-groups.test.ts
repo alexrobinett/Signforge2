@@ -11,6 +11,7 @@ import { fakeServices } from './services';
 const START = Date.UTC(2100, 0, 5, 9);
 let o: SeededOrg;
 let owner: Caller;
+let till: { id: string };
 
 const run = (name: string, input: unknown) => dispatch(registry, name, input, owner);
 const call = async <T = any>(name: string, input: unknown): Promise<T> => {
@@ -27,7 +28,7 @@ beforeAll(async () => {
   o = await seedOrg(env.DB, 'smart-groups');
   await seedTeam(env.DB, o.orgId);
   owner = { org: scope(), role: 'owner', actor: { kind: 'user', id: `${o.orgId}-owner`, clientId: 'cms' }, blobs: env.BLOBS, services: fakeServices };
-  const till = await scope().screens.insert({ name: 'Till', timezone: 'Europe/London', orientation: 'landscape' });
+  till = await scope().screens.insert({ name: 'Till', timezone: 'Europe/London', orientation: 'landscape' });
   // What a takeover's publish needs: a default playlist for its screens.
   await scope().commit((await scope().settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
   await call('update_screen_labels', { screenIds: [o.screen], set: { region: 'north' } });
@@ -67,6 +68,16 @@ describe('a smart group through the tools', () => {
     expect(listed.group.screenIds).toEqual([]);
   });
 
+  it("is among a screen's groups as get_screen reads them (review of #608)", async () => {
+    const { group } = await call('save_group', { name: 'North screen', selector: north, idempotencyKey: crypto.randomUUID() });
+    expect((await call('get_screen', { screenId: o.screen })).groupIds).toContain(group.id);
+    expect((await call('get_screen', { screenId: till.id })).groupIds).not.toContain(group.id);
+  });
+
+  it('refuses an empty rule, which would be every screen (review of #608)', async () => {
+    expect(await run('save_group', { name: 'Everything', selector: { all: [] } })).toMatchObject({ ok: false, error: 'invalid_input' });
+  });
+
   it('refuses a selector beside screenIds, and one past the ten terms a rule may have', async () => {
     const both = await run('save_group', { name: 'Both', selector: north, screenIds: [o.screen] });
     expect(both).toMatchObject({ ok: false, error: 'invalid_input' });
@@ -90,6 +101,10 @@ describe('a takeover of a smart group (owner decision on #179)', () => {
     const endsAt = new Date(START + 3_600_000).toISOString();
     const sent = await call('takeover', { action: 'publish', playlistId: o.playlist, target: 'group', groupId: group.id, endsAt, ifReach: [o.screen] });
     expect(sent.entry).toMatchObject({ target: 'group', groupId: group.id });
+    // Reached: the screen its rule matches gets the takeover, the one it does not keeps what it plays (#186's done when).
+    const outcome = (id: string) => sent.screens.find((x: { screenId: string }) => x.screenId === id)?.outcome;
+    expect(outcome(o.screen)).toBe('updated');
+    expect(outcome(till.id)).toBe('unchanged');
 
     // Another screen labelled into the group after the card was shown: the press is refused, naming the screens now.
     const lobby2 = await scope().screens.insert({ name: 'Lobby 2', timezone: 'Europe/London', orientation: 'landscape' });

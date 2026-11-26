@@ -180,9 +180,9 @@ const listBrandKits = defineTool({
   input: z.object({ ...pageInput }),
   output: outputs.list_brand_kits,
   example: {},
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, memo }) => {
     const { rows, next } = page(await org.brandKits.list(), (k) => [k.id], input);
-    const ctx = await brandContext(org);
+    const ctx = await memo('brandContext', () => brandContext(org));
     return { brandKits: rows.map((r) => kitView(r, ctx)), next };
   },
 });
@@ -197,7 +197,10 @@ const getBrandKit = defineTool({
   input: z.object({ brandKitId: id('brand kit') }),
   output: outputs.get_brand_kit,
   example: { brandKitId: 'bk_example' },
-  handler: async ({ org, input }) => ({ brandKit: kitView(await requireKit(org, input.brandKitId), await brandContext(org)) }),
+  // Once per read: a read of several kits by id shares one context (review of #608).
+  handler: async ({ org, input, memo }) => ({
+    brandKit: kitView(await requireKit(org, input.brandKitId), await memo('brandContext', () => brandContext(org))),
+  }),
 });
 
 /** The colours a new kit must give; onPrimary and onAccent are derived when left out. */

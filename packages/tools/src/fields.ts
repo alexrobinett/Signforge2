@@ -140,7 +140,14 @@ const term = (described: boolean) =>
     .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none');
 
 /** A smart group's rule (#186): a selector as `list_screens` describes one, so its parts are not described again. */
-export const rule = z.object({ all: z.array(term(false)).max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`) });
+export const rule = z.object({
+  // An empty rule would match every screen: that is the target org, not a group (review of #608). Refined, not a
+  // minItems the catalogue would carry.
+  all: z
+    .array(term(false))
+    .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`)
+    .refine((terms) => terms.length > 0, 'a rule needs at least one term'),
+});
 
 /** `@signforge/compiler/selector`'s `Selector`, checked. */
 export const selector = z

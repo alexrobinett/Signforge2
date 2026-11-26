@@ -5,6 +5,7 @@
 import type { OrgScope, ScreenGroup } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, rule } from './fields';
+import type { Selector } from '@signforge/compiler/selector';
 import { orgGroups, ruleOf } from './memberships';
 import { page, pageInput } from './paging';
 import { ended } from './schedule';
@@ -40,7 +41,7 @@ const listGroups = defineTool({
   output: outputs.list_groups,
   example: {},
   handler: async ({ org, input }) => {
-    const { groups, screensIn } = await orgGroups(org);
+    const { groups, screensIn } = await orgGroups(org, { groups: true });
     const { rows, next } = page(groups, (g) => [g.id], input);
     return { groups: rows.map((g) => viewOf(g, screensIn(g.id))), next };
   },
@@ -98,13 +99,14 @@ const saveGroup = defineTool({
   target: (input, output) => ({ kind: 'group', id: input.groupId ?? output.group.id }),
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds ?? [])];
-    const { matching } = await orgGroups(org);
+    // The screens a rule matches now, read only for a rule (review of #608).
+    const matching = async (rule: Selector) => (await orgGroups(org)).matching(rule);
     if (input.groupId === undefined) {
       // The group and its members are written together, so a bad screen id leaves no empty group behind.
       const rule = input.selector ?? null;
       const group = write(org.screenGroups.stage.insert({ name: input.name!, selectorJson: rule && JSON.stringify(rule) }));
       if (screenIds.length) write(await org.screenGroups.stage.setMembers(group, screenIds, { newGroup: true }));
-      return { group: viewOf(group, rule ? matching(rule) : screenIds) };
+      return { group: viewOf(group, rule ? await matching(rule) : screenIds) };
     }
     let group = await requireGroup(org, input.groupId);
     // A smart group's screens are its rule's: membership changes are refused until it is a list again (selector null).
@@ -133,7 +135,7 @@ const saveGroup = defineTool({
       members = members.filter((s) => !screenIds.includes(s));
     }
     const rule = ruleOf(group);
-    return { group: viewOf(group, rule ? matching(rule) : members) };
+    return { group: viewOf(group, rule ? await matching(rule) : members) };
   },
 });
 
