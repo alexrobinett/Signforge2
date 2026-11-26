@@ -7,10 +7,6 @@
     "orientation": "landscape"
   },
   "files": {
-    "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e": {
-      "size": 79560,
-      "type": "text/html"
-    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg",
@@ -26,6 +22,10 @@
     },
     "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
       "size": 81141,
+      "type": "text/html"
+    },
+    "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c": {
+      "size": 78652,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -251,7 +251,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -264,6 +263,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -459,7 +459,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -472,6 +471,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,8 +626,6 @@
           "events": {
             "type": "list",
             "label": "Events",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -653,7 +651,9 @@
                 "label": "Location",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "rows": {
             "type": "number",
@@ -685,13 +685,13 @@
         ],
         "uses": [],
         "background": "#0d1117",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
@@ -833,8 +833,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -851,7 +849,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,25 +970,25 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/menu-board@1.4.0": {
+    "base/menu-board@1.5.0": {
       "manifest": {
         "id": "menu-board",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "name": "Menu Board",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
         "fields": {
@@ -1007,7 +1007,6 @@
           "items": {
             "type": "list",
             "label": "Items",
-            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1038,7 +1037,8 @@
                 ],
                 "default": ""
               }
-            }
+            },
+            "maxItems": 12
           },
           "footnote": {
             "type": "text",
@@ -1072,15 +1072,15 @@
         ],
         "uses": [],
         "background": "#14110f",
+        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
+      "html": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c"
     },
     "base/news@2.1.2": {
       "manifest": {
@@ -1104,8 +1104,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1132,7 +1130,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1190,14 +1190,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,13 +1368,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
@@ -1468,6 +1468,7 @@
           "canvas"
         ],
         "background": "#0b1a33",
+        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1486,8 +1487,7 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
     }
@@ -1807,7 +1807,7 @@
       "id": "menu",
       "name": "Coffee menu",
       "kind": "template",
-      "template": "base/menu-board@1.4.0",
+      "template": "base/menu-board@1.5.0",
       "data": {
         "title": "Coffee bar",
         "subtitle": "Made to order, all day",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "a43f2ecfdd4c190cd833c1302e1829c0b660212e8a8dced1d12e8bfe39f9e0e4"
+  "id": "e2d091e39ddcba364911ff67cc517b62b06effd5d77d7606cb463d0c4a934c82"
 }
