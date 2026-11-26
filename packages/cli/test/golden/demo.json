@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
+      "onPrimary": "#ffffff",
       "accent": "#f97316",
+      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb",
-      "onPrimary": "#ffffff",
-      "onAccent": "#000000"
+      "muted": "#a5b4cb"
     },
     "shape": "soft",
     "fonts": {
@@ -117,10 +117,6 @@
       "size": 12704,
       "type": "font/woff2"
     },
-    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
-      "size": 400856,
-      "type": "text/html"
-    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
@@ -128,6 +124,10 @@
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
+    },
+    "8972b396145feb48a6f118f5b3522fc666bcb4b76ceb7c00e18c6f3330fb2be2": {
+      "size": 399642,
+      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -224,7 +224,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -237,6 +236,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -382,7 +382,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -395,6 +394,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -617,10 +617,10 @@
       },
       "html": "ec8dcdef8364a0763c1604e28b1c1c063c85d28c1d35ee7b3edd1fb560d2e90f"
     },
-    "base/info-frame@1.2.0": {
+    "base/info-frame@1.3.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -755,8 +755,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -773,7 +771,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -864,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -892,20 +892,20 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
+      "html": "8972b396145feb48a6f118f5b3522fc666bcb4b76ceb7c00e18c6f3330fb2be2"
     },
     "base/news@2.1.2": {
       "manifest": {
@@ -929,8 +929,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -957,7 +955,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1015,14 +1015,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1072,8 +1072,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1098,7 +1096,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,13 +1142,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     }
@@ -1262,7 +1262,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.2.0",
+      "template": "base/info-frame@1.3.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "d784608a41d2841f3f352e492b590bec86276cf9c920f1c7b2721fef8c772cee"
+  "id": "ec846143600ef911ece3cadaac206ad41d90456271dbfca873ef3999241c99fe"
 }

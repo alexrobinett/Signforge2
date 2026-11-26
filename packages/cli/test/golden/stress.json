@@ -44,13 +44,13 @@
       "size": 44306,
       "type": "image/png"
     },
-    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
-      "size": 400856,
-      "type": "text/html"
-    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "8972b396145feb48a6f118f5b3522fc666bcb4b76ceb7c00e18c6f3330fb2be2": {
+      "size": 399642,
+      "type": "text/html"
     },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
@@ -251,7 +251,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -264,6 +263,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -459,7 +459,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -472,6 +471,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -626,8 +626,6 @@
           "events": {
             "type": "list",
             "label": "Events",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -653,7 +651,9 @@
                 "label": "Location",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "rows": {
             "type": "number",
@@ -685,20 +685,20 @@
         ],
         "uses": [],
         "background": "#0d1117",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
-    "base/info-frame@1.2.0": {
+    "base/info-frame@1.3.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -833,8 +833,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -851,7 +849,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -942,10 +942,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -970,20 +970,20 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
+      "html": "8972b396145feb48a6f118f5b3522fc666bcb4b76ceb7c00e18c6f3330fb2be2"
     },
     "base/menu-board@1.4.0": {
       "manifest": {
@@ -1007,7 +1007,6 @@
           "items": {
             "type": "list",
             "label": "Items",
-            "maxItems": 12,
             "item": {
               "name": {
                 "type": "text",
@@ -1038,7 +1037,8 @@
                 ],
                 "default": ""
               }
-            }
+            },
+            "maxItems": 12
           },
           "footnote": {
             "type": "text",
@@ -1072,13 +1072,13 @@
         ],
         "uses": [],
         "background": "#14110f",
+        "protocol": 2,
         "live": {
           "source": "table",
           "fields": {
             "items": "rows"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
     },
@@ -1104,8 +1104,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1132,7 +1130,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1190,14 +1190,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1298,8 +1298,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1324,7 +1322,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1368,13 +1368,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
@@ -1468,6 +1468,7 @@
           "canvas"
         ],
         "background": "#0b1a33",
+        "protocol": 2,
         "live": {
           "source": "open-meteo",
           "fields": {
@@ -1486,8 +1487,7 @@
             "temperature": "unit",
             "wind": "windUnit"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "22079b15311fad0f58c33b2388c44e9beb74478d651e36d1a342a28001c28ba8"
     }
@@ -1630,7 +1630,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.2.0",
+      "template": "base/info-frame@1.3.0",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "a43f2ecfdd4c190cd833c1302e1829c0b660212e8a8dced1d12e8bfe39f9e0e4"
+  "id": "58ea8c7b2e04011923ef37abf255740260f160f635f62fb5802c9117df533da8"
 }
