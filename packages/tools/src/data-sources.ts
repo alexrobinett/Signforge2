@@ -75,7 +75,8 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   rowsPath: d.rowsPath,
   // An rss source's switch; no other format has photos, whatever an older row stored (#345).
   photos: d.format === 'rss' && d.photos,
-  nextPollAt: d.nextPollAt,
+  // 0 is the poller's "due now", not a time (#543).
+  nextPollAt: d.nextPollAt === 0 ? null : d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
   version: d.rowVersion,

@@ -91,6 +91,14 @@ describe('list_audit_log', () => {
     expect(await actions({ target: { kind: 'screen', id: 'scr_deleted' } })).toEqual([]);
     expect(await actions({ from: T, to: T + 1000 })).toEqual([`update_screen@${T}`, `update_screen@${T}`, `update_screen@${T}`]);
     expect(await actions({ from: T + 1 })).toEqual([`rate_limited@${T + 1000}`]);
+    // As an agent reads times, ISO 8601; a time in no accepted form is refused by naming them (#543).
+    expect(await actions({ from: new Date(T + 1).toISOString() })).toEqual([`rate_limited@${T + 1000}`]);
+    const refused = await dispatch(registry, 'list_audit_log', { from: 'yesterday' }, as('viewer'));
+    expect(JSON.stringify(refused)).toMatch(/ISO 8601 time with its offset.*ms since the epoch/);
+    // Described as date-time, without zod's regex.
+    const d = await dispatch(registry, 'describe', { type: 'audit_entry' }, as('viewer'));
+    expect(JSON.stringify(d)).toContain('"format":"date-time"');
+    expect(JSON.stringify(d)).not.toContain('pattern');
     // Text: in the recorded input, any case; LIKE's wildcards are plain characters.
     expect((await all({ query: 'second' })).map((e) => e.detail.input)).toEqual([{ screenId: o.screen, name: 'Second 1' }]);
     expect(await actions({ query: 'price_bot' })).toEqual([`rate_limited@${T + 1000}`]);

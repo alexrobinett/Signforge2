@@ -94,7 +94,7 @@ describe('a source in words', () => {
   });
 
   it('says a source with a new address is being checked, until its next poll', () => {
-    expect(sourceState(source({ nextPollAt: 0 }), clock)).toEqual({ word: 'checking', tone: 'waiting' });
+    expect(sourceState(source({ nextPollAt: null }), clock)).toEqual({ word: 'checking', tone: 'waiting' });
     expect(sourceState(source({ lastCheckedAt: null }), clock).tone).toBe('waiting');
   });
 });

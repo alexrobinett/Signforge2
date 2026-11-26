@@ -211,7 +211,7 @@ export function clockTime(at: number, { timezone, locale, now }: Clock): string 
 /** The source's state in a few words, for its row: its last good time, or that it is waiting or failing. */
 export function sourceState(s: ListedSource, clock: Clock): { word: string; tone: 'ok' | 'waiting' | 'failing' } {
   if (s.failures > 0) return { word: `failed ${s.failures}×`, tone: 'failing' };
-  if (s.lastCheckedAt === null || s.nextPollAt === 0) return { word: 'checking', tone: 'waiting' };
+  if (s.lastCheckedAt === null || s.nextPollAt === null) return { word: 'checking', tone: 'waiting' };
   return { word: clockTime(s.lastCheckedAt, clock), tone: 'ok' };
 }
 

@@ -60,8 +60,22 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
   set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
 };
 
-/** A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler. */
-const instant = z.union([z.number().int().nonnegative(), z.iso.datetime({ offset: true }).transform((t) => Date.parse(t))]);
+const isoTime = z.iso.datetime({ offset: true });
+/**
+ * A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler.
+ * Checked by refine, so its schema says date-time rather than carry zod's regex (#543).
+ */
+const instant = z.union(
+  [
+    z.number().int().nonnegative(),
+    z
+      .string()
+      .refine((t) => isoTime.safeParse(t).success)
+      .meta({ format: 'date-time' })
+      .transform((t) => Date.parse(t)),
+  ],
+  { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
+);
 
 const listAuditLog = defineTool({
   name: 'list_audit_log',
