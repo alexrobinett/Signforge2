@@ -173,14 +173,22 @@ describe('the look kit (#190)', () => {
       const move = { duration: 600, delay: 5000, easing: std, fill: 'both' } as const;
       add('t-marker').animate([{ transform: 'none' }, { transform: 'translateY(4vmin)' }, { transform: 'translateY(8vmin)' }], move);
       add('t-bounce').animate([{ transform: 'none' }, { transform: 'translateY(6vmin)', offset: 0.7 }, { transform: 'translateY(5vmin)' }], move);
-      add('t-spin').animate([{ opacity: 0, transform: 'rotate(-8deg)' }, { opacity: 1, transform: 'none' }], { duration: 500, easing: dec, fill: 'both' });
+      add('t-spin').animate(
+        [
+          { opacity: 0, transform: 'rotate(-8deg)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 500, easing: dec, fill: 'both' },
+      );
       const slide = add('t-slide');
       getComputedStyle(slide).transform;
       slide.style.transform = 'translateX(2vmin)';
     });
     const found = await motionContract(f, durationMs);
     const of = (c: string) => found.filter((l) => l.startsWith(`div.t.${c} `)).map((l) => l.slice(`div.t.${c} `.length));
-    expect(Object.fromEntries(['t-centred', 't-steps', 't-marker', 't-clip', 't-mask', 't-over', 't-bounce', 't-spin', 't-slide', 't-early'].map((c) => [c, of(c)]))).toEqual({
+    expect(
+      Object.fromEntries(['t-centred', 't-steps', 't-marker', 't-clip', 't-mask', 't-over', 't-bounce', 't-spin', 't-slide', 't-early'].map((c) => [c, of(c)])),
+    ).toEqual({
       't-centred': [],
       't-steps': [],
       't-marker': [],

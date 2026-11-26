@@ -774,13 +774,19 @@ export const motion = (f: Frame, durationMs: number, every = false) =>
         if ((every || ends.length) && !ends.includes(durationMs)) unended.push(el.className);
       }
       // A name with no @keyframes runs nothing and fails silently: the element shows from the first frame.
-      const unknown = [...document.querySelectorAll('*')].flatMap((el) => {
-        const running = new Set(el.getAnimations().map((a) => (a instanceof CSSAnimation ? a.animationName : '')));
-        return getComputedStyle(el)
+      const defined = new Set<string>();
+      const read = (rules: CSSRuleList) => {
+        for (const r of rules)
+          if (r instanceof CSSKeyframesRule) defined.add(r.name);
+          else if (r instanceof CSSGroupingRule) read(r.cssRules);
+      };
+      for (const sheet of document.styleSheets) read(sheet.cssRules);
+      const unknown = [...document.querySelectorAll('*')].flatMap((el) =>
+        getComputedStyle(el)
           .animationName.split(', ')
-          .filter((n) => n !== 'none' && !running.has(n))
-          .map((n) => `${el.className} ${n}`);
-      });
+          .filter((n) => n !== 'none' && !defined.has(n))
+          .map((n) => `${el.className} ${n}`),
+      );
       return { props: [...props].sort(), withinCap: moving.size <= 50, unended, unknown: [...new Set(unknown)] };
     },
     { durationMs, every },
@@ -898,7 +904,8 @@ export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl,
         if (samples.some((s) => Math.abs(s.turn) > 0.01)) found.push(`${who} rotates`);
         for (const s of samples) {
           const uniform = Math.abs(s.sx - s.sy) < 0.001;
-          if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > m.scale[1] + 0.001) found.push(`${who} scales to ${(uniform && s.sx < 1 ? s.sx : Math.max(s.sx, s.sy)).toFixed(2)}`);
+          if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > m.scale[1] + 0.001)
+            found.push(`${who} scales to ${(uniform && s.sx < 1 ? s.sx : Math.max(s.sx, s.sy)).toFixed(2)}`);
         }
       }
       return [...new Set(found)];
