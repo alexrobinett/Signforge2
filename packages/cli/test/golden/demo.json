@@ -157,8 +157,8 @@
       "size": 395144,
       "type": "text/html"
     },
-    "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
-      "size": 393916,
+    "528cedb9acf5da986fcc062f4cf48e7ce4f0bf5e6d65964ec292d7c0806e2200": {
+      "size": 393904,
       "type": "text/html"
     },
     "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e": {
@@ -310,10 +310,10 @@
       },
       "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
     },
-    "base/countdown@1.1.1": {
+    "base/countdown@1.2.0": {
       "manifest": {
         "id": "countdown",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -436,7 +436,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9"
+      "html": "528cedb9acf5da986fcc062f4cf48e7ce4f0bf5e6d65964ec292d7c0806e2200"
     },
     "base/cstore-promo@1.4.0": {
       "manifest": {
@@ -1193,7 +1193,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.1.1",
+      "template": "base/countdown@1.2.0",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "d844e35fb214139233800e5692badacf49f0323c48850e7e82e4a02ba3d2a9d5"
+  "id": "fc3f117c2ff06e2f6d408f2c2f2020e801fd83fccbbeaa9ac5fd1c887fcc4c10"
 }
