@@ -233,13 +233,13 @@ describe('tools', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'org:manage']);
     const { tools } = (await rpc<{ tools: { name: string; annotations: object }[] }>(access_token, 'tools/list')).result!;
     const names = tools.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(['read', 'describe', 'save_playlist', 'delete_playlist']));
+    expect(names).toEqual(expect.arrayContaining(['read', 'describe', 'save_playlist', 'delete']));
     expect(names).not.toContain('list_playlists');
     expect(names).not.toContain('publish');
     expect(names).not.toContain('invite_member');
     expect(names).toContain('cancel_invitation');
     expect(tools.find((tool) => tool.name === 'save_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
-    expect(tools.find((tool) => tool.name === 'delete_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    expect(tools.find((tool) => tool.name === 'delete')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     // Its link stops working for good: only a person invites again (review of #414).
     expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
   });

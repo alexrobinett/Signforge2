@@ -554,7 +554,7 @@ export async function dryPublish(org: OrgScope, opts: CompileOptions, pins: read
  *
  * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
  * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
- * `end` names schedule entries this publish deletes, whatever the pins (`end_takeover`). A takeover
+ * `end` names schedule entries this publish deletes, whatever the pins (`takeover`'s end). A takeover
  * that has ended is in no screen's manifest, and goes with the publish; with `exact` (an approved
  * request) only if it is pinned, as nothing else is touched. `revision` is the org's publish revision as read; the
  * publish moves it to the next. `read` is the org as read, and `graph` as it will be once the
@@ -591,7 +591,7 @@ export async function publishOrg(
   graph: OrgGraph;
   madeDefault: { id: string; name: string } | null;
 }> {
-  // Entries staged earlier in the same batch (`publish_takeover`): read as if they were there, so the publish promotes them with the rest.
+  // Entries staged earlier in the same batch (`takeover`'s publish): read as if they were there, so the publish promotes them with the rest.
   const base = loaded ?? (await loadOrg(org));
   // Which drafts have one kept beside them (#116), read with the org and before anything is compiled: each one this publish
   // clears is guarded below at the version this read has, so a draft written after it (and its kept draft) is never cleared.

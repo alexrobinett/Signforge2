@@ -3,7 +3,7 @@
  * Web Crypto. The browser PUTs straight to R2, so the bytes never pass through a Worker.
  *
  * The URL signs `content-type` and `content-length`, so R2 refuses a PUT of another type or size
- * than the one the server agreed to. It does not bind the bytes: `finalize_asset` hashes what
+ * than the one the server agreed to. It does not bind the bytes: `finalize_upload` hashes what
  * landed before anything uses it.
  *
  * Local development: wrangler and Miniflare serve the local bucket's S3 API at

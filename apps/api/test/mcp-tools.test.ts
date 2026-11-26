@@ -21,6 +21,14 @@ beforeAll(async () => {
   expect((await app.request('https://api.test/', {}, env, createExecutionContext())).status).toBe(204);
 });
 
+/** `/mcp`'s services where a provider could be connected: none is, in this deployment. */
+let CONNECTING: ToolServices = {};
+beforeAll(() => {
+  const connectors = AGENT.connectors;
+  if (!connectors) throw new Error('no connectors');
+  CONNECTING = { ...AGENT, connectors: { ...connectors, providers: ['example'] } };
+});
+
 /** Every service some tool needs. */
 const NEEDED = [...new Set([...registry.values()].flatMap((t) => t.needs ?? []))];
 
@@ -45,8 +53,14 @@ describe('tools/list', () => {
       const permitted = describeTools(registry, grant).map((t) => t.name);
       const listed = listedTools(grant, AGENT);
       // Only the member tools and the people-only ones drop out: a tool needing any other service would be listed, so losing one fails here.
-      // And each type's own read, listed as `read` (#345).
-      const lacking = permitted.filter((name) => registry.get(name)?.needs?.includes('members') || registry.get(name)?.people || READ_TOOLS.has(name));
+      // And each type's own read, listed as `read`, and the connection tools, as this deployment connects no provider (#345).
+      const lacking = permitted.filter(
+        (name) =>
+          registry.get(name)?.needs?.includes('members') ||
+          registry.get(name)?.needs?.includes('connectors') ||
+          registry.get(name)?.people ||
+          READ_TOOLS.has(name),
+      );
       expect(
         listed.map((t) => t.name),
         `${grant.role} ${grant.editorsPublish}`,
@@ -81,10 +95,10 @@ describe('tools/list', () => {
     expect(without).not.toContain('invite_member');
   });
 
-  it('hints from the registry: a read is read-only, a delete, revoke, roll back, ended takeover or disconnect destructive, a keyed creation idempotent', () => {
+  it('hints from the registry: a read is read-only, a delete, revoke, roll back, takeover or disconnect destructive, a keyed creation idempotent', () => {
     const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
-    const destructive = /^(delete|revoke|cancel)_|^(roll_back_publish|end_takeover|disconnect)$/;
-    for (const t of listedTools(owner, AGENT)) {
+    const destructive = /^(delete|revoke|cancel)_|^(delete|roll_back_publish|takeover|disconnect)$/;
+    for (const t of listedTools(owner, CONNECTING)) {
       const tool = registry.get(t.name);
       expect(t.annotations, t.name).toEqual({
         readOnlyHint: !tool?.mutates,
@@ -92,8 +106,8 @@ describe('tools/list', () => {
         idempotentHint: tool?.idempotent === true,
       });
     }
-    for (const name of ['roll_back_publish', 'end_takeover', 'disconnect'])
-      expect(listedTools(owner, AGENT).find((t) => t.name === name)?.annotations?.destructiveHint, name).toBe(true);
+    for (const name of ['delete', 'roll_back_publish', 'takeover', 'disconnect'])
+      expect(listedTools(owner, CONNECTING).find((t) => t.name === name)?.annotations?.destructiveHint, name).toBe(true);
     const hints = (name: string) => listedTools(owner, AGENT).find((t) => t.name === name)?.annotations;
     expect(hints('read')).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     expect(hints('revoke_screen_credential')).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
@@ -117,8 +131,17 @@ describe('tools/list', () => {
     const types = (grant: Grant, services: ToolServices) => JSON.stringify(readOf(grant, services)?.inputSchema);
     expect(types(viewer, AGENT)).not.toContain('"invitation"');
     expect(readOf(viewer, AGENT)?.description).not.toContain('invitation:');
-    expect(types(owner, AGENT)).toContain('"connection"');
+    expect(types(owner, CONNECTING)).toContain('"connection"');
+    expect(types(owner, AGENT)).not.toContain('"connection"');
     expect(types(owner, { ...AGENT, connectors: undefined })).not.toContain('"connection"');
+  });
+
+  it('lists the connection tools only where a provider can be connected (#345), and no raw manifest push to any agent', () => {
+    const owner: Grant = { role: 'owner', scopes: [...SCOPES], editorsPublish: true };
+    expect(AGENT.connectors?.providers).toEqual([]);
+    expect(listedTools(owner, AGENT).map((t) => t.name)).not.toContain('disconnect');
+    expect(listedTools(owner, CONNECTING).map((t) => t.name)).toContain('disconnect');
+    for (const services of [AGENT, CONNECTING]) expect(listedTools(owner, services).map((t) => t.name)).not.toContain('publish_manifest_to_screen');
   });
 
   it('lists each tool with a title and only what helps a call (#345): no $schema, id pattern or safe-integer bound (mcp.test.ts: a call still checks them)', () => {

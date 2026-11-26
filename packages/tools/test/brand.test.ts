@@ -268,6 +268,6 @@ describe('brand at publish', () => {
       status: 'verified',
     });
     const kit = (await call('save_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).brandKit;
-    expect(await refusal('delete_asset', { assetId: logo.id })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [kit.id] } });
+    expect(await refusal('delete', { type: 'asset', id: logo.id })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [kit.id] } });
   });
 });

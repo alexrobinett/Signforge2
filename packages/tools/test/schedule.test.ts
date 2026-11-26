@@ -164,14 +164,14 @@ describe('schedule entries', () => {
     });
     expect(await call('save_schedule_entry', { scheduleEntryId: made.id, to: '25:00', ifVersion: 2 })).toMatchObject({ ok: false, error: 'invalid_input' });
     // Not at a version it has moved on from (#268: the drawer's Undo of an entry it made).
-    expect(await call('delete_schedule_entry', { scheduleEntryId: made.id, ifVersion: 1 })).toMatchObject({
+    expect(await call('delete', { type: 'schedule_entry', id: made.id, ifVersion: 1 })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { id: made.id, version: 2 },
     });
     // Never published: it goes at once.
-    expect(await ok(call('delete_schedule_entry', { scheduleEntryId: made.id, ifVersion: 2 }))).toEqual({ deleted: made.id, version: null });
-    expect(await call('delete_schedule_entry', { scheduleEntryId: made.id })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await ok(call('delete', { type: 'schedule_entry', id: made.id, ifVersion: 2 }))).toEqual({ deleted: made.id, version: null });
+    expect(await call('delete', { type: 'schedule_entry', id: made.id })).toMatchObject({ ok: false, error: 'not_found' });
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual([]);
   });
 
@@ -179,7 +179,7 @@ describe('schedule entries', () => {
     const { org, call, lobby, breakfast, lunch } = await setup('sch-tombstone');
     const made = entryOf(await ok(call('save_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby })));
     const read = entryOf(await ok(call('save_schedule_entry', { scheduleEntryId: made.id, from: '06:00', ifVersion: 1 })));
-    await ok(call('delete_schedule_entry', { scheduleEntryId: made.id }));
+    await ok(call('delete', { type: 'schedule_entry', id: made.id }));
     const again = await org.scheduleEntries.insert({ id: made.id, playlistId: breakfast, target: 'screen', screenId: lobby });
     expect(again.rowVersion).toBe(read.version + 1);
 
@@ -284,7 +284,7 @@ describe('schedule entries', () => {
       return (await (await env.BLOBS.get(manifestKey(org.orgId, lobby, id)))!.json()) as ScreenManifest;
     };
     expect(Object.keys((await manifest()).playlists)).toContain(flash);
-    expect(await call('delete_playlist', { playlistId: flash })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('delete', { type: 'playlist', id: flash })).toMatchObject({ ok: false, error: 'conflict' });
 
     // Ten days later, a publish that pins nothing.
     vi.setSystemTime(at('2026-11-27T12:00'));
@@ -293,7 +293,7 @@ describe('schedule entries', () => {
     expect(after.schedule).toEqual([]);
     expect(Object.keys(after.playlists)).not.toContain(flash);
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual([]);
-    expect(await ok(call('delete_playlist', { playlistId: flash }))).toEqual({ deleted: flash });
+    expect(await ok(call('delete', { type: 'playlist', id: flash }))).toEqual({ deleted: flash, version: null });
   });
 
   it('a playlist whose takeover has ended can be deleted before any publish, the takeover with it', async () => {
@@ -305,7 +305,7 @@ describe('schedule entries', () => {
     );
     await publish(takeover);
     vi.setSystemTime(at('2026-11-17T13:00'));
-    expect(await ok(call('delete_playlist', { playlistId: flash }))).toEqual({ deleted: flash });
+    expect(await ok(call('delete', { type: 'playlist', id: flash }))).toEqual({ deleted: flash, version: null });
     expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
   });
 
@@ -323,7 +323,7 @@ describe('schedule entries', () => {
     expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
   });
 
-  it('end_takeover deletes a takeover and publishes that alone, in one call', async () => {
+  it('takeover end deletes a takeover and publishes that alone, in one call', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at('2026-11-17T12:00'));
     const { call, publish, playingAt, hall, main, flash, lunch } = await setup('sch-end');
@@ -333,20 +333,20 @@ describe('schedule entries', () => {
     await publish(takeover);
     // A draft someone else is working on: ending the takeover does not publish it.
     await ok(call('save_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, idempotencyKey: 'lunch-hall' }));
-    expect(await ok(call('end_takeover', { scheduleEntryId: takeover.id }))).toMatchObject({
+    expect(await ok(call('takeover', { action: 'end', scheduleEntryId: takeover.id }))).toMatchObject({
       publish: { screens: 2 },
       promoted: [],
       removed: [{ kind: 'schedule_entry', id: takeover.id }],
     });
     expect(await playingAt(at('2026-11-17T12:30'))).toEqual({ lobby: main, hall: main });
-    expect(await call('end_takeover', { scheduleEntryId: takeover.id })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await call('takeover', { action: 'end', scheduleEntryId: takeover.id })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
-  it('publish_takeover makes a takeover and publishes it in one batch, whole or not at all: one it cannot publish leaves no draft (#351)', async () => {
+  it('takeover publish makes a takeover and publishes it in one batch, whole or not at all: one it cannot publish leaves no draft (#351)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at('2026-11-17T12:00'));
     const { org, call, playingAt, flash, still } = await setup('sch-publish-takeover');
-    const out = await ok(call('publish_takeover', { playlistId: flash, target: 'org', endsAt: '2026-11-17T14:00:00Z' }));
+    const out = await ok(call('takeover', { action: 'publish', playlistId: flash, target: 'org', endsAt: '2026-11-17T14:00:00Z' }));
     expect(out).toMatchObject({ publish: { screens: 2 }, entry: { takeover: true, live: expect.anything() } });
     expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: flash, hall: flash });
 
@@ -355,7 +355,7 @@ describe('schedule entries', () => {
     await org.playlists.setItems(fresh.id, [still]);
     const entries = (await org.scheduleEntries.list()).length;
     const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
-    expect(await call('publish_takeover', { playlistId: fresh.id, target: 'org', endsAt: '2026-11-17T14:00:00Z' })).toMatchObject({
+    expect(await call('takeover', { action: 'publish', playlistId: fresh.id, target: 'org', endsAt: '2026-11-17T14:00:00Z' })).toMatchObject({
       ok: false,
       error: 'conflict',
       message: expect.stringContaining('the takeover cannot be published'),
@@ -367,7 +367,13 @@ describe('schedule entries', () => {
     const later = { startsAt: '2026-11-17T12:05:00Z', endsAt: '2026-11-17T14:00:00Z' };
     expect(
       await ok(
-        call('publish_takeover', { playlistId: fresh.id, target: 'org', ...later, with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }] }),
+        call('takeover', {
+          action: 'publish',
+          playlistId: fresh.id,
+          target: 'org',
+          ...later,
+          with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }],
+        }),
       ),
     ).toMatchObject({ promoted: expect.arrayContaining([{ kind: 'playlist', id: fresh.id }]) });
     expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: fresh.id, hall: fresh.id });
@@ -383,10 +389,10 @@ describe('schedule entries', () => {
 
     // Only someone who may publish deletes what screens play.
     await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
-    expect(await call('delete_schedule_entry', { scheduleEntryId: atLobby.id })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await call('delete', { type: 'schedule_entry', id: atLobby.id })).toMatchObject({ ok: false, error: 'forbidden' });
     await org.commit((await org.settings.stage.set({ editorsPublish: true })).writes);
 
-    const deletion = await ok(call('delete_schedule_entry', { scheduleEntryId: atLobby.id }));
+    const deletion = await ok(call('delete', { type: 'schedule_entry', id: atLobby.id }));
     expect(deletion).toEqual({ deleted: atLobby.id, version: atLobby.version + 1 });
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: atLobby.id, deleted: true, live: expect.objectContaining({ playlistId: breakfast }) })]),
@@ -405,7 +411,7 @@ describe('schedule entries', () => {
 
     const again = entryOf(await ok(call('save_schedule_entry', { playlistId: lunch, target: 'org' })));
     await publish(again);
-    await ok(call('delete_schedule_entry', { scheduleEntryId: again.id }));
+    await ok(call('delete', { type: 'schedule_entry', id: again.id }));
     expect(await ok(call('publish', {}))).toMatchObject({ removed: [{ kind: 'schedule_entry', id: again.id }] });
   });
 
@@ -434,7 +440,7 @@ describe('schedule entries', () => {
     const raced = racing({ ...memberOf(org, 'editor'), member: userId }, async () =>
       org.commit((await org.settings.stage.set({ editorsPublish: false })).writes),
     );
-    expect(await dispatch(registry, 'delete_schedule_entry', { scheduleEntryId: entry.id }, raced)).toMatchObject({
+    expect(await dispatch(registry, 'delete', { type: 'schedule_entry', id: entry.id }, raced)).toMatchObject({
       ok: false,
       error: 'forbidden',
       message: 'Only owners publish in this organization',

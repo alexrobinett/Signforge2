@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla';
 import type { CommandEntry, TargetAction } from '../src/lib/command-menu';
 import { createCommandMenuSlice, type CommandMenuSlice } from '../src/state/command-menu';
 import { toast } from 'sonner';
+import { initialOrgs, type OrgsState } from '../src/state/orgs';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -233,12 +234,15 @@ describe('asking the agent from the menu (#270)', () => {
   /** The menu with the drawer's two actions it calls, recorded. */
   function asking() {
     const asked: { opened: number; questions: string[] } = { opened: 0, questions: [] };
-    const store = createStore<CommandMenuSlice & { ui: object; openAgentDrawer: () => void; askAgent: (q: string) => Promise<void> }>()((set, get) => ({
-      ui: {},
-      openAgentDrawer: () => void asked.opened++,
-      askAgent: async (q: string) => void asked.questions.push(q),
-      ...createCommandMenuSlice(set as never, get as never, { router: { navigate: vi.fn(), invalidate: vi.fn(), state: { matches: [] } } } as never),
-    }));
+    const store = createStore<CommandMenuSlice & { ui: object; orgs: OrgsState; openAgentDrawer: () => void; askAgent: (q: string) => Promise<void> }>()(
+      (set, get) => ({
+        ui: {},
+        orgs: initialOrgs,
+        openAgentDrawer: () => void asked.opened++,
+        askAgent: async (q: string) => void asked.questions.push(q),
+        ...createCommandMenuSlice(set as never, get as never, { router: { navigate: vi.fn(), invalidate: vi.fn(), state: { matches: [] } } } as never),
+      }),
+    );
     return { store, asked };
   }
 
@@ -254,5 +258,14 @@ describe('asking the agent from the menu (#270)', () => {
     store.getState().askFromMenu('what plays now', true);
     expect(asked.questions).toEqual(['why are screens behind', 'what plays now']);
     expect(store.getState().commandMenu.open).toBe(true);
+  });
+
+  it('asks nothing, and opens no drawer, while the org changes (#479)', async () => {
+    const { store, asked } = asking();
+    store.setState({ orgs: { ...initialOrgs, switchingTo: 'org_2' } });
+    store.getState().openCommandMenu();
+    store.getState().askFromMenu('what plays now', false);
+    await store.getState().chooseCommand({ kind: 'agent', id: 'agent', label: 'Ask the agent…', keywords: [] });
+    expect(asked).toEqual({ opened: 0, questions: [] });
   });
 });

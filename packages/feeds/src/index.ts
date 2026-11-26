@@ -10,6 +10,7 @@ import { type FeedImage, type NewsOptions, type ParsedNews, parseNews, parseNews
 import { parseCsv, parseJsonTable, type TableOptions } from './table';
 
 export { FeedError, LIMITS, type FeedErrorCode } from './errors';
+export { rendition } from './renditions';
 export { FEED_URL_PROBLEMS, feedUrlProblem, type FeedUrlProblem } from './url';
 export { parseCalendar, parseCsv, parseJsonTable, parseNews, type CalendarOptions, type FeedImage, type NewsOptions, type ParsedNews, type TableOptions };
 

@@ -149,19 +149,12 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example code, open to claim.
   claim_screen: () => startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() }),
   delete_group: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
-  // The seeded entry, made a takeover.
-  end_takeover: (o) => o.scope.scheduleEntries.update(o.scheduleEntry, { priority: 100, startsAt: Date.now(), endsAt: Date.now() + 3_600_000 }),
-  delete_playlist: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
+  // Its example deletes the seeded playlist, which the seeded entry plays.
+  delete: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
   // The seeded playlist plays the spot its example names: it plays the other one alone.
   delete_spot: (o) => o.scope.playlists.setItems(o.playlist, [o.imageSpot]),
-  delete_asset: async (o) => {
-    await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
-    await o.scope.spots.delete(o.imageSpot);
-    await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
-  },
-  renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
   // Its playlist published first, as it publishes only the takeover beside what it pins.
-  publish_takeover: (o) =>
+  takeover: (o) =>
     dispatch(
       registry,
       'publish',
@@ -177,7 +170,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   test_ai_provider: (o) => savedKey(o),
   remove_ai_provider: (o) => savedKey(o),
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
-  finalize_asset: async (o) => {
+  finalize_upload: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });
     await o.scope.assets.renditions.insert({
       assetId: o.asset,
@@ -195,21 +188,18 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   cancel_invitation: (o) => seedTeam(env.DB, o.orgId),
   update_member_role: (o) => seedTeam(env.DB, o.orgId),
   remove_member: (o) => seedTeam(env.DB, o.orgId),
-  // A pending video whose uploaded bytes are no MP4: finalize rejects it.
-  finalize_video_upload: async (o) => {
-    const asset = await o.scope.assets.update(o.asset, { kind: 'video', status: 'pending', type: 'video/mp4', size: 11 });
-    await env.BLOBS.put(uploadKey(o.orgId, o.asset, asset!.sha256), 'not a video');
-  },
 };
 /** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
 const INPUT: Record<string, (o: SeededOrg, example: unknown) => unknown> = {
   start_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
-  publish_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
+  takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
+  // Its id is named by its type, which withOwnIds cannot read: the seeded playlist.
+  delete: (o) => ({ type: 'playlist', id: o.playlist }),
   // A draft pinned at the version it is: the seeded spot's first.
   request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend opening hours' }),
 };
 /** Tools whose example is refused on purpose, changing the asset as it does so. */
-const REJECTS = new Set(['finalize_asset', 'finalize_video_upload']);
+const REJECTS = new Set(['finalize_upload']);
 /** Tools whose example still cannot get as far as writing: their bundle is not uploaded. They are covered in templates.test.ts. */
 const STOPS_SHORT = new Set(['register_template_version']);
 

@@ -296,7 +296,7 @@ test('play a new playlist on this screen from its page, see what it will play, r
   test.setTimeout(150_000);
   // The tests before leave drafts: an entry never published is gone once deleted.
   for (const e of (await tool(page, 'list_schedule_entries', {})).entries as { id: string; published: boolean; takeover: boolean }[])
-    if (!e.published && !e.takeover) await tool(page, 'delete_schedule_entry', { scheduleEntryId: e.id });
+    if (!e.published && !e.takeover) await tool(page, 'delete', { type: 'schedule_entry', id: e.id });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   // A playlist and spot never published: Save and publish takes them along with the entry.

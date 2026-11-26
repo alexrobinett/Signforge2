@@ -20,6 +20,7 @@ import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../s
 import { draftOf, fieldProblems } from '../src/lib/spots';
 import { type AgentSlice, createAgentSlice } from '../src/state/agent';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
+import { initialOrgs } from '../src/state/orgs';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -124,6 +125,7 @@ describe('a save on its way (#150)', () => {
     const store = createStore<SpotEditorSlice & PublishingSlice>()((set, get) => ({
       ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
       ...createPublishingSlice(set as never, get as never, { router, queryClient } as never),
+      orgs: initialOrgs,
     }));
     return { store, queryClient };
   }

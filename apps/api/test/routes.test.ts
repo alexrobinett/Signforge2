@@ -333,7 +333,8 @@ describe('POST /api/tools/:name', () => {
 
   it('hands out presigned uploads to the local bucket in dev', async () => {
     const r = { sha256: '1'.repeat(64), type: 'image/jpeg', size: 1000, width: 1920, height: 1080 };
-    const res = await owner.tool('create_asset_upload', {
+    const res = await owner.tool('start_upload', {
+      kind: 'image',
       name: 'Photo',
       renditions: { landscape: r, portrait: { ...r, sha256: '2'.repeat(64), width: 1920 } },
     });

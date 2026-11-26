@@ -1,6 +1,6 @@
 # @signforge/media-check
 
-Is this video one a screen plays well? It reads an MP4's header, without decoding, and checks it against the contract's `VIDEO_SPEC`. The same code runs in the browser before an upload (`uploadVideo` in `@signforge/media`) and in the Worker after it (`finalize_video_upload` in `@signforge/tools`, over R2 range reads). `sf build` applies the same rules to what ffprobe reports.
+Is this video one a screen plays well? It reads an MP4's header, without decoding, and checks it against the contract's `VIDEO_SPEC`. The same code runs in the browser before an upload (`uploadVideo` in `@signforge/media`) and in the Worker after it (`finalize_upload` in `@signforge/tools`, over R2 range reads). `sf build` applies the same rules to what ffprobe reports.
 
 ## What it checks
 

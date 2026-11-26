@@ -631,16 +631,16 @@ describe('confirmation cards (#269)', () => {
       ...options,
       steps: (body) =>
         body.messages.length === 1
-          ? { calls: [{ name: 'start_takeover', input: ask.called }] }
+          ? { calls: [{ name: 'takeover', input: ask.called }] }
           : { text: JSON.stringify({ text: 'Every screen plays Storm closure until 13:00.', groups: [], steps: [] }) },
     });
     const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
     const called = {
+      action: 'publish',
       playlistId: playlist.id,
       target: 'org',
       ...options.aim,
       endsAt: new Date(NOON + 3_600_000).toISOString(),
-      idempotencyKey: 'storm-key-0001',
     };
     ask.called = called;
     return { ...s, playlist, called };
@@ -651,7 +651,7 @@ describe('confirmation cards (#269)', () => {
     const all = await raw(await s.ask('Bayside closes at 2 for the storm: put the closure up everywhere'));
     const { card } = pressOf(all, 'q');
     expect(card).toMatchObject({
-      tool: 'start_takeover',
+      tool: 'takeover',
       title: 'Take over screens',
       lines: [
         'Plays Storm closure on every screen (3 screens), over anything scheduled.',
@@ -676,15 +676,15 @@ describe('confirmation cards (#269)', () => {
     const s = await takeover();
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     const all = await raw(await s.member.post('/api/agent/chat', body));
-    expect(doneOf(all)).toEqual({ tool: 'start_takeover', ok: true, message: 'Took over the screens' });
+    expect(doneOf(all)).toEqual({ tool: 'takeover', ok: true, message: 'Took over the screens' });
     expect((await events(new Response(all.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')))).at(-1)).toMatchObject({
       type: 'answer',
-      card: { text: 'Every screen plays Storm closure until 13:00.', trace: [shown('start_takeover', 'Took over the screens')] },
+      card: { text: 'Every screen plays Storm closure until 13:00.', trace: [shown('takeover', 'Took over the screens')] },
     });
     const [entry] = await s.scope.scheduleEntries.list();
     expect(entry).toMatchObject({ playlistId: s.playlist.id, endsAt: NOON + 3_600_000 });
     expect(entry?.publishedJson).not.toBeNull();
-    const audit = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'publish_takeover');
+    const audit = (await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'takeover');
     expect(audit).toMatchObject({ clientId: 'cms-agent' });
     expect(JSON.parse(audit?.detailJson ?? '{}').confirmed).toMatchObject({
       summary: expect.stringMatching(/^Take over screens: Plays Storm closure on every screen/),
@@ -716,7 +716,7 @@ describe('confirmation cards (#269)', () => {
     const s = await takeover();
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     const edited = [
-      { ...body, messages: [{ ...body.messages[0], toolCalls: [{ id: 't1', function: { name: 'start_takeover', arguments: '{}' } }] }] },
+      { ...body, messages: [{ ...body.messages[0], toolCalls: [{ id: 't1', function: { name: 'takeover', arguments: '{}' } }] }] },
       { ...body, resume: [{ interruptId: 'approval_t1', status: 'resolved', payload: { approved: true, editedArgs: { target: 'screen' } } }] },
       { ...body, messages: [body.messages[0], { id: 'a1', role: 'assistant', content: '' }] },
     ];
@@ -780,26 +780,60 @@ describe('confirmation cards (#269)', () => {
         return n === 1
           ? { calls: reads }
           : n === 2
-            ? { calls: [{ name: 'start_takeover', input: ask.called }] }
+            ? { calls: [{ name: 'takeover', input: ask.called }] }
             : { calls: [{ name: 'read', input: { type: 'screen' } }] };
       },
     });
     const playlist = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
-    ask.called = { playlistId: playlist.id, target: 'org', endsAt: new Date(NOON + 3_600_000).toISOString() };
+    ask.called = { action: 'publish', playlistId: playlist.id, target: 'org', endsAt: new Date(NOON + 3_600_000).toISOString() };
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     const lines = await events(await s.member.post('/api/agent/chat', body));
     // The press itself runs, the eighth call; the read after it would be the ninth, and the turn stops there.
-    expect(lines.filter((e) => e.type === 'call').map((e) => (e.type === 'call' ? e.card.tool : ''))).toEqual(['start_takeover']);
+    expect(lines.filter((e) => e.type === 'call').map((e) => (e.type === 'call' ? e.card.tool : ''))).toEqual(['takeover']);
     expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
+  });
+
+  it('ends a takeover, and deletes a playlist or removes a schedule entry, each behind its own card, saying what each did (#345)', async () => {
+    const ask: { name?: string; called?: Record<string, unknown> } = {};
+    const s = await setup({ steps: (body) => (body.messages.length === 1 ? { calls: [{ name: ask.name!, input: ask.called }] } : ANSWER) });
+    const pressed = async (name: string, called: Record<string, unknown>) => {
+      Object.assign(ask, { name, called });
+      const { card, body } = pressOf(await raw(await s.ask('q')), 'q');
+      return { card, done: doneOf(await raw(await s.member.post('/api/agent/chat', body))) };
+    };
+    const playlist = await s.scope.playlists.insert({ name: 'Old promos', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const gone = await pressed('delete', { type: 'playlist', id: playlist.id });
+    expect(gone.card).toMatchObject({ title: 'Delete a playlist', press: 'Delete' });
+    expect(gone.done).toEqual({ tool: 'delete', ok: true, message: 'Deleted a playlist' });
+    expect(await s.scope.playlists.get(playlist.id)).toBeUndefined();
+
+    const kept = await s.scope.playlists.insert({ name: 'Lunch', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const entry = await s.scope.scheduleEntries.insert({ playlistId: kept.id, target: 'org' });
+    const removed = await pressed('delete', { type: 'schedule_entry', id: entry.id });
+    expect(removed.card).toMatchObject({ title: 'Remove a schedule entry', press: 'Remove' });
+    expect(removed.done).toEqual({ tool: 'delete', ok: true, message: 'Removed a schedule entry' });
+
+    const storm = await s.scope.playlists.insert({ name: 'Storm closure', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const takeover = await s.scope.scheduleEntries.insert({ playlistId: storm.id, target: 'org', priority: 100, startsAt: NOON, endsAt: NOON + 3_600_000 });
+    const ended = await pressed('takeover', { action: 'end', scheduleEntryId: takeover.id });
+    expect(ended.card).toMatchObject({ title: 'End the takeover', press: 'End now' });
+    expect(ended.done).toEqual({ tool: 'takeover', ok: true, message: 'Ended the takeover' });
+    expect(await s.scope.scheduleEntries.get(takeover.id)).toBeUndefined();
+
+    // The drawer deletes no asset or data source: its card takes neither.
+    expect(s.model.asked[0].tools.find((t: { name: string }) => t.name === 'delete')?.input_schema.properties.type.enum).toEqual([
+      'playlist',
+      'schedule_entry',
+    ]);
   });
 
   it('offers no card a member may not press (#345); a call to one all the same ends at a card saying who may, running nothing', async () => {
     const s = await takeover({ role: 'viewer' });
     const all = await raw(await s.ask('q'));
-    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('start_takeover');
+    expect(s.model.asked[0].tools.map((t: { name: string }) => t.name)).not.toContain('takeover');
     expect(all.find((e) => e.name === CHAT_EVENTS.confirm)?.value).toEqual({
-      tool: 'start_takeover',
-      title: 'Takeover',
+      tool: 'takeover',
+      title: 'Take over screens, or end a takeover',
       lines: [],
       address: null,
       when: '',
@@ -1045,7 +1079,7 @@ describe('confirmation cards (#269)', () => {
     const s = await takeover({ role: 'editor' });
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
-    await refusedPress(s, body, 'publish_takeover', 'Only owners publish in this organization');
+    await refusedPress(s, body, 'takeover', 'Only owners publish in this organization');
     expect(await s.scope.scheduleEntries.list()).toEqual([]);
   });
 
@@ -1055,7 +1089,7 @@ describe('confirmation cards (#269)', () => {
     const editor = (await s.member.session()).body.user.id;
     const row = await env.DB.prepare('SELECT id FROM member WHERE organizationId = ? AND userId = ?').bind(s.org.id, editor).first<{ id: string }>();
     await s.owner.ok('/api/auth/organization/update-member-role', { memberId: row?.id, role: 'viewer', organizationId: s.org.id });
-    await refusedPress(s, body, 'publish_takeover', 'publish_takeover needs the content:publish scope and at least the editor role');
+    await refusedPress(s, body, 'takeover', 'takeover needs the content:publish scope and at least the editor role');
     expect(await s.scope.scheduleEntries.list()).toEqual([]);
   });
 
@@ -1130,7 +1164,7 @@ describe('confirmation cards (#269)', () => {
         .bind(JSON.stringify({ texts: ['headline'], lists: {} }), spot.id)
         .run();
       const { body } = pressOf(await raw(await s.ask('q')), 'q');
-      await refusedPress(s, body, 'publish_takeover', /sample text/);
+      await refusedPress(s, body, 'takeover', /sample text/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
       expect((await s.scope.spots.get(spot.id))?.publishedJson).toBeNull();
     });
@@ -1139,7 +1173,7 @@ describe('confirmation cards (#269)', () => {
       const s = await takeover();
       await withSpot(s, 'http://example.com/closure');
       const { body } = pressOf(await raw(await s.ask('q')), 'q');
-      await refusedPress(s, body, 'publish_takeover', /the takeover cannot be published/);
+      await refusedPress(s, body, 'takeover', /the takeover cannot be published/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
       expect((await s.scope.playlists.get(s.playlist.id))?.publishedJson).toBeNull();
     });
@@ -1151,7 +1185,7 @@ describe('confirmation cards (#269)', () => {
       const all = await raw(await s.member.post('/api/agent/chat', body));
       expect(doneOf(all)).toMatchObject({ ok: false });
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
-      expect((await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'publish_takeover')?.detailJson).toContain('"refused"');
+      expect((await s.scope.auditLog.list({ limit: 5 })).find((a) => a.action === 'takeover')?.detailJson).toContain('"refused"');
     });
 
     it('its group deleted since the card', async () => {
@@ -1162,7 +1196,7 @@ describe('confirmation cards (#269)', () => {
       Object.assign(s.called, { groupId: group.id });
       const { body } = pressOf(await raw(await s.ask('q')), 'q');
       expect((await s.owner.tool('delete_group', { groupId: group.id })).status).toBe(200);
-      await refusedPress(s, body, 'publish_takeover', /Its group or screen was deleted since the card was made/);
+      await refusedPress(s, body, 'takeover', /Its group or screen was deleted since the card was made/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
     });
 
@@ -1176,7 +1210,7 @@ describe('confirmation cards (#269)', () => {
       const row = (await s.scope.spots.get(spot.id))!;
       expect((await s.owner.tool('save_spot', { spotId: spot.id, url: 'https://example.com/other', ifVersion: row.rowVersion })).status).toBe(200);
       expect((await s.owner.tool('publish', {})).status).toBe(200);
-      await refusedPress(s, body, 'publish_takeover', /A spot of its playlist was published again since the card was made/);
+      await refusedPress(s, body, 'takeover', /A spot of its playlist was published again since the card was made/);
       expect(await s.scope.scheduleEntries.list()).toEqual([]);
     });
   });
@@ -1310,6 +1344,28 @@ describe('confirmation cards (#269)', () => {
     expect(await cardFor('save_data_source', { dataSourceId: 'menu', name: 'Menu board' })).toMatchObject({ token: expect.any(String), why: null });
   });
 
+  it('offers no card for a data source save its press could only refuse, saying why (#507)', async () => {
+    const ask: { called?: Record<string, unknown> } = {};
+    const s = await setup({ steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'save_data_source', input: ask.called }] } : ANSWER) });
+    expect((await s.owner.tool('save_data_source', { id: 'menu', name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/today.json' })).status).toBe(
+      200,
+    );
+    for (const [called, why] of [
+      [{ name: 'Menu', feedUrl: 'https://menu.example.com/a.json' }, /needs a name and a format/],
+      [{ name: 'Menu', format: 'json', feedUrl: 'https://menu.example.com/a.json', ifVersion: 1 }, /no version yet/],
+      [{ dataSourceId: 'menu', format: 'rss' }, /format is fixed once made/],
+      [{ dataSourceId: 'menu', photos: false }, /photos is for rss sources only/],
+    ] as const) {
+      ask.called = called;
+      const all = await raw(await s.ask('q'));
+      expect(
+        all.some((e) => e.name === CHAT_EVENTS.confirm),
+        JSON.stringify(called),
+      ).toBe(false);
+      expect(all.at(-1), JSON.stringify(called)).toMatchObject({ type: 'RUN_ERROR', code: 'unreadable', message: expect.stringMatching(why) });
+    }
+  });
+
   it("keeps a provider's resource out of the audit row, and audits a source refused in its handler, writing nothing", async () => {
     const steps: Step[] = [];
     const s = await setup({ steps });
@@ -1394,15 +1450,12 @@ describe('the drafting tools the drawer offers (#268)', () => {
   const grant = (role: 'viewer' | 'editor' | 'owner') => grantOf({ org: { orgId: 'org_x' } as never, role, scopes: undefined });
   const NEVER_DRAFTED = [
     'start_takeover',
+    'takeover',
     'delete_spot',
-    'delete_playlist',
-    'delete_schedule_entry',
+    'delete',
     'delete_group',
-    'delete_asset',
-    'delete_data_source',
     'publish',
     'roll_back_publish',
-    'end_takeover',
     'set_default_playlist',
     'set_template_version_status',
     'save_data_source',
@@ -1430,7 +1483,7 @@ describe('the drafting tools the drawer offers (#268)', () => {
       ).toEqual(DRAFTING);
     }
     // An editor may call them: they are left out, not out of reach.
-    for (const name of ['start_takeover', 'delete_schedule_entry', 'publish', 'screen_command']) expect(registry.get(name)?.minRole, name).toBe('editor');
+    for (const name of ['start_takeover', 'delete', 'publish', 'screen_command']) expect(registry.get(name)?.minRole, name).toBe('editor');
   });
 });
 
@@ -1547,7 +1600,7 @@ describe('the drawer drafting changes (#268)', () => {
       [{ tool: 'save_spot', input: { spotId: d.spot.id, url: 'https://evil.example', ifVersion: before.version } }],
       [{ tool: 'save_spot', input: { spotId: d.web.id, name: 'Evil', ifVersion: 1 } }],
       [{ tool: 'publish', input: {} }],
-      [{ tool: 'delete_schedule_entry', input: { scheduleEntryId: 'sch_x' } }],
+      [{ tool: 'delete', input: { type: 'schedule_entry', id: 'sch_x' } }],
     ]) {
       const res = await d.apply(calls);
       expect(res.status, JSON.stringify(calls)).toBe(403);

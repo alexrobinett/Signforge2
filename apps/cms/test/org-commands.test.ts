@@ -18,6 +18,7 @@ const deps = { router, queryClient: {} } as never;
 /** The slices these commands touch, with the settings slice's, the agent drawer's and the sidebar Publish's one action they call. */
 const forgetAgentDrawer = vi.fn();
 const cancelPublishAll = vi.fn();
+const dropSampleCheck = vi.fn();
 const appStore = () =>
   createStore<any>()((set, get) => ({
     ...createUiSlice(set, get, deps),
@@ -26,7 +27,7 @@ const appStore = () =>
     forgetOrgSettings: () => {},
     forgetAgentDrawer,
     cancelPublishAll,
-    dropSampleCheck: () => {},
+    dropSampleCheck,
   }));
 
 describe('orgCommands', () => {
@@ -192,5 +193,16 @@ describe('creating an org', () => {
     finish();
     await first;
     expect(orgs.switchOrganization).not.toHaveBeenCalledWith(router, 'org_c');
+  });
+
+  it('lets go of a sample-text question waiting on a publish when the org is left, by a switch or a new org (#479, review of #472)', async () => {
+    const store = appStore();
+    dropSampleCheck.mockClear();
+    await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    expect(dropSampleCheck).toHaveBeenCalledTimes(1);
+    orgs.createOrganization.mockResolvedValueOnce(undefined);
+    store.getState().editOrgName('dialog', 'Pier West');
+    await store.getState().createOrg('dialog');
+    expect(dropSampleCheck).toHaveBeenCalledTimes(2);
   });
 });

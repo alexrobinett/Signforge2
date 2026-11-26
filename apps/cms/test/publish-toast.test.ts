@@ -67,7 +67,7 @@ const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
   updatedAt: 0,
 });
 
-/** What `publish` and `end_takeover` answer: publish v`revision` to one screen, after the one before. */
+/** What `publish` and `takeover` answer: publish v`revision` to one screen, after the one before. */
 const published = (revision: number) => ({
   publish: { id: `pub_${revision}`, revision, screens: 1, previousId: `pub_${revision - 1}` },
   promoted: [],
@@ -119,7 +119,7 @@ describe('the publish toast', () => {
     expect(undoOf()).toMatchObject({ label: 'Undo' });
 
     await s.endTakeover(ORG, 'sch_flash');
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('end_takeover', { scheduleEntryId: 'sch_flash' });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('takeover', { action: 'end', scheduleEntryId: 'sch_flash' });
     expect(publishToast()?.title).toBe('Published v3 to 1 screen');
     expect(undoOf()).toBeUndefined();
   });
@@ -687,6 +687,19 @@ describe('sample text the server refuses (#360)', () => {
     expect(await store.getState().checkSampleText(ORG, would)).toBeNull();
     expect(await first).toEqual([]);
     expect(store.getState().publishing.pending).toBe(false);
+  });
+
+  it('sends nothing for an org the tab has left, as a drawer Publish answered after a switch (#479)', async () => {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [] } as never);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockImplementation(async () => published(++revision));
+    const store = publishingStore({ router: { navigate: vi.fn() }, queryClient: new QueryClient() });
+    shown.org = 'org_2';
+    expect(await store.getState().publishTogether(ORG, [{ kind: 'schedule_entry', id: 'sch_breakfast' }])).toBe(false);
+    expect(callTool).not.toHaveBeenCalled();
   });
 
   it('says not published when the publish was held back: no publish was made', async () => {

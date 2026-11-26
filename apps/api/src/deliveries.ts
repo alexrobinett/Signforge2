@@ -147,16 +147,22 @@ async function send(
     const members = await reach.members(row.orgId);
     if (row.toUserId === null) {
       // Addressed to those who may approve now: one delivery each, queued in one batch, each sent and
-      // retried on its own by the next run, so one mailbox that fails stops no other, and a retry sends
-      // to no one twice. This one is then done.
+      // retried on its own, so one mailbox that fails stops no other, and a retry sends to no one twice.
+      // A run's worth go now, claimed as they are queued and settled in one batch; the rest at the next
+      // run (#396). This one is then done.
       const to = await approversOf(env, members, event);
       if (!to.length) throw new Undeliverable('no-member');
-      await scoped(env.DB, row.orgId).alertDeliveries.queueEmails(
+      const claimed = await scoped(env.DB, row.orgId).alertDeliveries.queueEmails(
         { id: event.id, type: event.type, json: row.eventJson },
         to.map((m) => m.userId),
         now,
         row.giveUpAt,
+        { claim: DELIVERIES_PER_RUN, leaseMs: LEASE_MS },
       );
+      const settled: { orgId: string; id: string; attempt: number; result: AttemptResult }[] = [];
+      for (const one of claimed)
+        settled.push({ orgId: one.orgId, id: one.id, attempt: one.attempts, result: await attempt(env, email, guards, reach, one, now) });
+      await settleAlertDeliveries(env.DB, now, settled);
       return null;
     }
     const member = members.find((m) => m.userId === row.toUserId);

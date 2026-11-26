@@ -1289,7 +1289,7 @@ const sweptObject = () => ({
 });
 
 /**
- * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete_asset` in its batch for the storage sweep (#235),
+ * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete` of an asset in its batch for the storage sweep (#235),
  * which deletes one past the grace period once nothing the org keeps names its bytes (packages/db `storage.ts`).
  * `claim_owner` and `claim_until`: the sweep's claim while it deletes the object; a writer that could reuse the bytes is
  * refused while it holds.

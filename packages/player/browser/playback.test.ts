@@ -27,6 +27,19 @@ describe('playback loop', () => {
       .toBe(true);
   });
 
+  // The skipped page's load was left pending, and the slot's next play waited on it for good (#515).
+  it('plays on after a URL spot whose page never answers', async () => {
+    const content = h.content([
+      { id: 'a', durationMs: 800 },
+      { id: 'slow', url: 'https://slow.test/', durationMs: 800 },
+      { id: 'b', durationMs: 800 },
+    ]);
+    const p = await h.openPlayer((s) => s.publish(content), {}, { before: (page) => page.context().route(/^https:\/\/slow\.test\//, () => undefined) });
+    const s = await p.until((s) => s.log.length >= 3);
+    expect(spotsPlayed(s).slice(0, 3)).toEqual(['a', 'b', 'a']);
+    expect(s.lastError).toBe(`slow: not ready within 2000 ms`);
+  });
+
   it('titles a URL spot frame with the spot name (#69)', async () => {
     const content = h.content([{ id: 'lunch-menu', url: 'https://menu.test/', durationMs: 4000 }]);
     const p = await h.openPlayer((s) => s.publish(content));

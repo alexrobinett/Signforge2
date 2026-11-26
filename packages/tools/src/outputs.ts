@@ -378,7 +378,7 @@ export const assetOutput = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(['image', 'video']),
-  status: z.enum(ASSET_STATUSES).describe('pending until finalize_asset checks the upload; only verified assets may be used'),
+  status: z.enum(ASSET_STATUSES).describe('pending until finalize_upload checks the upload; only verified assets may be used'),
   sha256: z.string().describe("The landscape rendition's, as are type, size, width and height"),
   type: z.string(),
   size: z.number(),
@@ -391,12 +391,9 @@ export const assetOutput = z.object({
 });
 export type AssetView = z.infer<typeof assetOutput>;
 
-const uploadOutput = z.object({
-  asset: assetOutput,
-  uploads: z
-    .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
-    .describe('One per file the server does not already hold'),
-});
+const uploadTargets = z.array(
+  z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }),
+);
 
 // ------------------------------------------------------------------ videos
 
@@ -931,8 +928,7 @@ export const outputs = {
     changed: z.boolean().describe('False if it was already the desired manifest'),
   }),
   publish: publishResult,
-  end_takeover: publishResult,
-  publish_takeover: publishResult.extend({ entry: entryOutput.describe('The takeover, as published') }),
+  takeover: publishResult.extend({ entry: entryOutput.optional().describe('publish: the takeover, as published') }),
   request_publish: publishRequestResult,
   list_publish_requests: z.object({ requests: z.array(publishRequestOutput), next: nextOutput }),
   get_publish_request: publishRequestResult,
@@ -963,18 +959,16 @@ export const outputs = {
   set_template_version_status: z.object({ version: versionOutput, changed: z.boolean() }),
   list_assets: z.object({ assets: z.array(assetOutput.extend({ usageCount: z.number().describe('How many spots use it') })), next: nextOutput }),
   get_asset: z.object({ asset: assetOutput, spotIds: z.array(z.string()) }),
-  create_asset_upload: uploadOutput,
-  renew_asset_upload: uploadOutput,
-  finalize_asset: z.object({ asset: assetOutput, changed: z.boolean() }),
-  delete_asset: z.object({ deleted: z.string().describe("The deleted asset's id") }),
-  create_video_upload: z.object({
+  start_upload: z.object({
     asset: assetOutput,
+    uploads: uploadTargets.optional().describe("An image's: one per file the server does not already hold"),
     upload: z
       .object({ uploadId: z.string(), partBytes: z.number(), parts: z.array(partOutput), expiresAt: z.number() })
       .nullable()
-      .describe('Null when the org already holds the file'),
+      .optional()
+      .describe("A video's multipart upload; null when the org already holds the file"),
   }),
-  finalize_video_upload: z.object({ asset: assetOutput, changed: z.boolean() }),
+  finalize_upload: z.object({ asset: assetOutput, changed: z.boolean() }),
   list_fonts: z.object({ fonts: z.array(fontOutput), next: nextOutput }),
   list_brand_kits: z.object({ brandKits: z.array(brandKitOutput), next: nextOutput }),
   get_brand_kit: kitResult,
@@ -983,7 +977,6 @@ export const outputs = {
   list_data_sources: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   get_data_source: z.object({ dataSource: dataSourceOutput, snapshot: snapshotOutput.nullable() }),
   save_data_source: dataSourceResult,
-  delete_data_source: z.object({ deleted: z.string().describe("The deleted data source's id") }),
   find_places: z.object({ places: z.array(placeOutput) }),
   read_table: z.object({
     table: z
@@ -1057,7 +1050,6 @@ export const outputs = {
   revert_playlist_draft: playlistResult.extend({ rejected }),
   keep_playlist_draft: playlistResult,
   get_agent_draft: agentDraftOutput,
-  delete_playlist: z.object({ deleted: z.string().describe("The deleted playlist's id") }),
   set_default_playlist: playlistResult,
   list_schedule_entries: z.object({
     entries: z.array(entryOutput),
@@ -1066,9 +1058,11 @@ export const outputs = {
   }),
   save_schedule_entry: entryResult,
   start_takeover: entryResult,
-  delete_schedule_entry: z.object({
-    deleted: z.string().describe("The deleted entry's id"),
-    version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
+  delete: z.object({
+    deleted: z.string().describe("The deleted thing's id"),
+    version: version
+      .nullable()
+      .describe("A published schedule entry's deletion's version, to pin in a publish; null when it went at once, as everything else does"),
   }),
   list_audit_log: z.object({ entries: z.array(auditEntryOutput), next: nextOutput }),
   // #345: one read for every type, and what a type holds. A row is its type's own read tool's row (describe says its fields).

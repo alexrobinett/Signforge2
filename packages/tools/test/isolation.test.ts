@@ -51,7 +51,7 @@ const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 /** Ids that name a catalogue every org shares, not an org's row: any org may use them. */
 const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', bodyFont: 'base/inter' };
 
-/** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_video_upload finds the asset first). */
+/** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_upload finds the asset first). */
 const NOT_ROWS = new Set(['upload']);
 
 /**
@@ -150,6 +150,9 @@ const LISTS_CALLS: Record<string, (out: unknown) => unknown> = {
  * Tools whose ids sit in a list of draft pins, `{ kind, id, version }`, which no field's name says:
  * each runs with org B's own draft here, and is refused org A's below.
  */
+/** What `delete` deletes, by its `type`, and the kind of id each names. */
+const DELETED: Record<string, string> = { asset: 'asset', data_source: 'dataSource', playlist: 'playlist', schedule_entry: 'scheduleEntry' };
+
 const PINNED: Record<string, (o: SeededOrg) => unknown> = {
   request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend hours' }),
 };
@@ -181,8 +184,11 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
   'save_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
   'start_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
   'start_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
-  'publish_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
-  'publish_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
+  'takeover.groupId': (s) => ({ action: 'publish', playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
+  'takeover.screenId': (s) => ({ action: 'publish', playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
+  'takeover.scheduleEntryId': (s) => ({ action: 'end', scheduleEntryId: s.a.scheduleEntry }),
+  // An assetId renews an image's upload, and takes nothing else.
+  'start_upload.assetId': (s) => ({ kind: 'image', assetId: s.a.asset }),
   'save_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
   // A provider source takes a resource with its connection, and no feed URL.
   'save_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
@@ -271,9 +277,17 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     }
   });
 
+  // `delete` names its id by its type (#345), which no field's name says: each type is a case of its own.
+  for (const [type, kind] of Object.entries(DELETED)) {
+    it(`delete: finds nothing of org A as a ${type}`, async () => {
+      const result = await dispatch(registry, 'delete', { type, id: ORG_IDS[kind]!(s.a) }, callerB);
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: expect.stringContaining(ORG_IDS[kind]!(s.a)) });
+    });
+  }
+
   for (const tool of TOOLS) {
     const fields = unique(idFields(z.toJSONSchema(tool.input, { io: 'input', unrepresentable: 'any' })));
-    if (!fields.length) {
+    if (!fields.length && tool.name !== 'delete') {
       it(`${tool.name}: names no ids, and works on org B alone`, async () => {
         const result = await dispatch(registry, tool.name, PINNED[tool.name]?.(s.b) ?? tool.example, callerB);
         expect(result.ok, JSON.stringify(result)).toBe(true);

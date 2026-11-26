@@ -76,7 +76,7 @@ export function unpublished(d: { spots: readonly Spot[]; playlists: readonly Pla
       (e): Unpublished => ({
         kind: 'entry',
         id: e.id,
-        // A playlist an entry plays cannot be deleted (`delete_playlist`), so a name is missing only if it went between two reads.
+        // A playlist an entry plays cannot be deleted (`delete`), so a name is missing only if it went between two reads.
         name: `${e.takeover ? 'Takeover' : 'Schedule'}: ${e.playlistName ?? 'a playlist'}`,
         word: wordOf(e),
         updatedAt: e.updatedAt,

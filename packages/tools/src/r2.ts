@@ -5,7 +5,7 @@
  *   o/<org>/f/<sha256>                    feed photos (owned by `apps/api/src/data/feed-photos.ts`, #195, #329)
  *   sys/b/<sha256>                        base templates
  *   o/<org>/m/<screen>/<manifestId>.json  manifests
- *   up/<org>/<asset>/<sha256>             asset uploads waiting for `finalize_asset`
+ *   up/<org>/<asset>/<sha256>             asset uploads waiting for `finalize_upload`
  *
  * Uploads land outside `o/<org>/b/` so a client never writes a content-addressed key: what it PUTs
  * is moved there only once its hash, type and size are checked. The storage sweep (#235) deletes the
