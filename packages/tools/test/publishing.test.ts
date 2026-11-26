@@ -120,21 +120,26 @@ async function seedSmallOrg(orgId: string) {
   return { org, lobby, hall, front, version, photo };
 }
 
+/** A spot outside its template's duration range (`broken`), alone in a playlist (`side`) no screen plays yet. */
+async function brokenSide(org: Awaited<ReturnType<typeof seedSmallOrg>>['org'], versionId: string) {
+  await org.spots.insert({
+    id: x('broken'),
+    name: 'Broken',
+    kind: 'template',
+    durationMs: 1000,
+    templateVersionId: versionId,
+    dataJson: '{}',
+    assetMapJson: '{}',
+  });
+  const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
+  await org.playlists.setItems(side.id, [x('broken')]);
+  return side;
+}
+
 describe('publishOrg', () => {
   it('publishes every screen when one draft spot is broken, and reports that spot', async () => {
     const { org, lobby, hall, version } = await seedSmallOrg('pub-broken');
-    // Broken: outside the template's duration range, and in a playlist no screen plays yet.
-    await org.spots.insert({
-      id: x('broken'),
-      name: 'Broken',
-      kind: 'template',
-      durationMs: 1000,
-      templateVersionId: version.id,
-      dataJson: '{}',
-      assetMapJson: '{}',
-    });
-    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
-    await org.playlists.setItems(side.id, [x('broken')]);
+    await brokenSide(org, version.id);
 
     const result = await publishOrg(org, opts);
     expect(result.screens.map((s) => [s.screenId, s.problems])).toEqual(
@@ -300,17 +305,7 @@ describe('publishOrg', () => {
 
   it('holds an entry whose playlist is not published', async () => {
     const { org, front, version } = await seedSmallOrg('pub-entry');
-    await org.spots.insert({
-      id: x('broken'),
-      name: 'Broken',
-      kind: 'template',
-      durationMs: 1000,
-      templateVersionId: version.id,
-      dataJson: '{}',
-      assetMapJson: '{}',
-    });
-    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
-    await org.playlists.setItems(side.id, [x('broken')]);
+    const side = await brokenSide(org, version.id);
     await org.scheduleEntries.insert({ id: x('side-show'), playlistId: side.id, target: 'group', groupId: front.id, priority: 9 });
     const result = await publishOrg(org, opts);
     expect(result.drafts.held).toContainEqual({ kind: 'schedule_entry', id: x('side-show'), problems: [`playlist ${x('side')} is not published`] });
@@ -322,17 +317,7 @@ describe('publishOrg', () => {
     const at = (minutes: number) => ({ ...opts, now: new Date(NOW.getTime() + minutes * 60_000) });
     await org.commit((await publishOrg(org, at(0))).writes);
     // Made first, with the first id, but held: its playlist plays a spot that does not pass its checks.
-    await org.spots.insert({
-      id: x('broken'),
-      name: 'Broken',
-      kind: 'template',
-      durationMs: 1000,
-      templateVersionId: version.id,
-      dataJson: '{}',
-      assetMapJson: '{}',
-    });
-    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
-    await org.playlists.setItems(side.id, [x('broken')]);
+    const side = await brokenSide(org, version.id);
     await org.scheduleEntries.insert({ id: x('a-held'), playlistId: side.id, target: 'org', priority: 1 });
     await org.scheduleEntries.insert({ id: x('b-now'), playlistId: x('main'), target: 'org', priority: 1 });
     await org.commit((await publishOrg(org, at(1))).writes);

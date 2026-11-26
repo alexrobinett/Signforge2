@@ -40,6 +40,17 @@ beforeEach(() => {
   onScreen = ORG;
 });
 
+/** Press Undo on this Reject's toast, the latest: sonner keeps the earlier tests' too. */
+function pressUndo() {
+  const done = toast
+    .getToasts()
+    .filter((t) => 'title' in t && t.title === "Rejected the agent's draft")
+    .at(-1);
+  const undo = done && 'action' in done ? done.action : undefined;
+  if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
+  undo.onClick({} as never);
+}
+
 describe("an agent's proposal", () => {
   it('is rejected at the version shown, its Undo at the version the Reject made; the editor reads it again', async () => {
     const { s, invalidated } = setup();
@@ -128,13 +139,7 @@ describe("an agent's proposal", () => {
     });
     const first = s.getState().rejectProposal(ORG, 'spot', 'spt_soup', 7);
     await rereading;
-    const done = toast
-      .getToasts()
-      .filter((t) => 'title' in t && t.title === "Rejected the agent's draft")
-      .at(-1);
-    const undo = done && 'action' in done ? done.action : undefined;
-    if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
-    undo.onClick({} as never);
+    pressUndo();
     expect(callTool).toHaveBeenCalledTimes(1);
     // The read again fails: the Reject's run ends refused, and the Undo still goes.
     fail(new Error('offline'));
@@ -155,16 +160,9 @@ describe("an agent's proposal", () => {
     });
     const first = s.getState().rejectProposal(ORG, 'spot', 'spt_soup', 7);
     await rereading;
-    // This Reject's toast: sonner keeps the earlier tests' too.
-    const done = toast
-      .getToasts()
-      .filter((t) => 'title' in t && t.title === "Rejected the agent's draft")
-      .at(-1);
-    const undo = done && 'action' in done ? done.action : undefined;
-    if (!undo || typeof undo !== 'object' || !('onClick' in undo)) throw new Error('no Undo');
     // Pressed now, it waits: nothing more is sent until the read again is done.
     reloadSpot.mockImplementation(async () => {});
-    undo.onClick({} as never);
+    pressUndo();
     expect(callTool).toHaveBeenCalledTimes(1);
     reread();
     await first;

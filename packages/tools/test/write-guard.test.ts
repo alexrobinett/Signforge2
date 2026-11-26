@@ -5,7 +5,7 @@
 // its own. The dispatcher commits only after the handler returns, so a batch run while the handler
 // runs is the tool's own, whatever it ends with.
 import { contentJson, scoped, startPairing } from '@signforge/db';
-import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
+import { ORG_ROW_IDS, seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -73,31 +73,11 @@ function recordingD1(real: D1Database) {
 
 /** The org's own row for each kind of id a tool input can name, so the tool gets as far as writing. */
 const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
-  screen: (o) => o.screen,
-  group: (o) => o.group,
-  credential: (o) => o.credential,
+  // Better Auth's rows among them: PREPARE seeds them.
+  ...ORG_ROW_IDS,
   manifest: () => 'a'.repeat(64),
-  template: (o) => o.template,
-  templateVersion: (o) => o.templateVersion,
-  spot: (o) => o.templateSpot,
-  playlist: (o) => o.playlist,
-  scheduleEntry: (o) => o.scheduleEntry,
   bundle: () => 'b'.repeat(64),
   sources: () => 'c'.repeat(64),
-  asset: (o) => o.asset,
-  brandKit: (o) => o.brandKit,
-  logoOnDarkAsset: (o) => o.asset,
-  logoOnLightAsset: (o) => o.asset,
-  dataSource: (o) => o.dataSource,
-  alertDelivery: (o) => o.alertDelivery,
-  connection: (o) => o.connection,
-  publish: (o) => o.publish,
-  // An agent grant (M4-07's tools): `grantId`.
-  grant: (o) => o.agentGrant,
-  publishRequest: (o) => o.publishRequest,
-  // Better Auth's rows, as seedTeam names them (PREPARE seeds them).
-  member: (o) => `${o.orgId}-member`,
-  invitation: (o) => `${o.orgId}-invitation`,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
