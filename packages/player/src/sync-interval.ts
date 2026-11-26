@@ -3,9 +3,12 @@
  *
  * From the API every pass is a `POST /v1/device/sync`, one D1 row written (docs/backend-plan.md,
  * Screens: Sync). The server's interval (`nextSyncS`, 5 minutes, or 15 s while feed photos the screen lacks wait and
- * the last reply's brought some in) with 10% jitter holds while the socket is up. The budgets here count 5 minutes:
- * the server ends the 15 s syncs once photos stop coming in, so a screen that cannot store them still syncs 288 times
- * a day. While it is down the socket cannot nudge, so the sync comes sooner, but only to
+ * those it was last asked for arrive or a publish brings more than one reply asks for, with one retry) with 10% jitter
+ * holds while the socket is up. The budgets here count 5 minutes: the server ends the 15 s syncs once photos stop
+ * coming in, so a screen that cannot store them syncs 288 times a day, plus one 15 s sync each time a feed turns over
+ * and it fetches the new stories' photos: about 550 a day with one turnover reaching it each interval, more when
+ * several feeds' turnovers reach it in different syncs, as each buys its own. While it is down the socket cannot
+ * nudge, so the sync comes sooner, but only to
  * `SOCKET_DOWN_SYNC_S`: with every screen's socket down at once (a Durable Object outage), 1,000
  * screens at 2 minutes write 21.6M heartbeat rows a month, plus the 21.6M of play counts, about
  * 43M against the 50M included. A minute would be 65M. A failed sync retries at the poll interval:
