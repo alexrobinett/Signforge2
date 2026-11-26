@@ -215,14 +215,18 @@ export const drawerTools = (grant: Grant) => {
     );
 };
 
-/** A `read` call's card, as its type's own read's: its title, and what it did ("Listed 4 screens", "Read 3 screens"). */
-function readCard(type: ReadType, ids: boolean, output: unknown): { tool: string; summary: string } {
+/**
+ * A `read` call's card, as its type's own read's: its title, and what it did ("Listed 4 screens", "Read 3 screens").
+ * `ids`: how many it asked for by id, which choose the card, so one that fails reads as the get it was ("Could not get
+ * screen"), not by the rows it returned, none (review of #482).
+ */
+function readCard(type: ReadType, ids: number, output: unknown): { tool: string; summary: string } {
   const [list = 'read', ...rest] = toolsOf(type);
-  const get = ids ? rest.find((n) => n.startsWith('get_')) : undefined;
+  const get = ids > 0 ? rest.find((n) => n.startsWith('get_')) : undefined;
   if (!get) return { tool: list, summary: summaryOf(list, output) };
   const items = output && typeof output === 'object' && 'items' in output && Array.isArray(output.items) ? output.items : [];
   // One is its get's own words ("Read a spot"); more, how many of its list's ("Read 3 screens").
-  if (items.length === 1) return { tool: get, summary: TOOL_CARDS[get]?.did ?? '' };
+  if (ids === 1) return { tool: get, summary: TOOL_CARDS[get]?.did ?? '' };
   // Several, titled as its list is ("Screens"), not as one ("A screen").
   return { tool: list, summary: `Read ${items.length} ${(TOOL_CARDS[list]?.title ?? type).toLowerCase()}` };
 }
@@ -505,7 +509,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
             if (asked && !asked.success)
               return { card: card(t.name, 'Could not read that', false), content: 'refused: not a type the drawer reads', refused: true };
             const out = await dispatch(registry, t.name, input, caller);
-            const shown = asked?.success ? readCard(asked.data.type, asked.data.ids !== undefined, out.ok ? out.output : undefined) : undefined;
+            const shown = asked?.success ? readCard(asked.data.type, asked.data.ids?.length ?? 0, out.ok ? out.output : undefined) : undefined;
             const name = shown?.tool ?? t.name;
             return out.ok
               ? // Times as an agent reads them, ISO 8601 (#345): those the tool's output schema declares.
@@ -693,6 +697,13 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
         } else if (chunk.type === 'TOOL_CALL_START' && shownText) yield textOf('');
         // Anything else is the run's own: tool calls (their cards say them), reasoning, its structured output, snapshots and steps.
       }
+      /** A card the member may not press: its title and who may, nothing read for it, no token; then the run's end. */
+      function* refusedCard(name: string, why: string): Generator<StreamChunk> {
+        const title = TOOL_CARDS[name]?.title ?? '';
+        const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt: now() + CONFIRM_MS };
+        yield { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: refused satisfies ConfirmCard, timestamp: Date.now() };
+        yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
+      }
       /**
        * The run paused at a tool behind a card (#269): the card, read from the org now, its record kept
        * under a one-use token for this member, then the run's end, without its pause: the press sends the
@@ -702,13 +713,6 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
        * it is shown, only whether it needs the right to publish read: a card can name what their role does not show them, as an invitee's
        * address (review of #414).
        */
-      /** A card the member may not press: its title and who may, nothing read for it, no token; then the run's end. */
-      function* refusedCard(name: string, why: string): Generator<StreamChunk> {
-        const title = TOOL_CARDS[name]?.title ?? '';
-        const refused = { tool: name, title, lines: [], address: null, when: '', undo: '', press: '', token: null, why, expiresAt: now() + CONFIRM_MS };
-        yield { type: 'CUSTOM', name: CHAT_EVENTS.confirm, value: refused satisfies ConfirmCard, timestamp: Date.now() };
-        yield { type: EventType.RUN_FINISHED, threadId, runId, finishReason: 'tool_calls', timestamp: Date.now() };
-      }
       async function* paused(asked: readonly { toolCallId?: string; metadata?: Record<string, unknown> }[]): AsyncGenerator<StreamChunk> {
         const [one] = asked;
         const name = String(one?.metadata?.toolName ?? '');

@@ -344,6 +344,8 @@ describe('POST /api/agent/chat', () => {
               calls: [
                 { name: 'read', input: { type: 'screen', ids } },
                 { name: 'read', input: { type: 'screen', ids: ids.slice(0, 1) } },
+                // One that is not there: still the get's card, by the ids asked, not the rows returned (review of #482).
+                { name: 'read', input: { type: 'screen', ids: ['scr_nowhere'] } },
               ],
             }
           : ANSWER,
@@ -353,6 +355,7 @@ describe('POST /api/agent/chat', () => {
     expect(lines.filter((e) => e.type === 'call').map((e) => e.type === 'call' && e.card)).toEqual([
       shown('list_screens', 'Read 2 screens'),
       shown('get_screen', "Read a screen's details"),
+      shown('get_screen', 'Could not get screen', false),
     ]);
   });
 
@@ -1148,8 +1151,12 @@ describe('confirmation cards (#269)', () => {
     const told = s.model.asked[1].messages.at(-1).content[0];
     expect(told).toMatchObject({ type: 'tool_result', is_error: true });
     expect(JSON.stringify(told.content)).toContain('not a valid');
-    expect(pressOf(all, 'q').card).toMatchObject({ tool: 'save_data_source', token: expect.any(String) });
+    const { card, body } = pressOf(all, 'q');
+    expect(card).toMatchObject({ tool: 'save_data_source', token: expect.any(String) });
     expect(await s.scope.dataSources.list()).toEqual([]);
+    // Pressed, the retried call runs as its card showed it (review of #475).
+    expect(doneOf(await raw(await s.member.post('/api/agent/chat', body)))).toMatchObject({ ok: true });
+    expect(await s.scope.dataSources.list()).toEqual([expect.objectContaining({ id: 'menu', name: 'Menu' })]);
   });
 
   it('tells the model a read has a malformed id, before it runs: no card, and no call of the turn spent', async () => {

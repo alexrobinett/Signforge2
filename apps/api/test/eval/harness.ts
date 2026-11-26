@@ -28,6 +28,16 @@ function catalogueSize(tools: readonly unknown[]) {
   return { tools: tools.length, bytes: new TextEncoder().encode(json).length, tokens: o200k.encode(json).length };
 }
 
+/**
+ * The words the model is sent beside the tools: the system prompt (/mcp's server instructions and the eval's own lines,
+ * or the drawer's) and, in the drawer, its first message's context around the question (the role, what it may not do).
+ * Pinned with the catalogue, so text moved out of tool descriptions into either is still counted (review of #470).
+ */
+function promptSize(system: unknown, first: unknown) {
+  const text = JSON.stringify([system ?? '', first ?? '']);
+  return { bytes: new TextEncoder().encode(text).length, tokens: o200k.encode(text).length };
+}
+
 // ------------------------------------------------------------------ the seeded org
 
 /** What every task's org holds, by name: made the same way each time, through the scoped repositories and the tools. */
@@ -56,6 +66,9 @@ const BAYSIDE_SEEN = Date.UTC(2026, 10, 23, 9, 14);
  * the default), a schedule entry, three templates and a publish of it all; then one change left unpublished (Lunch
  * specials to 15 seconds), so there is something to publish and an audit row to find.
  */
+/** The Harbor and Cafe screens' time zone: the one the schedule tasks' entries play in. */
+const LONDON = 'Europe/London';
+
 async function seed(owner: Client): Promise<World> {
   const org = await owner.createOrg('Harbor Grocers');
   const scope = testScope(env.DB, org.id);
@@ -64,8 +77,8 @@ async function seed(owner: Client): Promise<World> {
   const screens = {
     baysideDoor: await screen('Bayside door', 'America/Los_Angeles', BAYSIDE_SEEN),
     baysideTill: await screen('Bayside till', 'America/Los_Angeles', BAYSIDE_SEEN),
-    harbor: await screen('Harbor lobby', 'Europe/London', null),
-    cafe: await screen('Cafe counter', 'Europe/London', null),
+    harbor: await screen('Harbor lobby', LONDON, null),
+    cafe: await screen('Cafe counter', LONDON, null),
   };
   const tool = async (name: string, input: Record<string, unknown>) => owner.ok<Record<string, { id: string; version: number }>>(`/api/tools/${name}`, input);
   const groups = {
@@ -156,7 +169,7 @@ export type Step = Turn | ((results: string[]) => Turn);
 
 /** A request to Anthropic's Messages API, and its answer, as the eval saw them. */
 interface Exchange {
-  body: { tools?: unknown[]; messages: { role: string; content: unknown }[] };
+  body: { tools?: unknown[]; system?: unknown; messages: { role: string; content: unknown }[] };
   answered: Promise<{ toolUses: string[]; input: number; output: number; problem?: string }>;
 }
 
@@ -168,6 +181,42 @@ interface Usage {
   cache_creation_input_tokens?: number;
 }
 const inputOf = (u: Usage) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+
+/** A streamed answer's event, as far as the harness reads it. */
+export interface StreamEvent {
+  type: string;
+  message?: { usage?: Usage };
+  usage?: Usage;
+  delta?: { stop_reason?: string };
+  content_block?: { type: string; name?: string };
+}
+
+/** A usage block's fields that are there: a later block's missing field leaves an earlier one's. */
+const present = (u: Usage | undefined): Usage => Object.fromEntries(Object.entries(u ?? {}).filter(([, v]) => v !== undefined));
+
+/** Whether a reply ended its turn: a cut-off one (max tokens, a full context window) or a refusal did not (review of #470). */
+const FINISHED = new Set(['end_turn', 'tool_use', 'stop_sequence']);
+
+/**
+ * What one streamed answer called and used, from its events. Usage is cumulative: message_delta's fields over
+ * message_start's, field by field, so a delta without the cache fields keeps message_start's (review of #470). A tool
+ * call the reply was cut off in is no call: a reply stopped at max_tokens whose last block is a tool use made none.
+ */
+export function streamed(events: readonly StreamEvent[]): { toolUses: string[]; input: number; output: number } {
+  let usage: Usage = {};
+  let stop: unknown;
+  const blocks: { tool?: string }[] = [];
+  for (const e of events) {
+    if (e.type === 'message_start') usage = { ...usage, ...present(e.message?.usage) };
+    if (e.type === 'message_delta') {
+      usage = { ...usage, ...present(e.usage) };
+      stop = e.delta?.stop_reason;
+    }
+    if (e.type === 'content_block_start') blocks.push(e.content_block?.type === 'tool_use' ? { tool: e.content_block.name ?? '' } : {});
+  }
+  if (stop === 'max_tokens' && blocks.at(-1)?.tool !== undefined) blocks.pop();
+  return { toolUses: blocks.flatMap((b) => (b.tool === undefined ? [] : [b.tool])), input: inputOf(usage), output: usage.output_tokens ?? 0 };
+}
 
 /** What the model was asked and answered in one run. */
 class ModelLog {
@@ -186,30 +235,24 @@ class ModelLog {
       const res = await inner(request);
       const [mine, theirs] = res.body ? res.body.tee() : [null, null];
       const answered = (async () => {
-        const text = mine ? await new Response(mine).text() : '';
         if (!res.ok) return { toolUses: [], input: 0, output: 0, problem: `model_${res.status}` };
         try {
+          // Read inside the try: a body that fails mid-read is the model's answer failing, not the harness (review of #470).
+          const text = mine ? await new Response(mine).text() : '';
           if (!res.headers.get('content-type')?.includes('event-stream')) {
-            const msg: { content: { type: string; name?: string }[]; usage: Usage } = JSON.parse(text);
+            const msg: { content: { type: string; name?: string }[]; usage: Usage; stop_reason?: string } = JSON.parse(text);
+            const blocks = msg.content;
+            // As a stream's: a tool call the reply was cut off in is none.
+            const cut = msg.stop_reason === 'max_tokens' && blocks.at(-1)?.type === 'tool_use' ? blocks.slice(0, -1) : blocks;
             return {
-              toolUses: msg.content.flatMap((b) => (b.type === 'tool_use' && b.name ? [b.name] : [])),
+              toolUses: cut.flatMap((b) => (b.type === 'tool_use' && b.name ? [b.name] : [])),
               input: inputOf(msg.usage),
               output: msg.usage.output_tokens ?? 0,
             };
           }
-          const events = text.split('\n').flatMap((line) => (line.startsWith('data: ') ? [JSON.parse(line.slice(6))] : []));
-          // The provider's final usage is cumulative: message_delta's when it carries one, message_start's otherwise.
-          let started: Usage = {};
-          let final: Usage = {};
-          const toolUses: string[] = [];
-          for (const e of events) {
-            if (e.type === 'message_start') started = e.message.usage;
-            if (e.type === 'message_delta') final = e.usage;
-            if (e.type === 'content_block_start' && e.content_block.type === 'tool_use') toolUses.push(e.content_block.name);
-          }
-          return { toolUses, input: final.input_tokens === undefined ? inputOf(started) : inputOf(final), output: final.output_tokens ?? 0 };
+          return streamed(text.split('\n').flatMap((line) => (line.startsWith('data: ') ? [JSON.parse(line.slice(6))] : [])));
         } catch {
-          return { toolUses: [], input: 0, output: 0, problem: 'model_unreadable' };
+          return { toolUses: [], input: 0, output: 0, problem: request.signal.aborted ? 'model_timeout' : 'model_unreadable' };
         }
       })();
       this.exchanges.push({ body, answered });
@@ -281,7 +324,7 @@ const live =
 /** What a task's check reads: the org after the run, what the tools gave the model, and the drawer's drafts and card presses. */
 export interface Outcome {
   arm: Arm;
-  /** The day the run's check runs, YYYY-MM-DD in UTC: a schedule may start on it. */
+  /** The day the run's check runs, YYYY-MM-DD where the Cafe's screens are: a schedule may start on it (review of #470). */
   today: string;
   world: World;
   scope: ReturnType<typeof testScope>;
@@ -312,6 +355,8 @@ export interface RunRecord {
   outputTokens: number;
   /** The tools as the model's request carried them. */
   catalogue: Size;
+  /** The words beside it, in the same units (`promptSize`). */
+  prompt: { bytes: number; tokens: number };
   /** /mcp's tools/list as the client received it, before it became the model's tools. */
   discovery?: Size;
   /** What went wrong running it: the model's or the route's failures, /mcp's loop out of turns, or the harness's own. */
@@ -428,57 +473,65 @@ async function overMcp(task: Task, model: Model, log: ModelLog): Promise<Ran> {
   const errors: string[] = [];
   // A live run's model calls end by RUN_MS together, so a hung call is a recorded failure, not a test timeout. A scripted run has no deadline.
   const deadline = model.clock === undefined ? AbortSignal.timeout(RUN_MS) : undefined;
-  for (let turn = 0; ; turn++) {
-    if (turn === MCP_TURNS) {
-      errors.push('out_of_turns');
-      break;
-    }
-    let res: Response;
-    try {
-      res = await ask('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: model.id, max_tokens: MAX_TOKENS, system, tools: defs, messages }),
-        ...(deadline ? { signal: deadline } : {}),
-      });
-    } catch {
-      errors.push(deadline?.aborted ? 'model_timeout' : 'model_unreachable');
-      break;
-    }
-    // The answer's own failure (its status, or a body that does not read) is recorded with its exchange.
-    if (!res.ok) break;
-    let msg: { content: { type: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string };
-    try {
-      msg = await res.json();
-    } catch {
-      break;
-    }
-    // A reply cut off or refused is no finished turn, whatever its tools already showed.
-    if (msg.stop_reason === 'max_tokens' || msg.stop_reason === 'refusal') {
-      errors.push(`model_${msg.stop_reason}`);
-      break;
-    }
-    messages.push({ role: 'assistant', content: msg.content });
-    const uses = msg.content.filter((b) => b.type === 'tool_use');
-    if (!uses.length) break;
-    const results = [];
-    for (const use of uses) {
-      try {
-        const result = await client.callTool({ name: use.name ?? '', arguments: use.input ?? {} });
-        const text = result.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n');
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: text, ...(result.isError ? { is_error: true } : {}) });
-      } catch (err) {
-        // A JSON-RPC error, not a tool's refusal: the client tells the model the call failed.
-        errors.push('mcp_error');
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: String(err), is_error: true });
+  // Closed however the loop ends, a reply that does not read included (review of #470).
+  try {
+    for (let turn = 0; ; turn++) {
+      if (turn === MCP_TURNS) {
+        errors.push('out_of_turns');
+        break;
       }
+      let res: Response;
+      try {
+        res = await ask('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model: model.id, max_tokens: MAX_TOKENS, system, tools: defs, messages }),
+          ...(deadline ? { signal: deadline } : {}),
+        });
+      } catch {
+        errors.push(deadline?.aborted ? 'model_timeout' : 'model_unreachable');
+        break;
+      }
+      // The answer's own failure (its status, or a body that does not read) is recorded with its exchange.
+      if (!res.ok) break;
+      // One that does not read, or reads as no message ({} or an error object), is recorded with its exchange.
+      const msg = reply.safeParse(await res.json().catch(() => undefined));
+      if (!msg.success) break;
+      const { content, stop_reason: stop } = msg.data;
+      // A reply cut off (max tokens, a full context window) or refused is no finished turn, whatever its tools showed.
+      if (!FINISHED.has(stop)) {
+        errors.push(`model_${stop}`);
+        break;
+      }
+      messages.push({ role: 'assistant', content });
+      const uses = content.filter((b) => b.type === 'tool_use');
+      if (!uses.length) break;
+      const results = [];
+      for (const use of uses) {
+        try {
+          const result = await client.callTool({ name: use.name ?? '', arguments: use.input ?? {} });
+          const text = result.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n');
+          results.push({ type: 'tool_result', tool_use_id: use.id, content: text, ...(result.isError ? { is_error: true } : {}) });
+        } catch (err) {
+          // A JSON-RPC error, not a tool's refusal: the client tells the model the call failed.
+          errors.push('mcp_error');
+          results.push({ type: 'tool_result', tool_use_id: use.id, content: String(err), is_error: true });
+        }
+      }
+      messages.push({ role: 'user', content: results });
     }
-    messages.push({ role: 'user', content: results });
+  } finally {
+    await client.close();
   }
   log.tail = messages;
-  await client.close();
   return { world, discovery, errors, drafts: [], cards: [] };
 }
+
+/** A reply's message, as the /mcp loop reads it: else the exchange records it as model_unreadable. */
+const reply = z.object({
+  content: z.array(z.object({ type: z.string(), id: z.string().optional(), name: z.string().optional(), input: z.record(z.string(), z.unknown()).optional() })),
+  stop_reason: z.string(),
+});
 
 /** What a check reads of the drawer's answer card: the changes it drafted. */
 const draft = z.object({ tool: z.string(), input: z.record(z.string(), z.unknown()), target: z.object({ kind: z.string(), id: z.string() }).nullable() });
@@ -570,7 +623,8 @@ export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, scr
     const results = log.results();
     const outcome: Outcome = {
       arm,
-      today: new Date().toISOString().slice(0, 10),
+      // Where the entries play, not UTC: a live run near midnight would otherwise refuse a start date already today there.
+      today: new Intl.DateTimeFormat('en-CA', { timeZone: LONDON }).format(new Date()),
       world: ran.world,
       scope: testScope(env.DB, ran.world.orgId),
       results,
@@ -590,6 +644,7 @@ export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, scr
       inputTokens: answers.reduce((n, a) => n + a.input, 0),
       outputTokens: answers.reduce((n, a) => n + a.output, 0),
       catalogue: catalogueSize(log.exchanges[0]?.body.tools ?? []),
+      prompt: promptSize(log.exchanges[0]?.body.system, arm === 'drawer' ? log.exchanges[0]?.body.messages[0]?.content : undefined),
       ...(ran.discovery ? { discovery: ran.discovery } : {}),
       errors,
     };
@@ -606,6 +661,7 @@ export async function runTask(task: Task, arm: Arm, model: Model, runNo = 1, scr
       inputTokens: 0,
       outputTokens: 0,
       catalogue: none,
+      prompt: promptSize(undefined, undefined),
       errors: [`harness: ${err instanceof Error ? err.message : String(err)}`],
     };
   } finally {
