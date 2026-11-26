@@ -897,7 +897,7 @@ describe('the publish tools (M3-18)', () => {
     // Published playing Evenings; its draft then pointed at Main, and deleted.
     const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
     const edited = await ok(call('save_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }));
-    await ok(call('delete_schedule_entry', { scheduleEntryId: entry.id, ifVersion: (edited.entry as { version: number }).version }));
+    await ok(call('delete', { type: 'schedule_entry', id: entry.id, ifVersion: (edited.entry as { version: number }).version }));
     await ok(p.call('publish', {}));
     expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toContainEqual({
       kind: 'schedule_entry',
@@ -952,7 +952,7 @@ describe('the publish tools (M3-18)', () => {
       onPut: async (attempt) => {
         if (attempt !== 1) return;
         await org.brandKits.update(kit.id, { logoOnDarkAssetId: null });
-        expect(await editorCalls(org)('delete_asset', { assetId: logo.id })).toMatchObject({ ok: true });
+        expect(await editorCalls(org)('delete', { type: 'asset', id: logo.id })).toMatchObject({ ok: true });
       },
     });
     const out = (await ok(p.call('publish', {}))) as unknown as Out;
@@ -1199,7 +1199,7 @@ describe('the publish tools (M3-18)', () => {
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
   });
 
-  it('makes no default from an entry whose playlist was never published, or from end_takeover', async () => {
+  it('makes no default from an entry whose playlist was never published, or from a takeover ended', async () => {
     const { org } = await seedSmallOrg('tool-default-none');
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     // The entry alone, its playlist a draft never published: the entry is held, and nothing is made the default.
@@ -1220,7 +1220,7 @@ describe('the publish tools (M3-18)', () => {
     await two.scheduleEntries.insert({ id: x('flash'), playlistId: x('main'), priority: 100, target: 'org', startsAt: now - 60_000, endsAt: now + 3_600_000 });
     await ok(publisher(two).call('publish', {}));
     await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
-    expect(await ok(publisher(two).call('end_takeover', { scheduleEntryId: x('flash') }))).toMatchObject({ madeDefault: null });
+    expect(await ok(publisher(two).call('takeover', { action: 'end', scheduleEntryId: x('flash') }))).toMatchObject({ madeDefault: null });
     expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
   });
 
@@ -1286,7 +1286,7 @@ describe('the publish tools (M3-18)', () => {
     await source(w4);
     await age(w4);
     await bind(w4);
-    expect(await call('delete_data_source', { dataSourceId: w1 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('delete', { type: 'data_source', id: w1 })).toMatchObject({ ok: false, error: 'conflict' });
     const second = (await ok(p.call('publish', {}))) as unknown as Out & { removedDataSources: string[] };
     expect(second.removedDataSources).toEqual([]);
     await ok(p.call('roll_back_publish', { publishId: first.publish!.id, ifLatest: second.publish!.id }));

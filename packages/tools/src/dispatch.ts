@@ -400,7 +400,10 @@ async function dispatchCall<D extends DataScope>(
         // staged: a person's press of a card (#269) refused so gets its row alone (`refusedPress`).
         if (err.changed) {
           try {
-            await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+            await commit(tool.target?.(parsed.data, undefined as never), {
+              refused: { error: err.code, message: err.message },
+              ...(err.auditDetail ? { detail: redact(err.auditDetail) } : {}),
+            });
           } catch (commitErr) {
             // What it staged was refused too (another call changed it first): say so, as for a change.
             const refusal = await refusedCommit(commitErr);

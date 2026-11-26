@@ -14,7 +14,7 @@
  *   the batch of the publish or `/admin` push that stores one, and by the sweep for one stored before it), and every file
  *   an asset, a rendition, a rendition's sample or a template version of the org names, a pending upload's included.
  *
- * **A deleted asset's file** (`blob_deletes`, queued by `delete_asset`) is deleted once queued for the grace period,
+ * **A deleted asset's file** (`blob_deletes`, queued by `delete` of an asset) is deleted once queued for the grace period,
  * outside all of that, and only while every kept manifest is indexed or was looked for in R2: an unindexed one could name
  * it, and one found in no object authorizes no fetch.
  * **An unfinished upload**: an asset still `pending` for the grace period, its `up/` objects and its row; the hashes it
@@ -330,7 +330,7 @@ export function storage(db: Db, orgId: string) {
         .get()) !== undefined,
     stage: {
       /**
-       * A deleted asset's files, queued at `now` (`delete_asset`): one already queued keeps the later of its times, and a
+       * A deleted asset's files, queued at `now` (`delete` of an asset): one already queued keeps the later of its times, and a
        * tombstone is queued afresh (its bytes were stored again since, or they would not be named).
        */
       queue: (shas: readonly string[], now: number): Staged => ({

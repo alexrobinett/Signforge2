@@ -13,7 +13,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, invalidFields, notFound, ToolError } from './tool';
+import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
 import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
@@ -102,8 +102,6 @@ const calendarOnly = (f: string, days: number | null | undefined) => days == nul
 const jsonTableOnly = (f: string, path: string | null | undefined) => path == null || f === 'json-table';
 const rssOnly = (f: string, on: boolean | undefined) => on === undefined || f === 'rss';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
-
-const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
 const listDataSources = defineTool({
   name: 'list_data_sources',
@@ -316,25 +314,13 @@ async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string
     .map((s) => s.id);
 }
 
-const deleteDataSource = defineTool({
-  name: 'delete_data_source',
-  description:
-    'Delete a data source and its snapshot. Refused with a conflict while a spot, as drafted or as published, binds to it; unbind those spots first. Returns { deleted: dataSourceId }.',
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ dataSourceId: id('data source') }),
-  output: outputs.delete_data_source,
-  example: { dataSourceId: 'weather' },
-  target,
-  handler: async ({ org, input, write }) => {
-    await requireSource(org, input.dataSourceId);
-    const spotIds = await spotsBinding(org, input.dataSourceId);
-    if (spotIds.length) throw new ToolError('conflict', `data source ${input.dataSourceId} is bound by ${spotIds.length} spots`, { spotIds });
-    write(org.dataSources.stage.delete(input.dataSourceId));
-    return { deleted: input.dataSourceId };
-  },
-});
+/** Delete a data source and its snapshot (the `delete` tool, ./delete.ts): refused with a conflict while a spot, drafted or published, binds it. */
+export async function deleteDataSource({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, dataSourceId: string) {
+  await requireSource(org, dataSourceId);
+  const spotIds = await spotsBinding(org, dataSourceId);
+  if (spotIds.length) throw new ToolError('conflict', `data source ${dataSourceId} is bound by ${spotIds.length} spots`, { spotIds });
+  write(org.dataSources.stage.delete(dataSourceId));
+}
 
 const findPlaces = defineTool({
   name: 'find_places',
@@ -378,4 +364,4 @@ const readTable = defineTool({
   },
 });
 
-export const dataSourceTools = [listDataSources, getDataSource, saveDataSource, deleteDataSource, findPlaces, readTable];
+export const dataSourceTools = [listDataSources, getDataSource, saveDataSource, findPlaces, readTable];

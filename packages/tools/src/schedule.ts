@@ -13,7 +13,7 @@
  * is published. Each is checked with the contract's `scheduleEntryProblems` before it is stored.
  * Deleting a published entry needs the right to publish, and waits like an edit: screens keep it
  * until a publish of everything, or one that pins the deletion, applies it (`deleted_at`).
- * `end_takeover` (./publish.ts) deletes a takeover and publishes that alone, in one batch. A
+ * `takeover` (./publish.ts) ends a takeover, deleting it and publishing that alone, in one batch. A
  * takeover that has ended is left out of every compile, and its row goes at the next publish
  * (`ended`). Deletes and creates go through `packages/db`'s repository, so an entry made again
  * with a deleted one's id continues its versions (`draft_tombstones`).
@@ -23,7 +23,7 @@ import { draftChanged, published, StaleVersionError, type OrgScope, type Schedul
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion } from './fields';
 import { page, pageInput } from './paging';
-import { defineTool, invalidFields, notFound, ToolError } from './tool';
+import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
 import { type entryOutput, type fieldsOutput, outputs, scheduleTarget } from './outputs';
 
 /** The longest takeover: past a day it is a schedule, and a screen that misses its end would run it too long. */
@@ -151,7 +151,7 @@ async function requireAim(org: OrgScope, e: { playlistId: string; target: 'org' 
   return { target: e.target, groupId: e.target === 'group' ? (e.groupId ?? null) : null, screenId: e.target === 'screen' ? (e.screenId ?? null) : null };
 }
 
-/** A takeover's fields as its tools take them: the playlist, whom it plays on, and when (`start_takeover`, `publish_takeover`). */
+/** A takeover's fields as its tools take them: the playlist, whom it plays on, and when (`start_takeover`, `takeover`). */
 export const takeoverFields = {
   playlistId: id('playlist'),
   ...aim,
@@ -195,8 +195,6 @@ async function requireEntry(org: OrgScope, scheduleEntryId: string) {
 
 const daysJson = (days: number[] | null | undefined) => (days ? JSON.stringify([...days].sort((a, b) => a - b)) : null);
 
-const entryTarget = (input: { scheduleEntryId: string }) => ({ kind: 'schedule_entry', id: input.scheduleEntryId });
-
 const listEntries = defineTool({
   name: 'list_schedule_entries',
   description:
@@ -220,7 +218,7 @@ const listEntries = defineTool({
 const startTakeover = defineTool({
   name: 'start_takeover',
   description:
-    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two takeovers on the same screens, the one that starts later wins, so a new one replaces one running. End one now with end_takeover, or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
+    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two takeovers on the same screens, the one that starts later wins, so a new one replaces one running. End one now with takeover (action end), or early with save_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -330,29 +328,25 @@ const saveEntry = defineTool({
       : notFound('schedule entry', input.scheduleEntryId),
 });
 
-const deleteEntry = defineTool({
-  name: 'delete_schedule_entry',
-  description:
-    'Delete a schedule entry or takeover. Pass the version you read as ifVersion so one changed since is not deleted. One never published goes at once. A published one needs the right to publish (refused to editors where only owners publish), and waits like an edit: screens keep it until a publish of every change, or one that pins it (kind schedule_entry at the version returned), applies the deletion; until then it is listed with deleted: true. To end a takeover now, use end_takeover. Returns { deleted: scheduleEntryId, version }, version null when it went at once.',
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ scheduleEntryId: id('schedule entry'), ifVersion }),
-  output: outputs.delete_schedule_entry,
-  example: { scheduleEntryId: 'sch_example' },
-  target: entryTarget,
-  handler: async ({ org, input, write, publishRight }) => {
-    const row = await requireEntry(org, input.scheduleEntryId);
-    if (input.ifVersion !== undefined && row.rowVersion !== input.ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
-    if (!published(row)) {
-      write(org.scheduleEntries.stage.remove(row));
-      return { deleted: row.id, version: null };
-    }
-    // Held to the commit too (review of #419): a role or editors-publish changed meanwhile refuses it.
-    publishRight('Screens play this entry: deleting it needs the right to publish');
-    const marked = write(org.scheduleEntries.stage.update(row, { deletedAt: Date.now() }, row.rowVersion));
-    return { deleted: row.id, version: marked.rowVersion };
-  },
-});
+/**
+ * Delete a schedule entry or takeover (the `delete` tool, ./delete.ts), unless it changed since `ifVersion`. One never
+ * published goes at once (version null); a published one needs the right to publish, and is marked deleted until a
+ * publish applies it (its new version).
+ */
+export async function deleteScheduleEntry(
+  { org, write, publishRight }: Pick<ToolContext<unknown>, 'org' | 'write' | 'publishRight'>,
+  scheduleEntryId: string,
+  ifVersion: number | undefined,
+): Promise<number | null> {
+  const row = await requireEntry(org, scheduleEntryId);
+  if (ifVersion !== undefined && row.rowVersion !== ifVersion) throw new StaleVersionError(row.id, row.rowVersion);
+  if (!published(row)) {
+    write(org.scheduleEntries.stage.remove(row));
+    return null;
+  }
+  // Held to the commit too (review of #419): a role or editors-publish changed meanwhile refuses it.
+  publishRight('Screens play this entry: deleting it needs the right to publish');
+  return write(org.scheduleEntries.stage.update(row, { deletedAt: Date.now() }, row.rowVersion)).rowVersion;
+}
 
-export const scheduleTools = [listEntries, saveEntry, startTakeover, deleteEntry];
+export const scheduleTools = [listEntries, saveEntry, startTakeover];

@@ -47,7 +47,7 @@ interface Created {
 /** Create the upload and PUT its parts as the browser would, through the binding. */
 async function upload(name: string, bytes: Uint8Array, claim: { sha256?: string } = {}) {
   const sha = claim.sha256 ?? (await sha256(bytes));
-  const created = await call<Created>('create_video_upload', { name, sha256: sha, type: 'video/mp4', size: bytes.length });
+  const created = await call<Created>('start_upload', { kind: 'video', name, sha256: sha, type: 'video/mp4', size: bytes.length });
   const parts: { partNumber: number; etag: string }[] = [];
   if (created.upload) {
     const mp = env.BLOBS.resumeMultipartUpload(uploadKey(o.orgId, created.asset.id, sha), created.upload.uploadId);
@@ -72,10 +72,10 @@ beforeAll(async () => {
   });
 });
 
-describe('create_video_upload', () => {
+describe('start_upload, a video', () => {
   it('creates a pending video asset and a signed UploadPart URL per 16 MiB part', async () => {
     const bytes = padded(clip('high.mp4'), 40 * 1024 * 1024);
-    const created = await call<Created>('create_video_upload', { name: 'Promo', sha256: await sha256(bytes), type: 'video/mp4', size: bytes.length });
+    const created = await call<Created>('start_upload', { kind: 'video', name: 'Promo', sha256: await sha256(bytes), type: 'video/mp4', size: bytes.length });
     expect(created.asset).toMatchObject({ status: 'pending', renditions: [] });
     const up = created.upload!;
     expect(up.partBytes).toBe(16 * 1024 * 1024);
@@ -88,7 +88,7 @@ describe('create_video_upload', () => {
   });
 
   it('refuses a file over the size cap before anything is stored', async () => {
-    const r = await run('create_video_upload', { name: 'Huge', sha256: 'a'.repeat(64), type: 'video/mp4', size: 500_000_001 });
+    const r = await run('start_upload', { kind: 'video', name: 'Huge', sha256: 'a'.repeat(64), type: 'video/mp4', size: 500_000_001 });
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'size', message: 'a video may be at most 500 MB' }] });
   });
 
@@ -99,7 +99,7 @@ describe('create_video_upload', () => {
     vi.setSystemTime(at);
     try {
       await claimFileForSweep(env.DB, o.orgId, sha, at + 60_000);
-      expect(await run('create_video_upload', { name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
+      expect(await run('start_upload', { kind: 'video', name: 'Claimed', sha256: sha, type: 'video/mp4', size: 1000 })).toMatchObject({
         ok: false,
         error: 'conflict',
         message: expect.stringContaining('storage clean-up'),
@@ -116,16 +116,16 @@ describe('create_video_upload', () => {
       const bytes = clip('high.mp4');
       const sha = await sha256(bytes);
       await env.BLOBS.put(orgBlobKey(o.orgId, sha), bytes);
-      const input = (name: string) => ({ name, sha256: sha, type: 'video/mp4', size: bytes.length });
+      const input = (name: string) => ({ kind: 'video', name, sha256: sha, type: 'video/mp4', size: bytes.length });
       // Held: no upload. The sweep deletes it between the read and the commit: refused.
       const raced = racing(owner, () => tombstone(sha, at));
-      expect(await dispatch(registry, 'create_video_upload', input('Raced'), raced)).toMatchObject({ ok: false, error: 'conflict' });
+      expect(await dispatch(registry, 'start_upload', input('Raced'), raced)).toMatchObject({ ok: false, error: 'conflict' });
       // Deleted, though a copy is back: uploaded again all the same.
-      const again = await call<Created>('create_video_upload', input('Again'));
+      const again = await call<Created>('start_upload', input('Again'));
       expect(again.upload).not.toBeNull();
       // Finished from the copy now held, read after the tombstone was stamped: verified, and the tombstone goes.
       await tombstone(sha, at - 1);
-      expect((await call('finalize_video_upload', { assetId: again.asset.id })).asset.status).toBe('verified');
+      expect((await call('finalize_upload', { assetId: again.asset.id })).asset.status).toBe('verified');
       expect(await scoped(env.DB, o.orgId).storage.deleted([sha], at)).toEqual([]);
     } finally {
       vi.useRealTimers();
@@ -133,12 +133,12 @@ describe('create_video_upload', () => {
   });
 });
 
-describe('finalize_video_upload', () => {
+describe('finalize_upload, a video', () => {
   it('completes a two-part upload, checks the header, re-hashes and stores it under its hash', async () => {
     const bytes = padded(clip('high.mp4'), 20 * 1024 * 1024);
     const { created, sha, parts, uploadId } = await upload('Two parts', bytes);
     expect(parts).toHaveLength(2);
-    const done = await call('finalize_video_upload', { assetId: created.asset.id, uploadId, parts });
+    const done = await call('finalize_upload', { assetId: created.asset.id, uploadId, parts });
     expect(done).toMatchObject({
       changed: true,
       asset: { kind: 'video', status: 'verified', width: 320, height: 180, durationMs: 1000, sha256: sha, size: bytes.length },
@@ -147,28 +147,31 @@ describe('finalize_video_upload', () => {
     expect(await sha256(new Uint8Array(await stored!.arrayBuffer()))).toBe(sha);
     expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
     // Again: nothing changes.
-    expect(await call('finalize_video_upload', { assetId: created.asset.id })).toMatchObject({ changed: false });
+    expect(await call('finalize_upload', { assetId: created.asset.id })).toMatchObject({ changed: false });
   });
 
   it('reads a moov at the end of the file', async () => {
     const { created, parts, uploadId } = await upload('Moov last', clip('main-moov-at-end.mp4'));
-    expect(await call('finalize_video_upload', { assetId: created.asset.id, uploadId, parts })).toMatchObject({ asset: { status: 'verified' } });
+    expect(await call('finalize_upload', { assetId: created.asset.id, uploadId, parts })).toMatchObject({ asset: { status: 'verified' } });
   });
 
   it('rejects a 60 fps video, deletes it, and says how to export one that passes', async () => {
     const { created, sha, parts, uploadId } = await upload('Too fast', clip('fps60.mp4'));
-    const r = await run('finalize_video_upload', { assetId: created.asset.id, uploadId, parts });
+    const r = await run('finalize_upload', { assetId: created.asset.id, uploadId, parts });
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'fps', message: '60 fps is above 30' }] });
     expect(r.ok ? '' : r.message).toBe(`the video was rejected and deleted: 60 fps is above 30. ${EXPORT_ADVICE}`);
     expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
     expect(await env.BLOBS.head(orgBlobKey(o.orgId, sha))).toBeNull();
     expect(await call('get_asset', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'rejected' } });
+    // Found under the tool it replaced, as a finish that passed is (review of #516).
+    const { entries } = await call('list_audit_log', { action: 'finalize_video_upload' });
+    expect(entries.map((e: { target: { id: string } }) => e.target.id)).toContain(created.asset.id);
   });
 
   it('rejects bytes that do not hash to the claimed SHA-256', async () => {
     const claimed = 'b'.repeat(64);
     const { created, parts, uploadId } = await upload('Forged', clip('high.mp4'), { sha256: claimed });
-    const r = await run('finalize_video_upload', { assetId: created.asset.id, uploadId, parts });
+    const r = await run('finalize_upload', { assetId: created.asset.id, uploadId, parts });
     expect(r).toMatchObject({ ok: false, details: [{ path: 'sha256' }] });
     expect(await env.BLOBS.head(orgBlobKey(o.orgId, claimed))).toBeNull();
   });
@@ -178,18 +181,18 @@ describe('finalize_video_upload', () => {
     const { created, parts, uploadId } = await upload('Retry', bytes);
     const tries = [parts.slice(1), [parts[0]!, { ...parts[1]!, etag: '"not-it"' }]];
     for (const tried of tries) {
-      const r = await run('finalize_video_upload', { assetId: created.asset.id, uploadId, parts: tried });
+      const r = await run('finalize_upload', { assetId: created.asset.id, uploadId, parts: tried });
       expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'parts' }] });
     }
     expect(await call('get_asset', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'pending' } });
-    expect(await call('finalize_video_upload', { assetId: created.asset.id, uploadId, parts })).toMatchObject({ asset: { status: 'verified' } });
+    expect(await call('finalize_upload', { assetId: created.asset.id, uploadId, parts })).toMatchObject({ asset: { status: 'verified' } });
   });
 
   it('refuses a file not uploaded yet without changing anything', async () => {
     const bytes = clip('fps60.mp4').slice();
     bytes[bytes.length - 1]! ^= 1;
-    const created = await call<Created>('create_video_upload', { name: 'Not yet', sha256: await sha256(bytes), type: 'video/mp4', size: bytes.length });
-    expect(await run('finalize_video_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'invalid_input', message: 'not uploaded yet' });
+    const created = await call<Created>('start_upload', { kind: 'video', name: 'Not yet', sha256: await sha256(bytes), type: 'video/mp4', size: bytes.length });
+    expect(await run('finalize_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'invalid_input', message: 'not uploaded yet' });
     expect(await call('get_asset', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'pending' } });
   });
 
@@ -198,21 +201,20 @@ describe('finalize_video_upload', () => {
     const sha = await sha256(bytes);
     // The two-part test above stored these bytes.
     expect(await env.BLOBS.head(orgBlobKey(o.orgId, sha))).not.toBeNull();
-    const created = await call<Created>('create_video_upload', { name: 'Again', sha256: sha, type: 'video/mp4', size: bytes.length });
+    const created = await call<Created>('start_upload', { kind: 'video', name: 'Again', sha256: sha, type: 'video/mp4', size: bytes.length });
     expect(created.upload).toBeNull();
-    expect(await call('finalize_video_upload', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'verified', width: 320 } });
+    expect(await call('finalize_upload', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'verified', width: 320 } });
   });
 
-  it('keeps images and videos to their own finalize and renew tools', async () => {
+  it("renews no video's upload: a video's upload is started again (#345)", async () => {
     const { created } = await upload('Wrong tool', clip('main-moov-at-end.mp4'));
-    expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
-    expect(await run('renew_asset_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await run('start_upload', { kind: 'image', assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
   });
 
   it('deletes a pending video with its upload', async () => {
     const { created, sha, parts, uploadId } = await upload('Abandoned', padded(clip('high.mp4'), 64));
     await env.BLOBS.resumeMultipartUpload(uploadKey(o.orgId, created.asset.id, sha), uploadId!).complete(parts);
-    await call('delete_asset', { assetId: created.asset.id });
+    await call('delete', { type: 'asset', id: created.asset.id });
     expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
   });
 });

@@ -26,8 +26,9 @@ const saves = (save: string, idKey: string, created: string, changed: string) =>
 
 /**
  * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
- * changed it too (#243). A screen command, a group's save and a content save (#345) do what the tools they replaced did:
- * their rows are found under those tools' names, by the input they recorded.
+ * changed it too (#243). A screen command, a group's save, a content save, a delete, a takeover and an upload (#345) do
+ * what the tools they replaced did: their rows are found under those tools' names, by the input they recorded (or, for
+ * an upload's finish, the kind it checked).
  */
 const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> }> = {
   set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
@@ -45,6 +46,16 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
   ...saves('save_brand_kit', 'brandKitId', 'create_brand_kit', 'update_brand_kit'),
   ...saves('save_data_source', 'dataSourceId', 'create_data_source', 'update_data_source'),
   set_default_brand_kit: { actions: ['save_brand_kit'], detailHas: '"makeDefault":true' },
+  delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
+  delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
+  delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
+  delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
+  publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
+  end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
+  create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
+  create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
+  finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
+  finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
 };
 
 const listAuditLog = defineTool({
@@ -66,7 +77,7 @@ const listAuditLog = defineTool({
       .max(64)
       .optional()
       .describe(
-        'Only this action, such as update_screen. A replaced tool also finds the rows of the tool that does its job now: create_spot and update_spot find save_spot without and with spotId, identify_screen finds screen_command identify, and so on',
+        'Only this action, such as update_screen. A replaced tool also finds the rows of the tool that does its job now: create_spot and update_spot find save_spot without and with spotId, delete_playlist finds delete of a playlist, identify_screen finds screen_command identify, and so on',
       ),
     target: z
       .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })

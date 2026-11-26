@@ -67,7 +67,7 @@ const entry = (id: string, takeover: boolean): ScheduleEntryView => ({
   updatedAt: 0,
 });
 
-/** What `publish` and `end_takeover` answer: publish v`revision` to one screen, after the one before. */
+/** What `publish` and `takeover` answer: publish v`revision` to one screen, after the one before. */
 const published = (revision: number) => ({
   publish: { id: `pub_${revision}`, revision, screens: 1, previousId: `pub_${revision - 1}` },
   promoted: [],
@@ -119,7 +119,7 @@ describe('the publish toast', () => {
     expect(undoOf()).toMatchObject({ label: 'Undo' });
 
     await s.endTakeover(ORG, 'sch_flash');
-    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('end_takeover', { scheduleEntryId: 'sch_flash' });
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('takeover', { action: 'end', scheduleEntryId: 'sch_flash' });
     expect(publishToast()?.title).toBe('Published v3 to 1 screen');
     expect(undoOf()).toBeUndefined();
   });

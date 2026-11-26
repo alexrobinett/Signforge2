@@ -205,7 +205,7 @@ describe('disconnecting', () => {
     expect(await call('disconnect', { connectionId: c.id })).toEqual({ deleted: false, dataSourceIds: ['rooms'] });
     expect(await owner.org.connections.get(c.id)).toMatchObject({ status: 'disconnected', credentialsSealed: null });
     // Nothing left to revoke the second time; deleted once its source is.
-    await call('delete_data_source', { dataSourceId: 'rooms' });
+    await call('delete', { type: 'data_source', id: 'rooms' });
     const before = revoked.length;
     expect(await call('disconnect', { connectionId: c.id })).toEqual({ deleted: true, dataSourceIds: [] });
     expect(revoked.length).toBe(before);

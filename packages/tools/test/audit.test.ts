@@ -292,3 +292,27 @@ describe('list_audit_log by a content or group save (#345, #507)', () => {
     expect(await found('remove_group_members')).toEqual([]);
   });
 });
+
+describe('list_audit_log by a delete or a takeover (#345 PR 5)', () => {
+  it('finds each row under the tool its type or action replaced, and only those', async () => {
+    const mine = await seedOrg(env.DB, 'audit-merged');
+    const owner = member(mine.orgId, 'owner');
+    const run = async (name: string, input: Record<string, unknown>) => {
+      const r = await dispatch(registry, name, input, owner);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return r.output;
+    };
+    const { playlist } = (await run('save_playlist', { name: 'Gone soon', idempotencyKey: 'audit-merged-pl' })) as { playlist: { id: string } };
+    await run('delete', { type: 'playlist', id: playlist.id });
+    await run('delete', { type: 'schedule_entry', id: mine.scheduleEntry });
+    const found = async (action: string) => {
+      const r = await dispatch(registry, 'list_audit_log', { action }, owner);
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { entries: Entry[] }).entries.map((e) => `${e.action} ${(e.detail.input as { type?: string }).type}`);
+    };
+    expect(await found('delete_playlist')).toEqual(['delete playlist']);
+    expect(await found('delete_schedule_entry')).toEqual(['delete schedule_entry']);
+    expect(await found('delete_asset')).toEqual([]);
+    expect(await found('delete')).toHaveLength(2);
+  });
+});

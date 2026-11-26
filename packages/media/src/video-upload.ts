@@ -1,8 +1,8 @@
 /**
  * Upload a video as an asset. The file is checked here first with `@signforge/media-check`, so a
  * file screens cannot play is refused before any byte leaves the browser, with how to export one
- * that passes. Then it is hashed, `create_video_upload` signs a URL per part, each part is PUT
- * straight to R2, and `finalize_video_upload` completes the upload and checks it again.
+ * that passes. Then it is hashed, `start_upload` signs a URL per part, each part is PUT
+ * straight to R2, and `finalize_upload` completes the upload and checks it again.
  */
 import { blobReader, checkVideo, EXPORT_ADVICE, type VideoCheck, type VideoProblem } from '@signforge/media-check';
 import { z } from 'zod';
@@ -44,7 +44,7 @@ export async function uploadVideo(file: File, options: VideoUploadOptions): Prom
 
   const sha256 = await sha256Hex(file);
   const { asset, upload } = created.parse(
-    await options.callTool('create_video_upload', { name: options.name ?? file.name, sha256, type: 'video/mp4', size: file.size }),
+    await options.callTool('start_upload', { kind: 'video', name: options.name ?? file.name, sha256, type: 'video/mp4', size: file.size }),
   );
   const parts: { partNumber: number; etag: string }[] = [];
   let start = 0;
@@ -58,7 +58,7 @@ export async function uploadVideo(file: File, options: VideoUploadOptions): Prom
     parts.push({ partNumber: part.partNumber, etag });
   }
   const done = finalized.parse(
-    await options.callTool('finalize_video_upload', upload ? { assetId: asset.id, uploadId: upload.uploadId, parts } : { assetId: asset.id }),
+    await options.callTool('finalize_upload', upload ? { assetId: asset.id, uploadId: upload.uploadId, parts } : { assetId: asset.id }),
   );
   return { asset: done.asset, check };
 }

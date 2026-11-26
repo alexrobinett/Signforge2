@@ -223,11 +223,28 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     run: run('publish'),
   },
-  start_takeover: {
-    tools: ['publish_takeover'],
-    input: ofRegistry('start_takeover'),
-    description: () => `${registry.get('start_takeover')?.description ?? ''} From the drawer it is published at once when the person presses its card.`,
+  // A takeover published now, or one ended now: one card each, by action (#345).
+  takeover: {
+    tools: ['takeover'],
+    input: ofRegistry('takeover'),
+    description: () => `${registry.get('takeover')?.description ?? ''} From the drawer, the person presses its card.`,
     async make(org, called, at) {
+      if (called.action === 'end') {
+        const entry = await org.scheduleEntries.get(str(called.scheduleEntryId));
+        if (!entry || entry.endsAt === null) throw new CardProblem(`no takeover ${str(called.scheduleEntryId)}`);
+        const playlist = await org.playlists.get(entry.playlistId);
+        return {
+          input: { action: 'end', scheduleEntryId: entry.id, version: entry.rowVersion },
+          card: {
+            title: 'End the takeover',
+            lines: [`Stops ${playlist?.name ?? 'the takeover'} ${(await reachOf(org, entry)).words}: they go back to what is scheduled.`],
+            address: null,
+            when: 'Now',
+            undo: 'No undo: start another takeover.',
+            press: 'End now',
+          },
+        };
+      }
       const playlist = await org.playlists.get(str(called.playlistId));
       if (!playlist) throw new CardProblem(`no playlist ${str(called.playlistId)}`);
       const ends = Date.parse(str(called.endsAt));
@@ -243,7 +260,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
             ...unpublished.map((s) => ({ kind: 'spot', id: s?.id, version: s?.rowVersion })),
           ]
         : [];
-      const { idempotencyKey: _key, ...start } = called;
+      // What the card pins is its own: the model's with is not taken.
+      const { action: _action, with: _with, ...start } = called;
       const reach = await reachOf(org, called);
       return {
         // What it plays, on which screens: a press refuses if any changed since (the group's screens, the playlist or a spot of it published again).
@@ -263,86 +281,62 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       };
     },
     async run(caller, input) {
+      if (input.action === 'end') {
+        const call = { action: 'end', scheduleEntryId: str(input.scheduleEntryId) };
+        if ((await caller.org.scheduleEntries.get(call.scheduleEntryId))?.rowVersion !== input.version)
+          return changedSince(caller, 'takeover', call, 'The takeover changed');
+        return dispatch(registry, 'takeover', call, caller);
+      }
       const start = typeof input.start === 'object' && input.start !== null ? Object.fromEntries(Object.entries(input.start)) : {};
-      const call = { ...start, with: input.with };
+      const call = { action: 'publish', ...start, with: input.with };
       // The screens it reaches, and what its playlist and spots play, as the card showed them: else nothing is done.
       const reach = await reachOf(caller.org, start).catch((err: unknown) => {
         if (err instanceof CardProblem) return undefined;
         throw err;
       });
-      if (!reach) return changedSince(caller, 'publish_takeover', call, 'Its group or screen was deleted');
-      if (canonical(reach.screens) !== canonical(input.reach)) return changedSince(caller, 'publish_takeover', call, 'The screens it would play on changed');
+      if (!reach) return changedSince(caller, 'takeover', call, 'Its group or screen was deleted');
+      if (canonical(reach.screens) !== canonical(input.reach)) return changedSince(caller, 'takeover', call, 'The screens it would play on changed');
       const playlist = await caller.org.playlists.get(str(start.playlistId));
-      if (!playlist || playlist.publishedJson !== input.live) return changedSince(caller, 'publish_takeover', call, 'Its playlist was published again');
+      if (!playlist || playlist.publishedJson !== input.live) return changedSince(caller, 'takeover', call, 'Its playlist was published again');
       if (canonical(await spotsLive(caller.org, playlist)) !== canonical(input.spots))
-        return changedSince(caller, 'publish_takeover', call, 'A spot of its playlist was published again');
-      // Made and published in one batch, or not at all (`publish_takeover`).
-      return dispatch(registry, 'publish_takeover', call, caller);
+        return changedSince(caller, 'takeover', call, 'A spot of its playlist was published again');
+      // Made and published in one batch, or not at all (`takeover`).
+      return dispatch(registry, 'takeover', call, caller);
     },
   },
-  end_takeover: {
-    tools: ['end_takeover'],
-    input: ofRegistry('end_takeover'),
-    description: describedAs('end_takeover'),
+  // The drawer deletes a playlist or a schedule entry, as it did before `delete` took every type (#345): no asset or source.
+  delete: {
+    tools: ['delete'],
+    input: () =>
+      z
+        .strictObject({
+          type: z.enum(['playlist', 'schedule_entry']),
+          id: z.string().describe('The playlist or schedule entry'),
+        })
+        .describe('What to delete'),
+    description: () =>
+      'Delete a playlist, its draft and its published version (not its spots; refused while it is the default or scheduled), or a schedule entry or takeover (one published waits for the next publish). To end a takeover now, use takeover (action end). From the drawer, the person presses its card.',
     async make(org, called) {
-      const entry = await org.scheduleEntries.get(str(called.scheduleEntryId));
-      if (!entry || entry.endsAt === null) throw new CardProblem(`no takeover ${str(called.scheduleEntryId)}`);
+      if (called.type === 'playlist') {
+        const playlist = await org.playlists.get(str(called.id));
+        if (!playlist) throw new CardProblem(`no playlist ${str(called.id)}`);
+        return {
+          input: { type: 'playlist', id: playlist.id, version: playlist.rowVersion },
+          card: {
+            title: 'Delete a playlist',
+            lines: [`Deletes ${playlist.name}, its draft and its published version. Its spots stay.`],
+            address: null,
+            when: 'Now',
+            undo: 'No undo.',
+            press: 'Delete',
+          },
+        };
+      }
+      const entry = await org.scheduleEntries.get(str(called.id));
+      if (!entry) throw new CardProblem(`no schedule entry ${str(called.id)}`);
       const playlist = await org.playlists.get(entry.playlistId);
       return {
-        input: { scheduleEntryId: entry.id, version: entry.rowVersion },
-        card: {
-          title: 'End the takeover',
-          lines: [`Stops ${playlist?.name ?? 'the takeover'} ${(await reachOf(org, entry)).words}: they go back to what is scheduled.`],
-          address: null,
-          when: 'Now',
-          undo: 'No undo: start another takeover.',
-          press: 'End now',
-        },
-      };
-    },
-    async run(caller, input) {
-      const call = { scheduleEntryId: str(input.scheduleEntryId) };
-      if ((await caller.org.scheduleEntries.get(call.scheduleEntryId))?.rowVersion !== input.version)
-        return changedSince(caller, 'end_takeover', call, 'The takeover changed');
-      return dispatch(registry, 'end_takeover', call, caller);
-    },
-  },
-  delete_playlist: {
-    tools: ['delete_playlist'],
-    input: ofRegistry('delete_playlist'),
-    description: describedAs('delete_playlist'),
-    async make(org, called) {
-      const playlist = await org.playlists.get(str(called.playlistId));
-      if (!playlist) throw new CardProblem(`no playlist ${str(called.playlistId)}`);
-      return {
-        input: { playlistId: playlist.id, version: playlist.rowVersion },
-        card: {
-          title: 'Delete a playlist',
-          lines: [`Deletes ${playlist.name}, its draft and its published version. Its spots stay.`],
-          address: null,
-          when: 'Now',
-          undo: 'No undo.',
-          press: 'Delete',
-        },
-      };
-    },
-    async run(caller, input) {
-      const call = { playlistId: str(input.playlistId) };
-      if ((await caller.org.playlists.get(call.playlistId))?.rowVersion !== input.version)
-        return changedSince(caller, 'delete_playlist', call, 'The playlist changed');
-      return dispatch(registry, 'delete_playlist', call, caller);
-    },
-  },
-  delete_schedule_entry: {
-    tools: ['delete_schedule_entry'],
-    input: ofRegistry('delete_schedule_entry'),
-    description: describedAs('delete_schedule_entry'),
-    async make(org, called) {
-      const entry = await org.scheduleEntries.get(str(called.scheduleEntryId));
-      if (!entry) throw new CardProblem(`no schedule entry ${str(called.scheduleEntryId)}`);
-      const playlist = await org.playlists.get(entry.playlistId);
-      return {
-        input: { scheduleEntryId: entry.id, ifVersion: entry.rowVersion },
+        input: { type: 'schedule_entry', id: entry.id, ifVersion: entry.rowVersion },
         card: {
           title: 'Remove a schedule entry',
           lines: [`Removes ${playlist?.name ?? 'its playlist'} ${(await reachOf(org, entry)).words}.`],
@@ -353,7 +347,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
         },
       };
     },
-    run: run('delete_schedule_entry'),
+    async run(caller, input) {
+      if (input.type === 'schedule_entry') return dispatch(registry, 'delete', input, caller);
+      const call = { type: 'playlist', id: str(input.id) };
+      if ((await caller.org.playlists.get(call.id))?.rowVersion !== input.version) return changedSince(caller, 'delete', call, 'The playlist changed');
+      return dispatch(registry, 'delete', call, caller);
+    },
   },
   // An invitation cancelled cannot be undone by the agent: only a person invites again (#321).
   cancel_invitation: {

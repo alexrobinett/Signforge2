@@ -285,7 +285,7 @@ export const unverified = (assetId: string, status: DraftAsset['status']): strin
 
 /**
  * The file an asset plays as on a screen of this orientation, added to `files` with its sample
- * when it has one, or why there is none. Only a verified asset has one: until `finalize_asset` checks an upload, its files are not
+ * when it has one, or why there is none. Only a verified asset has one: until `finalize_upload` checks an upload, its files are not
  * where screens, or the stage, read them.
  */
 export function assetFile(

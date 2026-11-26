@@ -382,7 +382,7 @@ export interface AgentLimiter {
 /**
  * A refusal a handler means to return. Anything else a handler throws is a bug and propagates.
  * Either way nothing the handler staged is written, unless the refusal sets `changed`: then what
- * it staged before refusing (`finalize_asset` marks a bad upload rejected) is committed and
+ * it staged before refusing (`finalize_upload` marks a bad upload rejected) is committed and
  * audited with the refusal.
  */
 export class ToolError extends Error {
@@ -392,6 +392,8 @@ export class ToolError extends Error {
     readonly details?: unknown,
     readonly changed = false,
     options?: ErrorOptions,
+    /** With `changed`: what its audit row records under `detail`, as a tool's `auditDetail` does for a success. */
+    readonly auditDetail?: Record<string, unknown>,
   ) {
     super(message, options);
     this.name = 'ToolError';

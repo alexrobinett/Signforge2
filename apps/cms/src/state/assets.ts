@@ -69,7 +69,7 @@ export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router,
       if (!target) return;
       assets((a) => ({ ...a, deletePending: true, deleteError: null }));
       try {
-        await callTool('delete_asset', { assetId: target.id });
+        await callTool('delete', { type: 'asset', id: target.id });
         await router.invalidate();
         assets((a) => ({ ...a, deleting: null, deletePending: false }));
       } catch (err) {

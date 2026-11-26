@@ -1152,7 +1152,7 @@ export function scoped(d1: D1Database, orgId: string) {
         ...assets.stage,
         /**
          * Nothing written: the batch is refused (`StaleVersionError`, id `asset in use`) if, as it runs, a spot's draft or
-         * published version, or a brand kit's logo, names the asset: `delete_asset`'s rule held to its commit (review of #429).
+         * published version, or a brand kit's logo, names the asset: an asset `delete`'s rule held to its commit (review of #429).
          * A spot's asset map and published version are matched as text, which can only err towards in use.
          */
         unused: (assetId: string): Write => {

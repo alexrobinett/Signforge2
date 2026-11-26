@@ -59,7 +59,7 @@ test('a member asks the agent to put up the storm closure, sees the takeover car
   await expect(card.getByRole('button', { name: 'Take over' })).toHaveCount(0);
   const [entry] = (await tool(page, 'list_schedule_entries', {})).entries;
   expect(entry).toMatchObject({ endsAt: expect.any(String) });
-  const [audit] = (await tool(page, 'list_audit_log', { limit: 5 })).entries.filter((e: { action: string }) => e.action === 'publish_takeover');
+  const [audit] = (await tool(page, 'list_audit_log', { limit: 5 })).entries.filter((e: { action: string }) => e.action === 'takeover');
   expect(audit).toMatchObject({ actor: { kind: 'user', clientId: 'cms-agent' } });
 
   // Another card, let go by keyboard: focus goes on to the question, and the live region says it was cancelled.
@@ -208,4 +208,34 @@ test('⌘K asks the agent a sentence typed into it, by keyboard: Enter opens the
   await page.keyboard.press('ControlOrMeta+Enter');
   await expect(menu).toBeVisible();
   await expect(drawer.getByText('which screens need me now', { exact: true })).toBeVisible();
+});
+
+test("an editor where only owners publish asks for the takeover: the card names both of the tool's actions and who may, and runs nothing (#345)", async ({
+  page,
+  browser,
+}) => {
+  const owner = '192.0.2.195';
+  await signInAs(page, `e2e-confirm-takeover-owner-${Date.now()}@example.com`, owner);
+  await createOrg(page, 'Bayside Storm Rota', owner);
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
+  await tool(page, 'save_playlist', { name: 'Storm closure', transition: { type: 'cut' } });
+  await tool(page, 'update_org_settings', { editorsPublish: false });
+  const editor = await (await browser.newContext()).newPage();
+  await joinAsEditor(page, editor, `e2e-confirm-takeover-editor-${Date.now()}@example.com`, '192.0.2.196');
+
+  await editor.goto('/schedule');
+  await hydrated(editor);
+  await editor.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const drawer = editor.getByRole('dialog', { name: 'Agent' });
+  await drawer.getByLabel('Ask about your screens and content').fill('Bayside closes at 2 for the storm: put the closure up everywhere');
+  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  const refused = drawer.getByRole('region', { name: 'Take over screens, or end a takeover' });
+  await expect(refused).toContainText('Only owners publish in this organization');
+  await expect(refused.getByRole('button', { name: 'Take over' })).toHaveCount(0);
+  expect((await tool(editor, 'list_schedule_entries', {})).entries).toEqual([]);
+  await axe(editor);
+  await editor.setViewportSize({ width: 1440, height: 1000 });
+  await shots(editor, '105-takeover-refused-card');
+  await editor.setViewportSize({ width: 390, height: 844 });
+  await shots(editor, '105-takeover-refused-card-phone');
 });
