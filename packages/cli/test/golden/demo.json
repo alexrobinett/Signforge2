@@ -101,21 +101,13 @@
     }
   },
   "files": {
-    "26afc77d8e9ce5b122ce8e517d2b8f2b15c62cd71881e31ac7da9ea83394095d": {
-      "size": 385598,
-      "type": "text/html"
-    },
-    "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56": {
-      "size": 398206,
+    "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b": {
+      "size": 400892,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45": {
-      "size": 401879,
-      "type": "text/html"
     },
     "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
       "size": 582,
@@ -125,21 +117,17 @@
       "size": 1042,
       "type": "image/svg+xml"
     },
-    "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396": {
-      "size": 403253,
-      "type": "text/html"
-    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
     },
+    "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd": {
+      "size": 393916,
+      "type": "text/html"
+    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f": {
-      "size": 396225,
-      "type": "text/html"
     },
     "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee": {
       "size": 125360,
@@ -149,9 +137,17 @@
       "size": 23664,
       "type": "font/woff2"
     },
+    "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953": {
+      "size": 395766,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637": {
+      "size": 399570,
+      "type": "text/html"
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
@@ -173,16 +169,20 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119": {
+      "size": 383289,
+      "type": "text/html"
+    },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
     }
   },
   "templates": {
-    "base/announcement@1.0.3": {
+    "base/announcement@1.1.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.3",
+        "version": "1.1.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -304,12 +304,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56"
+      "html": "8d2eabe462db34c1b2951c2b671d72dbe35fefa47de60676f496d00dc0624953"
     },
-    "base/countdown@1.0.3": {
+    "base/countdown@1.1.0": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.3",
+        "version": "1.1.0",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -432,7 +432,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f"
+      "html": "78fbfd0c467c2c0d9de8084b5385c47d4d28693171a8fab71bf70545862440dd"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -601,10 +601,10 @@
       },
       "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
-    "base/info-frame@1.0.3": {
+    "base/info-frame@1.1.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.3",
+        "version": "1.1.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -889,12 +889,12 @@
         },
         "protocol": 2
       },
-      "html": "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396"
+      "html": "1b68bba86e9f51e02e9c8c8d669a3cbbf6cec464762b6c407d074e37a7b5f57b"
     },
-    "base/news@2.1.0": {
+    "base/news@2.1.1": {
       "manifest": {
         "id": "news",
-        "version": "2.1.0",
+        "version": "2.1.1",
         "name": "News",
         "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1008,12 +1008,12 @@
         },
         "protocol": 2
       },
-      "html": "26afc77d8e9ce5b122ce8e517d2b8f2b15c62cd71881e31ac7da9ea83394095d"
+      "html": "b3152b22934e698e5e25f46fcc6d3526bba1bcb51614db1840d8d28868cc8119"
     },
-    "base/room-status@1.0.3": {
+    "base/room-status@1.1.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.3",
+        "version": "1.1.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1134,7 +1134,7 @@
         },
         "protocol": 2
       },
-      "html": "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45"
+      "html": "983be4bd1039062a689b081bd431336205ee92b3b06ce27861f3919407e62637"
     }
   },
   "spots": {
@@ -1142,7 +1142,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.0.3",
+      "template": "base/announcement@1.1.0",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1177,7 +1177,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.0.3",
+      "template": "base/countdown@1.1.0",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1246,7 +1246,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.0.3",
+      "template": "base/info-frame@1.1.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1309,7 +1309,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1339,7 +1339,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1369,7 +1369,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.1.0",
+      "template": "base/news@2.1.1",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1399,7 +1399,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.0.3",
+      "template": "base/room-status@1.1.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1524,5 +1524,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "7446ea83abb37845e35dd6fb5222f8f6efe4a7adf5b419671378a5479003ea0b"
+  "id": "99ff55c4ba0c8f919020399f5a7416bb89075ef16226b095190402b0c427d6e2"
 }

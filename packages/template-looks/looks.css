@@ -159,12 +159,26 @@
    for, and `applyLook` measures them (small text 4.5:1, `-large` 3:1). `--lk-scale` is 1 until a
    template's layout steps type up into space an element left (`[data-photo='off']`). */
 [data-look] {
+  /* Motion (D's, #news-design): arriving decelerates, leaving accelerates, and a move that starts and ends on screen
+     takes the standard curve. Entrances run 400 to 650 ms by role, 110 ms apart in reading order; exits run 300 ms
+     and are their own, not the entrance reversed. Travel is at most 1.5vmin in and 0.6vmin out, with no overshoot.
+     Only transform and opacity move: no clip or mask reveals, which the Pi has not measured. */
+  --lk-ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --lk-ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --lk-in-text: 0.65s;
+  --lk-in-fade: 0.5s;
+  --lk-in-badge: 0.4s;
+  --lk-in-photo: 0.6s;
+  --lk-out: 0.3s;
+  --lk-stagger: 0.11s;
+  --lk-rise: 1.5vmin;
+  --lk-lift: -0.6vmin;
+  --lk-settle: 1.03;
   --lk-primary-ink: var(--lk-primary);
   --lk-primary-ink-large: var(--lk-primary);
   --lk-accent-ink: var(--lk-accent);
   --lk-accent-ink-large: var(--lk-accent);
   --lk-scale: 1;
-  --lk-cover-motion: none;
   background: var(--lk-bg);
   color: var(--lk-text);
   font-family: var(--lk-font-body);
@@ -203,19 +217,10 @@
   --lk-radius-pill: 9999px;
   --lk-rule: 0.37vmin;
 
-  --lk-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
-  --lk-in: 0.85s;
-  --lk-out: 0.5s;
-  --lk-stagger: 0.12s;
-  --lk-text-motion: lk-pop-rise;
+  --lk-text-motion: lk-rise;
   --lk-fade-motion: lk-fade;
-  --lk-badge-motion: lk-pop-in;
-  --lk-photo-motion: lk-pop-slide;
-  --lk-drift-motion: lk-pop-drift;
-  --lk-drift-s: 22s;
-  --lk-wobble-motion: lk-pop-wobble;
-  --lk-pulse-motion: lk-pop-pulse;
-  --lk-pulse-s: 1.2s;
+  --lk-badge-motion: lk-pop-press;
+  --lk-photo-motion: lk-slide;
   --lk-ping-motion: none;
   --lk-crawl-speed: 9vmin;
 }
@@ -255,20 +260,10 @@
   --lk-radius-pill: 0px;
   --lk-rule: 0.28vmin;
 
-  --lk-ease: cubic-bezier(0.7, 0, 0.2, 1);
-  --lk-in: 0.9s;
-  --lk-out: 0.6s;
-  --lk-stagger: 0.12s;
-  --lk-text-motion: lk-mask-up;
-  --lk-fade-motion: lk-poster-fade;
-  --lk-badge-motion: lk-poster-stamp;
-  --lk-photo-motion: none;
-  --lk-cover-motion: lk-poster-wipe;
-  --lk-drift-motion: lk-poster-drift;
-  --lk-drift-s: 26s;
-  --lk-wobble-motion: none;
-  --lk-pulse-motion: none;
-  --lk-pulse-s: 1s;
+  --lk-text-motion: lk-rise;
+  --lk-fade-motion: lk-rise;
+  --lk-badge-motion: lk-rise;
+  --lk-photo-motion: lk-fade;
   --lk-ping-motion: none;
   --lk-crawl-speed: 8.3vmin;
 }
@@ -307,19 +302,11 @@
   --lk-radius-pill: 9999px;
   --lk-rule: 0.19vmin;
 
-  --lk-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --lk-in: 0.9s;
-  --lk-out: 0.5s;
-  --lk-stagger: 0.12s;
-  --lk-text-motion: lk-mask-up;
-  --lk-fade-motion: lk-night-rise;
-  --lk-badge-motion: lk-night-slide;
-  --lk-photo-motion: lk-night-zoom;
-  --lk-drift-motion: lk-night-pan;
-  --lk-drift-s: 32s;
-  --lk-wobble-motion: none;
-  --lk-pulse-motion: lk-night-pulse;
-  --lk-pulse-s: 1.6s;
+  --lk-text-motion: lk-rise;
+  --lk-fade-motion: lk-rise;
+  --lk-badge-motion: lk-slide;
+  --lk-photo-motion: lk-settle;
+  --lk-ping-s: 1.6s;
   --lk-ping-motion: lk-night-ping;
   --lk-crawl-speed: 9vmin;
 }
@@ -357,51 +344,52 @@
   --lk-radius-pill: 0px;
   --lk-rule: max(1px, 0.1vmin);
 
-  --lk-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --lk-in: 0.8s;
-  --lk-out: 0.5s;
-  --lk-stagger: 0.11s;
-  --lk-text-motion: lk-corporate-rise;
+  --lk-text-motion: lk-rise;
   --lk-fade-motion: lk-fade;
   --lk-badge-motion: lk-fade;
-  --lk-photo-motion: lk-corporate-settle;
-  --lk-drift-motion: lk-corporate-drift;
-  --lk-drift-s: 30s;
-  --lk-wobble-motion: none;
-  --lk-pulse-motion: lk-corporate-breathe;
-  --lk-pulse-s: 3s;
+  --lk-photo-motion: lk-settle;
   --lk-ping-motion: none;
   --lk-crawl-speed: 7.5vmin;
 }
-/* Motion. Each element gets its look's intro, staggered by `lk-d1` to `lk-d8`, and the same
-   motion reversed as its outro, ending as the spot does (`--sf-duration`). Only transform and
-   opacity move. */
+/* Motion. Each element gets its look's intro, for its role's time, staggered by `lk-d1` to `lk-d8`, and its own
+   outro, ending as the spot does (`--sf-duration`): everything leaves together, lifting a little (`lk-leave`), or a
+   photo or rule fading (`lk-fade-out`). Only transform and opacity move. */
 .lk-text {
   --lk-motion: var(--lk-text-motion);
+  --lk-dur: var(--lk-in-text);
+  --lk-leave: lk-leave;
 }
 .lk-fade {
   --lk-motion: var(--lk-fade-motion);
+  --lk-dur: var(--lk-in-fade);
+  --lk-leave: lk-leave;
 }
 .lk-badge {
   --lk-motion: var(--lk-badge-motion);
+  --lk-dur: var(--lk-in-badge);
+  --lk-leave: lk-leave;
 }
 .lk-photo {
   --lk-motion: var(--lk-photo-motion);
+  --lk-dur: var(--lk-in-photo);
+  --lk-leave: lk-fade-out;
 }
 .lk-draw {
   --lk-motion: lk-draw;
+  --lk-dur: var(--lk-in-fade);
+  --lk-leave: lk-fade-out;
   transform-origin: left center;
 }
 .lk-text,
 .lk-fade,
 .lk-badge,
 .lk-photo,
-.lk-draw,
-.lk-cover {
+.lk-draw {
   will-change: transform, opacity;
+  /* `both` before the name: after it, a `--lk-motion: none` reads as the fill mode and `both` as the name. */
   animation:
-    var(--lk-motion) var(--lk-in) var(--lk-ease) calc(var(--lk-i, 0) * var(--lk-stagger)) both,
-    var(--lk-motion) var(--lk-out) var(--lk-ease) calc(var(--sf-duration, 8s) - var(--lk-out)) reverse forwards;
+    var(--lk-dur) var(--lk-ease-in) calc(var(--lk-i, 0) * var(--lk-stagger)) both var(--lk-motion),
+    var(--lk-leave) var(--lk-out) var(--lk-ease-out) calc(var(--sf-duration, 8s) - var(--lk-out)) forwards;
 }
 .lk-d1 {
   --lk-i: 1;
@@ -427,31 +415,11 @@
 .lk-d8 {
   --lk-i: 8;
 }
-/* Text that slides up out of a mask (Poster, Night) sits in one; descenders keep their room. */
-.lk-mask {
-  padding-bottom: 0.1em;
-  margin-bottom: -0.1em;
-}
-[data-look='poster'] .lk-mask,
-[data-look='night'] .lk-mask {
-  overflow: hidden;
-}
-/* Poster's ink wipe: a block over a photo, scaled away. Nothing in the other looks. */
-.lk-cover {
-  --lk-motion: var(--lk-cover-motion);
-  position: absolute;
-  inset: 0;
-  background: var(--lk-text);
-  transform: scaleX(0);
-  transform-origin: right center;
-}
-:root:not([data-look='poster']) .lk-cover {
-  display: none;
-}
-/* Ambient motion, inside an element that has an intro and outro of its own. */
+/* Ambient motion, inside an element that has an intro and outro of its own: one slow push-in over the play, so the
+   screen holds still otherwise (D's long holds). No wobble, bounce or breathing on text. */
 .lk-drift {
   will-change: transform;
-  animation: var(--lk-drift-motion) var(--lk-drift-s) ease-in-out infinite;
+  animation: lk-push var(--sf-duration, 8s) linear both;
 }
 /* A photo drifting across a portrait screen's width took the kit's test template over 1% of frames
    dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until a portrait
@@ -460,14 +428,9 @@
   will-change: auto;
   animation: none;
 }
-.lk-wobble {
-  animation: var(--lk-wobble-motion) 3.6s ease-in-out 1.8s infinite;
-}
-.lk-pulse {
-  animation: var(--lk-pulse-motion) var(--lk-pulse-s) ease-in-out infinite;
-}
+/* A live indicator's ping, for a template that wants one (Night's). */
 .lk-ping {
-  animation: var(--lk-ping-motion) var(--lk-pulse-s) cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: var(--lk-ping-motion) var(--lk-ping-s, 1.6s) cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 /* A crawl: `crawl()` puts the strip's content in twice and sets the shift (one copy) and the
    duration, from the look's speed. */
@@ -511,162 +474,33 @@
     transform: scaleX(0);
   }
 }
-@keyframes lk-mask-up {
-  from {
-    transform: translateY(110%);
-  }
-}
 @keyframes lk-crawl {
   to {
     transform: translateX(var(--lk-crawl-shift, -50%));
   }
 }
-@keyframes lk-pop-rise {
-  0% {
-    opacity: 0;
-    transform: translateY(7.4vmin);
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(-0.9vmin);
-  }
-  82% {
-    transform: translateY(0.3vmin);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes lk-pop-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.3);
-  }
-  55% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
-  75% {
-    transform: scale(0.95);
-  }
-  90% {
-    transform: scale(1.02);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes lk-pop-slide {
-  0% {
-    opacity: 0;
-    transform: translateX(14.8vmin) rotate(8deg);
-  }
-  60% {
-    opacity: 1;
-    transform: translateX(-1.3vmin) rotate(-1deg);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes lk-pop-drift {
-  0%,
-  100% {
-    transform: scale(1.04);
-  }
-  50% {
-    transform: scale(1.1) translate(-1.5%, -1%);
-  }
-}
-@keyframes lk-pop-wobble {
-  0%,
-  100% {
-    transform: rotate(-3deg);
-  }
-  50% {
-    transform: rotate(3deg);
-  }
-}
-@keyframes lk-pop-pulse {
-  0%,
-  100% {
-    transform: none;
-  }
-  50% {
-    transform: scale(1.15);
-  }
-}
-@keyframes lk-poster-fade {
+@keyframes lk-rise {
   from {
     opacity: 0;
-    transform: translateY(2.2vmin);
+    transform: translateY(var(--lk-rise));
   }
 }
-@keyframes lk-poster-stamp {
-  0% {
-    opacity: 0;
-    transform: scale(1.6) rotate(-4deg);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(0.96);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes lk-poster-wipe {
-  from {
-    transform: scaleX(1);
-  }
-}
-@keyframes lk-poster-drift {
-  0%,
-  100% {
-    transform: scale(1.02);
-  }
-  50% {
-    transform: scale(1.09);
-  }
-}
-@keyframes lk-night-rise {
+@keyframes lk-settle {
   from {
     opacity: 0;
-    transform: translateY(3.7vmin);
+    transform: scale(var(--lk-settle));
   }
 }
-@keyframes lk-night-slide {
+@keyframes lk-pop-press {
   from {
     opacity: 0;
-    transform: translateX(5.6vmin);
+    transform: scale(0.94);
   }
 }
-@keyframes lk-night-zoom {
+@keyframes lk-slide {
   from {
     opacity: 0;
-    transform: scale(1.06);
-  }
-}
-@keyframes lk-night-pan {
-  0%,
-  100% {
-    transform: scale(1.08);
-  }
-  50% {
-    transform: scale(1.08) translateX(-2.5%);
-  }
-}
-@keyframes lk-night-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
+    transform: translateX(var(--lk-rise));
   }
 }
 @keyframes lk-night-ping {
@@ -679,33 +513,22 @@
     transform: scale(2.6);
   }
 }
-@keyframes lk-corporate-rise {
+@keyframes lk-push {
   from {
-    opacity: 0;
-    transform: translateY(1.5vmin);
+    transform: scale(1);
   }
-}
-@keyframes lk-corporate-settle {
-  from {
-    opacity: 0;
+  to {
     transform: scale(1.04);
   }
 }
-@keyframes lk-corporate-drift {
-  0%,
-  100% {
-    transform: none;
-  }
-  50% {
-    transform: scale(1.04);
+@keyframes lk-leave {
+  to {
+    opacity: 0;
+    transform: translateY(var(--lk-lift));
   }
 }
-@keyframes lk-corporate-breathe {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
+@keyframes lk-fade-out {
+  to {
+    opacity: 0;
   }
 }

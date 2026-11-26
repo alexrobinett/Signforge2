@@ -78,8 +78,8 @@ defineTemplate({
     const look = LOOKS.find((l) => l === data.look)!;
     // Unpainted until play: a frame that paints the photo, on a layer of its own while it drifts,
     // has it decoded for the screen first, and the SDK's decode before ready then waits behind that
-    // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing (Poster's
-    // under its ink block), so no frame shows the change.
+    // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing, so no
+    // frame shows the change.
     const photo = document.querySelector<HTMLElement>('.photo')!;
     photo.style.visibility = 'hidden';
 
@@ -242,7 +242,7 @@ function forecast(ctx: TemplateContext, look: Look, days: Element): void {
 /**
  * A figure (the clock, the temperature) at its look's size, or smaller where it would run past its
  * box. Measures subpixel child edges as well as `scrollWidth` and leaves a small margin when
- * shrinking so tighter Linux font metrics never clip against `.lk-mask`.
+ * shrinking so tighter Linux font metrics never clip against its box.
  */
 function shrink(el: HTMLElement): void {
   for (let i = 0; i < 6; i++) {

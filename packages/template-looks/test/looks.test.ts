@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { Orientation } from '@signforge/contract';
-import { host, LIGHT_KIT, noDemoAndLight, paintedContrast, screenFrame, spotData, useTemplate } from '@signforge/template-test';
+import { host, LIGHT_KIT, motionContract, noDemoAndLight, paintedContrast, screenFrame, spotData, useTemplate } from '@signforge/template-test';
 
 const photo = { photo: '#808080' };
 const t = useTemplate(new URL('../looks-test', import.meta.url), {
@@ -113,8 +113,7 @@ describe('the look kit (#190)', () => {
         for (const a of document.getAnimations())
           for (const k of (a.effect as KeyframeEffect).getKeyframes())
             for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
-        // The photo's own intro and outro, or in Poster the ink block's, which uncovers it and covers it again.
-        const moving = ['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo', '.cover'];
+        const moving = ['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo'];
         const ends = moving.map((sel) => {
           const timed = document
             .querySelector(sel)!
@@ -131,9 +130,76 @@ describe('the look kit (#190)', () => {
       }, durationMs);
       expect(props, look).toEqual(['opacity', 'transform']);
       const both = (sel: string) => `${sel} intro, outro at the end`;
-      const photo = look === 'poster' ? ['.photo ', both('.cover')] : [both('.photo'), '.cover '];
-      expect(ends, look).toEqual([...['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker'].map(both), ...photo]);
+      expect(ends, look).toEqual(['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo'].map(both));
     }
+  });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`moves as D does in every look, ${orientation}: in on the decelerating curve, out on its own accelerating one, at most 1.5vmin, no overshoot`, async () => {
+      const k = await kitFrame(orientation);
+      const durationMs = 11_000;
+      const found: string[] = [];
+      for (const look of looks)
+        for (const line of await motionContract(await k.play({ look }, undefined, durationMs), durationMs)) found.push(`${look}: ${line}`);
+      expect(found).toEqual([]);
+    });
+
+  it('motionContract: a centred element, a monotone multi-step entrance and a move on the standard curve pass; a clip, mask, overshoot, rotation, transition or early exit is named', async () => {
+    const k = await kitFrame();
+    const durationMs = 11_000;
+    const f = await k.play({ look: 'corporate' }, undefined, durationMs);
+    await f.evaluate(() => {
+      const [dec, std] = ['cubic-bezier(0.05, 0.7, 0.1, 1)', 'cubic-bezier(0.2, 0, 0, 1)'];
+      const style = document.createElement('style');
+      style.textContent = `
+        .t { position: absolute; left: 10vmin; top: 10vmin; width: 5vmin; height: 5vmin; }
+        @keyframes t-centred { from { opacity: 0; transform: translate(-50%, -50%) translateY(1.5vmin); } }
+        .t-centred { left: 50%; top: 50%; transform: translate(-50%, -50%); animation: t-centred .5s ${dec} both; }
+        @keyframes t-steps { from { opacity: 0; transform: translateY(1.5vmin); } 40% { opacity: .7; transform: translateY(.5vmin); } }
+        .t-steps { animation: t-steps .5s ${dec} both; }
+        @keyframes t-clip { from { clip-path: inset(0 100% 0 0); } }
+        .t-clip { animation: t-clip .5s ${dec} both; }
+        @keyframes t-mask { from { mask-position: 100% 0; } }
+        .t-mask { animation: t-mask .5s ${dec} both; }
+        @keyframes t-over { from { opacity: 0; transform: scale(0.94); } }
+        .t-over { animation: t-over .5s linear(0, 2.2, 1) both; }
+        @keyframes t-early { to { opacity: 0; } }
+        .t-early { animation: t-early .3s cubic-bezier(0.3, 0, 0.8, 0.15) 10.699s forwards; }
+        .t-slide { transition: transform 2s linear; }`;
+      document.head.append(style);
+      const add = (name: string) => document.body.appendChild(Object.assign(document.createElement('div'), { className: `t ${name}` }));
+      for (const name of ['t-centred', 't-steps', 't-clip', 't-mask', 't-over', 't-early']) add(name);
+      // A list marker's move, row to row through a middle keyframe; then one that passes its row and comes back.
+      const move = { duration: 600, delay: 5000, easing: std, fill: 'both' } as const;
+      add('t-marker').animate([{ transform: 'none' }, { transform: 'translateY(4vmin)' }, { transform: 'translateY(8vmin)' }], move);
+      add('t-bounce').animate([{ transform: 'none' }, { transform: 'translateY(6vmin)', offset: 0.7 }, { transform: 'translateY(5vmin)' }], move);
+      add('t-spin').animate(
+        [
+          { opacity: 0, transform: 'rotate(-8deg)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 500, easing: dec, fill: 'both' },
+      );
+      const slide = add('t-slide');
+      getComputedStyle(slide).transform;
+      slide.style.transform = 'translateX(2vmin)';
+    });
+    const found = await motionContract(f, durationMs);
+    const of = (c: string) => found.filter((l) => l.startsWith(`div.t.${c} `)).map((l) => l.slice(`div.t.${c} `.length));
+    expect(
+      Object.fromEntries(['t-centred', 't-steps', 't-marker', 't-clip', 't-mask', 't-over', 't-bounce', 't-spin', 't-slide', 't-early'].map((c) => [c, of(c)])),
+    ).toEqual({
+      't-centred': [],
+      't-steps': [],
+      't-marker': [],
+      't-clip': expect.arrayContaining(['t-clip moves clipPath']),
+      't-mask': expect.arrayContaining([expect.stringMatching(/^t-mask moves (webkitM|m)askPosition/)]),
+      't-over': expect.arrayContaining(['t-over overshoots in sx', 't-over scales to 1.07']),
+      't-bounce': ['script animation overshoots in y'],
+      't-spin': ['script animation rotates'],
+      't-slide': ['transition of transform moves mid-play on linear'],
+      't-early': ['t-early leaves at 10999 ms, not as the spot ends at 11000'],
+    });
   });
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames
@@ -166,7 +232,6 @@ describe('the look kit (#190)', () => {
       const still = await f.evaluate(() => ({
         animations: document.getAnimations().length,
         moved: [...document.querySelectorAll<HTMLElement>('.stage *')]
-          .filter((el) => !el.classList.contains('lk-cover'))
           .filter((el) => getComputedStyle(el).opacity !== '1' || getComputedStyle(el).transform !== 'none')
           .map((el) => el.className),
         crawl: [...document.querySelectorAll('#crawl > *')].map((el) => getComputedStyle(el).display),

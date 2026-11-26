@@ -1,6 +1,6 @@
 {
   "id": "announcement",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "name": "Announcement",
   "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
   "fields": {
