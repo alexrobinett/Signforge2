@@ -119,7 +119,7 @@ function LiveValues({
       </p>
     );
   const { dataSource, snapshot } = read;
-  const fresh = isFresh(snapshot, now);
+  const fresh = isFresh(dataSource, snapshot, now);
   const weather = live.source === 'open-meteo';
   const temperature = weather ? liveValue(snapshot, 'current.temperature_2m') : undefined;
   const summary =

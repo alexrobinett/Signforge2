@@ -493,7 +493,7 @@ const listedSourceOutput = dataSourceOutput.extend({
 });
 
 const snapshotOutput = z
-  .object({ id: z.string(), version: z.number(), fetchedAt: z.string(), checkedAt: z.string(), data: z.unknown() })
+  .object({ id: z.string(), version: z.number(), fetchedAt: z.string(), checkedAt: z.string(), staleS: z.number().optional(), data: z.unknown() })
   .describe('The latest snapshot, as screens get it; null until a poll succeeds');
 
 const placeOutput = z.object({

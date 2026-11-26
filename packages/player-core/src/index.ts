@@ -321,12 +321,54 @@ export interface Rejected {
   problem: string;
 }
 
+/** The poller's longest wait between tries of a failing source. */
+export const BACKOFF_MAX_MS = 6 * 3_600_000;
+
+/** How long the poller waits before polling a source again after its `failures`th failure in a row. */
+export const pollBackoffMs = (refreshS: number, failures: number) => Math.min(refreshS * 1000 * 2 ** failures, BACKOFF_MAX_MS);
+
+/**
+ * The `staleS` the server gives a snapshot of a source of `format` polled every `refreshS` seconds (#624), from the
+ * source as it is when the snapshot is sent, so a new poll interval reaches screens with no publish. A calendar
+ * (`ical`) outlives one failed poll and its retry (`pollBackoffMs`): the poll due `refreshS` after the last success
+ * fails, the retry comes `2 * refreshS` later, and ten minutes cover a screen hearing of it (its sync, and the
+ * poller's minute). That is 25 minutes at a calendar's default 5-minute poll, and at most a day. The ten minutes
+ * assume the poller keeps up: it polls at most 6 sources a minute platform-wide (`POLLS_PER_RUN` in apps/api), so
+ * more than 60 sources due in the same ten minutes delay some past it. Any other kind keeps the day: old weather,
+ * news or a menu misleads no one into a booked room.
+ */
+export function sourceStaleS(format: string, refreshS: number): number | undefined {
+  if (format !== 'ical') return undefined;
+  return Math.min((refreshS * 1000 + pollBackoffMs(refreshS, 1)) / 1000 + 600, SNAPSHOT_STALE_MS / 1000);
+}
+
+/** A snapshot's `staleS` field from its source as it is now: none for a source that keeps the day. */
+export function staleAge(source: { format: string; refreshS: number }): { staleS?: number } {
+  const staleS = sourceStaleS(source.format, source.refreshS);
+  return staleS === undefined ? {} : { staleS };
+}
+
+/**
+ * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its `staleS`, or a day
+ * (`SNAPSHOT_STALE_MS`) without one, or with no `checkedAt` the screen can read. On a clock the screen does not trust
+ * (`Clock.trusted`: its corrected time is before the player's build or its last sync, such as a reboot that lost the
+ * time) the age cannot be told, so a snapshot
+ * with a shorter `staleS` than a day is stale, and any other is judged by the day as before: a menu keeps playing
+ * offline. A stale snapshot plays the spot's fallback, which the template is told of (`InitPayload.fallback`).
+ */
+export function isStale(snapshot: Pick<DataSnapshot, 'checkedAt' | 'staleS'>, now: number, clockTrusted: boolean): boolean {
+  const at = Date.parse(snapshot.checkedAt);
+  if (!Number.isFinite(at)) return true;
+  const staleMs = snapshot.staleS === undefined ? SNAPSHOT_STALE_MS : snapshot.staleS * 1000;
+  if (!clockTrusted && staleMs < SNAPSHOT_STALE_MS) return true;
+  return now - at > staleMs;
+}
+
 /**
  * The data a template spot plays with at `now`: its static values, with each bound field replaced
  * by the latest snapshot value when that value fits the field (the contract's `boundValue`; a
  * table's rows mapped onto a list field, numbers written in `locale`). A missing source, or a
- * snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`, leaves the static
- * fallback in place quietly; a value that is missing at its path or does not fit also leaves the
+ * stale snapshot (`isStale`, on a clock the screen trusts or not), leaves the static fallback in place quietly; a value that is missing at its path or does not fit also leaves the
  * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
  * `fallback` names each bound field left on its static value, for `init` to tell the template (#225); a list that
  * kept some rows of a table is live.
@@ -336,6 +378,7 @@ export function resolveSpotData(
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
   now: number,
+  clockTrusted: boolean,
   locale: string,
 ): { data: Record<string, unknown>; rejected: Rejected[]; fallback: string[] } {
   const data = { ...spot.data };
@@ -343,7 +386,7 @@ export function resolveSpotData(
   const fallback: string[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) {
+    if (!snapshot || isStale(snapshot, now, clockTrusted)) {
       fallback.push(field);
       continue;
     }

@@ -64,12 +64,21 @@ describe('a poll saved', () => {
     });
     expect(await o.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 300_000, etag: '"e1"' });
     expect(await o.dataSources.snapshots([a.dataSource])).toEqual([
-      { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW, dataJson: '{"t":13}' },
+      { orgId: a.orgId, dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW, dataJson: '{"t":13}', format: 'json', refreshS: 300 },
     ]);
 
     await o.dataSources.savePoll(a.dataSource, { source: { nextPollAt: NOW + 600_000 }, checkedAt: NOW + 300_000 });
     expect(await o.dataSources.snapshots([a.dataSource])).toEqual([
-      { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW + 300_000, dataJson: '{"t":13}' },
+      {
+        orgId: a.orgId,
+        dataSourceId: a.dataSource,
+        version: 'h2',
+        fetchedAt: NOW,
+        checkedAt: NOW + 300_000,
+        dataJson: '{"t":13}',
+        format: 'json',
+        refreshS: 300,
+      },
     ]);
     // Without the data: what a list of sources needs.
     expect(await o.dataSources.checkedTimes([a.dataSource])).toEqual([{ dataSourceId: a.dataSource, checkedAt: NOW + 300_000 }]);

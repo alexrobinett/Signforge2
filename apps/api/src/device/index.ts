@@ -5,7 +5,7 @@
 import { isCatalogueFontFile } from '@signforge/compiler';
 import { isId, type DataSnapshot } from '@signforge/contract';
 import { scoped } from '@signforge/db';
-import { boundImageHashes, hasBoundListImage, snapshotFit } from '@signforge/player-core';
+import { boundImageHashes, hasBoundListImage, snapshotFit, staleAge } from '@signforge/player-core';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { feedBlobKey } from '../data/feed-photos';
@@ -112,6 +112,7 @@ device.get('/data/:file', async (c) => {
     version: snap.fetchedAt,
     fetchedAt: new Date(snap.fetchedAt).toISOString(),
     checkedAt: new Date(snap.checkedAt).toISOString(),
+    ...staleAge(snap),
     data: JSON.parse(snap.dataJson),
   };
   return c.json(body, 200, { 'cache-control': 'no-store' });

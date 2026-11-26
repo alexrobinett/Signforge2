@@ -133,13 +133,17 @@ export async function offerPending(manifest: ScreenManifest): Promise<void> {
 /**
  * A sync's `checked`: the server confirmed a snapshot again without sending its data. Moves on the
  * held copy's `checkedAt` (which staleness counts from) only for the version it names, so a
- * refused newer version never freshens the older copy still held.
+ * refused newer version never freshens the older copy still held, and takes the stale age the server gives its
+ * source now (#624).
  */
 export async function offerChecked(checked: NonNullable<SyncResponse['checked']>): Promise<void> {
   for (const [id, c] of Object.entries(checked)) {
     const held = snapshots.get(id);
-    if (!held || held.version !== c.version || Date.parse(c.checkedAt) <= Date.parse(held.checkedAt)) continue;
-    const next = { ...held, checkedAt: c.checkedAt };
+    if (!held || held.version !== c.version) continue;
+    const newer = Date.parse(c.checkedAt) > Date.parse(held.checkedAt);
+    if (!newer && c.staleS === held.staleS) continue;
+    const { staleS: _, ...rest } = held;
+    const next = { ...rest, checkedAt: newer ? c.checkedAt : held.checkedAt, ...(c.staleS === undefined ? {} : { staleS: c.staleS }) };
     snapshots.set(id, next);
     await store(id, next).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   }

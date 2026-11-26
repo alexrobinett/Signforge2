@@ -606,6 +606,9 @@ importers:
       '@signforge/media-check':
         specifier: workspace:*
         version: link:../media-check
+      '@signforge/player-core':
+        specifier: workspace:*
+        version: link:../player-core
       '@signforge/template-build':
         specifier: workspace:*
         version: link:../template-build

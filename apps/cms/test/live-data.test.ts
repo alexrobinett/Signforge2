@@ -5,10 +5,42 @@ import { parseCalendar, parseNews } from '@signforge/feeds';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import twoSources from '../e2e/fixtures/two-sources/template.json';
-import { bindAll, guessMapping, madeByEditor, rowTitles, sameWeather, tableRows, typedFields, weatherSource, weatherToKeep } from '../src/lib/live-data';
+import {
+  bindAll,
+  type DataSourceView,
+  freshness,
+  guessMapping,
+  madeByEditor,
+  rowTitles,
+  sameWeather,
+  tableRows,
+  typedFields,
+  weatherSource,
+  weatherToKeep,
+} from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
 const stored = (feed: unknown): unknown => JSON.parse(canonicalJson(feed));
+
+describe("a source's freshness, by the age screens keep it (#624)", () => {
+  const NOW = Date.parse('2026-11-18T17:40:00Z');
+  const snapshot = (checkedAt: string) => ({ id: 'cal', version: 1, fetchedAt: checkedAt, checkedAt, data: {} });
+  const failing = (format: string) => ({ format, refreshS: 300, lastError: 'http-status' }) as unknown as DataSourceView;
+
+  it("keeps a calendar's data for its own minutes, and anything else's for a day", () => {
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:20:00Z'), NOW)).toBe(
+      'Checked 20 min ago. The last check failed: the feed answered with an error. Screens keep this data for 25 min, then show the fallback values.',
+    );
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:10:00Z'), NOW)).toBe('Not confirmed for 30 min: screens show the fallback values.');
+    expect(freshness(failing('csv'), snapshot('2026-11-18T17:15:00Z'), NOW)).toContain('Screens keep this data for a day');
+  });
+
+  it('calls a check fresh when the browser clock is behind the server (review of #630)', () => {
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:45:00Z'), NOW)).toBe(
+      'Checked just now. The last check failed: the feed answered with an error. Screens keep this data for 25 min, then show the fallback values.',
+    );
+  });
+});
 
 describe('rowTitles', () => {
   it("shows a news feed's headlines, dated or not, and whatever its source", () => {

@@ -3,13 +3,14 @@
 // and DNS are stubbed, and the clock is a parameter.
 import { MAX_SNAPSHOT_BYTES } from '@signforge/contract';
 import { scoped } from '@signforge/db';
+import { BACKOFF_MAX_MS, isStale, sourceStaleS } from '@signforge/player-core';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
-import { BACKOFF_MAX_MS, pollDataSources } from '../src/data/poller';
+import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
 
 const NOW = Date.UTC(2026, 10, 17, 14);
@@ -130,11 +131,28 @@ describe('pollDataSources', () => {
     const row = await o.scope.dataSources.get(id);
     expect(row).toMatchObject({ failures: 9, lastError: 'http-status' });
     expect(JSON.stringify(row)).not.toContain('token');
-    expect((await o.scope.dataSources.snapshots([id]))[0]?.dataJson).toBe('{"ok":true}');
+    // The last good check stays where it was, so the snapshot ages on screens and goes stale at its source's age (#624).
+    expect((await o.scope.dataSources.snapshots([id]))[0]).toMatchObject({ dataJson: '{"ok":true}', checkedAt: NOW });
     // The first success clears it.
     answer = { body: '{"ok":true}' };
     await poll(feed.guards, at);
     expect(await o.scope.dataSources.get(id)).toMatchObject({ failures: 0, lastError: null, nextPollAt: at + 5 * MIN });
+  });
+
+  it('keeps a calendar live through one failed poll and its retry, and stale after a second failure (#624)', async () => {
+    const id = await source('json', 'https://blip.test/');
+    let answer: Answer = { body: '{"ok":true}' };
+    const feed = feedsAt({ 'https://blip.test/': () => answer });
+    await poll(feed.guards);
+    answer = { status: 503 };
+    await poll(feed.guards, NOW + 5 * MIN);
+    const retryAt = (await o.scope.dataSources.get(id))!.nextPollAt;
+    // A calendar's age, from the same refreshS; the backoff does not depend on the format.
+    const snapshot = { checkedAt: new Date(NOW).toISOString(), staleS: sourceStaleS('ical', 300) };
+    // A screen hears of the retry's success within ten minutes of it.
+    expect(isStale(snapshot, retryAt + 10 * MIN, true)).toBe(false);
+    await poll(feed.guards, retryAt);
+    expect(isStale(snapshot, (await o.scope.dataSources.get(id))!.nextPollAt, true)).toBe(true);
   });
 
   it('records a guard refusal as its category', async () => {

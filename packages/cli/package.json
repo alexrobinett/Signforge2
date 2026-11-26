@@ -21,6 +21,7 @@
     "@signforge/feeds": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/media-check": "workspace:*",
+    "@signforge/player-core": "workspace:*",
     "@signforge/template-build": "workspace:*",
     "sharp": "^0.35.5"
   },

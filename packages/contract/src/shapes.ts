@@ -573,7 +573,7 @@ export interface InitPayload {
   theme?: FrameTheme;
   /**
    * Protocol 2: the bound fields playing their static fallback in `data` (#225), because their source is missing, its
-   * snapshot is older than `SNAPSHOT_STALE_MS`, or its value did not fit. A bound field not named here plays live data;
+   * snapshot is stale (`DataSnapshot.staleS`), or its value did not fit. A bound field not named here plays live data;
    * a field with no binding is never named. Absent from players before #225: read it as none. It holds for the whole
    * play: `data` is resolved once, at `init`, so a source that goes stale mid-play changes nothing until the next one.
    */
@@ -625,7 +625,7 @@ export interface BrandKit {
 // A data source is a feed the server polls. Screens never call the feed themselves: from
 // the API they get snapshots on each sync (`SyncResponse.snapshots`); static content has them at
 // `data/<id>.json` beside the manifest. A screen keeps the last good one on disk and reads bound
-// fields from it each time a spot starts, while it is fresher than `SNAPSHOT_STALE_MS`.
+// fields from it each time a spot starts, while it is fresher than its `staleS`.
 
 export interface DataSource {
   id: string;
@@ -641,9 +641,12 @@ export interface DataSource {
 export const MAX_SNAPSHOT_BYTES = 65_536;
 
 /**
- * A snapshot the server has not confirmed (`checkedAt`) for this long is stale: a screen plays the
- * spot's static fallback rather than old data. The poller backs off to 6 hours on failure, so a
- * source gets several tries before its screens fall back.
+ * A snapshot the server has not confirmed (`checkedAt`) for this long is stale, unless it says sooner
+ * (`DataSnapshot.staleS`): a screen plays the spot's static fallback rather than old data. The poller backs off to 6
+ * hours on failure, so a source gets several tries before its screens fall back. A snapshot with no `checkedAt` a
+ * screen can read is stale. A screen whose clock it does not trust (its corrected time before the player's build or its
+ * last sync, such as a reboot that lost the time: docs/architecture.md, Player, Clock) cannot tell a snapshot's age: one with a shorter `staleS` is stale then, and any other is judged by
+ * this day as before, so a screen restarted with no network keeps its menu.
  */
 export const SNAPSHOT_STALE_MS = 24 * 3_600_000;
 
@@ -661,6 +664,13 @@ export interface DataSnapshot {
   /** When the server last saw the feed still say this. Staleness counts from it. */
   checkedAt: string;
   data: unknown;
+  /**
+   * How long, in seconds, this snapshot stays current on a screen with no newer `checkedAt` (#624): past it, the screen
+   * plays the spots' fallback, which they can say is not current (`InitPayload.fallback`). The server sets it from the
+   * source as it is now, its kind and its poll interval, so a change to either reaches screens on their next sync with
+   * no publish: a calendar's is minutes. Absent, `SNAPSHOT_STALE_MS`; at most that, at least a minute.
+   */
+  staleS?: number;
 }
 
 /**
@@ -1080,7 +1090,7 @@ export interface SyncResponse {
    * screen moves its copy's `checkedAt` on only if it holds that `version`, so an unchanged feed
    * does not go stale and the data is not sent again.
    */
-  checked?: Record<string, { version: number; checkedAt: string }>;
+  checked?: Record<string, { version: number; checkedAt: string; staleS?: number }>;
   /**
    * Feed image blob hashes referenced by the screen's snapshots that it did not report holding in
    * `SyncRequest.blobs`, at most `MAX_SYNC_RESPONSE_BLOBS`. Fetched from `/v1/device/blobs/:sha256`.

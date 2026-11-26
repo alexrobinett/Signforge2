@@ -44,9 +44,9 @@ describe('a source in words', () => {
   });
 
   it('says a failing source failed, and what its feed does and what screens show meanwhile', () => {
-    const failing = source({ failures: 2, lastError: 'http-status' });
+    const failing = source({ failures: 2, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:25:00Z') });
     expect(sourceState(failing, clock)).toEqual({ word: 'failed 2×', tone: 'failing' });
-    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error: its last 2 checks failed. Its screens show the 7:05 AM copy.');
+    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error: its last 2 checks failed. Its screens show the 9:25 AM copy.');
   });
 
   it('says a source that never had a good check leaves spots on their fallback', () => {
@@ -56,21 +56,29 @@ describe('a source in words', () => {
     );
   });
 
-  it('says spots fall back once the last good copy is more than a day old, as screens do (SNAPSHOT_STALE_MS)', () => {
-    const lastMonday = source({ failures: 9, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-16T17:40:00Z') });
+  it('says spots fall back once the last good copy is older than screens keep it: a day, as screens do (SNAPSHOT_STALE_MS)', () => {
+    const lastMonday = source({ format: 'csv', name: 'Menu', failures: 9, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-16T17:40:00Z') });
     expect(failingWords(lastMonday, clock)).toBe(
-      'The Break room calendar answers with an error: its last 9 checks failed. Its spots show their fallback values: the last good copy, from Mon 9:40 AM, is more than a day old.',
+      'The Menu file answers with an error: its last 9 checks failed. Its spots show their fallback values: the last good copy, from Mon 9:40 AM, is more than a day old.',
     );
     // Within the day, screens still show it.
-    expect(failingWords(source({ failures: 2, lastError: 'http-status', lastCheckedAt: NOW - 23 * 3_600_000 }), clock)).toContain(
-      'Its screens show the Tue 10:40 AM copy.',
+    expect(failingWords({ ...lastMonday, failures: 2, lastCheckedAt: NOW - 23 * 3_600_000 }, clock)).toContain('Its screens show the Tue 10:40 AM copy.');
+  });
+
+  it("says a calendar's spots fall back once its last good copy is older than its own stale age, one failed poll, its retry and ten minutes (#624)", () => {
+    // Polled every 5 minutes: 25 minutes. 9:15 is the edge at 9:40.
+    expect(failingWords(source({ failures: 2, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:15:00Z') }), clock)).toContain(
+      'Its screens show the 9:15 AM copy.',
+    );
+    expect(failingWords(source({ failures: 3, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-18T17:14:59Z') }), clock)).toContain(
+      'Its spots show their fallback values: the last good copy, from 9:14 AM, is more than 25 min old.',
     );
   });
 
   it('gives a time more than 6 days back its date, not a weekday that reads as this week', () => {
     const nineDays = source({ lastCheckedAt: Date.parse('2026-11-09T17:40:00Z') });
     expect(sourceState(nineDays, clock).word).toBe('Nov 9, 9:40 AM');
-    expect(failingWords({ ...nineDays, failures: 3, lastError: 'timeout' }, clock)).toContain('from Nov 9, 9:40 AM, is more than a day old');
+    expect(failingWords({ ...nineDays, format: 'csv', failures: 3, lastError: 'timeout' }, clock)).toContain('from Nov 9, 9:40 AM, is more than a day old');
     expect(sourceState(source({ lastCheckedAt: Date.parse('2026-11-12T17:40:00Z') }), clock).word).toBe('Thu 9:40 AM');
   });
 
