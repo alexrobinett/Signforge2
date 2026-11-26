@@ -36,11 +36,15 @@ const ORG_ALERTS_PER_HOUR = 5;
  */
 const MEMBER_ALERTS_PER_HOUR = 2;
 
-/** A count in the open clock hour: a grant's `forbidden` refusals. `alerted`: its alert is claimed this hour. */
+/**
+ * A count in the open clock hour: a grant's `forbidden` refusals. `alerted`: its alert is claimed this hour.
+ * `handedBack`: a failed org check has given the claim back once this hour, which happens at most once (review of #554).
+ */
 interface HourCount {
   start: number;
   count: number;
   alerted?: boolean;
+  handedBack?: boolean;
 }
 
 /** An org's alerts sent in the open clock hour, in all and by the member who granted each agent. */
@@ -113,11 +117,16 @@ export class AgentGrantObject extends DurableObject<Env> {
     return { alert, refusals: hour.count, hour: hour.start };
   }
 
-  /** The alert `refused` claimed for `hour` was never asked of the org (its check failed): the next refusal claims it again (#347). */
-  unclaimed(hour: number): void {
+  /**
+   * The alert `refused` claimed for `hour` was never asked of the org (its check failed): the next refusal claims it
+   * again (#347). Once an hour: an org check that keeps failing then costs no more requests (review of #554). Whether
+   * it was given back.
+   */
+  unclaimed(hour: number): boolean {
     const stored = this.ctx.storage.kv.get<HourCount>(REFUSALS_KEY);
-    if (stored?.start !== hour || !stored.alerted) return;
-    this.ctx.storage.kv.put(REFUSALS_KEY, { ...stored, alerted: false });
+    if (stored?.start !== hour || !stored.alerted || stored.handedBack) return false;
+    this.ctx.storage.kv.put(REFUSALS_KEY, { ...stored, alerted: false, handedBack: true });
+    return true;
   }
 
   /**
@@ -178,8 +187,9 @@ export function agentLimiter(env: Pick<Env, 'AGENT_GRANTS' | 'AGENT_CALL_LIMIT'>
 /**
  * The clock hour in which this isolate saw a grant's refusals reach the alert, by grant: its later
  * `forbidden` refusals that hour reach no object, so a runaway agent's refusals cost at most
- * `REFUSALS_TO_ALERT` object requests per isolate an hour (more only while some are in flight at
- * once), as `recordedMinute` bounds the call limit's. One entry a grant.
+ * `REFUSALS_TO_ALERT` grant-object requests and one org-object request per isolate an hour (more only while some are
+ * in flight at once), as `recordedMinute` bounds the call limit's; while the org's object fails, at most 6 and 2, as
+ * the claim is given back once (`unclaimed`). One entry a grant.
  */
 const refusalsDone = new Map<string, number>();
 
@@ -206,7 +216,8 @@ export async function refusalAlertDue(
   try {
     due = await env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(`org:${orgId}`)).orgAlertDue(member);
   } catch (err) {
-    await grant.unclaimed(counted.hour);
+    // Given back once an hour; after that this isolate asks no more this hour, so a failing org object costs a bounded few.
+    if (!(await grant.unclaimed(counted.hour))) refusalsDone.set(grantId, counted.hour);
     throw err;
   }
   refusalsDone.set(grantId, counted.hour);

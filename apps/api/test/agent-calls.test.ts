@@ -318,6 +318,43 @@ describe("the refusals' cost and the org's cap", () => {
     expect(await grant.refused()).toMatchObject({ alert: false, refusals: 4 });
   });
 
+  it("bounds a grant's requests while the org's object keeps failing: one hand-back an hour, then none (review of #554)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    vi.setSystemTime(now - (now % HOUR) + 7 * HOUR + 60_000);
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const asked: string[] = [];
+    const grants = new Proxy(env.AGENT_GRANTS, {
+      get(target, key) {
+        if (key !== 'get') {
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return (id: DurableObjectId) =>
+          new Proxy(target.get(id), {
+            get(stub, method) {
+              const real = Reflect.get(stub, method);
+              if (typeof method !== 'string' || typeof real !== 'function') return real;
+              return (...args: unknown[]) => {
+                asked.push(method);
+                return method === 'orgAlertDue' ? Promise.reject(new Error('org object unavailable')) : Reflect.apply(real, stub, args);
+              };
+            },
+          });
+      },
+    });
+    const bindings: Env = { ...env, AGENT_GRANTS: grants };
+    const failed = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (let i = 0; i < 20; i++) await call(access_token, 'update_screen', { screenId: 'scr_any', name: 'x' }, bindings);
+    failed.mockRestore();
+    const refusalCalls = asked.filter((m) => m !== 'write');
+    // The third claims and is handed back; the fourth claims again, is not, and the isolate stops asking.
+    expect(refusalCalls.filter((m) => m === 'refused')).toHaveLength(4);
+    expect(refusalCalls.filter((m) => m === 'orgAlertDue')).toHaveLength(2);
+    expect(refusalCalls.filter((m) => m === 'unclaimed')).toHaveLength(2);
+  });
+
   it("keeps a grant's alert when the org's check fails, and sends it at the next refusal (#347)", async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const now = Date.now();
