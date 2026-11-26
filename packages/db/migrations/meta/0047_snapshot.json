@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "40096606-bcdc-48c5-92c4-5dd868b86f10",
+  "id": "642fcc7d-cba4-4836-a9ab-3c0eeda4e5d3",
   "prevId": "6afc8535-8d30-4fb2-a5fc-e8f16281f5ae",
   "tables": {
     "account": {
@@ -1977,6 +1977,16 @@
         "feed_images_org_thumb_sha_idx": {
           "name": "feed_images_org_thumb_sha_idx",
           "columns": ["org_id", "thumb_sha256"],
+          "isUnique": false
+        },
+        "feed_images_org_created_idx": {
+          "name": "feed_images_org_created_idx",
+          "columns": ["org_id", "created_at"],
+          "isUnique": false
+        },
+        "feed_images_next_check_idx": {
+          "name": "feed_images_next_check_idx",
+          "columns": ["next_check_at"],
           "isUnique": false
         }
       },

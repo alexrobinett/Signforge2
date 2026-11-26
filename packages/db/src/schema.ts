@@ -1257,6 +1257,10 @@ export const feedImages = sqliteTable(
     // The sweep asks, of each blob queued for delete, whether a row still names it as its file or its thumbnail.
     index('feed_images_org_file_sha_idx').on(t.orgId, t.fileSha256),
     index('feed_images_org_thumb_sha_idx').on(t.orgId, t.thumbSha256),
+    // A poll's hold counts the org's photos of the last day: read by their time, not every row the org has (review of #497).
+    index('feed_images_org_created_idx').on(t.orgId, t.createdAt),
+    // The hourly sweep finds the rows past their check across orgs, oldest first, without reading the rest.
+    index('feed_images_next_check_idx').on(t.nextCheckAt),
   ],
 );
 

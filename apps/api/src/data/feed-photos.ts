@@ -16,8 +16,8 @@
  *   1.25× SCREEN_BOX.landscape and PASS_THROUGH_MAX_BYTES or scaled via the Images binding, thumb
  *   reusing `file` when within NEWS_THUMB_BOX, written under `o/<org>/f/<sha256>` (`feedBlobKey`)
  *   through `PhotoBlobs`, and recorded with `org.feedPhotos.delivered`.
- * - **The 01:00 UTC sweep (`sweepFeedPhotos`)**: expires rows unnamed for a week past their check
- *   and deletes unreferenced blobs past their grace window, bounded to 11 D1 calls per run.
+ * - **The hourly sweep (`sweepFeedPhotos`, at :30)**: expires rows unnamed for a week past their check
+ *   and deletes unreferenced blobs past their grace window, bounded to 14 D1 calls per run.
  *
  * Ports: `PhotoBlobs` (R2 in production via `r2PhotoBlobs`) and `PhotoQueue` (FEED_IMAGES in
  * production via `cfPhotoQueue`). Every timestamp comes from the injected `now`.
@@ -52,23 +52,29 @@ const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
 /**
- * Orgs a daily run cleans up, each up to a day's photos at its cap (`perOrg` rows, and up to twice as many blobs: a
- * photo and its thumbnail), so the sweep keeps up with that many orgs at the cap. The org count bounds the run to 11 D1
- * calls, whatever the cap; a row's or blob's list goes in one statement as JSON.
+ * What one hourly sweep run takes of what is due (rows unnamed past their check, blobs past their grace), the oldest
+ * first, from up to CLEANUP_ORGS_PER_RUN orgs: 24 runs a day forget 7,200 rows and delete 14,400 blobs, so the sweep
+ * keeps up with three orgs at MOST_PER_ORG_PER_DAY whatever their cap, and a cap lowered later strands nothing. A run
+ * stays within 14 D1 calls and R2 deletes, and each statement's list of URLs within a few hundred kB (review of #497).
  */
+const FORGET_PER_RUN = 300;
+const DELETE_PER_RUN = 600;
 const CLEANUP_ORGS_PER_RUN = 3;
+/** The most `FEED_PHOTOS_ORG_DAILY` and `FEED_PHOTOS_SOURCE_DAILY` may be: the sweep keeps up with three orgs this busy. */
+const MOST_PHOTOS_PER_DAY = 1800;
 
 /**
  * The day's photo caps the environment sets (`FEED_PHOTOS_ORG_DAILY`, `FEED_PHOTOS_SOURCE_DAILY`; the demo's real-feed
- * test lifts them), or 60 an org and 30 a source. Read once a run. A value that is not a whole number above 0 fails the
- * run, loudly, rather than polling under caps nobody set.
+ * test lifts them), or 60 an org and 30 a source. Read once a run, before any source is claimed. A value that is not
+ * written as a whole number from 1 to MOST_PHOTOS_PER_DAY (no sign, exponent, hex or spaces) fails the run, loudly,
+ * rather than polling under caps nobody set.
  */
 export function photoBudget(env: Pick<Env, 'FEED_PHOTOS_ORG_DAILY' | 'FEED_PHOTOS_SOURCE_DAILY'>): PhotoBudget {
   const read = (name: string, value: string | undefined, unset: number) => {
     if (value === undefined) return unset;
-    const n = Number(value);
-    if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a whole number above 0, not ${JSON.stringify(value)}`);
-    return n;
+    if (!/^[1-9]\d*$/.test(value) || Number(value) > MOST_PHOTOS_PER_DAY)
+      throw new Error(`${name} must be a whole number from 1 to ${MOST_PHOTOS_PER_DAY}, not ${JSON.stringify(value)}`);
+    return Number(value);
   };
   return {
     perOrg: read('FEED_PHOTOS_ORG_DAILY', env.FEED_PHOTOS_ORG_DAILY, DEFAULT_PHOTO_BUDGET.perOrg),
@@ -394,7 +400,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Group items by org, keeping at most `maxOrgs` orgs so a daily run stays well inside Free D1's 50-query limit. */
+/** Group items by org, keeping at most `maxOrgs` orgs so a run stays well inside Free D1's 50-query limit. */
 function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T) => string, maxOrgs: number): Map<string, string[]> {
   const byOrg = new Map<string, string[]>();
   for (const item of items) {
@@ -410,7 +416,7 @@ function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T
 }
 
 /**
- * The daily sweep, bounded to 11 D1 calls for Free D1's 50-query limit:
+ * The hourly sweep, bounded to 14 D1 calls for Free D1's 50-query limit:
  * 1. Expire `feed_images` rows unnamed for a week past their check (`expiredFeedImages`), keeping
  *    any still named by a snapshot, and durably queue their hashes into `feed_image_deletes`.
  * 2. Drain `feed_image_deletes` rows whose grace window has elapsed (`pendingFeedImageDeletes`),
@@ -418,13 +424,13 @@ function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T
  *    under `o/<org>/f/`, and clearing the delete records only after blob delete succeeds.
  * Returns how many expired rows were forgotten plus how many blobs were deleted.
  */
-export async function sweepFeedPhotos(db: D1Database, blobs: PhotoBlobs, now: number, { perOrg }: PhotoBudget): Promise<number> {
-  const expired = await expiredFeedImages(db, now, CLEANUP_ORGS_PER_RUN * perOrg);
+export async function sweepFeedPhotos(db: D1Database, blobs: PhotoBlobs, now: number): Promise<number> {
+  const expired = await expiredFeedImages(db, now, FORGET_PER_RUN);
   let forgotten = 0;
   for (const [orgId, urls] of groupByOrg(expired, (r) => r.url, CLEANUP_ORGS_PER_RUN)) {
     forgotten += await scoped(db, orgId).feedPhotos.expire(urls, now);
   }
-  const pending = await pendingFeedImageDeletes(db, now, 2 * CLEANUP_ORGS_PER_RUN * perOrg);
+  const pending = await pendingFeedImageDeletes(db, now, DELETE_PER_RUN);
   let deleted = 0;
   const errors: unknown[] = [];
   for (const [orgId, shas] of groupByOrg(pending, (r) => r.sha256, CLEANUP_ORGS_PER_RUN)) {

@@ -17,25 +17,26 @@ const count = async (sql: string, ...binds: number[]) =>
     .first<{ n: number }>())!.n;
 
 const DAYS = 19;
-const CAPS: [string, PhotoBudget][] = [
-  ['default', DEFAULT_PHOTO_BUDGET],
-  ['demo', { perOrg: 1800, perSource: 300 }],
+const CAPS: [string, PhotoBudget, number][] = [
+  ['default', DEFAULT_PHOTO_BUDGET, 0],
+  // Its own days, after the default case's: the sweep reads across orgs, and the cases share the file's database.
+  ['demo', { perOrg: 1800, perSource: 300 }, 60],
 ];
 
 it.for(CAPS)(
-  'keeps up with three orgs at the %s cap: what is left after each sweep stays the same, not growing',
+  'keeps up with three orgs at the %s cap, swept every hour: what is left at the end of each day stays the same, not growing',
   { timeout: 300_000 },
-  async ([tag, budget]) => {
+  async ([tag, budget, startDay]) => {
     const perDay = budget.perOrg;
+    const start = T0 + startDay * DAY;
     const orgs = await Promise.all([0, 1, 2].map(async (i) => testScope(env.DB, (await seedOrg(env.DB, `sweep-${tag}-${i}`)).orgId)));
-    // This case's orgs alone: the cases share the file's database.
     const mine = `(${orgs.map((o) => `'${o.orgId}'`).join(', ')})`;
     let deleted = 0;
     const blobs: PhotoBlobs = { put: async () => undefined, delete: async (keys) => void (deleted += keys.length) };
-    const left: Record<number, { due: number; queued: number }> = {};
+    const left: Record<number, { due: number; queued: number; deleted: number }> = {};
     for (let day = 0; day < DAYS; day++) {
       // A day at the cap: each photo a file and a thumbnail of its own, never named again after it was made.
-      const made = T0 + day * DAY + 9 * HOUR;
+      const made = start + day * DAY + 9 * HOUR;
       for (const org of orgs)
         await org.feedPhotos.putMany(
           Array.from({ length: perDay }, (_, k) => {
@@ -50,16 +51,21 @@ it.for(CAPS)(
             };
           }),
         );
-      const sweepAt = T0 + (day + 1) * DAY + HOUR;
-      await sweepFeedPhotos(env.DB, blobs, sweepAt, budget);
+      // At half past each hour, as the minute Cron Trigger runs it.
+      for (let hour = 0; hour < 24; hour++) await sweepFeedPhotos(env.DB, blobs, start + day * DAY + hour * HOUR + 30 * 60_000);
+      const end = start + (day + 1) * DAY;
       left[day + 1] = {
-        due: await count(`SELECT count(*) AS n FROM feed_images WHERE org_id IN ${mine} AND next_check_at < ?`, sweepAt - FEED_IMAGE_TTL_MS),
+        due: await count(`SELECT count(*) AS n FROM feed_images WHERE org_id IN ${mine} AND next_check_at < ?`, end - FEED_IMAGE_TTL_MS),
         queued: await count(`SELECT count(*) AS n FROM feed_image_deletes WHERE org_id IN ${mine}`),
+        deleted,
       };
     }
-    // A day's rows expire in the 15th sweep after, and their blobs go in the next: from the 16th, each sweep takes one day's.
-    expect(left[16]).toEqual({ due: 0, queued: 3 * 2 * perDay });
-    for (const day of [17, 18, DAYS]) expect(left[day], `day ${day}`).toEqual(left[16]);
-    expect(deleted).toBe((DAYS - 15) * 3 * 2 * perDay);
+    // A day's rows are due 14 days after they are made, so from the 16th each day forgets one day's and deletes its blobs.
+    for (const day of [17, 18, DAYS]) {
+      expect({ ...left[day], deleted: 0 }, `day ${day}`).toEqual({ ...left[16], deleted: 0 });
+      expect(left[day]!.deleted - left[day - 1]!.deleted, `day ${day}`).toBe(3 * 2 * perDay);
+    }
+    // What a day's last runs had no time for, less than a day's, goes in the next morning's.
+    expect(left[DAYS]!.due).toBeLessThan(3 * perDay);
   },
 );

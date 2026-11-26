@@ -121,6 +121,8 @@ export async function pollDataSources(
     photoQueue = cfPhotoQueue(env.FEED_IMAGES),
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps; photoQueue?: PhotoQueue } = {},
 ): Promise<void> {
+  // Read before any source is claimed: a bad setting fails the run with every source left due, none leased past its poll.
+  const budget = photoBudget(env);
   const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
   const pass: Run = {
     env,
@@ -128,7 +130,7 @@ export async function pollDataSources(
     guards,
     connectors,
     photoQueue,
-    photoBudget: photoBudget(env),
+    photoBudget: budget,
     grants: new Map(),
     boundByOrg: new Map(),
     playedByOrg: new Map(),

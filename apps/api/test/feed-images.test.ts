@@ -958,8 +958,9 @@ describe('budgets, resilience and cleanup', () => {
     const jobs = take();
     // Ten new stories a poll, four polls: all forty of each feed, where 60 an org would stop at 20 each.
     for (const [f, id] of ids) expect(jobs.filter((j) => j.sourceId === id).length, f).toBe(40);
-    for (const value of ['', 'lots', '0', '2.5'])
-      expect(() => photoBudget({ FEED_PHOTOS_ORG_DAILY: value }), value).toThrow(/FEED_PHOTOS_ORG_DAILY must be a whole number above 0/);
+    for (const value of ['', 'lots', '0', '2.5', '1e3', '0x10', ' 60', '060', '1801'])
+      expect(() => photoBudget({ FEED_PHOTOS_ORG_DAILY: value }), value).toThrow(/FEED_PHOTOS_ORG_DAILY must be a whole number from 1 to 1800/);
+    expect(photoBudget({ FEED_PHOTOS_SOURCE_DAILY: '1800' })).toEqual({ ...DEFAULT_PHOTO_BUDGET, perSource: 1800 });
     expect(photoBudget({})).toEqual(DEFAULT_PHOTO_BUDGET);
   });
 
@@ -1112,38 +1113,39 @@ describe('budgets, resilience and cleanup', () => {
   });
 
   it('forgets expired unreferenced rows, deletes feed blobs after the grace window, and never touches an /admin manifest blob with the same hash', async () => {
-    const id = await news('https://gc.test/rss');
+    // A year before the rest of the file: when its rows are due, no other test's are, so one sweep run reaches them.
+    const T = NOW - 365 * DAY_MS;
+    const id = await news('https://gc.test/rss', { at: T });
     const dropUrl = 'https://cdn.gc.test/drop.jpg';
     const keepUrl = 'https://cdn.gc.test/keep.jpg';
     const dropBytes = jpeg(320, 180, 'drop-shared-with-manifest');
     await poll({
-      now: NOW,
+      now: T,
       guards: web({ 'https://gc.test/rss': { body: feedOf(2, (i) => (i === 0 ? dropUrl : keepUrl)) } }).guards,
     });
     const jobs = take();
     const { images } = imagesStub();
-    await consume(jobs, { guards: web({ [dropUrl]: { body: dropBytes }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, NOW);
+    await consume(jobs, { guards: web({ [dropUrl]: { body: dropBytes }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, T);
     const dropSha = (await row(dropUrl))!.fileSha256!;
     const keepSha = (await row(keepUrl))!.fileSha256!;
     // Simulate a published /admin manifest holding the exact same content hash at orgBlobKey (no assets row).
     photoBlobs.seed(orgBlobKey(o.orgId, dropSha), dropBytes, dropSha);
 
     // Next poll writes a snapshot naming only keepUrl (dropUrl has dropped off the feed).
-    await o.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN, etag: null });
-    await poll({ now: NOW + 5 * MIN, guards: web({ 'https://gc.test/rss': { body: feedOf(1, () => keepUrl) } }).guards });
+    await o.scope.dataSources.update(id, { nextPollAt: T + 5 * MIN, etag: null });
+    await poll({ now: T + 5 * MIN, guards: web({ 'https://gc.test/rss': { body: feedOf(1, () => keepUrl) } }).guards });
     expect((await snapshot(id)).items[0]?.image?.file).toBe(keepSha);
 
     // Phase 1 at cleanupAt: forgets dropUrl and queues dropSha durably in feed_image_deletes (kept during grace window).
-    const cleanupAt = NOW + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
-    // Oldest first: the suite's earlier rows come before this one, so the run is sized as demo's, to reach it.
-    expect(await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt, LIFTED)).toBeGreaterThanOrEqual(1);
+    const cleanupAt = T + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
+    expect(await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt)).toBeGreaterThanOrEqual(1);
     expect(await row(dropUrl)).toBeUndefined();
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toContain(dropSha);
     expect(photoBlobs.has(feedBlobKey(o.orgId, dropSha))).toBe(true);
 
     // Phase 2 after FEED_IMAGE_DELETE_GRACE_MS: deletes feed blob o/<org>/f/<dropSha>, keeps snapshot-referenced keepSha AND keeps /admin manifest blob o/<org>/b/<dropSha>.
     const drainAt = cleanupAt + FEED_IMAGE_DELETE_GRACE_MS;
-    await sweepFeedPhotos(env.DB, photoBlobs, drainAt, LIFTED);
+    await sweepFeedPhotos(env.DB, photoBlobs, drainAt);
     expect(photoBlobs.has(feedBlobKey(o.orgId, dropSha))).toBe(false);
     expect(photoBlobs.has(orgBlobKey(o.orgId, dropSha))).toBe(true);
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).not.toContain(dropSha);
@@ -1180,7 +1182,7 @@ describe('budgets, resilience and cleanup', () => {
 
     // While the snapshot still references v1 (before the next poll refreshes it to v2), cleanup keeps both v1 blobs AND keeps them durably queued.
     const beforeRefreshAt = later + FEED_IMAGE_DELETE_GRACE_MS;
-    await sweepFeedPhotos(env.DB, photoBlobs, beforeRefreshAt, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(env.DB, photoBlobs, beforeRefreshAt);
     expect(photoBlobs.has(feedBlobKey(o.orgId, v1.fileSha256!))).toBe(true);
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toEqual(expect.arrayContaining([v1.fileSha256!, v1.thumbSha256!]));
 
@@ -1192,7 +1194,7 @@ describe('budgets, resilience and cleanup', () => {
     // 3. Failing blob delete keeps the durable delete record intact, and after DELETE_LEASE_MS the next sweep retries and succeeds.
     const drainAt = beforeRefreshAt + FEED_IMAGE_DELETE_GRACE_MS;
     const failingBlobs: PhotoBlobs = { ...photoBlobs, delete: async () => Promise.reject(new Error('R2 delete failed')) };
-    await expect(sweepFeedPhotos(env.DB, failingBlobs, drainAt, DEFAULT_PHOTO_BUDGET)).rejects.toThrow('R2 delete failed');
+    await expect(sweepFeedPhotos(env.DB, failingBlobs, drainAt)).rejects.toThrow('R2 delete failed');
     // Old blobs and their durable delete records survive the failed delete.
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toEqual(expect.arrayContaining([v1.fileSha256!, v1.thumbSha256!]));
     expect(photoBlobs.has(feedBlobKey(o.orgId, v1.fileSha256!))).toBe(true);
@@ -1210,7 +1212,7 @@ describe('budgets, resilience and cleanup', () => {
     expect(consoleErr).toHaveBeenCalled();
 
     // Once DELETE_LEASE_MS passes, cleanup retries blob delete cleanly and removes old blobs + durable records while keeping v2.
-    await sweepFeedPhotos(env.DB, photoBlobs, drainAt + DELETE_LEASE_MS, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(env.DB, photoBlobs, drainAt + DELETE_LEASE_MS);
     expect(photoBlobs.has(feedBlobKey(o.orgId, v1.fileSha256!))).toBe(false);
     expect(photoBlobs.has(feedBlobKey(o.orgId, v1.thumbSha256!))).toBe(false);
     expect(photoBlobs.has(feedBlobKey(o.orgId, v2.fileSha256!))).toBe(true);
@@ -1263,7 +1265,7 @@ describe('budgets, resilience and cleanup', () => {
     expect(deletions.map((d) => d.sha256)).not.toContain(shas[2]);
     expect(await consume(jobs, { guards: web({ [url]: { body: c } }).guards, images }, NOW + RECHECK_MS + 1)).toEqual({ acked: [url], retried: [] });
     expect(await pending()).toEqual(deletions);
-    await sweepFeedPhotos(env.DB, photoBlobs, NOW + RECHECK_MS + FEED_IMAGE_DELETE_GRACE_MS, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(env.DB, photoBlobs, NOW + RECHECK_MS + FEED_IMAGE_DELETE_GRACE_MS);
     expect(photoBlobs.has(feedBlobKey(o.orgId, shas[1]!))).toBe(false);
     expect(photoBlobs.has(feedBlobKey(o.orgId, shas[2]!))).toBe(true);
   });
@@ -1305,7 +1307,7 @@ describe('budgets, resilience and cleanup', () => {
     const scope = o.scope.feedPhotos;
     await scope.put({ url, sourceId: 'eligible', fileSha256: sha, thumbSha256: sha, nextCheckAt: 1, createdAt: 1 });
 
-    await sweepFeedPhotos(env.DB, photoBlobs, NOW, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(env.DB, photoBlobs, NOW);
 
     expect(await scope.get([url])).toEqual([]);
     expect(await scope.deletes()).toContainEqual(expect.objectContaining({ sha256: sha, queuedAt: NOW }));
@@ -1336,12 +1338,12 @@ describe('budgets, resilience and cleanup', () => {
     }
     counter.reset();
     const expireAt = NOW + FEED_IMAGE_TTL_MS + 1;
-    await sweepFeedPhotos(counter.db, photoBlobs, expireAt, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(counter.db, photoBlobs, expireAt);
     expect(counter.counts().apiCalls).toBeLessThan(15);
     expect(counter.counts().statements).toBeLessThan(20);
 
     counter.reset();
-    await sweepFeedPhotos(counter.db, photoBlobs, expireAt + FEED_IMAGE_DELETE_GRACE_MS, DEFAULT_PHOTO_BUDGET);
+    await sweepFeedPhotos(counter.db, photoBlobs, expireAt + FEED_IMAGE_DELETE_GRACE_MS);
     expect(counter.counts().apiCalls).toBeLessThan(15);
     expect(counter.counts().statements).toBeLessThan(20);
   });
@@ -1465,7 +1467,8 @@ describe('budgets, resilience and cleanup', () => {
     expect(await orgs[0]!.scope.feedPhotos.get(['https://midnight-gc.test/0.jpg'])).toHaveLength(1);
 
     counter.reset();
-    await runCron('* * * * *', midnight + 60 * MIN);
+    // The feed photos' sweep runs at half past every hour.
+    await runCron('* * * * *', midnight + 30 * MIN);
     expect(counter.counts().apiCalls).toBe(11);
     for (const [i, org] of orgs.slice(0, 3).entries()) {
       expect(await org.scope.feedPhotos.get([`https://midnight-gc.test/${i}.jpg`])).toHaveLength(0);

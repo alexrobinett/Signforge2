@@ -140,7 +140,7 @@ describe('the day of new feed photos', () => {
     expect(held).toHaveLength(NEW_PER_SOURCE_PER_DAY);
   });
 
-  it("reads the org's rows once: the hold scans them once, its sources' few beside (Fable P6)", async () => {
+  it("reads the day's rows alone: the hold counts them on its index, its sources' few beside (Fable P6, review of #497)", async () => {
     await fresh(s.a);
     await add(s.a, 'p6-reader');
     await add(s.a, 'p6-other');
@@ -163,7 +163,9 @@ describe('the day of new feed photos', () => {
     } finally {
       env.DB.batch = batch;
     }
-    // The most any statement of the save reads: the hold, once over the org's photo rows, with its sources and lookups.
-    expect(Math.max(...read)).toBeLessThanOrEqual(rows + sources + 10);
+    // The most any statement of the save reads: the hold, over the day's photo rows alone on (org_id, created_at), not the
+    // org's 400 older ones (review of #497), with its sources and lookups.
+    expect(rows).toBeGreaterThanOrEqual(400);
+    expect(Math.max(...read)).toBeLessThanOrEqual(sources + 10);
   });
 });
