@@ -467,10 +467,12 @@ const takeover = defineTool({
         if (stored === undefined) write(org.screenGroups.stage.membersAre(fields.groupId!, reach));
         else {
           write(org.screenGroups.stage.ruleIs(fields.groupId!, stored.selectorJson));
-          // What the rule reads: the labels of its keys, and the screens' settings when it names a system label.
-          const keys = [...new Set(ruleOf(stored)!.all.map((t) => t.key))];
-          const system = keys.some((k) => SYSTEM_KEYS.some((x) => x === k));
-          write(org.screens.labels.stage.are(keys, read.labels, system ? read.screens : undefined));
+          // What the rule reads: the labels of its keys, and the screens themselves when it names a system label or
+          // has a missing term, which a screen claimed meanwhile, with no labels, matches (review of #608).
+          const terms = ruleOf(stored)!.all;
+          const keys = [...new Set(terms.map((t) => t.key))];
+          const screens = terms.some((t) => t.op === 'missing' || SYSTEM_KEYS.some((x) => x === t.key));
+          write(org.screens.labels.stage.are(keys, read.labels, screens ? read.screens : undefined));
         }
       }
     }

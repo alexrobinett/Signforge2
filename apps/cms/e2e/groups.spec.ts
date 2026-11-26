@@ -262,3 +262,92 @@ test('a smart group is shown where a screen is in it, never offered to tick by h
   await page.getByRole('region', { name: 'Selected screens' }).getByRole('button', { name: 'Add to group' }).click();
   await expect(page.getByRole('menuitem')).toHaveText(['Listed']);
 });
+
+/** With E2E_SCREENSHOTS: light and dark at the desktop's width, then at a phone's (390 px). */
+async function shotsBoth(page: Page, name: string) {
+  if (!process.env.E2E_SCREENSHOTS) return;
+  const size = page.viewportSize()!;
+  await shots(page, `${name}-desktop`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, `${name}-390`);
+  await page.setViewportSize(size);
+}
+
+test('a smart group made from a rule, the screens it matches seen before it is saved, and whom it reaches (#186)', async ({ page }) => {
+  await signInAs(page, `e2e-group-rule-${Date.now()}@example.com`, '192.0.2.203');
+  await createOrg(page, 'Rule Deli', '192.0.2.203');
+  const door = await pairScreen(page, 'North door', '192.0.2.204');
+  const till = await pairScreen(page, 'North till', '192.0.2.205');
+  const south = await pairScreen(page, 'South door', '192.0.2.206');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id, till.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [south.id], set: { region: 'south', store: '0142' } });
+  await tool(page, 'save_playlist', { name: 'Storm closure', transition: { type: 'cut' } });
+
+  // New group: a rule, its screens matched as the conditions are chosen.
+  await page.goto('/settings/screens');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New group…' }).click();
+  const made = page.getByRole('dialog', { name: 'New group' });
+  await made.getByLabel('Name').fill('North');
+  await made.getByRole('radio', { name: /Screens that match/ }).click();
+  const first = made.getByRole('group', { name: 'Condition 1' });
+  await first.getByLabel('Label').selectOption('region');
+  await first.getByLabel('Value').fill('NORTH');
+  const matched = made.getByRole('region', { name: 'Matching screens' });
+  await expect(matched).toContainText('Matches 2 screens now');
+  await expect(matched).toContainText('North door, North till');
+  // A second condition no screen meets with the first: it says none matches, and why when no screen meets it at all.
+  await made.getByRole('button', { name: 'Add a condition' }).click();
+  const second = made.getByRole('group', { name: 'Condition 2' });
+  await second.getByLabel('Label').selectOption('store');
+  await second.getByLabel('Compared').selectOption({ label: 'is one of' });
+  await second.getByRole('checkbox', { name: '0142' }).check();
+  await expect(matched.getByRole('alert')).toHaveText('Matches no screen now.');
+  await second.getByLabel('Compared').selectOption({ label: 'is not set' });
+  await expect(matched).toContainText('Matches 2 screens now');
+  await axe(page);
+  await shotsBoth(page, '186-new-smart-group');
+  await made.getByRole('button', { name: 'Create group' }).click();
+  await expect(made).toBeHidden();
+
+  // The table marks it a rule, and its menu changes the rule rather than ticking screens.
+  const groups = page.getByRole('region', { name: 'Groups' });
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('Rule');
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('2 screens');
+  await groups.getByRole('button', { name: 'Change North' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Members…' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Rule…' }).click();
+  const rule = page.getByRole('dialog', { name: 'North’s rule' });
+  await expect(rule.getByRole('group', { name: 'Condition 2' }).getByLabel('Compared')).toHaveValue('missing');
+  await rule.getByRole('button', { name: 'Remove condition 2' }).click();
+  await rule.getByRole('group', { name: 'Condition 1' }).getByLabel('Value').fill('south');
+  await expect(rule.getByRole('region', { name: 'Matching screens' })).toContainText('Matches 1 screen now');
+  await rule.getByRole('button', { name: 'Save' }).click();
+  await expect(rule).toBeHidden();
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('1 screen');
+  // Its conditions are text in the row, not a hover's.
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('region is south');
+  // A rule on a label no screen has any more opens with that label still chosen.
+  await tool(page, 'save_group', { name: 'Zoned', selector: { all: [{ key: 'zone', op: 'eq', values: ['a'] }] }, idempotencyKey: `zoned-${Date.now()}` });
+  await page.reload();
+  await hydrated(page);
+  await groups.getByRole('button', { name: 'Change Zoned' }).click();
+  await page.getByRole('menuitem', { name: 'Rule…' }).click();
+  const zoned = page.getByRole('dialog', { name: 'Zoned’s rule' });
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Label')).toHaveValue('zone');
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Value')).toHaveValue('a');
+  await page.keyboard.press('Escape');
+  await shotsBoth(page, '186-groups-rule-badge');
+
+  // A takeover's picker: the group marked a rule, and whom it reaches when sent.
+  await page.goto('/schedule');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Take over screens' }).click();
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await takeover.getByRole('combobox', { name: 'Plays on' }).click();
+  const picker = page.getByRole('dialog', { name: 'Plays on' });
+  await expect(picker.getByRole('option', { name: /^North Rule/ })).toContainText('Rule');
+  await picker.getByRole('option', { name: /^North Rule/ }).click();
+  await expect(takeover.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('Reaches this screen now: South door');
+  await shotsBoth(page, '186-takeover-reach');
+});

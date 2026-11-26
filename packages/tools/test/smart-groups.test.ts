@@ -112,4 +112,24 @@ describe('a takeover of a smart group (owner decision on #179)', () => {
     const stale = await run('takeover', { action: 'publish', playlistId: o.playlist, target: 'group', groupId: group.id, endsAt, ifReach: [o.screen] });
     expect(stale).toMatchObject({ ok: false, error: 'conflict', details: { screens: [o.screen, lobby2.id].toSorted() } });
   });
+
+  it('is refused when a screen a missing term matches is claimed between its reads and its write (review of #608)', async () => {
+    const { group } = await call('save_group', { name: 'No zone', selector: { all: [{ key: 'zone', op: 'missing' }] }, idempotencyKey: crypto.randomUUID() });
+    // A new screen has no labels, so a rule of missing terms takes it in: the guard compares the screens too.
+    const raced = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === 'batch')
+          return async (statements: D1PreparedStatement[]) => {
+            await scope().screens.insert({ name: 'Claimed meanwhile', timezone: 'Europe/London', orientation: 'landscape' });
+            return target.batch(statements);
+          };
+        const v = Reflect.get(target, prop, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const endsAt = new Date(START + 3_600_000).toISOString();
+    const input = { action: 'publish', playlistId: o.playlist, target: 'group', groupId: group.id, endsAt, ifReach: group.screenIds };
+    const out = await dispatch(registry, 'takeover', input, { ...owner, org: testScope(raced, o.orgId) });
+    expect(out).toMatchObject({ ok: false, error: 'conflict' });
+  });
 });
