@@ -1266,3 +1266,51 @@ The player has kept each bundle it has read, by hash, for the manifest last prep
 - **The cache's numbers are the per-template tables' own.** Its repeat prepares sit where the kit's templates measured on their own (Room status, Info frame, above).
 - **One cache run had a 1,926 ms prepare** with a 1,583 ms stall while loading, 3.14% overall. None of the other five cache runs, nor any no-cache run, came near it; it is not the cache (a hit does less than a miss) and was not chased further.
 - **Memory.** The cache holds, for each bundle of the manifest last prepared, its wrapper document (a few hundred bytes of policy) and its template document, about the bundle's own size: about the manifest's bundle bytes in all (2.26 MB for the 12 templates of this content), within a 4 GB Pi's means and bounded by what one manifest uses. A bundle a newly prepared manifest does not use is dropped then.
+
+## A template's first prepare (issue #232, 2026-11-26)
+
+Where a look-kit template's first prepare after a page load goes, and what reading the bundles still to come while a spot plays (`warmBundles` in `packages/player/src/slot.ts`) changes. Builds served beside the deployed player at `http://localhost:8090/c232/<build>/` with the supervisor stopped while measured, on the static content.
+
+**Where it goes.** A build that timed each stage of `Slot.template`, four page loads a template, each with the HTTP cache and the origin's storage cleared, landscape. Cumulative ms from the prepare's start:
+
+| Template (bundle) | Bundle read | Parse and contain | Wrapper frame loaded | Template frame's `loaded` | `ready` |
+| --- | --- | --- | --- | --- | --- |
+| room-status (402 kB), first prepare | 8-12 | 73-181 | 113-227 | 254-374 | 410-546 |
+| announcement (398 kB), first prepare | 10-13 | 76-128 | 116-197 | 259-347 | 466-552 |
+| clock (73 kB), first prepare | 5-6 | 43-51 | 81-86 | 161-175 | 281-317 |
+| room-status, later prepares in the page | 0 | 0 | 33-37 | 140-152 | 220-237 |
+
+Of the 300 ms or so between a kit template's first prepare and its later ones, the bundle's read and parse (`containedFrames`, cold) is about 200 ms; the rest is the template's frame starting (about 35 ms more to `loaded`) and its first init (about 70 ms more to `ready`: its fonts and first style and layout in a new process). The parse varies run to run, 73 to 213 ms for the same bundle.
+
+**The fix: the bundles still to come are read while a spot plays.** Master (`e27cb4b2`) against the branch. A kit template's first prepare when another spot plays first (a fresh page load each, `clock` then the kit template), ABBA, three loads a build per order in landscape, two in portrait:
+
+| Orientation | Template | Before | After |
+| --- | --- | --- | --- |
+| landscape | room-status | 332-477 ms | 268-316 ms |
+| | announcement | 440-595 ms | 361-391 ms |
+| portrait | room-status | 517-549 ms | 352-381 ms |
+| | announcement | 683-770 ms | 464-484 ms |
+
+`isolate.py 60 cut room-status+announcement+countdown+info-frame`, ABBA, the first cycle's first plays inside the measured minute:
+
+| Orientation | Build | First plays (prepares) | Repeat plays | Overall | Loading next | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | before | 472, 377, 570; 520, 511, 486 | 250-315 | 0.97, 1.08% | 25.0, 27.5% | 0.00, 0.03% | 17, 50 ms |
+| | after | 354, 262, 353; 353, 260, 375 | 250-316 | 0.42, 0.42% | 11.9, 12.6% | 0.03, 0.06% | 50, 67 ms |
+| portrait | before | 575, 322, 505; 616, 282, 479 | 210-394 | 0.89, 0.56% | 22.8, 14.9% | 0.03, 0.00% | 167, 17 ms |
+| | after | 446, 244, 325; 428, 227, 326 | 222-391 | 0.56, 0.33% | 10.5, 10.7% | 0.23, 0.00% | 133, 67 ms |
+
+- **Every first play but the page's first is now within the budget,** and the screen drops half as many frames while the next spot loads: a first play no longer parses its bundle while the spot before it is on screen.
+- **The runs above do not show the read-ahead's cost while it runs** (review of #555): `isolate.py` starts counting 10 s after the page loads, when it is long done. Its one portrait run at 0.23% playing was a single 133 ms frame in steady state, where the read-ahead finds nothing left to read.
+
+**While it runs.** The first seconds after a page load, nothing reset, `room-status+announcement+countdown+info-frame`, cut, landscape, ABBA, three loads a build per order (the read-ahead reads the other three bundles while `room-status` plays, from about 1 s in):
+
+| Build | Player frame monitor, playing (first 12 s) | Its stalls while playing | Presented by the compositor, 1 to 7 s in | Gaps over 50 ms | Worst gap |
+| --- | --- | --- | --- | --- | --- |
+| before | 0.00% in all six | none | 198-209 frames | 8-9 | 500-509 ms |
+| after | 0.42-3.95% | 67-250 ms, one to two a load | 196-207 frames | 8-9 | 500-502 ms |
+
+- **Each bundle's read and parse is one task of about 65 to 250 ms on the player page's main thread**, started when it is idle but not cut into pieces. The player's own frame monitor (a `requestAnimationFrame` loop on that thread) counts it as dropped `play` frames, in the first seconds after a page load or a new manifest.
+- **The compositor presented the same frames either way** (a `viz` trace, `Display::DrawAndSwap`): the template draws in its own process, and the player page draws nothing while a spot plays. These templates hold still between their animations, so the compositor presents only on a change, which is why the counts sit near 200 in 6 s; the gaps and the worst gap are the templates' own cadence, the same in both builds. So the stalls are the monitor's, not the panel's.
+- **A prepare that starts while a read runs waits for it**: a spot of about 5 s or less, whose successor loads at once. Running `containedFrames` in a worker would take it off the main thread; not done here.
+- **The page's first prepare is unchanged** (no spot plays before it to read ahead under): a kit template as the first spot after a page load took 432-558 ms before (one 948) and 455-542 ms after, landscape and portrait together. That is the cold-start cost left: its bundle's first parse and a new template process. Its bundle could be smaller (only the chosen look's fonts, as separate resources; a look-kit change, #232), and the parse itself is the containment check, which this does not touch.

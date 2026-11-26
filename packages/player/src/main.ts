@@ -69,7 +69,7 @@ import { activeOverride, savedOverride, setOverride, wakeable } from './override
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retractPlay } from './plays';
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
-import { Slot } from './slot';
+import { Slot, warmBundles } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
@@ -403,6 +403,9 @@ const playback = new Playback({
     played(step, manifestId, at) {
       preview?.played(manifestId, step.spot.id);
       state.played++;
+      // While it plays, read the bundles still to come, the playlist's next spots first (#232).
+      const items = step.playlist.items.map((i) => i.spot);
+      if (playback.manifest?.id === manifestId) warmBundles(playback.manifest, [...items.slice(step.index + 1), ...items.slice(0, step.index)]);
       // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
       lastRecorded = undefined;
       if (SOURCE === 'device' && clock.trusted) {
