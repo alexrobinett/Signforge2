@@ -21,6 +21,11 @@ const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
 
 /** The lead headline at each step, from the look's own size down; past the last, a headline is cut to its lines. */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
+/**
+ * A story without a photo starts a step larger (`--nw-bare-step`, 1.45 in landscape), so it has one step more: 0.55 of
+ * 1.45 is about 0.8, where 1.25's last step was (0.64 of it), so a long headline is cut no sooner than before (review of #629).
+ */
+const BARE_STEPS = [...HEADLINE_STEPS, 0.55];
 
 /** When the first story comes in, after the header (0 ms) and the strip (100 ms): the spec's play-start stagger. */
 const FIRST_AT_MS = 150;
@@ -226,16 +231,25 @@ function fitHeadlines(stories: HTMLElement[]): void {
     return text.offsetTop + text.offsetHeight > h.closest<HTMLElement>('.story')!.clientHeight + 1;
   };
   /**
-   * Over, or a word broken across two lines: `overflow-wrap: anywhere` breaks one wider than the line, and Night's large
-   * steps would show "Thanksgivin / g" (review of #502). A step smaller holds it whole; past the last, the cut below
-   * takes what still will not fit, as it does a word wider than any line, such as a URL.
+   * Over, or holding a word wider than its line, which `overflow-wrap: anywhere` would break mid-word: Night's large
+   * steps showed "Thanksgivin / g" (review of #502). Read with the wrap a browser does on its own, which breaks after a
+   * hyphen or dash, between CJK characters and in a URL, so only a word that cannot fit counts (review of #629). Every
+   * headline is set and read together, so a step costs one layout more, not one a headline.
    */
-  const unfit = (h: HTMLElement) => over(h) || splitsAWord(h);
-  let long = heads.filter(unfit);
-  for (const step of HEADLINE_STEPS.slice(1)) {
-    if (!long.length) return;
-    for (const h of long) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(step));
-    long = long.filter(unfit);
+  const unfit = (hs: HTMLElement[]) => {
+    for (const h of hs) h.style.overflowWrap = 'normal';
+    const wide = hs.map((h) => h.scrollWidth > h.clientWidth + 1);
+    for (const h of hs) h.style.removeProperty('overflow-wrap');
+    return hs.filter((h, i) => wide[i] || over(h));
+  };
+  const stepsOf = (h: HTMLElement) => (h.closest('.story')!.classList.contains('no-photo') ? BARE_STEPS : HEADLINE_STEPS);
+  let long = unfit(heads);
+  for (let k = 1; k < BARE_STEPS.length; k++) {
+    // A headline past its own last step goes on to the cut.
+    const stepping = long.filter((h) => k < stepsOf(h).length);
+    if (!stepping.length) break;
+    for (const h of stepping) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(stepsOf(h)[k]));
+    long = [...long.filter((h) => k >= stepsOf(h).length), ...unfit(stepping)];
   }
   // At the last step a word may still break only because it is wider than the line: left so, as long as it fits.
   long = long.filter(over);
@@ -280,21 +294,6 @@ function fitHeadlines(stories: HTMLElement[]): void {
     }
     return n;
   }
-}
-
-/** Whether a word of `h`'s text is drawn on more than one line (its only child is its text). */
-function splitsAWord(h: HTMLElement): boolean {
-  const text = h.firstChild;
-  if (!text) return false;
-  const range = document.createRange();
-  for (const word of h.textContent!.matchAll(/\S+/g)) {
-    range.setStart(text, word.index);
-    range.setEnd(text, word.index + word[0].length);
-    const rects = [...range.getClientRects()];
-    // Lines by their tops: a word on one line may still give more than one box (a font change, a kerning pair).
-    if (rects.some((r) => Math.abs(r.top - rects[0]!.top) > r.height / 2)) return true;
-  }
-  return false;
 }
 
 /** The longest start of `text`, with "…", that `fits`: a search over its characters. */

@@ -393,6 +393,49 @@ describe('news 2.1 (design D, #476)', () => {
       expect(found).toEqual([]);
     }, 120_000);
 
+  // Review of #629: a line break after a hyphen or a dash, between CJK characters or in a URL is the browser's own
+  // wrap, not a word broken; a headline that fits at the look's size keeps it.
+  const fitting = [
+    'Self-driving cars reach a state-of-the-art milestone',
+    'Council votes—finally—on the riverside park',
+    '東京都が川沿いの新しい公園の計画を発表しました',
+    'Plans online now at nyt.com/x',
+  ];
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a fitting headline with hyphens, dashes, CJK or a URL at the look's own size, beside a photo or without one, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true])
+          for (const title of fitting) {
+            const f = await r.show(
+              { look, items: [0, 1].map((i) => story(i, { title, ...(bare ? { image: undefined } : {}) })) },
+              photos(2, bare ? [0, 1] : []),
+            );
+            const fit = await f.evaluate(() => document.querySelector<HTMLElement>('.story')!.style.getPropertyValue('--fit'));
+            if (fit) found.push(`${look}${bare ? ', no photo' : ''}: ${title} at ${fit}`);
+          }
+      expect(found).toEqual([]);
+    }, 240_000);
+
+  // Review of #629: without a photo a headline starts larger, and has a step more, so a long one is cut no sooner than
+  // 2.1 cut it. 2.1 showed this copy whole in every look but Night, which wraps wide: there it kept 23 words in
+  // landscape and 19 in portrait, and keeps at least as many.
+  const KEPT_IN_2_1 = { landscape: 23, portrait: 19 };
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`cuts a 165-character headline without a photo no sooner than 2.1, in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const title = sentence.repeat(2).slice(0, 165).trim();
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, items: [0, 1].map((i) => story(i, { title, image: undefined })) }, photos(2, [0, 1]));
+        const shown = (await f.evaluate(() => document.querySelector('.story .headline')!.textContent))!;
+        const words = shown.replace(/…$/, '').trim().split(/\s+/).length;
+        if (look === 'night' ? words < KEPT_IN_2_1[orientation] : shown !== title) found.push(`${look}: ${shown}`);
+      }
+      expect(found).toEqual([]);
+    }, 120_000);
+
   it(`takes the feed's summaries at their longest, NEWS_SUMMARY_MAX characters`, () => {
     const items = t().manifest.fields.items;
     expect(items?.type === 'list' && items.item.summary).toMatchObject({ maxLength: NEWS_SUMMARY_MAX });
