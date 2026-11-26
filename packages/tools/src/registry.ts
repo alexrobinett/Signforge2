@@ -21,7 +21,7 @@ import { memberTools } from './members';
 import { pairingTools } from './pairing';
 import { agentDraftTools } from './agent-drafts';
 import { playlistTools } from './playlists';
-import { readTools } from './read';
+import { agentOutputOf, readTools } from './read';
 import { publishRequestTools } from './publish-requests';
 import { publishTools } from './publish';
 import { scheduleTools } from './schedule';
@@ -75,4 +75,7 @@ function build<D extends DataScope>(tools: readonly AnyTool<D>[]): ReadonlyMap<s
 export const TOOLS: readonly AnyTool[] = [...BASE_TOOLS, ...readTools(build(BASE_TOOLS))];
 
 export const registry = build(TOOLS);
+
+/** A tool's output as an agent reads it, its times ISO 8601 (#345): `/mcp`'s results and the drawer's tool outputs. */
+export const agentOutput = agentOutputOf(registry);
 export const platformRegistry = build(PLATFORM_TOOLS);

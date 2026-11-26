@@ -61,7 +61,7 @@ export {
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
-export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
+export { agentOutput, platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
 export { describeInput, isReadType, READ_TOOLS, READ_TYPES, type ReadType, readDescription, readInput, readTypes, servedByRead, toolsOf } from './read';
 export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
@@ -122,5 +122,4 @@ export {
 } from './screen-state';
 export { tally } from './rollout';
 export { orgSettings } from './settings';
-export { agentTimes } from './agent-times';
 export { madeBySpotEditor, reachesScreens, saveDataSourceInput, sourceRefusal } from './data-sources';

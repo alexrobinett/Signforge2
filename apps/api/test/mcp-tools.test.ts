@@ -147,7 +147,7 @@ describe('tools/list', () => {
 describe('tools/call', () => {
   it('answers an output as structured content and as JSON text', () => {
     const output = { playlist: { id: 'pls_1', name: 'Lobby' } };
-    expect(callResult({ ok: true, output })).toEqual({ content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output });
+    expect(callResult({ ok: true, output }, 'no_such_tool', {})).toEqual({ content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output });
   });
 
   it('answers a refusal as a result with isError, its code, message and details', () => {
@@ -159,7 +159,7 @@ describe('tools/call', () => {
       if (result.ok) continue;
       const { error, message, details } = result;
       const refusal = { error, message, ...(details === undefined ? {} : { details }) };
-      expect(callResult(result), error).toEqual({ isError: true, content: [{ type: 'text', text: JSON.stringify(refusal) }], structuredContent: refusal });
+      expect(callResult(result, 'no_such_tool', {}), error).toEqual({ isError: true, content: [{ type: 'text', text: JSON.stringify(refusal) }], structuredContent: refusal });
     }
   });
 });

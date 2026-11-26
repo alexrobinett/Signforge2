@@ -268,6 +268,28 @@ describe('tools', () => {
     expect((await cms.json<{ items: { createdAt: unknown }[] }>()).items[0]?.createdAt).toBe(Date.parse(playlist.createdAt));
   });
 
+  it("converts only the times a schema declares: an audit entry's free-form detail stays as stored, and no number breaks a call (review of #538)", async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
+    const at = Date.UTC(2026, 10, 26, 9);
+    await scoped(env.DB, org.id).auditLog.append({
+      at,
+      actorKind: 'user',
+      actorId: 'usr_iso',
+      clientId: 'cms',
+      action: 'save_spot',
+      detailJson: JSON.stringify({ input: { name: 'Since 1987', since: 1987, endedAt: 1e20 } }),
+    });
+    // `from` as an agent reads times, ISO 8601, or as the CMS gives them, ms.
+    for (const from of [new Date(at - 1000).toISOString(), at - 1000]) {
+      const read = await call(access_token, 'list_audit_log', { action: 'save_spot', from });
+      expect(read?.isError, String(from)).toBeUndefined();
+      expect(read?.structuredContent.entries, String(from)).toEqual([
+        expect.objectContaining({ at: new Date(at).toISOString(), detail: { input: { name: 'Since 1987', since: 1987, endedAt: 1e20 } } }),
+      ]);
+    }
+  });
+
   it('refuses an id or a version the listing no longer spells out (#345): the call checks the input, as invalid_input', async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'screens:manage']);

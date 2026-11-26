@@ -252,6 +252,24 @@ describe('POST /api/agent/chat', () => {
     expect(result.content.match(/<\/data>/g)).toHaveLength(1);
   });
 
+  it("gives the model a free-form value as stored, whatever its keys, and no number breaks the turn (review of #538)", async () => {
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'audit_entry', detail: 'full' } }] }, ANSWER] });
+    await s.scope.auditLog.append({
+      at: Date.UTC(2026, 10, 26, 9),
+      actorKind: 'user',
+      actorId: 'usr_iso',
+      clientId: 'cms',
+      action: 'save_spot',
+      detailJson: JSON.stringify({ input: { name: 'Since 1987', since: 1987, endedAt: 1e20 } }),
+    });
+    const all = await raw(await s.ask());
+    expect(all.at(-1)).toMatchObject({ type: 'RUN_FINISHED' });
+    const result = s.model.asked[1].messages.at(-1).content[0].content;
+    expect(result).toContain('"since":1987');
+    expect(result).toContain('"endedAt":100000000000000000000');
+    expect(result).toContain('"at":"2026-11-26T09:00:00.000Z"');
+  });
+
   it('gives the model every time in a tool output as ISO 8601, never ms (#345)', async () => {
     const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'playlist', detail: 'full' } }] }, ANSWER] });
     await s.scope.playlists.insert({ name: 'Lunch', transitionJson: JSON.stringify({ type: 'cut' }) });

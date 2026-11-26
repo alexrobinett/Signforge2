@@ -3,7 +3,7 @@
  * give, so every tool's listing is tested without a request (test/mcp-tools.test.ts).
  */
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
-import { agentTimes, type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
+import { agentOutput, type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
 
 /** Tools that take something away for good: a person should look before an agent runs them. `takeover` can end one. */
 const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(delete|roll_back_publish|takeover|disconnect)$/;
@@ -53,10 +53,10 @@ export function listedTools(grant: Grant, services: ToolServices): Tool[] {
  * text, or a refusal as a result with `isError`, its code, message and details, which the agent reads
  * and acts on. JSON-RPC errors are only for faults in the protocol itself.
  */
-export function callResult(result: DispatchResult): CallToolResult {
+export function callResult(result: DispatchResult, name: string, input: unknown): CallToolResult {
   if (result.ok) {
-    // Times as an agent reads them, ISO 8601 (#345).
-    const output = agentTimes(result.output);
+    // Times as an agent reads them, ISO 8601 (#345): those the tool's output schema declares.
+    const output = agentOutput(name, input, result.output);
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       ...(isRecord(output) ? { structuredContent: output } : {}),
