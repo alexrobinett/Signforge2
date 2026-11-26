@@ -70,7 +70,7 @@ export class PlayLedger {
     const c = this.s.open.find((x) => x.hour === hour && x.spot === spot);
     if (!c) return;
     c.plays--;
-    c.ms -= ms;
+    c.ms = Math.max(0, c.ms - ms);
     if (c.plays <= 0) this.s.open = this.s.open.filter((x) => x !== c);
   }
 

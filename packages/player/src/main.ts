@@ -336,6 +336,9 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): { sta
   return { started, done };
 }
 
+/** The play the ledger last recorded: only the spot on screen's play can be taken back (`unplayed`). */
+let lastRecorded: { at: number; spot: string; ms: number } | undefined;
+
 /** Where the playback loop reports to the CMS, in preview mode. Set in boot. */
 let preview: Preview | undefined;
 
@@ -399,7 +402,11 @@ const playback = new Playback({
       preview?.played(manifestId, step.spot.id);
       state.played++;
       // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
-      if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
+      lastRecorded = undefined;
+      if (SOURCE === 'device' && clock.trusted) {
+        lastRecorded = { at, spot: step.spot.id, ms: step.spot.durationMs };
+        recordPlay(at, step.spot.id, step.spot.durationMs);
+      }
       state.log.push({
         spot: step.spot.id,
         playlist: step.playlist.id,
@@ -411,7 +418,9 @@ const playback = new Playback({
     },
     unplayed(step, manifestId, at) {
       state.played--;
-      if (SOURCE === 'device' && clock.trusted) retractPlay(at, step.spot.id, step.spot.durationMs);
+      // Only what `played` recorded: the clock may have become trusted since, or the spot changed length.
+      if (lastRecorded?.at === at && lastRecorded.spot === step.spot.id) retractPlay(at, lastRecorded.spot, lastRecorded.ms);
+      lastRecorded = undefined;
       const startedAt = new Date(at).toISOString();
       const i = state.log.findLastIndex((e) => e.spot === step.spot.id && e.manifest === manifestId && e.startedAt === startedAt);
       if (i >= 0) state.log.splice(i, 1);

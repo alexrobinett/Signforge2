@@ -185,6 +185,14 @@ function setup({ preview = false } = {}) {
   return { clock, slots, pins, seen, playback, run, shown };
 }
 
+/** Spots a and b, 10 s each, looping from the start. */
+function playingAB() {
+  const t = setup();
+  t.playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
+  t.run();
+  return t;
+}
+
 describe('playback', () => {
   it('loads the next spot 3 s before the spot on screen ends, and shows it at the end', async () => {
     const { clock, playback, run, shown } = setup();
@@ -381,9 +389,7 @@ describe('playback', () => {
       expect(pins.holders.has('preparing')).toBe(false);
     });
     it('never shows a loaded spot whose turn comes after the display went to sleep', async () => {
-      const { clock, slots, playback, run, shown } = setup();
-      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
-      run();
+      const { clock, slots, playback, shown } = playingAB();
       // b is ready at 7.4 s and waits for a's end at 10.2 s.
       await clock.until(8 * SECOND);
       playback.display(false);
@@ -474,29 +480,41 @@ describe('playback', () => {
       expect(seen.played).toEqual(['a@m1']);
     });
 
-    it('that dies just after each play counts, on a cut, pauses after three in a row and counts none (#528)', async () => {
-      const { clock, slots, seen, playback, run, shown } = setup();
-      // A template that navigates as it plays: its death lands just after its play counted.
-      const played = slots.show.bind(slots);
-      slots.show = (slot, prev, transition) => {
-        const r = played(slot, prev, transition);
-        clock.after(1, () => playback.died(slot, 'a: template navigated away'));
+    // A template that dies `afterMs` into each play, whatever its length: its death lands after its play counted.
+    const diesEvery = (afterMs: number, length: number) => {
+      const t = setup();
+      const show = t.slots.show.bind(t.slots);
+      t.slots.show = (slot, prev, transition) => {
+        const r = show(slot, prev, transition);
+        t.clock.after(afterMs, () => t.playback.died(slot, 'a: template navigated away'));
         return r;
       };
-      playback.adopt(manifest('m1', [spot('a', HOUR)]));
-      run();
+      t.playback.adopt(manifest('m1', [spot('a', length)]));
+      t.run();
+      return t;
+    };
+
+    // However long the spot, and whenever in it the death comes: none in the last 3 s is safe (#528).
+    it.each([
+      ['an hour', HOUR, 1],
+      ['3 s', 3 * SECOND, 1],
+      ['1 s', SECOND, 1],
+      ['800 ms', 800, 1],
+      ['10 s, dying at 7001 ms', 10 * SECOND, 7001],
+    ])('that dies after each play counts, %s long, on a cut, pauses after three in a row and counts none', async (_, length, afterMs) => {
+      const { clock, seen, shown } = diesEvery(afterMs, length);
       await clock.until(MINUTE);
-      // Three plays, each dying 1 ms in; the third death (603) pauses for 5 s; then three more, and so on.
-      expect(shown().slice(0, 4)).toEqual(['a@m1 200', 'a@m1 401', 'a@m1 602', `a@m1 ${603 + 5 * SECOND + PREPARE_MS}`]);
+      const at = shown().map((s) => Number(s.split(' ')[1]));
+      // Three plays, then the pause: 5 s between the third death and the next load.
+      expect(at[3]! - at[2]!).toBeGreaterThanOrEqual(afterMs + 5 * SECOND);
       expect(seen.status).toContain('SignForge\nContent is unavailable. Retrying…');
-      expect(shown().length).toBeLessThan(40);
-      expect(seen.played).toEqual([]);
+      // None stands, but the play on screen at the minute, if its death is still to come.
+      expect(seen.played.length).toBeLessThanOrEqual(1);
+      expect(at.length).toBeLessThan(40);
     });
 
     it('underneath, is never shown, and the spot on screen plays its full length', async () => {
-      const { clock, seen, playback, run, shown } = setup();
-      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
-      run();
+      const { clock, seen, playback, shown } = playingAB();
       // b loads into slot 0 from 7.2 s and is ready at 7.4 s.
       await clock.until(8 * SECOND);
       playback.died(0, 'b: refit failed: not ready within 2000 ms');
@@ -542,6 +560,55 @@ describe('playback', () => {
       await clock.until(2 * MINUTE);
       expect(slots.log).toContain(`${MINUTE + 100} update 1 a@m2`);
       expect(shown()).toEqual(['a@m1 200']);
+    });
+
+    it('as the outgoing spot of a crossfade, changes nothing: it has played its turn', async () => {
+      const { clock, seen, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)], { transition: { type: 'crossfade', ms: 600 } }));
+      run();
+      // b comes on at 9.6 s in slot 0, over a in slot 1, which fades out until 10.2 s.
+      await clock.until(9900);
+      playback.died(1, 'a: template navigated away');
+      await clock.until(15 * SECOND);
+      expect(seen.skipped).toEqual([]);
+      expect(seen.played).toEqual(['a@m1', 'b@m1']);
+      expect(shown()).toEqual(['a@m1 200', 'b@m1 9600']);
+    });
+
+    describe('a display sleep ends the turn of the spot on screen (#528)', () => {
+      const url = (id: string, durationMs: number): Spot => ({ id, name: id, kind: 'url', url: `https://${id}.test/`, durationMs });
+
+      it('so a manifest whose only working spot is a URL does not fall back on waking', async () => {
+        const { clock, slots, seen, playback, run, shown } = setup();
+        slots.failing.add('x');
+        playback.restore(manifest('m0', [spot('g', HOUR)]));
+        playback.adopt(manifest('m1', [spot('x', MINUTE), url('u', MINUTE)]));
+        run();
+        await clock.until(30 * SECOND);
+        expect(shown()).toEqual(['u@m1 400']);
+        playback.display(false);
+        await clock.until(40 * SECOND);
+        playback.display(true);
+        await clock.until(2 * MINUTE);
+        expect(seen.fellBack).toEqual([]);
+        expect(shown()[1]).toMatch(/^u@m1 /);
+      });
+
+      it('so failures before and after it are not one run', async () => {
+        const { clock, slots, seen, playback, run, shown } = setup();
+        slots.failing.add('x');
+        slots.failing.add('y');
+        playback.adopt(manifest('m1', [spot('x', MINUTE), spot('y', MINUTE), spot('a', MINUTE)]));
+        run();
+        await clock.until(30 * SECOND);
+        expect(shown()).toEqual(['a@m1 600']);
+        playback.display(false);
+        await clock.until(40 * SECOND);
+        playback.display(true);
+        await clock.until(MINUTE + 30 * SECOND);
+        expect(seen.status).not.toContain('SignForge\nContent is unavailable. Retrying…');
+        expect(shown()[1]).toMatch(/^a@m1 /);
+      });
     });
   });
 });
