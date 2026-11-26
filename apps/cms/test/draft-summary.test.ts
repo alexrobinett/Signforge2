@@ -5,39 +5,13 @@ import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
 import type { ProposedCall } from '@signforge/api/agent-chat';
 import { type DraftContext, type DraftSummary, summarize as summarizeOrNot } from '../src/lib/draft-summary';
-import type { ScheduleEntryView } from '../src/lib/schedule';
+import { scheduleEntry as entry } from './schedule-entry';
 
 const FIELDS: Record<string, FieldDef> = {
   headline: { type: 'text', label: 'Headline' },
   look: { type: 'select', label: 'Look', options: ['day', 'night'], default: 'day' },
   qrUrl: { type: 'url', label: 'QR code link', default: '' },
 };
-
-const entry = (id: string, over: Partial<ScheduleEntryView>): ScheduleEntryView => ({
-  id,
-  playlistId: 'pls_main',
-  target: 'org',
-  groupId: null,
-  screenId: null,
-  priority: 0,
-  startDate: null,
-  endDate: null,
-  days: null,
-  from: null,
-  to: null,
-  startsAt: null,
-  endsAt: null,
-  takeover: false,
-  deleted: false,
-  live: null,
-  version: 1,
-  published: false,
-  draftChanged: true,
-  publishedAt: null,
-  createdAt: 0,
-  updatedAt: 0,
-  ...over,
-});
 
 const screen = (id: string, name: string) => ({ id, name, timezone: 'UTC' });
 const CONTEXT: DraftContext = {

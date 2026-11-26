@@ -1,0 +1,1 @@
+ALTER TABLE `publishes` ADD `targets_json` text;

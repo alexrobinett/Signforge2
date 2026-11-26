@@ -4,7 +4,7 @@
 // own rows, so a check on one id cannot hide a missing check on another. A new tool is covered as
 // soon as it is registered; a new kind of id field fails here until it is mapped below.
 import { scoped, startPairing } from '@signforge/db';
-import { seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
+import { ORG_ROW_IDS, seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -20,31 +20,10 @@ const FILES = {
 
 /** An org's row for each kind of id a tool input can name (`screenId` → `screen`). */
 const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
-  screen: (o) => o.screen,
-  group: (o) => o.group,
-  credential: (o) => o.credential,
+  ...ORG_ROW_IDS,
   manifest: (o) => files(o).manifest,
-  template: (o) => o.template,
-  templateVersion: (o) => o.templateVersion,
-  spot: (o) => o.templateSpot,
-  playlist: (o) => o.playlist,
-  scheduleEntry: (o) => o.scheduleEntry,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
-  asset: (o) => o.asset,
-  brandKit: (o) => o.brandKit,
-  logoOnDarkAsset: (o) => o.asset,
-  logoOnLightAsset: (o) => o.asset,
-  dataSource: (o) => o.dataSource,
-  alertDelivery: (o) => o.alertDelivery,
-  connection: (o) => o.connection,
-  publish: (o) => o.publish,
-  // An agent grant (M4-07's tools): `grantId`.
-  grant: (o) => o.agentGrant,
-  publishRequest: (o) => o.publishRequest,
-  // Better Auth's rows, as seedTeam names them.
-  member: (o) => `${o.orgId}-member`,
-  invitation: (o) => `${o.orgId}-invitation`,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 
@@ -81,7 +60,8 @@ function idFields(schema: unknown, path: string[] = []): IdField[] {
   };
   if (MATCHED_ONLY.has(path.at(-1) ?? '')) return [];
   if (s.anyOf) return s.anyOf.flatMap((b) => idFields(b, path));
-  if (s.items?.properties && idFields(s.items, path).length) throw new Error(`${path.join('.')}: ids inside a list of objects; teach idFields to reach them`);
+  // A list of objects (import_screen_labels' screens): each id in it reached through the list's first item, `0`.
+  if (s.items?.properties) return idFields(s.items, [...path, '0']);
   // A record's values (a spot's bindings by field name): `*` stands for any key, and REACHED_BY gives the input.
   if (typeof s.additionalProperties === 'object') return idFields(s.additionalProperties, [...path, '*']).map((f) => ({ ...f, optional: true }));
   return Object.entries(s.properties ?? {}).flatMap(([key, prop]) => {
@@ -99,7 +79,8 @@ const unique = (fields: IdField[]) => [...new Map(fields.map((f) => [f.path.join
 /** A copy of `v` with `value` at `path` (undefined removes it). */
 function setPath(v: unknown, path: string[], value: unknown): unknown {
   const [key, ...rest] = path;
-  const obj = { ...((v ?? {}) as Record<string, unknown>) };
+  // A list's item, by its place: the list copied as a list.
+  const obj = (/^\d+$/.test(key!) ? [...(Array.isArray(v) ? v : [])] : { ...(v ?? {}) }) as Record<string, unknown>;
   if (rest.length) obj[key!] = setPath(obj[key!], rest, value);
   else if (value === undefined) delete obj[key!];
   else obj[key!] = value;

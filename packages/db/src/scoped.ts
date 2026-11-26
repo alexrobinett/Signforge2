@@ -938,8 +938,9 @@ export function scoped(d1: D1Database, orgId: string) {
           /**
            * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless what a smart group's rule reads
            * is as read (#186, review of #608): the labels of its `keys` (`rows`, those read), and, when it names a system
-           * label, each screen's settings it comes from (`screens`). A label of another key edited meanwhile changes
-           * nothing the rule reads, and does not refuse it.
+           * label or has a `missing` term (a screen claimed meanwhile has no labels, so it matches), the screens and the
+           * settings system labels come from (`screens`). A label of another key edited meanwhile changes nothing the rule
+           * reads, and does not refuse it.
            */
           are: (
             keys: readonly string[],
@@ -1012,6 +1013,45 @@ export function scoped(d1: D1Database, orgId: string) {
                 .where(eq(s.organization.id, orgId)),
             );
             return staged(undefined, ...queries);
+          },
+          /**
+           * Each screen its own merge (#188, a CSV import): a key in its `set` takes that value, a key in its `remove`
+           * goes, its other labels stay. Written as one batch, so all of it lands or none, with the same limit check as
+           * `update`. Throws `NotInOrgError` if a screen is not the org's. Three statements however many screens: the
+           * changes go as JSON.
+           */
+          each: async (changes: readonly { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] }[]): Promise<Staged> => {
+            const ids = await orgScreens(changes.map((c) => c.screenId));
+            const idsJson = JSON.stringify(ids);
+            const gone = JSON.stringify(changes.flatMap((c) => c.remove.map((k) => [c.screenId, k])));
+            const set = JSON.stringify(changes.flatMap((c) => Object.entries(c.set).map(([k, v]) => [c.screenId, k, v])));
+            const sc = s.screens;
+            const now = Date.now();
+            const crowded = sql`EXISTS (SELECT 1 FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.screenId} IN (SELECT value FROM json_each(${idsJson})) GROUP BY ${sl.screenId} HAVING count(*) > ${LABEL_LIMITS.perScreen})`;
+            const keys = sql`(SELECT count(DISTINCT ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId})`;
+            return staged(
+              undefined,
+              db
+                .delete(sl)
+                .where(
+                  and(
+                    eq(sl.orgId, orgId),
+                    sql`EXISTS (SELECT 1 FROM json_each(${gone}) AS g WHERE json_extract(g.value, '$[0]') = ${sl.screenId} AND json_extract(g.value, '$[1]') = ${sl.key})`,
+                  ),
+                ),
+              db
+                .insert(sl)
+                // The table's columns in order: org, screen, key, value, created_at. Only the org's screens are joined.
+                .select(
+                  sql`SELECT ${sc.orgId}, ${sc.id}, json_extract(r.value, '$[1]'), json_extract(r.value, '$[2]'), ${now} FROM json_each(${set}) AS r
+                      JOIN ${sc} ON ${sc.orgId} = ${orgId} AND ${sc.id} = json_extract(r.value, '$[0]')`,
+                )
+                .onConflictDoUpdate({ target: [sl.orgId, sl.screenId, sl.key], set: { value: sql`excluded.value` } }),
+              db
+                .select({ ok: sql`json(CASE WHEN ${crowded} OR ${keys} > ${LABEL_LIMITS.keys} THEN 'over a label limit' ELSE '1' END)` })
+                .from(s.organization)
+                .where(eq(s.organization.id, orgId)),
+            );
           },
         },
       },
@@ -1096,14 +1136,16 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       membership: async () => {
         const g = s.screenGroups;
-        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null }>(sql`
-            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson FROM ${m} WHERE ${m.orgId} = ${orgId}
+        // Every group's own row too, with its name: what a publish records it reached (#187), in the same statement.
+        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null; name: string | null }>(sql`
+            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson, NULL AS name FROM ${m} WHERE ${m.orgId} = ${orgId}
             UNION ALL
-            SELECT ${g.id}, NULL, ${g.selectorJson} FROM ${g} WHERE ${g.orgId} = ${orgId} AND ${g.selectorJson} IS NOT NULL
+            SELECT ${g.id}, NULL, ${g.selectorJson}, ${g.name} FROM ${g} WHERE ${g.orgId} = ${orgId}
             ORDER BY 1, 2`);
         return {
           members: rows.flatMap((r) => (r.screenId === null ? [] : [{ groupId: r.groupId, screenId: r.screenId }])),
           rules: rows.flatMap((r) => (r.selectorJson === null ? [] : [{ id: r.groupId, selectorJson: r.selectorJson }])),
+          groups: rows.flatMap((r) => (r.name === null ? [] : [{ id: r.groupId, name: r.name }])),
         };
       },
       /** Every membership in the org, by group then screen. */
@@ -1937,12 +1979,15 @@ export function scoped(d1: D1Database, orgId: string) {
        * the whole address, #253), for a roll back the revision it went back to, and its rollout's
        * `rolloutCounts`, read after the page: a publish's screens commit with it.
        */
-      history: async ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
+      history: async ({ beforeRevision, limit, targets = false }: { beforeRevision?: number; limit: number; targets?: boolean }) => {
         const p = s.publishes;
         const restored = alias(s.publishes, 'restored');
+        // A publish's record of whom it reached (#187) only when asked (`targets`, one publish's page): a page of them would be large.
+        const { targetsJson, ...columns } = getTableColumns(p);
         const page = await db
           .select({
-            ...getTableColumns(p),
+            ...columns,
+            targetsJson: targets ? targetsJson : sql<string | null>`NULL`,
             actorName: sql<string | null>`coalesce(nullif(${s.user.name}, ''), substr(${s.user.email}, 1, instr(${s.user.email}, '@') - 1))`,
             restoresRevision: restored.revision,
           })
@@ -1975,6 +2020,17 @@ export function scoped(d1: D1Database, orgId: string) {
           .limit(1)
           .get();
       },
+      /** The latest publish's record of whom its groups reached, skipping roll backs: what the next publish is compared with (#187). */
+      lastTargets: async () =>
+        (
+          await db
+            .select({ t: s.publishes.targetsJson })
+            .from(s.publishes)
+            .where(and(eq(s.publishes.orgId, orgId), isNotNull(s.publishes.targetsJson)))
+            .orderBy(desc(s.publishes.revision))
+            .limit(1)
+            .get()
+        )?.t ?? null,
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>
         db
