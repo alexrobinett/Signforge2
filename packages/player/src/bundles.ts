@@ -80,6 +80,9 @@ function start(): Worker | null {
   }
 }
 
+/** How many times a worker has hung in this page's life: `window.__sf.bundleHangs`, so a Pi run can show none (#577). */
+export const bundleHangs = (): number => hangs;
+
 /** `containedFrames` of `bundle`'s text, in the worker; on the page where there is none. Rejects as `containedFrames` throws. */
 export function parseBundle(bundle: Blob): Promise<Frames> {
   if (worker === undefined) worker = start();
