@@ -1863,6 +1863,29 @@ describe('photos stored after their poll', () => {
 });
 
 describe('photos switched off', () => {
+  /** Runs `during` while a poll at `at` is held inside its RSS fetch, then lets the poll finish. */
+  async function whilePollFetches(at: number, guards: FetchGuards, during: () => Promise<void>) {
+    const fetching = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const inFlight = poll({
+      now: at,
+      guards: {
+        ...guards,
+        fetch: async (input, init) => {
+          fetching.resolve();
+          await resume.promise;
+          return guards.fetch(input, init);
+        },
+      },
+    });
+    await fetching.promise;
+    try {
+      await during();
+    } finally {
+      resume.resolve();
+      await inFlight;
+    }
+  }
   const setPhotos = (dataSourceId: string, photos: boolean) =>
     dispatch(
       registry,
@@ -1904,26 +1927,9 @@ describe('photos switched off', () => {
     expect((await row(url))?.fileSha256).toBeTruthy();
 
     const at = NOW + 5 * MIN;
-    const fetching = Promise.withResolvers<void>();
-    const resume = Promise.withResolvers<void>();
-    const inFlight = poll({
-      now: at,
-      guards: {
-        ...rss.guards,
-        fetch: async (input, init) => {
-          fetching.resolve();
-          await resume.promise;
-          return rss.guards.fetch(input, init);
-        },
-      },
-    });
-    await fetching.promise;
-    try {
+    await whilePollFetches(at, rss.guards, async () => {
       expect(await setPhotos(id, false)).toMatchObject({ ok: true });
-    } finally {
-      resume.resolve();
-      await inFlight;
-    }
+    });
     const afterRace = await o.scope.dataSources.get(id);
     const afterSnapshot = await o.scope.dataSources.snapshots([id]);
     await poll({ now: at + 5 * MIN, guards: rss.guards });
@@ -1955,29 +1961,12 @@ describe('photos switched off', () => {
           : { body, headers: { etag: '"story"', 'last-modified': 'Fri, 20 Nov 2026 23:00:00 GMT' } },
     });
     const at = NOW + 5 * MIN;
-    const fetching = Promise.withResolvers<void>();
-    const resume = Promise.withResolvers<void>();
-    const inFlight = poll({
-      now: at,
-      guards: {
-        ...rss.guards,
-        fetch: async (input, init) => {
-          fetching.resolve();
-          await resume.promise;
-          return rss.guards.fetch(input, init);
-        },
-      },
-    });
-    await fetching.promise;
-    try {
+    await whilePollFetches(at, rss.guards, async () => {
       expect(await setPhotos(id, true)).toMatchObject({ ok: true });
       await poll({ now: at + MIN, guards: rss.guards });
       expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
       expect(await setPhotos(id, false)).toMatchObject({ ok: true });
-    } finally {
-      resume.resolve();
-      await inFlight;
-    }
+    });
     const afterRace = await o.scope.dataSources.get(id);
     const [afterSnapshot] = await o.scope.dataSources.snapshots([id]);
     await poll({ now: at + 5 * MIN, guards: rss.guards });
