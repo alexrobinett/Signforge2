@@ -36,7 +36,8 @@ test('a removal moves focus into its confirmation, Keep it puts it back on Remov
 }) => {
   await signInAs(page, `e2e-confirm-focus-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Harbour Lights Deli', ADDRESS);
-  await tool(page, 'set_webhook_alert_channel', {
+  await tool(page, 'set_alert_channel', {
+    kind: 'webhook',
     webhookUrl: 'https://ops.example.com/hooks/signforge',
     signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD',
   });

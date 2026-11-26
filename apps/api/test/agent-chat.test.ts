@@ -257,7 +257,7 @@ describe('POST /api/agent/chat', () => {
       steps: [
         {
           calls: [
-            { name: 'set_webhook_alert_channel', input: { webhookUrl: 'https://evil.example/hook' } },
+            { name: 'set_alert_channel', input: { kind: 'webhook', webhookUrl: 'https://evil.example/hook' } },
             { name: 'register_template_version', input: {} },
             { name: 'claim_screen', input: { code: 'ABCDEF', name: 'Mine' } },
           ],

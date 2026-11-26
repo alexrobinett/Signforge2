@@ -69,8 +69,8 @@ async function orgWithChannels() {
   const org = { ...(await owner.createOrg(name)), name };
   const slackUrl = `https://hooks.slack.com/services/T0ORG${n}/B0ORG${n}/secretpart${n}`;
   const webhookUrl = `https://ops${n}.example.com/hooks/sf?key=k${n}`;
-  await owner.ok('/api/tools/set_slack_alert_channel', { webhookUrl: slackUrl });
-  await owner.ok('/api/tools/set_webhook_alert_channel', { webhookUrl, signingSecret: SECRET });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'slack', webhookUrl: slackUrl });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'webhook', webhookUrl, signingSecret: SECRET });
   await owner.ok('/api/tools/update_org_settings', { alerts: { screen_offline: { slack: true, webhook: true } } });
   return { owner, org, slackUrl, webhookUrl, outbox: t.outbox };
 }

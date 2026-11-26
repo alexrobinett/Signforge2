@@ -38,7 +38,7 @@ async function orgWith(names: string[], now: number) {
   await owner.signIn(email(`rollout-${n}`));
   const org = await owner.createOrg(`Rollout ${n}`);
   const webhookUrl = `https://ops${n}.example.com/hooks/sf`;
-  await owner.ok('/api/tools/set_webhook_alert_channel', { webhookUrl, signingSecret: SECRET });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'webhook', webhookUrl, signingSecret: SECRET });
   await owner.ok('/api/tools/update_org_settings', { alerts: { publish_finished: { webhook: true } } });
   const o = testScope(env.DB, org.id);
   const screens: Record<string, { id: string; credential: string }> = {};

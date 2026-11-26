@@ -189,4 +189,22 @@ describe('describe', () => {
       expect(await dispatch(registry, 'describe', { type }, as('owner')), type).toMatchObject({ ok: true });
     }
   });
+
+  it("gives a type's rules, the reference text no tool's description carries (#345): rollout states, which entry wins, the video spec", async () => {
+    const rules = async (type: string) => {
+      const r = await dispatch(registry, 'describe', { type }, as('owner'));
+      return r.ok ? (r.output as { rules: string | null }).rules : undefined;
+    };
+    expect(await rules('publish')).toContain('fell_back');
+    expect(await rules('schedule_entry')).toContain('the highest priority wins');
+    expect(await rules('asset')).toContain('H.264');
+    expect(await rules('screen')).toBeNull();
+    for (const [name, text] of [
+      ['get_publish', 'fell_back'],
+      ['save_schedule_entry', 'highest priority'],
+      ['start_takeover', 'starts later'],
+      ['start_upload', 'H.264'],
+    ] as const)
+      expect(registry.get(name)?.description, name).not.toContain(text);
+  });
 });

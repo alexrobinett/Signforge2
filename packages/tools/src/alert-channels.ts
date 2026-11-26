@@ -148,37 +148,10 @@ const getAlertChannels = defineTool({
   },
 });
 
-const setSlackAlertChannel = defineTool({
-  name: 'set_slack_alert_channel',
+const setAlertChannel = defineTool({
+  name: 'set_alert_channel',
   description:
-    "Post the organization's alerts to a Slack channel, through an incoming webhook made in Slack for that channel; owners only. Replaces the one set before. Which alerts go there is each alert rule's slack (update_org_settings). Pass the version you read as ifVersion to replace only that one. Returns { channel }.",
-  scope: 'org:manage',
-  minRole: 'owner',
-  mutates: true,
-  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
-  people: true,
-  needs: ['alertSecrets'],
-  input: z.object({ webhookUrl: slackWebhookUrl, ifVersion }),
-  output: outputs.set_slack_alert_channel,
-  example: { webhookUrl: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX' },
-  target: () => channelTarget('slack'),
-  handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
-    const urlEncrypted = await alertSecrets.seal({ orgId: org.orgId, kind: 'slack' }, 'url', input.webhookUrl);
-    const row = write(
-      await org.alertChannels.stage.put(
-        'slack',
-        { host: new URL(input.webhookUrl).hostname, urlEncrypted, secretEncrypted: null, secretSetAt: null, connectedBy: actor.id },
-        input.ifVersion,
-      ),
-    );
-    return { channel: viewOf(row) };
-  },
-});
-
-const setWebhookAlertChannel = defineTool({
-  name: 'set_webhook_alert_channel',
-  description:
-    "Send the organization's alerts to an outgoing webhook: each is POSTed as JSON ({ type, id, occurredAt, org, data }) signed with HMAC-SHA256 under your signing secret, and retried for up to 24 hours while it fails; owners only. A new webhook needs webhookUrl and signingSecret; afterwards give either to change it alone (a new signingSecret rotates it). The secret is never shown again. Pass the version you read as ifVersion to change only that one. Returns { channel }.",
+    "Send the organization's alerts to a channel besides email; owners only. kind slack: a Slack channel, through an incoming webhook made in Slack for it (webhookUrl); it replaces the one set before. kind webhook: an outgoing webhook, each alert POSTed as JSON ({ type, id, occurredAt, org, data }) signed with HMAC-SHA256 under your signing secret, and retried for up to 24 hours while it fails; a new one needs webhookUrl and signingSecret, and afterwards either changes it alone (a new signingSecret rotates it). Secrets are never shown again. Which alerts go to each is each alert rule's (update_org_settings). Pass the version you read as ifVersion to change only that one. Returns { channel }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -186,21 +159,48 @@ const setWebhookAlertChannel = defineTool({
   people: true,
   needs: ['alertSecrets'],
   input: z
-    .object({ webhookUrl: outgoingUrl.optional(), signingSecret: signingSecret.optional(), ifVersion })
-    .refine((v) => v.webhookUrl !== undefined || v.signingSecret !== undefined, 'nothing to change'),
-  output: outputs.set_webhook_alert_channel,
-  example: { webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
-  target: () => channelTarget('webhook'),
+    .strictObject({
+      kind: z.enum(ALERT_CHANNEL_KINDS),
+      webhookUrl: z.string().max(2048).optional().describe("slack: the incoming webhook's URL; webhook: the URL alerts are POSTed to"),
+      signingSecret: signingSecret.optional(),
+      ifVersion,
+    })
+    .superRefine((v, ctx) => {
+      if (v.kind === 'slack' && v.signingSecret !== undefined)
+        ctx.addIssue({ code: 'custom', path: ['signingSecret'], message: 'a Slack channel takes no signing secret' });
+      if (v.kind === 'slack' && v.webhookUrl === undefined)
+        ctx.addIssue({ code: 'custom', path: ['webhookUrl'], message: 'a Slack channel needs its webhookUrl' });
+      if (v.kind === 'webhook' && v.webhookUrl === undefined && v.signingSecret === undefined) ctx.addIssue({ code: 'custom', message: 'nothing to change' });
+      if (v.webhookUrl === undefined) return;
+      // Each kind's own rules for its URL: Slack's host, or a public https address.
+      const checked = (v.kind === 'slack' ? slackWebhookUrl : outgoingUrl).safeParse(v.webhookUrl);
+      for (const issue of checked.error?.issues ?? []) ctx.addIssue({ code: 'custom', path: ['webhookUrl'], message: issue.message });
+    }),
+  output: outputs.set_alert_channel,
+  example: { kind: 'webhook', webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
+  target: (input) => channelTarget(input.kind),
   handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
-    const current = await org.alertChannels.get('webhook');
-    const seal = (field: 'url' | 'secret', value: string) => alertSecrets.seal({ orgId: org.orgId, kind: 'webhook' }, field, value);
+    const { kind } = input;
+    const seal = (field: 'url' | 'secret', value: string) => alertSecrets.seal({ orgId: org.orgId, kind }, field, value);
+    const current = kind === 'webhook' ? await org.alertChannels.get('webhook') : undefined;
     const url = input.webhookUrl ? { host: new URL(input.webhookUrl).hostname, urlEncrypted: await seal('url', input.webhookUrl) } : current;
-    const secret = input.signingSecret ? { secretEncrypted: await seal('secret', input.signingSecret), secretSetAt: Date.now() } : current;
-    if (!url || !secret?.secretEncrypted) throw new ToolError('invalid_input', 'a new webhook needs both webhookUrl and signingSecret');
+    const secret =
+      kind === 'slack'
+        ? { secretEncrypted: null, secretSetAt: null }
+        : input.signingSecret
+          ? { secretEncrypted: await seal('secret', input.signingSecret), secretSetAt: Date.now() }
+          : current;
+    if (!url || (kind === 'webhook' && !secret?.secretEncrypted)) throw new ToolError('invalid_input', 'a new webhook needs both webhookUrl and signingSecret');
     const row = write(
       await org.alertChannels.stage.put(
-        'webhook',
-        { host: url.host, urlEncrypted: url.urlEncrypted, secretEncrypted: secret.secretEncrypted, secretSetAt: secret.secretSetAt, connectedBy: actor.id },
+        kind,
+        {
+          host: url.host,
+          urlEncrypted: url.urlEncrypted,
+          secretEncrypted: secret?.secretEncrypted ?? null,
+          secretSetAt: secret?.secretSetAt ?? null,
+          connectedBy: actor.id,
+        },
         input.ifVersion,
       ),
     );
@@ -317,12 +317,4 @@ const retryAlertDelivery = defineTool({
   },
 });
 
-export const alertChannelTools = [
-  getAlertChannels,
-  setSlackAlertChannel,
-  setWebhookAlertChannel,
-  removeAlertChannel,
-  testAlertChannel,
-  listAlertDeliveries,
-  retryAlertDelivery,
-];
+export const alertChannelTools = [getAlertChannels, setAlertChannel, removeAlertChannel, testAlertChannel, listAlertDeliveries, retryAlertDelivery];

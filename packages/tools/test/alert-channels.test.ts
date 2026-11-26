@@ -33,7 +33,7 @@ beforeAll(async () => {
 describe('alert channels', () => {
   it('sets a Slack webhook, sealed, showing only its host', async () => {
     expect(await call('get_alert_channels', {}, 'viewer')).toMatchObject({ ok: true, output: { slack: null, webhook: null } });
-    const set = await call('set_slack_alert_channel', { webhookUrl: SLACK });
+    const set = await call('set_alert_channel', { kind: 'slack', webhookUrl: SLACK });
     expect(set).toMatchObject({
       ok: true,
       output: { channel: { kind: 'slack', host: 'hooks.slack.com', connectedBy: 'user-owner', secretSetAt: null, version: 1 } },
@@ -51,21 +51,43 @@ describe('alert channels', () => {
       'http://hooks.slack.com/services/T1/B1/x',
       'https://example.com/services/T1/B1/x',
     ])
-      expect(await call('set_slack_alert_channel', { webhookUrl }), webhookUrl).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect(await call('set_alert_channel', { kind: 'slack', webhookUrl }), webhookUrl).toMatchObject({ ok: false, error: 'invalid_input' });
+  });
+
+  it("refuses what the other kind takes, each URL by its own kind's rules, and is found under the setter it replaced (#345)", async () => {
+    const paths = async (input: Record<string, unknown>) => {
+      const r = await call('set_alert_channel', input);
+      if (r.ok) throw new Error('set');
+      return (r.details as { path: string }[]).map((d) => d.path);
+    };
+    expect(await paths({ kind: 'slack', webhookUrl: SLACK, signingSecret: SECRET })).toEqual(['signingSecret']);
+    expect(await paths({ kind: 'slack' })).toEqual(['webhookUrl']);
+    expect(await paths({ kind: 'slack', webhookUrl: 'https://ops.example.com/hooks/sf' })).toEqual(['webhookUrl']);
+    expect(await paths({ kind: 'webhook', webhookUrl: 'http://ops.example.com/hooks/sf', signingSecret: SECRET })).toEqual(['webhookUrl']);
+    expect(await call('set_alert_channel', { kind: 'slack', webhookUrl: SLACK })).toMatchObject({ ok: true });
+    const found = async (action: string) => {
+      const r = await call('list_audit_log', { action });
+      return r.ok ? (r.output as { entries: { action: string; detail: { input: { kind: string } } }[] }).entries.map((e) => e.detail.input.kind) : [];
+    };
+    expect(new Set(await found('set_slack_alert_channel'))).toEqual(new Set(['slack']));
+    expect(await found('set_webhook_alert_channel')).not.toContain('slack');
   });
 
   it('sets a webhook with its signing secret, rotates the secret alone, and never shows or audits either', async () => {
-    expect(await call('set_webhook_alert_channel', { webhookUrl: 'https://ops.example.com/hooks/sf' })).toMatchObject({ ok: false, error: 'invalid_input' });
-    const set = await call('set_webhook_alert_channel', { webhookUrl: 'https://ops.example.com/hooks/sf?token=abc', signingSecret: SECRET });
+    expect(await call('set_alert_channel', { kind: 'webhook', webhookUrl: 'https://ops.example.com/hooks/sf' })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+    const set = await call('set_alert_channel', { kind: 'webhook', webhookUrl: 'https://ops.example.com/hooks/sf?token=abc', signingSecret: SECRET });
     expect(set).toMatchObject({ ok: true, output: { channel: { kind: 'webhook', host: 'ops.example.com', version: 1 } } });
     const first = await scoped(env.DB, o.orgId).alertChannels.get('webhook');
 
-    const rotated = await call('set_webhook_alert_channel', { signingSecret: SECRET_2, ifVersion: 1 });
+    const rotated = await call('set_alert_channel', { kind: 'webhook', signingSecret: SECRET_2, ifVersion: 1 });
     expect(rotated).toMatchObject({ ok: true, output: { channel: { host: 'ops.example.com', version: 2 } } });
     const second = await scoped(env.DB, o.orgId).alertChannels.get('webhook');
     expect(second?.urlEncrypted).toBe(first?.urlEncrypted);
     expect(second?.secretEncrypted).toBe(`sealed:${o.orgId}/webhook/secret:${SECRET_2}`);
-    expect(await call('set_webhook_alert_channel', { signingSecret: SECRET, ifVersion: 1 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('set_alert_channel', { kind: 'webhook', signingSecret: SECRET, ifVersion: 1 })).toMatchObject({ ok: false, error: 'conflict' });
 
     const seen = JSON.stringify([set, rotated, await call('get_alert_channels', {}), await scoped(env.DB, o.orgId).auditLog.list({ limit: 200 })]);
     for (const secret of [SECRET, SECRET_2, 'token=abc', SLACK]) expect(seen).not.toContain(secret);
@@ -73,13 +95,16 @@ describe('alert channels', () => {
 
   it('refuses webhook URLs the fetch-safety rules refuse, and weak secrets', async () => {
     for (const webhookUrl of ['http://ops.example.com/h', 'https://10.0.0.1/h', 'https://ops.example.com:8443/h', 'https://router.local/h'])
-      expect(await call('set_webhook_alert_channel', { webhookUrl, signingSecret: SECRET }), webhookUrl).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await call('set_webhook_alert_channel', { signingSecret: 'short' })).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect(await call('set_alert_channel', { kind: 'webhook', webhookUrl, signingSecret: SECRET }), webhookUrl).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+      });
+    expect(await call('set_alert_channel', { kind: 'webhook', signingSecret: 'short' })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 
   it('lets only owners set, test, remove or retry', async () => {
     for (const role of ['editor', 'viewer'] as const) {
-      expect(await call('set_slack_alert_channel', { webhookUrl: SLACK }, role)).toMatchObject({ error: 'forbidden' });
+      expect(await call('set_alert_channel', { kind: 'slack', webhookUrl: SLACK }, role)).toMatchObject({ error: 'forbidden' });
       expect(await call('test_alert_channel', { channel: 'slack' }, role)).toMatchObject({ error: 'forbidden' });
       expect(await call('remove_alert_channel', { channel: 'slack' }, role)).toMatchObject({ error: 'forbidden' });
       expect(await call('retry_alert_delivery', { alertDeliveryId: o.alertDelivery }, role)).toMatchObject({ error: 'forbidden' });

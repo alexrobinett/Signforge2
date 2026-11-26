@@ -5,6 +5,7 @@
  * against its limits and one D1 budget. Today's tools stay in the registry for the CMS and for clients that call them
  * by name; agents are no longer listed them (`READ_TOOLS`).
  */
+import { VIDEO_SPEC } from '@signforge/contract';
 import { z } from 'zod';
 import { effectiveScopes, type Grant, permits } from './dispatch';
 import { outputs } from './outputs';
@@ -25,6 +26,8 @@ interface TypeDef {
    */
   get?: { tool: string; id: string; item: string; maxIds: number; rename?: Readonly<Record<string, string>>; latest?: true };
   one?: string;
+  /** What an agent needs to know of it beyond its fields, which `describe` gives rather than every tool's description (#345). */
+  rules?: string;
   /** What `detail: "summary"` (the default) keeps of each row: its fields, or a shape of its own. */
   summary: readonly string[] | ((row: Row) => Row);
 }
@@ -75,6 +78,8 @@ export const READ_TYPES = {
   },
   publish: {
     about: 'publishes, newest first, and how each rolled out',
+    rules:
+      "A publish's rollout gives each screen it switched and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since.",
     list: { tool: 'list_publishes', items: 'publishes' },
     get: { tool: 'get_publish', id: 'publishId', item: 'publish', maxIds: 7, rename: { screens: 'rollout' }, latest: true },
     summary: ['id', 'revision', 'by', 'createdAt', 'reached', 'screens', 'playing', 'changes'],
@@ -98,6 +103,7 @@ export const READ_TYPES = {
   },
   asset: {
     about: 'images and videos',
+    rules: `An image is uploaded as a landscape and a portrait rendition, each the smallest that covers its screen box (1920x1080, 1080x1920). A video ships as it is exported, with no transcoding: H.264 MP4, Baseline, Main or High profile up to level 4.2, 8-bit 4:2:0, progressive, at most 1920x1080 either way round, ${VIDEO_SPEC.maxFps} fps, ${VIDEO_SPEC.maxBitrate / 1e6} Mbit/s and ${VIDEO_SPEC.maxBytes / 1e6} MB (@signforge/media-check checks it). An asset is usable once its status is verified.`,
     list: { tool: 'list_assets', items: 'assets' },
     get: { tool: 'get_asset', id: 'assetId', item: 'asset', maxIds: 12 },
     summary: ['id', 'name', 'kind', 'status', 'width', 'height', 'durationMs', 'usageCount'],
@@ -134,6 +140,8 @@ export const READ_TYPES = {
   },
   schedule_entry: {
     about: 'schedule entries and takeovers: which playlist plays where and when',
+    rules:
+      "What a screen plays, from the next publish: of the entries that apply to it now (in its own time zone, within their dates, days and window), the highest priority wins, and a takeover's is above every entry's. On a tie the more specific target wins (screen, then group, then org), then the later startsAt, so of two takeovers aimed alike the newer wins. Where none applies, the organization's default playlist.",
     list: { tool: 'list_schedule_entries', items: 'entries' },
     summary: [
       'id',
@@ -472,7 +480,7 @@ export function readTools(tools: Tools) {
   const describe = defineTool({
     name: 'describe',
     description:
-      'What read gives for a type: its filters, whether it reads by ids or searches, the fields of summary and of full with what each means, and the tools that change it. Call it once for a type before you filter it or pick its fields. Returns { type, about, ids, query, filters, summary, fields, changedBy }.',
+      'What read gives for a type: its rules, filters, whether it reads by ids or searches, the fields of summary and of full, and the tools that change it. Call it once for a type before you filter it or pick its fields. Returns { type, about, rules, ids, query, filters, summary, fields, changedBy }.',
     scope: 'content:read',
     minRole: 'viewer',
     mutates: false,
@@ -489,6 +497,7 @@ export function readTools(tools: Tools) {
       return {
         type,
         about: def.about,
+        rules: def.rules ?? null,
         ids: def.get !== undefined,
         maxIds: def.get?.maxIds ?? 0,
         idOptions: idOptionsOf(tools, type),

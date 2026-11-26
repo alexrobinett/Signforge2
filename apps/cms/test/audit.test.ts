@@ -28,6 +28,11 @@ describe('eventText', () => {
     expect(eventText({ action: 'save_spot', input: { spotId: 'spt_1', name: 'Menu' } })).toBe('Draft changed');
     expect(eventText({ action: 'save_schedule_entry', input: { playlistId: 'pls_1', target: 'org' } })).toBe('Scheduled');
     expect(eventText({ action: 'save_brand_kit', input: { brandKitId: 'bk_1', makeDefault: true } })).toBe('Changed · made the default');
+    expect(eventText({ action: 'delete', input: { type: 'schedule_entry', id: 'sch_1' } })).toBe('Unscheduled');
+    expect(eventText({ action: 'takeover', input: { action: 'end', scheduleEntryId: 'sch_1' } })).toBe('Takeover ended');
+    expect(eventText({ action: 'finalize_upload', input: { assetId: 'ast_1', kind: 'video' } })).toBe('Video checked');
+    expect(eventText({ action: 'set_alert_channel', input: { kind: 'slack' } })).toBe('Slack channel set');
+    expect(eventText({ action: 'set_alert_channel', input: { kind: 'webhook' } })).toBe('Webhook set');
     // Rows from before #345 merged the screen, group and content tools keep their own words.
     expect(eventText({ action: 'restart_screen', input: {} })).toBe('Player restarted');
     expect(eventText({ action: 'rename_screen', input: { name: 'Lobby' } })).toBe('Renamed to Lobby');
