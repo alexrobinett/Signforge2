@@ -21,6 +21,11 @@ const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
 
 /** The lead headline at each step, from the look's own size down; past the last, a headline is cut to its lines. */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
+/**
+ * A story without a photo starts a step larger (`--nw-bare-step`, 1.45 in landscape), so it has one step more: 0.55 of
+ * 1.45 is about 0.8, where 1.25's last step was (0.64 of it), so a long headline is cut no sooner than before (review of #629).
+ */
+const BARE_STEPS = [...HEADLINE_STEPS, 0.55];
 
 /** When the first story comes in, after the header (0 ms) and the strip (100 ms): the spec's play-start stagger. */
 const FIRST_AT_MS = 150;
@@ -39,7 +44,8 @@ const MAX_UPSCALE = 1.25;
 /**
  * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
- * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
+ * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared in `stop`, as the spec's lifecycle asks (#477):
+ * a tool that seeks a play's time without running its timers then finds no timer of an earlier play waiting.
  */
 let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number }[] = [];
 let timers: number[] = [];
@@ -65,8 +71,6 @@ function clone(id: string): HTMLElement {
 defineTemplate({
   async prepare(ctx) {
     const { data } = ctx;
-    for (const t of timers) clearTimeout(t);
-    timers = [];
     later = [];
     // Unpainted until play: a frame that paints a photo while prepare runs has it decoded for the
     // screen first, and the SDK's decode before ready waits behind that one (photo-promo, #168).
@@ -182,6 +186,10 @@ defineTemplate({
         }, at),
       );
   },
+  stop() {
+    for (const t of timers) clearTimeout(t);
+    timers = [];
+  },
 });
 
 /** Resolves once `img` has loaded, or failed to. */
@@ -222,12 +230,30 @@ function fitHeadlines(stories: HTMLElement[]): void {
     const text = h.closest<HTMLElement>('.text')!;
     return text.offsetTop + text.offsetHeight > h.closest<HTMLElement>('.story')!.clientHeight + 1;
   };
-  let long = heads.filter(over);
-  for (const step of HEADLINE_STEPS.slice(1)) {
-    if (!long.length) return;
-    for (const h of long) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(step));
-    long = long.filter(over);
+  /**
+   * Over, or holding a word wider than its line, which `overflow-wrap: anywhere` would break mid-word: Night's large
+   * steps showed "Thanksgivin / g" (review of #502). Read with the wrap a browser does on its own, which breaks after a
+   * hyphen or dash, between CJK characters and in a URL, so only a word that cannot fit counts (review of #629). Every
+   * headline is set and read together, so a step costs one layout more, not one a headline.
+   */
+  const unfit = (hs: HTMLElement[]) => {
+    for (const h of hs) h.style.overflowWrap = 'normal';
+    const wide = hs.map((h) => h.scrollWidth > h.clientWidth + 1);
+    for (const h of hs) h.style.removeProperty('overflow-wrap');
+    return hs.filter((h, i) => wide[i] || over(h));
+  };
+  const stepsOf = (h: HTMLElement) => (h.closest('.story')!.classList.contains('no-photo') ? BARE_STEPS : HEADLINE_STEPS);
+  let long = unfit(heads);
+  for (let k = 1; k < BARE_STEPS.length; k++) {
+    // A headline past its own last step goes on to the cut.
+    const stepping = long.filter((h) => k < stepsOf(h).length);
+    if (!stepping.length) break;
+    for (const h of stepping) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(stepsOf(h)[k]));
+    long = [...long.filter((h) => k >= stepsOf(h).length), ...unfit(stepping)];
   }
+  // At the last step a word may still break only because it is wider than the line: left so, as long as it fits.
+  long = long.filter(over);
+  if (!long.length) return;
   // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
   // each word's line ends is read from the one layout there is; the cut is checked with one more.
   const full = long.map((h) => h.textContent!);

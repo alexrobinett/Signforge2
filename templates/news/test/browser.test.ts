@@ -346,14 +346,95 @@ describe('news 2.1 (design D, #476)', () => {
       );
     expect((await stories()).map((s) => s.split(' ')[0])).toEqual(['bare', 'photo', 'photo']);
     await hst.post('fresh', 'play');
-    // The second story's photo loads at 5 s and fails; the third's at 13 s, and draws.
-    for (let i = 0; i < 100; i++) await hst.page.clock.runFor(100);
+    // The second story's photo loads at 5 s and fails; the third's at 13 s, and draws: run past both (review of #476).
+    for (let i = 0; i < 140; i++) await hst.page.clock.runFor(100);
     await f.waitForFunction(() => !document.querySelectorAll('.story')[1]!.querySelector('.area'));
+    await f.waitForFunction(() => document.querySelectorAll<HTMLElement>('.story')[2]!.style.getPropertyValue('--nw-photo-w') !== '');
     const [first, second, third] = await stories();
     // Refitted from its title, as the first was: not from the cut made beside the photo.
     expect(second).toBe(first);
     expect(third!.startsWith('photo')).toBe(true);
   });
+
+  it('clears its timers in stop: a later photo the play would load is not loaded after the play stops (#477)', async () => {
+    const { hst, f } = await clocked({ items: [0, 1, 2].map((i) => story(i)), rotationSeconds: 8 }, photos(3), 24_000);
+    await hst.post('fresh', 'play');
+    await hst.page.clock.runFor(1_000);
+    await hst.post('fresh', 'stop');
+    // The second story's photo would load at 5 s.
+    for (let i = 0; i < 60; i++) await hst.page.clock.runFor(100);
+    expect(await f.evaluate(() => [...document.querySelectorAll('.story .photo')].map((img) => img.hasAttribute('src')))).toEqual([true, false, false]);
+  });
+
+  // Review of #502: Night's large steps broke long words mid-word ("Thanksgivin / g"); a headline steps down instead.
+  const longWords = 'Thanksgiving smartphones Cybersecurity manufacturing Representatives';
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`never breaks a word of a headline across lines, beside a photo or without one, in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show(
+            { look, items: [0, 1].map((i) => story(i, { title: longWords, ...(bare ? { image: undefined } : {}) })) },
+            photos(2, bare ? [0, 1] : []),
+          );
+          const split = await f.evaluate(() => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const range = document.createRange();
+            return [...h.textContent!.matchAll(/\S+/g)].flatMap((word) => {
+              range.setStart(h.firstChild!, word.index);
+              range.setEnd(h.firstChild!, word.index + word[0].length);
+              const tops = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
+              return tops.size > 1 ? [word[0]] : [];
+            });
+          });
+          for (const word of split) found.push(`${look}${bare ? ', no photo' : ''}: ${word}`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  // Review of #629: a line break after a hyphen or a dash, between CJK characters or in a URL is the browser's own
+  // wrap, not a word broken; a headline that fits at the look's size keeps it.
+  const fitting = [
+    'Self-driving cars reach a state-of-the-art milestone',
+    'Council votes—finally—on the riverside park',
+    '東京都が川沿いの新しい公園の計画を発表しました',
+    'Plans online now at nyt.com/x',
+  ];
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a fitting headline with hyphens, dashes, CJK or a URL at the look's own size, beside a photo or without one, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true])
+          for (const title of fitting) {
+            const f = await r.show(
+              { look, items: [0, 1].map((i) => story(i, { title, ...(bare ? { image: undefined } : {}) })) },
+              photos(2, bare ? [0, 1] : []),
+            );
+            const fit = await f.evaluate(() => document.querySelector<HTMLElement>('.story')!.style.getPropertyValue('--fit'));
+            if (fit) found.push(`${look}${bare ? ', no photo' : ''}: ${title} at ${fit}`);
+          }
+      expect(found).toEqual([]);
+    }, 240_000);
+
+  // Review of #629: without a photo a headline starts larger, and has a step more, so a long one is cut no sooner than
+  // 2.1 cut it. 2.1 showed this copy whole in every look but Night, which wraps wide: there it kept 23 words in
+  // landscape and 19 in portrait, and keeps at least as many.
+  const KEPT_IN_2_1 = { landscape: 23, portrait: 19 };
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`cuts a 165-character headline without a photo no sooner than 2.1, in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const title = sentence.repeat(2).slice(0, 165).trim();
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, items: [0, 1].map((i) => story(i, { title, image: undefined })) }, photos(2, [0, 1]));
+        const shown = (await f.evaluate(() => document.querySelector('.story .headline')!.textContent))!;
+        const words = shown.replace(/…$/, '').trim().split(/\s+/).length;
+        if (look === 'night' ? words < KEPT_IN_2_1[orientation] : shown !== title) found.push(`${look}: ${shown}`);
+      }
+      expect(found).toEqual([]);
+    }, 120_000);
 
   it(`takes the feed's summaries at their longest, NEWS_SUMMARY_MAX characters`, () => {
     const items = t().manifest.fields.items;
@@ -600,6 +681,22 @@ describe('news 2.1 (design D, #476)', () => {
       expect(got.summary, look).toBeGreaterThanOrEqual(1.29);
       // Filling the lead, and within it.
       expect(got.filled, look).toBeGreaterThan(0.4);
+      expect(got.filled, look).toBeLessThanOrEqual(1);
+    }
+  }, 120_000);
+
+  // #477: without a photo, the landscape headline at 1.25 times left the lead sparse; it is a step larger again.
+  it('steps a landscape story without a photo up to 1.45 times the headline, within its lead', async () => {
+    const r = await frame('landscape');
+    for (const look of looks) {
+      const f = await r.show({ look, items: [story(0), story(1, { image: undefined })], rotationSeconds: 8 }, photos(2, [1]), demo, 16_000);
+      const got = await f.evaluate(() => {
+        const [photo, bare] = [...document.querySelectorAll<HTMLElement>('.story')];
+        const px = (s: HTMLElement, sel: string) => Number.parseFloat(getComputedStyle(s.querySelector(sel)!).fontSize);
+        const text = bare!.querySelector<HTMLElement>('.text')!;
+        return { headline: px(bare!, '.headline') / px(photo!, '.headline'), filled: (text.offsetTop + text.offsetHeight) / bare!.clientHeight };
+      });
+      expect(got.headline, look).toBeGreaterThanOrEqual(1.44);
       expect(got.filled, look).toBeLessThanOrEqual(1);
     }
   }, 120_000);

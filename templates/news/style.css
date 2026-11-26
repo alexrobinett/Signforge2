@@ -41,7 +41,8 @@ ol {
   --nw-strip-text: 2.8vmin;
   --nw-lines: 5;
   --nw-bare-lines: 4;
-  --nw-bare-step: 1.25;
+  /* A story without a photo: its headline a step larger, 1.45 times, so it fills more of the lead (#477). */
+  --nw-bare-step: 1.45;
   --nw-summary-lines: 2;
 }
 :root[data-orientation='portrait'] {
@@ -207,6 +208,10 @@ ol {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--nw-summary-lines);
   overflow: hidden;
+  /* Room inside the clip for a glyph that hangs left of its line, a line-initial "j"'s hook (review of #502); the
+     margin keeps the text where it was. */
+  padding-inline-start: 0.08em;
+  margin-inline-start: -0.08em;
   overflow-wrap: anywhere;
   color: color-mix(in srgb, var(--lk-text) 80%, var(--lk-bg));
   font-size: var(--nw-body);
