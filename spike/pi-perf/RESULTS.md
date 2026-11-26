@@ -1236,7 +1236,7 @@ The new News template in each look, its lead turning every 6 s through four stor
 
 **The N100 at 4K60, a second check** (Proxmox host `pve`, LXC 105, a virtual 4K60 HDMI display, real DRM scan-out; `isolate.py 45`, landscape, each look cut and fade): 0.00 to 0.15% of frames dropped, worst frames 17 to 50 ms, prepares 115 to 167 ms. At 4K the N100 has room to spare; the Pi sets the budget.
 
-### News 2.0.1: small photos framed smaller (#492, 2026-11-26)
+### News 2.0.2: small photos framed smaller (#492, 2026-11-26)
 
 The same bench with every photo 700x560, as The Guardian's feed sends them, so each lead takes the smaller frame (at most 1.25 times its size) and the first story's prepare waits for its photo to load. `isolate.py 60 cut`, each look, the lead turning every 6 s:
 

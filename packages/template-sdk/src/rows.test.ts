@@ -127,17 +127,28 @@ describe('@signforge/template-sdk/rows', { timeout: 30_000 }, () => {
         li.innerHTML = '<img data-sf-src="image">';
         return [li, li.querySelector('img')!] as const;
       };
-      // Bound again at once, while the bad one's decode is still under way.
+      /** Resolves once the image is hidden. */
+      const hides = (img: HTMLImageElement) =>
+        new Promise<void>((resolve) => {
+          const watch = new MutationObserver(() => {
+            if (!img.hidden) return;
+            watch.disconnect();
+            resolve();
+          });
+          watch.observe(img, { attributes: true, attributeFilter: ['hidden'] });
+        });
+      // Bound again at once, while the bad one's decode is still under way. A decode asked for after bindRow's own is
+      // rejected after it when the next bind replaces the photo, so once it settles, bindRow's handler for the bad one has run.
       const [a, imgA] = row();
       sfRows.bindRow(a, ctxOf(bad), 'items', 0);
+      const replaced = settled(imgA);
       sfRows.bindRow(a, ctxOf(good), 'items', 0);
+      await replaced;
       await settled(imgA);
-      await new Promise((r) => setTimeout(r, 50));
       // Bound again after the bad one failed and hid the image.
       const [b, imgB] = row();
       sfRows.bindRow(b, ctxOf(bad), 'items', 0);
-      await settled(imgB);
-      await new Promise((r) => setTimeout(r, 50));
+      await hides(imgB);
       const failed = view(imgB);
       sfRows.bindRow(b, ctxOf(good), 'items', 0);
       await settled(imgB);
