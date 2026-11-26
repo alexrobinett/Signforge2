@@ -46,6 +46,7 @@ import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
+import { NEXT_PUBLISH } from '~/state/labels';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
 
 /**
@@ -710,7 +711,7 @@ function LabelsDialog({ orgId, screen }: { orgId: string; screen: ScreenView }) 
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Labels</DialogTitle>
-          <DialogDescription>Labels change nothing on screen until the next publish.</DialogDescription>
+          <DialogDescription>{NEXT_PUBLISH}</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="grid gap-4">
           <LabelEditor target={{ screenId: screen.id }} own={screen.labels} titled={false} />
