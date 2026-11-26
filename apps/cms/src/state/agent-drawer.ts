@@ -39,12 +39,14 @@ import type { FieldMark } from '@signforge/api/agent-inline';
 import { orgOnScreen } from '~/lib/live';
 import { type DraftSummary, summarize } from '~/lib/draft-summary';
 import { versionsById } from '~/lib/spots';
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { tabOrgHeaders } from '~/lib/tab-org';
 import { callToolByName, Refusal, refusalOf, toolMessage } from '~/lib/tools';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { screensQuery } from '~/queries/screens';
 import { spotsQuery, templatesQuery } from '~/queries/spots';
+import { changingOrg } from './orgs';
 import type { SliceCreator } from './store';
 
 /** What an answer's drafts do: being worked out, one summary a draft, or why not, so they cannot be saved yet. */
@@ -229,8 +231,6 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
   let running: ChatClient | null = null;
   /** The conversation's thread, for every turn of it; a new one once forgotten. */
   let thread: string | null = null;
-  /** Which conversation this is: forgetting the drawer starts the next, and what the last one was doing changes nothing. */
-  let conversation = 0;
   /**
    * The confirmation cards waiting for a press (#269), by token: the question and context of the turn that
    * paused at each, which its press sends again with the token. Held until pressed, let go, or the drawer is forgotten.
@@ -309,12 +309,17 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     turn.dispose();
   }
 
-  /** The drafts of the answer at `index`, changed; nothing if it holds none (forgotten since). */
-  const drafts = (index: number, change: (d: Drafts) => Drafts) =>
+  /**
+   * The drafts of the answer whose card is `card`, changed. By the card, not its place: work that ends after the org
+   * switched finds the conversation forgotten, and changes nothing in the next one's card at that place (#344).
+   */
+  const drafts = (card: AnswerCard, change: (d: Drafts) => Drafts) =>
     drawer((d) => ({
       ...d,
-      messages: d.messages.map((m, i) => (i === index && m.role === 'assistant' && m.drafts ? { ...m, drafts: change(m.drafts) } : m)),
+      messages: d.messages.map((m) => (m.role === 'assistant' && m.card === card && m.drafts ? { ...m, drafts: change(m.drafts) } : m)),
     }));
+  /** Whether the answer whose card is `card` is still in the drawer: forgotten (the org changed), its work stops changing anything. */
+  const kept = (card: AnswerCard) => get().agentDrawer.messages.some((m) => m.role === 'assistant' && m.card === card);
   const draftsAt = (index: number) => {
     const m = get().agentDrawer.messages[index];
     return m?.role === 'assistant' && m.drafts ? { card: m.card, drafts: m.drafts } : undefined;
@@ -329,11 +334,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
     const orgId = orgOnScreen(router);
     if (!at || !orgId) return;
     const calls = at.card.drafts;
-    // Only this conversation's: a drawer forgotten meanwhile (the org switched) holds another, or none.
-    const asked = conversation;
-    const write = (change: (d: Drafts) => Drafts) => {
-      if (conversation === asked) drafts(index, change);
-    };
+    const write = (change: (d: Drafts) => Drafts) => drafts(at.card, change);
     write((d) => ({ ...d, shown: { state: 'working' } }));
     try {
       const [fleet, schedule, playlists, spots, templates] = await Promise.all([
@@ -417,9 +418,10 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // Not before the card shows every change it would write.
       const { shown } = at?.drafts ?? {};
       if (!at || !orgId || at.drafts.status !== 'proposed' || shown?.state !== 'shown' || shown.summaries.length !== at.card.drafts.length) return;
-      drafts(index, (d) => ({ ...d, status: 'saving', error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'saving', error: null }));
       try {
-        const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
+        // The org the card was answered in, named, not the tab's when it sends: it may have changed by then (review of #472).
+        const headers = { 'content-type': 'application/json', [TAB_ORG_HEADER]: orgId };
         const calls = at.card.drafts.map(({ tool, input }) => ({ tool, input }));
         const res = await fetch('/api/agent/apply', { method: 'POST', headers, body: JSON.stringify({ calls }) }).catch((cause: unknown) => {
           throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
@@ -428,6 +430,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
         if (!isRow(body) || !Array.isArray(body.results)) throw await refusalOf(res, `Something went wrong (${res.status}).`);
         const answer: ApplyAnswer = { results: body.results };
         const refused = answer.results.find((r): r is Extract<ApplyAnswer['results'][number], { ok: false }> => !r.ok);
+        // Answered after the org changed: the editors and pages are the next org's now, and the card is gone.
+        if (!kept(at.card)) return;
         answer.results.forEach((r, i) => {
           const call = at.card.drafts[i];
           if (r.ok && call) markSpot(call, r.output);
@@ -444,7 +448,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (saved && typeof saved.version === 'number') versions[String(saved.id)] = saved.version;
         }
-        drafts(index, (d) => ({
+        drafts(at.card, (d) => ({
           ...d,
           results: answer.results,
           versions,
@@ -452,7 +456,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
           error: refused?.message ?? null,
         }));
       } catch (err) {
-        drafts(index, (d) => ({ ...d, status: 'proposed', error: toolMessage(err) }));
+        drafts(at.card, (d) => ({ ...d, status: 'proposed', error: toolMessage(err) }));
       }
     },
 
@@ -461,40 +465,47 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const orgId = orgOnScreen(router);
       const was = at?.drafts.status;
       if (!at || !orgId || (was !== 'saved' && was !== 'refused')) return;
-      drafts(index, (d) => ({ ...d, status: 'undoing', error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'undoing', error: null }));
       let { undone, versions } = at.drafts;
       try {
         // The last saved first: what each put back is what it found. One put back already, by an Undo that stopped, is skipped.
         for (const [i, r] of [...at.drafts.results.entries()].reverse()) {
+          // The org changed meanwhile: no more of it is put back, and nothing is sent under the next org (review of #472).
+          if (!kept(at.card)) return;
           if (undone.includes(i)) continue;
           const call = at.card.drafts[i];
           const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
           if (call && saved) {
             const id = String(saved.id);
             const undo = undoOf(call, saved, versions[id]);
-            const now = versionOf(undo.tool, await callToolByName(undo.tool, undo.input));
+            const now = versionOf(undo.tool, await callToolByName(undo.tool, undo.input, orgId));
+            if (!kept(at.card)) return;
             if (now !== undefined) versions = { ...versions, [id]: now };
           }
           undone = [...undone, i];
-          drafts(index, (d) => ({ ...d, undone, versions }));
+          drafts(at.card, (d) => ({ ...d, undone, versions }));
           const spot = call?.tool === 'update_spot' ? call.target?.id : undefined;
           if (spot) set((s) => ({ agent: { ...s.agent, filled: Object.fromEntries(Object.entries(s.agent.filled).filter(([k]) => k !== spot)) } }));
         }
-        drafts(index, (d) => ({ ...d, status: 'undone' }));
+        drafts(at.card, (d) => ({ ...d, status: 'undone' }));
       } catch (err) {
-        drafts(index, (d) => ({ ...d, status: was, error: toolMessage(err) }));
+        drafts(at.card, (d) => ({ ...d, status: was, error: toolMessage(err) }));
       }
+      if (!kept(at.card)) return;
       await queryClient.invalidateQueries({ queryKey: ['org', orgId] });
       for (const call of at.card.drafts) if (call.tool === 'update_spot' && call.target) await get().reloadSpot(orgId, call.target.id);
     },
 
-    confirmPublish: (index, confirming) => drafts(index, (d) => ({ ...d, confirming })),
+    confirmPublish(index, confirming) {
+      const at = draftsAt(index);
+      if (at) drafts(at.card, (d) => ({ ...d, confirming }));
+    },
 
     async publishDrafts(index) {
       const at = draftsAt(index);
       const orgId = orgOnScreen(router);
       if (!at || !orgId || at.drafts.status !== 'saved') return;
-      drafts(index, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
+      drafts(at.card, (d) => ({ ...d, status: 'publishing', confirming: false, error: null }));
       // All of them in one publish, after one question about sample text (#360): all go live, or none does.
       const items = at.drafts.results.flatMap((r) => {
         const saved = r.ok ? savedOf(r.tool, r.output) : undefined;
@@ -510,10 +521,10 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       });
       // Not published (Edit first on sample text, or a refusal the toast told): nothing went live, the drafts stay saved, and the card says so.
       if (!(await get().publishTogether(orgId, items))) {
-        drafts(index, (d) => ({ ...d, status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' }));
+        drafts(at.card, (d) => ({ ...d, status: 'saved', error: 'Not published: nothing went live, and the changes are saved as drafts.' }));
         return;
       }
-      drafts(index, (d) => ({ ...d, status: 'published' }));
+      drafts(at.card, (d) => ({ ...d, status: 'published' }));
     },
 
     openAgentDrawer(opener) {
@@ -526,7 +537,6 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       running?.stop();
       running = null;
       thread = null;
-      conversation++;
       // The cards still waiting for a press were the old org's: they go, and their tokens run out unused.
       waiting.clear();
       const { open } = get().agentDrawer;
@@ -546,7 +556,9 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       // The page shown now: the person may have moved since the drawer opened.
       const page: ChatContext['page'] = { path: router.state.location.pathname, ids: idsOf(router.state.matches.at(-1)?.params) };
       const question = (asked ?? typed).trim();
-      if (!question || busy) return;
+      // Not while the org changes: the drawer was forgotten for the next org, and a turn now would be the last one's,
+      // its answer left in the next org's drawer and sent to its model as history (review of #469).
+      if (!question || busy || changingOrg(get().orgs)) return;
       const context: ChatContext = { history: historyOf(messages), page };
       drawer((d) => ({
         ...d,
@@ -568,7 +580,7 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       const m = get().agentDrawer.messages[index];
       const token = m?.role === 'confirm' && m.press === 'offered' ? m.card.token : null;
       const held = token ? waiting.get(token) : undefined;
-      if (!token || !held || get().agentDrawer.asking) return;
+      if (!token || !held || get().agentDrawer.asking || changingOrg(get().orgs)) return;
       waiting.delete(token);
       const press = (press: Press, error: string | null = null) =>
         drawer((d) => ({ ...d, messages: d.messages.map((x, i) => (i === index && x.role === 'confirm' ? { ...x, press, error } : x)) }));

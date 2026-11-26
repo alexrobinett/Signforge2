@@ -507,6 +507,7 @@ describe('an edit still waiting when the member leaves the org (review of #461)'
       ...createOrgsSlice(set as never, get as never, { router, queryClient } as never),
       forgetAgentDrawer: () => {},
       cancelPublishAll: () => {},
+      dropSampleCheck: () => {},
       forgetOrgSettings: () => {},
     }));
     vi.mocked(switchOrganization).mockImplementation(async () => {

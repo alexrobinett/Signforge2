@@ -67,10 +67,13 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      // The drawer's conversation, a turn on its way, and the sidebar's Publish question are this org's: none of it goes to the next.
+      // A switch already on its way: this one changes nothing, so nothing here is dropped (#335).
+      if (changingOrg(get().orgs)) return;
+      // The drawer's conversation and turn, the sidebar's Publish question and a waiting sample-text question (review of
+      // #472) are this org's. Dropped before the switch, even one that then fails: a turn stops before the tab changes org.
       get().forgetAgentDrawer();
       get().cancelPublishAll();
-      if (changingOrg(get().orgs)) return;
+      get().dropSampleCheck();
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {
@@ -107,6 +110,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       // Creating makes the new org active: the drawer's conversation stays with the org it was in, as on a switch.
       get().forgetAgentDrawer();
       get().cancelPublishAll();
+      get().dropSampleCheck();
       try {
         // As on a switch: the new org becomes the tab's.
         await saveWaiting();

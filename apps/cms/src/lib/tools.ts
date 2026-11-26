@@ -70,9 +70,12 @@ export async function callTool<N extends ToolName>(name: N, input: unknown, org?
   return answer(res, `Something went wrong (${res.status}).`);
 }
 
-/** Calls a tool by a name known only as a string: the command menu's, from `GET /api/tools`, and @signforge/media's uploads, which read their own outputs. */
-export async function callToolByName(name: string, input: unknown): Promise<unknown> {
-  const res = await post(name, input);
+/**
+ * Calls a tool by a name known only as a string: the command menu's, from `GET /api/tools`, @signforge/media's uploads,
+ * which read their own outputs, and the drawer's Undo, which names the org its drafts were saved in (`org`).
+ */
+export async function callToolByName(name: string, input: unknown, org?: string): Promise<unknown> {
+  const res = await post(name, input, org);
   return answer(res, `Something went wrong (${res.status}).`);
 }
 

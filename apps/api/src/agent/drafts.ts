@@ -65,8 +65,9 @@ export const SAVE_STATEMENTS = 48;
 const STATEMENTS: Record<string, number> = {
   update_spot: 10,
   update_playlist: 14,
-  update_schedule_entry: 7,
-  create_schedule_entry: 7,
+  // An entry's aim is read again too: one more for a group or a screen, which an update reads whatever its input.
+  update_schedule_entry: 8,
+  create_schedule_entry: 8,
   rename_screen: 16,
 };
 /**
@@ -148,6 +149,20 @@ export async function propose(caller: Caller, name: string, raw: unknown): Promi
       before: read.target,
     },
   };
+}
+
+/** Where a schedule entry plays: one choice, so a later change of it replaces the earlier one's whole. */
+const AIM = new Set(['target', 'groupId', 'screenId']);
+
+/**
+ * A second change to what `earlier` changes, joined to it on its read (#268). A new aim replaces the
+ * earlier one whole: a group's entry then aimed at the org kept its group, which the aim rule refuses,
+ * at save, after the drafts before it were written (#344). Each change passed alone, and aim is the
+ * only rule across fields, so the joined one passes too.
+ */
+export function join(earlier: ProposedCall, made: ProposedCall): ProposedCall {
+  const kept = made.input.target === undefined ? earlier.input : Object.fromEntries(Object.entries(earlier.input).filter(([k]) => !AIM.has(k)));
+  return { ...earlier, input: { ...kept, ...made.input, ifVersion: earlier.input.ifVersion } };
 }
 
 const applyRequest = z

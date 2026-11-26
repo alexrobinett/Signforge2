@@ -2,7 +2,7 @@
 // status, then STUB_CARD as the structured answer; e2e/global-setup.ts), streamed over server-sent
 // events: no test reaches a real model.
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, createOrgFromAccountMenu, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, STUB_CARD } from './servers';
 
 const ADDRESS = '192.0.2.169';
@@ -88,4 +88,42 @@ test('a member opens the agent, asks why screens are behind, sees the diagnosis 
   await shots(page, '100-drawer-phone');
   await drawer.getByRole('button', { name: 'Close the agent' }).click();
   await expect(drawer).toBeHidden();
+});
+
+test("nothing is asked while the org changes: a question then would be the last org's, left in the next one (review of #469)", async ({ page }) => {
+  await signInAs(page, `e2e-drawer-switch-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Wharf Street Deli', ADDRESS);
+  await createOrgFromAccountMenu(page, 'Wharf Street Bakery');
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
+  await page.goto('/screens');
+  await hydrated(page);
+  const switcher = orgSwitcher(page);
+  await expect(switcher).toContainText('Wharf Street Bakery');
+  // The switch held on its way, as on a slow network.
+  let arrived = () => {};
+  const requested = new Promise<void>((r) => (arrived = r));
+  let release = () => {};
+  const released = new Promise<void>((r) => (release = r));
+  await page.route('**/api/auth/organization/set-active', async (route) => {
+    arrived();
+    await released;
+    await route.continue();
+  });
+  await switcher.click();
+  await page.getByRole('menuitemradio', { name: 'Wharf Street Deli' }).click();
+  await requested;
+  const drawer = page.getByRole('dialog', { name: 'Agent' });
+  let asked = 0;
+  page.on('request', (r) => void (r.url().endsWith('/api/agent/chat') && asked++));
+  try {
+    await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+    await drawer.getByLabel('Ask about your screens and content').fill('Tell me about these screens');
+    await expect(drawer.getByRole('button', { name: 'Ask', exact: true })).toBeDisabled();
+    await drawer.getByLabel('Ask about your screens and content').press('Enter');
+  } finally {
+    release();
+  }
+  await expect(page.getByText('Switched to Wharf Street Deli.', { exact: true })).toBeAttached();
+  await expect(drawer.getByRole('article')).toHaveCount(0);
+  expect(asked).toBe(0);
 });

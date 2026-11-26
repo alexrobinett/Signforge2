@@ -85,10 +85,12 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
     await page.context().addCookies(session);
   }
 
-  // From Overview, follow the link to Spots, once Overview's own reads (what screens are doing, #357) have answered:
-  // the link, not one of them, is what finds the session ended (#397).
+  // From Overview, follow the link to Spots once Overview's own reads have answered, so the link finds the session
+  // ended (#397). The first is awaited by its answer: before it is sent, no call is open either (review of #471).
+  const status = page.waitForResponse((r) => r.url().includes('/_serverFn/getScreenStatus'));
   await page.goto('/');
   await hydrated(page);
+  await status;
   await expect.poll(() => open.size).toBe(0);
   await ends(() => spotsLink.click(), '/spots');
 

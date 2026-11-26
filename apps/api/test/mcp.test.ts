@@ -101,7 +101,7 @@ describe('the transport', () => {
       return ((await res.json<{ result: { tools: { name: string }[] } }>()).result.tools ?? []).map((x) => x.name);
     };
     const [read, drafted] = await Promise.all([listed(reader), listed(drafter)]);
-    expect(read).toContain('list_spots');
+    expect(read).toContain('read');
     expect(read).not.toContain('create_spot');
     expect(drafted).toContain('create_spot');
     expect(warn.mock.calls.flat().join(' ')).not.toContain('responseMode');
@@ -185,7 +185,7 @@ describe('who may call', () => {
   it('gives a revoked grant 401 on its next call', async () => {
     const { t, owner, ownerId, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read']);
-    expect(await toolNames(access_token)).toContain('list_screens');
+    expect(await toolNames(access_token)).toContain('read');
     const { grantId } = (await check(access_token))!;
     const scope = scoped(env.DB, org.id);
     await scope.commit(scope.agentGrants.stage.revoke((await scope.agentGrants.get(grantId))!, ownerId, Date.now()).writes);
@@ -222,7 +222,7 @@ describe('who may call', () => {
     const names = await toolNames(access_token);
     expect(names).not.toContain('publish');
     expect(names).not.toContain('create_playlist');
-    expect(names).toContain('list_playlists');
+    expect(names).toContain('read');
     expect(await call(access_token, 'publish', {})).toMatchObject({ isError: true, structuredContent: { error: 'forbidden' } });
   });
 });
@@ -233,7 +233,8 @@ describe('tools', () => {
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft', 'org:manage']);
     const { tools } = (await rpc<{ tools: { name: string; annotations: object }[] }>(access_token, 'tools/list')).result!;
     const names = tools.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(['list_playlists', 'create_playlist', 'delete_playlist', 'list_members']));
+    expect(names).toEqual(expect.arrayContaining(['read', 'describe', 'create_playlist', 'delete_playlist']));
+    expect(names).not.toContain('list_playlists');
     expect(names).not.toContain('publish');
     expect(names).not.toContain('invite_member');
     expect(names).toContain('cancel_invitation');
@@ -241,6 +242,17 @@ describe('tools', () => {
     expect(tools.find((tool) => tool.name === 'delete_playlist')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     // Its link stops working for good: only a person invites again (review of #414).
     expect(tools.find((tool) => tool.name === 'cancel_invitation')?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+  });
+
+  it("lists each type's own read as read (#345), and still answers it called by name, with the same rows", async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
+    await call(access_token, 'create_playlist', { name: 'Lobby', idempotencyKey: 'read-same-1' });
+    expect(await toolNames(access_token)).not.toContain('list_playlists');
+    const old = await call(access_token, 'list_playlists');
+    const read = await call(access_token, 'read', { type: 'playlist', detail: 'full' });
+    expect(old?.isError).toBeUndefined();
+    expect(read?.structuredContent.items).toEqual(old?.structuredContent.playlists);
   });
 
   it('refuses an id or a version the listing no longer spells out (#345): the call checks the input, as invalid_input', async () => {

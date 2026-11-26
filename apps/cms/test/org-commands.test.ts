@@ -26,6 +26,7 @@ const appStore = () =>
     forgetOrgSettings: () => {},
     forgetAgentDrawer,
     cancelPublishAll,
+    dropSampleCheck: () => {},
   }));
 
 describe('orgCommands', () => {
@@ -176,5 +177,20 @@ describe('creating an org', () => {
     await store.getState().createOrg('dialog');
     expect(orgs.createOrganization).toHaveBeenCalledTimes(1);
     expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("a switch asked for while one runs changes nothing: the drawer's conversation and Publish are kept (#335)", async () => {
+    let finish = () => {};
+    orgs.switchOrganization.mockImplementationOnce(() => new Promise<void>((r) => (finish = r)));
+    const store = appStore();
+    const first = store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    forgetAgentDrawer.mockClear();
+    cancelPublishAll.mockClear();
+    await store.getState().switchOrg({ id: 'org_c', name: 'Pier West' }, 'switcher');
+    expect(forgetAgentDrawer).not.toHaveBeenCalled();
+    expect(cancelPublishAll).not.toHaveBeenCalled();
+    finish();
+    await first;
+    expect(orgs.switchOrganization).not.toHaveBeenCalledWith(router, 'org_c');
   });
 });

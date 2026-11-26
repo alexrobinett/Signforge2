@@ -48,6 +48,10 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 
 ## The tools
 
+### `read` and `describe` (#345)
+
+Agents read every type with one tool, `read({ type, ids?, filter?, query?, detail?, fields?, limit?, cursor? })`, and learn a type with `describe({ type })`. Each type is read by today's own read tools (`READ_TYPES` in `src/read.ts`), run in the same call through `ctx.run`: with the dispatcher's role and scope check and input parse, through the same scoped repositories, and one count against an agent's limits. `ids` reads by the type's get tool, each row in full with `detail: "full"`, what the get adds renamed off a row field of the same name (a publish's `rollout`), at most the type's `maxIds` a call so one call stays within 40 D1 statements (pinned in `apps/api/test/read-cost.test.ts`); with ids, `filter` takes the get's other input (a spot's `published`), and a publish's `latest` reads the newest. Without ids, the list tool's page, and what the list says besides its rows under `extra` (a connection's providers). `detail` is `summary` by default, a fixed field list per type (a template's: its key, name, and its latest approved version's id, orientations and field names). A filter, field, query or `ids` the type does not take is refused with `invalid_input` naming the right ones. Listings narrow `type`, and the description's lines, to what the caller's role and services may read (`listedInput`, `listedDescription`); a key `read` does not take is refused, saying filters go under `filter`. `describe` names the tools that change a type from an explicit list, those the caller may use. Today's read tools stay in the registry for the CMS and for clients that call them by name; `/mcp` and the drawer list `read` and `describe` in their place where `read` serves the type for the grant (`servedByRead`: an `org:manage`-only grant keeps `list_invitations`).
+
 | Name | Scope | Min role | Input | Output |
 | --- | --- | --- | --- | --- |
 | `list_screens` | content:read | viewer | `{ selector?, limit?, cursor? }` | `{ screens: Screen[], next }`, by id; only those the selector matches |
@@ -120,7 +124,7 @@ Agents call the same tools over MCP (Streamable HTTP, stateless, JSON only) at `
 | `create_schedule_entry` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, idempotencyKey? }` | `{ entry }` |
 | `start_takeover` | content:draft | editor | `{ playlistId, target, groupId?, screenId?, startsAt?, endsAt, idempotencyKey? }` | `{ entry }` |
 | `update_schedule_entry` | content:draft | editor | `{ scheduleEntryId, playlistId?, target?, groupId?, screenId?, priority?, startDate?, endDate?, days?, from?, to?, startsAt?, endsAt?, ifVersion? }` | `{ entry }` |
-| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId, ifVersion? }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version` |
+| `delete_schedule_entry` | content:draft; content:publish for a published entry | editor | `{ scheduleEntryId, ifVersion? }` | `{ deleted, version }`: a published entry's deletion waits for a publish, pinned at `version`. With `ifVersion`, one changed since is refused (`conflict`), published or not, so a delete that races an edit never goes through |
 | `end_takeover` | content:publish | editor | `{ scheduleEntryId }` | as `publish`: the takeover deleted and published alone, in one batch |
 | `publish_takeover` | content:publish | editor | `{ playlistId, target?, groupId?, screenId?, startsAt?, endsAt, with? }` | as `publish`, and `entry`: a takeover made and published, with the drafts in `with` pinned at their versions, in one batch; one it cannot publish writes nothing (`conflict`), not even a draft |
 | `get_org_settings` | content:read | viewer | `{}` | `{ settings }` |

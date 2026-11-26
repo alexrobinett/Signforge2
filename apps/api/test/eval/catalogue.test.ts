@@ -11,29 +11,29 @@ const NOON = Date.UTC(2026, 10, 25, 12);
 const hello = (role: Role): Task => ({ id: 'catalogue', prompt: 'Hello', role, script: { mcp: () => [], drawer: () => [] }, check: () => undefined });
 
 /**
- * Measured with #345 PR 1's trims: no `$schema`, id pattern or safe-integer bound in any input, short ifVersion and
+ * Measured with #345 PR 2's read and describe, which stand for each type's own read, and PR 1's trims: no `$schema`, id pattern or safe-integer bound in any input, short ifVersion and
  * idempotencyKey texts, and only the cards a role can press in the drawer. /mcp's is tools/list as the eval's client hands it to Anthropic: name, description and
  * input schema, without the annotations. The drawer's carries TanStack AI's own fields (`type`, `cache_control`) and no
  * `$schema`, so it differs from the audit's count, which was built from chat.ts's lists.
  */
 const MODEL_FACING: Record<Arm, Record<Role, Size>> = {
   mcp: {
-    owner: { tools: 83, bytes: 89_783, tokens: 21_312 },
-    editor: { tools: 79, bytes: 83_421, tokens: 19_783 },
-    viewer: { tools: 36, bytes: 23_823, tokens: 5532 },
+    owner: { tools: 52, bytes: 73_176, tokens: 17_422 },
+    editor: { tools: 49, bytes: 67_182, tokens: 15_986 },
+    viewer: { tools: 6, bytes: 7584, tokens: 1735 },
   },
   drawer: {
-    owner: { tools: 52, bytes: 52_225, tokens: 12_122 },
-    editor: { tools: 49, bytes: 50_387, tokens: 11_715 },
-    viewer: { tools: 38, bytes: 35_130, tokens: 8221 },
+    owner: { tools: 24, bytes: 35_387, tokens: 8189 },
+    editor: { tools: 22, bytes: 33_968, tokens: 7887 },
+    viewer: { tools: 11, bytes: 18_711, tokens: 4393 },
   },
 };
 
-/** /mcp's tools/list, with PR 1's trims and each tool's title. */
+/** /mcp's tools/list, with PR 1's trims, each tool's title, and each type's own read listed as `read` (#345 PR 2). */
 const DISCOVERY: Record<Role, Size> = {
-  owner: { tools: 83, bytes: 98_825, tokens: 23_519 },
-  editor: { tools: 79, bytes: 92_014, tokens: 21_883 },
-  viewer: { tools: 36, bytes: 27_680, tokens: 6489 },
+  owner: { tools: 52, bytes: 78_880, tokens: 18_802 },
+  editor: { tools: 49, bytes: 72_546, tokens: 17_285 },
+  viewer: { tools: 6, bytes: 8212, tokens: 1891 },
 };
 
 const ROLES = ['owner', 'editor', 'viewer'] as const;
