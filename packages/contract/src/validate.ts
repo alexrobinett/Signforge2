@@ -30,6 +30,7 @@ import {
   PLAYER_RELEASE_FORMAT,
   RELEASE_PATH_SEGMENT,
   RELEASE_SIGNATURE,
+  RESERVED_RELEASE_PATH,
   PLAYER_CHANNELS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
@@ -1495,6 +1496,8 @@ const releaseFiles = custom<PlayerReleaseFile[]>((v) => {
     const sha256 = own(f, 'sha256');
     if (!isReleasePath(path))
       return refused([`a file's path must be relative, of segments ${RELEASE_PATH_SEGMENT.source}, at most ${MAX_RELEASE_PATH_LENGTH} long`]);
+    if (path.split('/')[0] === RESERVED_RELEASE_PATH)
+      return refused([`file "${path}": ${RESERVED_RELEASE_PATH}/ is reserved for the content a player is sent`]);
     if (!isSha256(sha256)) return refused([`file "${path}": sha256 must be a lowercase hex sha256`]);
     files.push({ path, sha256 });
   }

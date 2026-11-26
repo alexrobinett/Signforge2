@@ -1238,6 +1238,8 @@ describe('player releases (#628)', () => {
     [`a path over ${MAX_RELEASE_PATH_LENGTH}`, files([Array.from({ length: 5 }, () => 'a'.repeat(250)).join('/')])],
     ['a path twice', files(['index.html', 'index.html'])],
     ['a file that is also a directory', files(['assets', 'assets/index.js'])],
+    ['a file at the reserved content/', files(['content/data/x.json'])],
+    ['a file named content', files(['content'])],
   ];
   for (const [why, manifest] of refusedManifests)
     it(`refuses a release manifest with ${why}`, () => expect(parsePlayerReleaseManifest(manifest).ok).toBe(false));
@@ -1270,10 +1272,19 @@ describe('player releases (#628)', () => {
     expect(parsePlayerReleaseManifest(JSON.parse(vector.manifest)).ok).toBe(true);
   });
 
+  it("holds a real tarball, the one the vector's manifest names by size and sha256", async () => {
+    const tarball = Uint8Array.from(atob(vector.tarball), (c) => c.charCodeAt(0));
+    const manifest = JSON.parse(vector.manifest) as { sha256: string; size: number };
+    const hex = [...new Uint8Array(await crypto.subtle.digest('SHA-256', tarball))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    expect({ sha256: hex, size: tarball.length }).toEqual({ sha256: manifest.sha256, size: manifest.size });
+  });
+
   it("reads the supervisor's /alive reply, and a sync carries the release it rolled back and the release the player is", () => {
     expect(parseSupervisorAliveResponse({})).toEqual({ ok: true, value: {} });
     const failedRelease = { version: 42, reason: 'not-alive' } as const;
     expect(parseSupervisorAliveResponse({ failedRelease })).toEqual({ ok: true, value: { failedRelease } });
+    // `other` is the open value a player maps a reason it does not know to; it does not send one unmapped.
+    expect(parseSupervisorAliveResponse({ failedRelease: { version: 42, reason: 'other' } }).ok).toBe(true);
     expect(parseSupervisorAliveResponse({ failedRelease: { version: 42, reason: 'bored' } }).ok).toBe(false);
     expect(parseSyncRequest({ ...validSyncRequest(), failedRelease })).toEqual({ ok: true, value: { ...validSyncRequest(), failedRelease } });
     expect(parseSyncRequest({ ...validSyncRequest(), failedRelease: { version: 0, reason: 'stopped' } }).ok).toBe(false);

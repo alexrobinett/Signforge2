@@ -1134,7 +1134,15 @@ export const MAX_IDENTIFY_SECONDS = 60;
 //
 // The signature is Ed25519 over the UTF-8 bytes of `PlayerReleaseOffer.release.manifest` exactly, with no trailing
 // newline, in standard base64 with padding. A fixed test vector, with a key pair for tests only, is in
-// packages/contract/test/player-release/.
+// packages/contract/test/player-release/, with a real tarball the manifest describes.
+//
+// The tarball is a gzip-compressed tar (ustar, pax or GNU; their extended headers are not members). Its members are only
+// regular files and directories, each named by a release path with at most one leading `./`, and `./` itself as a
+// directory. Every regular file is listed in `files` once, with its hash, and every listed file is there; a directory is
+// a parent of a listed file. The supervisor refuses the whole release for anything else: a link, a device or FIFO, an
+// absolute path, a `..`, a member named twice, a file not listed, or a directory no listed file is in. A path whose
+// first segment is `content` (`RESERVED_RELEASE_PATH`) is reserved: the supervisor links the content the player is sent
+// there, so no release carries it.
 //
 // The channel is server state and is not signed: a compromised API could offer a canary release to a stable screen. The
 // owner accepted that risk (#628, Security).
@@ -1155,13 +1163,15 @@ export const MAX_RELEASE_BYTES = 64 * 1_048_576;
 export const MAX_RELEASE_PATH_LENGTH = 1024;
 /** One segment of a path inside a release: letters, digits, `.`, `_` and `-`, never `.` or `..` alone. */
 export const RELEASE_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
+/** The first path segment no release may use: where the supervisor links the content the player is sent. */
+export const RESERVED_RELEASE_PATH = 'content';
 /** An Ed25519 signature, 64 bytes, in standard base64 with padding: 88 characters. */
 export const RELEASE_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
 
 /**
  * One file of a release: its path inside the tarball, relative, `/`-separated `RELEASE_PATH_SEGMENT`s, at most
- * `MAX_RELEASE_PATH_LENGTH` long; and its sha256. No two files share a path, and no file's path is a directory of
- * another's (`a` beside `a/b`).
+ * `MAX_RELEASE_PATH_LENGTH` long, not under `RESERVED_RELEASE_PATH`; and its sha256. No two files share a path, and no
+ * file's path is a directory of another's (`a` beside `a/b`).
  */
 export interface PlayerReleaseFile {
   path: string;
@@ -1215,10 +1225,11 @@ export interface SupervisorAliveRequest {
 }
 
 /**
- * Why the supervisor rolled a release back: its player never beat `/alive` with its version within the gate's first
- * window (`not-alive`), or stopped beating before the gate closed (`stopped`).
+ * Why the supervisor rolled a release back: its player never beat `/alive` with its release within the gate's first
+ * window (`not-alive`), stopped beating before the gate closed (`stopped`), or a reason a later supervisor gives
+ * (`other`). The list is open: a player maps a reason it does not know to `other`, rather than drop the report.
  */
-export const FAILED_RELEASE_REASONS = ['not-alive', 'stopped'] as const;
+export const FAILED_RELEASE_REASONS = ['not-alive', 'stopped', 'other'] as const;
 
 /** A release the supervisor rolled back and will not install again. */
 export interface FailedPlayerRelease {
@@ -1227,7 +1238,7 @@ export interface FailedPlayerRelease {
 }
 
 /**
- * The supervisor's answer to `/alive`: the last release it rolled back, on every beat until it installs a newer one.
+ * The supervisor's answer to `/alive`: the last release it rolled back, on every beat until a newer one passes its gate.
  * The player sends it on each sync (`SyncRequest.failedRelease`); the server keeps one per version.
  */
 export interface SupervisorAliveResponse {

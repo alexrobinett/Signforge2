@@ -1,5 +1,6 @@
 {
   "publicKey": "MCowBQYDK2VwAyEAE2z9q2IHuZImrWNK3+j95fk1Ed8+M9JHiCvuMpgShSI=",
-  "manifest": "{\"format\":1,\"minSupervisor\":1,\"version\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":1024,\"files\":[{\"path\":\"index.html\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"path\":\"assets/index-abc.js\",\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}],\"manifestSchemas\":[8,9],\"protocols\":[1,2],\"createdAt\":\"2026-11-26T12:00:00.000Z\"}",
-  "signature": "7Fln07OtrrvucaO89fghDCUdMKSCXqhG+lIpK6jEqleG4yaPZ+3y4+U77+FujRdYoZCT3jaPD2tB5Gm7nmvzBQ=="
+  "manifest": "{\"format\":1,\"minSupervisor\":1,\"version\":1,\"sha256\":\"6e510e71fcea3b39b035568981d998c56353a83aa72e798715f258643f013d23\",\"size\":267,\"files\":[{\"path\":\"index.html\",\"sha256\":\"3bf3ee6d1c2c654028975c095d04b190933cd57b843be4de5ecfc459d7287afe\"},{\"path\":\"assets/index-abc.js\",\"sha256\":\"51315f02ef13b78068f0e7da2eb840d44abd122984a7da3b7ebc1138db7833be\"}],\"manifestSchemas\":[8,9],\"protocols\":[1,2],\"createdAt\":\"2026-11-26T12:00:00.000Z\"}",
+  "signature": "BM+pIgF7XZSoKb+BeGM55EyT8/jn/GfoT44kBhZYpysXw97Yoq4ac2BFO2ACHe05pe4dXbs4fia27V1wWHUNCQ==",
+  "tarball": "H4sIAAAAAAAA/+3UzUrEMBQF4K59ijib0YVJq8nMwtilL+AT1MylVmIz5EbQtzdjRYbiD4KtiufbpNDCbTm3R6picmW2Nub5zMbnG9erqjwthJn+1YrinlMT88g5Zv1CUnX9hh7kTbrzU83YhbrS+t38Kz3Kv8r7kvOfJZN/nr893ASXHrckdhtQ29QlT/VV1/aXIbYkEnESkTw1TFYNdy272G2T4OguFg0zJR626KS5dvKWF7VVwyP1wU9/H3xMqpcAJ5zx9f5f61Kj/+fwmv/+D/zNMz7r//LMjPq/Muj/ebjQc/AkfWiPlvtlvzw+R3kDAAAAAAAAAAAAAAAAAPwdT8jsOdkAKAAA"
 }
