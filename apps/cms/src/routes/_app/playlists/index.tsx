@@ -15,7 +15,6 @@ import { clockLength, loopMs, playlistPublishWord, transitionWord } from '~/lib/
 import { ASK_AN_EDITOR, sectionFor } from '~/lib/sections';
 import { playlistsQuery } from '~/queries/playlists';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
-import { useAppStore } from '~/state/provider';
 
 const section = sectionFor('/playlists');
 
@@ -41,7 +40,6 @@ function PlaylistsPage() {
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
   const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
   const byId = new Map(spots.map((s) => [s.id, s]));
-  const newSpot = useAppStore((s) => s.openNewSpot);
 
   return (
     <div className="space-y-6">
@@ -82,7 +80,7 @@ function PlaylistsPage() {
               <NewPlaylistDialog orgId={orgId} />
             ) : (
               <Button asChild>
-                <Link to="/spots" onClick={() => newSpot(true)}>
+                <Link to="/spots" search={{ new: true }}>
                   <PlusIcon aria-hidden />
                   New spot
                 </Link>

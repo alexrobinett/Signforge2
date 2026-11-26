@@ -372,23 +372,29 @@ const unsaved = new Set<string>();
  */
 const waiting = new Set<() => Promise<unknown>>();
 
-/** Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. */
-export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): (key: string) => void {
+/**
+ * Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. `cancel(key)` lets
+ * a waiting one go, for an action that sends the draft itself and must not race it (a delete, #445).
+ */
+export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): ((key: string) => void) & { cancel: (key: string) => void } {
   const timers = new Map<string, { cancel: () => void; now: () => Promise<unknown> }>();
-  return (key) => {
-    const before = timers.get(key);
-    before?.cancel();
-    if (before) waiting.delete(before.now);
+  const cancel = (key: string) => {
+    const waits = timers.get(key);
+    if (!waits) return;
+    waits.cancel();
+    timers.delete(key);
+    waiting.delete(waits.now);
+  };
+  const soon = (key: string) => {
+    cancel(key);
     const now = () => {
-      cancel();
-      timers.delete(key);
-      waiting.delete(now);
+      cancel(key);
       return save(key);
     };
-    const cancel = clock.after(ms, () => void now());
-    timers.set(key, { cancel, now });
+    timers.set(key, { cancel: clock.after(ms, () => void now()), now });
     waiting.add(now);
   };
+  return Object.assign(soon, { cancel });
 }
 
 /** Sends every save still waiting out its delay now, and resolves once they are answered. */

@@ -156,8 +156,21 @@ test('a long playlist name wraps on a phone, hiding the checklist keeps it hidde
   await expect(page.getByRole('button', { name: 'New playlist' })).toHaveCount(0);
   await axe(page);
   await shots(page, '40-playlists-no-spots');
+  // Opened in a new tab, the dialog opens there, and this tab, going to Spots later, finds none waiting (#403).
+  const [tab] = await Promise.all([page.context().waitForEvent('page'), empty.getByRole('link', { name: 'New spot' }).click({ modifiers: ['ControlOrMeta'] })]);
+  await expect(tab.getByRole('dialog', { name: 'New spot' })).toBeVisible();
+  await tab.close();
+  await page.getByRole('navigation').getByRole('link', { name: 'Spots' }).click();
+  await expect(page.getByRole('heading', { name: 'Spots', level: 1 })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'New spot' })).toHaveCount(0);
+  await page.goBack();
+  await hydrated(page);
   await empty.getByRole('link', { name: 'New spot' }).click();
   await expect(page.getByRole('dialog', { name: 'New spot' })).toBeVisible();
+  // Closed, it stays closed: the page's address no longer asks for it.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'New spot' })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/spots$/);
   await page.goto('/');
   await hydrated(page);
 

@@ -10,6 +10,7 @@
 import { choiceVariants } from '~/components/ui/choice';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { PlusIcon } from 'lucide-react';
 import type { KeyboardEvent, SubmitEvent } from 'react';
 import { AssetPicker } from '~/components/assets/asset-picker';
@@ -29,11 +30,13 @@ const KINDS = [
   { kind: 'url', label: 'Web page' },
 ] as const;
 
-export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: TemplateView[] }) {
+/** New spot. `asked`: the page's URL asks for it open (`/spots?new=true`), as another page's New spot link does (#403). */
+export function NewSpotDialog({ orgId, templates, asked = false }: { orgId: string; templates: TemplateView[]; asked?: boolean }) {
   const d = useAppStore((s) => s.spotEditor.newSpot);
   const picking = useAppStore((s) => s.spotEditor.picking === 'new');
   const open = useAppStore((s) => s.openNewSpot);
   const focusBack = useAppStore((s) => s.newSpotFocusBack);
+  const navigate = useNavigate();
   const edit = useAppStore((s) => s.editNewSpot);
   const pick = useAppStore((s) => s.pickImageFor);
   const create = useAppStore((s) => s.createSpot);
@@ -76,10 +79,11 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
 
   return (
     <Dialog
-      open={d.open}
+      open={d.open || asked}
       onOpenChange={(o) => {
         open(o);
         if (!o) forgetFill();
+        if (!o && asked) void navigate({ to: '/spots', search: {}, replace: true });
       }}
     >
       <DialogTrigger asChild>

@@ -474,6 +474,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     async deleteSpot(orgId, spotId) {
       editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null, playlists: [], savedSince: false } }));
       try {
+        // Its autosave goes: one firing while the delete is on its way could commit first and refuse it (#445).
+        saveSoon.cancel(spotId);
         // An edit of theirs not saved yet goes first: deleting at the version before it would be refused as someone
         // else's save (#355). One that cannot save (refused, or not sendable) leaves the version as it was.
         await drafts.save(spotId);
@@ -481,7 +483,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         // Never a delete without a version: the spot is read before it can be deleted.
         if (version === undefined) throw new Refusal('not_found', 'This spot is not loaded here: reload the page and try again.');
         await callTool('delete_spot', { spotId, ifVersion: version });
-        // Only once it is gone: a refused delete leaves the waiting save to run.
+        // Only once it is gone: a refused delete keeps the draft, and an edit still unsaved waits to save again (below).
         drafts.drop(spotId);
         await router.navigate({ to: '/spots' });
         queryClient.removeQueries({ queryKey: spotKeys.one(orgId, spotId), exact: true });
@@ -498,6 +500,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
             ? 'Someone saved this spot since you opened it, so it was not deleted. Reload it to see their change.'
             : toolMessage(err);
         editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error, playlists, savedSince } }));
+        if (get().spotEditor.drafts[spotId]?.status === 'unsaved') saveSoon(spotId);
         return false;
       }
     },
