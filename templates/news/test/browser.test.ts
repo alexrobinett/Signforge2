@@ -418,6 +418,97 @@ describe('news 2.0 (#202)', () => {
       expect(found).toEqual([]);
     }, 120_000);
 
+  // Review of #492: the cut read each word's line from the balanced layout, and counted a word out once its glyph box
+  // passed the lines, so a cut headline kept one line less than it holds.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`cuts a long headline with every line it holds filled, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      const long = sentence.repeat(2).slice(0, 200).trim();
+      let cuts = 0;
+      for (const look of looks)
+        for (const lead of ['large', 'none'] as const) {
+          const f = await r.show(
+            { look, items: [story(0, { title: long, ...(lead === 'none' ? { image: undefined } : {}) }), story(1)] },
+            photos(2, lead === 'none' ? [0] : []),
+          );
+          const got = await f.evaluate((full) => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const s = getComputedStyle(h);
+            const line = Number.parseFloat(s.lineHeight);
+            const max = Number(s.getPropertyValue('--nw-lines'));
+            const cut = h.textContent!;
+            const lines = Math.round(h.offsetHeight / line);
+            // One word more, with its "…", takes a line more than the headline has: the cut kept all its lines hold.
+            const kept = cut.slice(0, -1).trim().split(/\s+/).length;
+            h.textContent = `${full
+              .split(/\s+/)
+              .slice(0, kept + 1)
+              .join(' ')}…`;
+            return { lines, max, cut: cut.endsWith('…'), full: h.offsetHeight > max * line + 1 };
+          }, long);
+          // 200 characters fit some looks' widest lines whole: only a cut is judged.
+          if (!got.cut) continue;
+          cuts++;
+          if (got.lines !== got.max || !got.full)
+            found.push(`${look}, ${lead} lead photo: ${got.lines} lines of ${got.max}${got.full ? '' : ', a word more fits'}`);
+        }
+      expect(found).toEqual([]);
+      expect(cuts).toBeGreaterThan(4);
+    }, 120_000);
+
+  // Review of #492: beside or above a small frame, a headline within its lines could still push the summary off the lead.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a small-framed story's text inside the lead at every headline length, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const showList of [true, false])
+          for (const length of [56, 80, 110, 135]) {
+            const title = sentence.repeat(2).slice(0, length).trim();
+            const items = [story(0, { title, summary: sentence.repeat(3).slice(0, 240) }), story(1), story(2)];
+            const f = await r.show({ look, showList, items }, photos(3, [], '700x560'));
+            const where = `${look}, list ${showList ? 'on' : 'off'}, ${length} characters`;
+            const out = await f.evaluate(() => {
+              const story = document.querySelector<HTMLElement>('.story')!;
+              const card = story.querySelector<HTMLElement>('.card')!;
+              return story.classList.contains('small') && (card.offsetTop < -1 || card.offsetTop + card.offsetHeight > story.clientHeight + 1);
+            });
+            if (out) found.push(`${where}: the text runs off the lead`);
+            for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${where}: ${fault}`);
+          }
+      expect(found).toEqual([]);
+    }, 300_000);
+
+  // Review of #492: a later story is fitted again when its small photo loads, in play, from its own title, not from the
+  // cut that prepare made for the larger frame.
+  it("fits a later story's headline as it fits the first's, once its small photo loads", async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    const long = sentence.repeat(2).slice(0, 200).trim();
+    await hst.init(
+      'fresh',
+      spotData(t().manifest, { look: 'night', items: [0, 1].map((i) => story(i, { title: long })), rotationSeconds: 8 }),
+      photos(2, [], '700x560'),
+      NOW,
+      demo,
+      false,
+      16_000,
+    );
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    await hst.post('fresh', 'play');
+    for (let i = 0; i < 60; i++) await hst.page.clock.runFor(100);
+    await f.waitForFunction(() => document.querySelectorAll('.story')[1]!.classList.contains('small'));
+    const [first, second] = await f.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.story')].map((s) => `${s.style.getPropertyValue('--fit')}: ${s.querySelector('.headline')!.textContent}`),
+    );
+    expect(second).toBe(first);
+  });
+
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
     const r = await frame();
     const read = (f: Frame) =>

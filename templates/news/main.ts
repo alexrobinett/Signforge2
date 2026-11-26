@@ -43,7 +43,7 @@ const SMALL_SHARE = { landscape: 0.42, portrait: 0.55 } as const;
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
  * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
  */
-let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number }[] = [];
+let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number; title: string }[] = [];
 let timers: number[] = [];
 
 /** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
@@ -136,7 +136,7 @@ defineTemplate({
           bare();
         });
         watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
-        if (i > 0) later.push({ story: el, img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+        if (i > 0) later.push({ story: el, img: photo, row, at: i * slot - LOAD_AHEAD_MS, title: story.title });
       }
       const meta = el.querySelector('.meta');
       if (meta) {
@@ -185,7 +185,7 @@ defineTemplate({
   },
   play(ctx) {
     document.getElementById('leads')!.style.visibility = '';
-    for (const { story, img, row, at } of later)
+    for (const { story, img, row, at, title } of later)
       timers.push(
         window.setTimeout(() => {
           img.dataset.sfSrc = 'image';
@@ -193,6 +193,8 @@ defineTemplate({
           void loaded(img).then(() => {
             if (!frame(story, img, ctx.orientation)) return;
             story.style.removeProperty('--fit');
+            // From the title, not the cut prepare made for the larger frame.
+            story.querySelector('.headline')!.textContent = title;
             fitHeadlines([story]);
           });
         }, at),
@@ -239,7 +241,13 @@ function fitHeadlines(stories: HTMLElement[]): void {
     const s = getComputedStyle(h);
     return Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight);
   };
-  const over = (h: HTMLElement) => h.offsetHeight > room(h) + 1;
+  const over = (h: HTMLElement) => {
+    if (h.offsetHeight > room(h) + 1) return true;
+    const story = h.closest<HTMLElement>('.story')!;
+    if (!story.classList.contains('small')) return false;
+    const card = h.closest<HTMLElement>('.card')!;
+    return card.offsetTop < -1 || card.offsetTop + card.offsetHeight > story.clientHeight + 1;
+  };
   let long = heads.filter(over);
   for (const step of HEADLINE_STEPS.slice(1)) {
     if (!long.length) return;
@@ -249,8 +257,11 @@ function fitHeadlines(stories: HTMLElement[]): void {
   // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
   // each word's line ends is read from the one layout there is; the cut is checked with one more.
   const full = long.map((h) => h.textContent!);
+  // Read from the greedy layout: a balanced one spreads the words over the lines, and holds fewer than they can.
+  for (const h of long) h.style.setProperty('text-wrap', 'wrap');
   const kept = long.map(wordsInRoom);
   long.forEach((h, i) => {
+    h.style.removeProperty('text-wrap');
     h.textContent = fitWords(full[i]!, (text) => text.trim().split(/\s+/).length <= kept[i]!);
   });
   long.forEach((h, i) => {
@@ -276,7 +287,9 @@ function fitHeadlines(stories: HTMLElement[]): void {
     for (const word of h.textContent!.matchAll(/\S+/g)) {
       range.setStart(text, word.index);
       range.setEnd(text, word.index + word[0].length);
-      if (range.getBoundingClientRect().bottom > limit) break;
+      const r = range.getBoundingClientRect();
+      // By the word's middle: set solid, a glyph box stands past its line's, and the last line would never count.
+      if ((r.top + r.bottom) / 2 > limit) break;
       n++;
     }
     return n;

@@ -109,10 +109,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "3622c556c53e1ed7d23af1672b599ebe72f3b4eaec1e8f8ecedcf7f408605d41": {
-      "size": 388354,
-      "type": "text/html"
-    },
     "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
       "size": 582,
       "type": "image/svg+xml"
@@ -176,6 +172,10 @@
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
+    },
+    "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b": {
+      "size": 388707,
+      "type": "text/html"
     }
   },
   "templates": {
@@ -1013,7 +1013,7 @@
         },
         "protocol": 2
       },
-      "html": "3622c556c53e1ed7d23af1672b599ebe72f3b4eaec1e8f8ecedcf7f408605d41"
+      "html": "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b"
     },
     "base/room-status@1.0.2": {
       "manifest": {
@@ -1532,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "56ca0d44a434910f55e45bbcaa156006497eef624466ad65744366f3c0e48a45"
+  "id": "e7f9534b00ae58285d8e553ed4300c96d3ce7ee453b259f4867b76ff1c20f3a3"
 }

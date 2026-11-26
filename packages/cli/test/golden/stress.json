@@ -28,10 +28,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "3622c556c53e1ed7d23af1672b599ebe72f3b4eaec1e8f8ecedcf7f408605d41": {
-      "size": 388354,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -112,6 +108,10 @@
     },
     "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c": {
       "size": 403253,
+      "type": "text/html"
+    },
+    "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b": {
+      "size": 388707,
       "type": "text/html"
     }
   },
@@ -1188,7 +1188,7 @@
         },
         "protocol": 2
       },
-      "html": "3622c556c53e1ed7d23af1672b599ebe72f3b4eaec1e8f8ecedcf7f408605d41"
+      "html": "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -2205,5 +2205,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "2900a5afae18e7a5ef94f7200fa2e2289acd65bea4bc2cec0e252a45eac04945"
+  "id": "f4301a8026ad84b2e0c974b7f5ce597d5477f85075d42167a65c9c1b5c68ed29"
 }
