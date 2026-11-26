@@ -44,7 +44,8 @@ The player's own watchdog runs in the renderer it watches, so a wedged renderer 
 frozen panel. The player beats POST /alive with the token instead; with no beat for STALE_S the
 supervisor restarts the kiosk unit (allowed by signforge-supervisor.rules, a polkit rule for that
 one unit and verb). Only a beat arms the check, and a restart disarms it until the next beat, so a
-player that never beats (an older build, a kiosk URL without the player) is never restarted in a loop.
+player that never beats (an older build, a kiosk URL without the player) is never restarted in a loop. A restart
+that fails is tried again RESTART_RETRY_S later, at most RESTART_TRIES times in all, then not until the next beat.
 
 The output's mode (#511). kiosk.sh sets 1920x1080 at 60 Hz before the browser starts (a Pi 4 cannot
 animate at 4K), but a panel can bring its own mode back during play: a hotplug, an input switch. So
@@ -53,7 +54,8 @@ output's name and its modes, which wake nothing), and when it is not MODE sets i
 does and logs it. GET /display reports the last reading and how often a set took ("output": {"mode",
 "resets"}); the player sends it in its heartbeat, so the screen's tools show it. A panel that refuses
 MODE is set MODE_TRIES times in a row, then once every MODE_RETRY_S, its own mode reported meanwhile
-(#558). A check that fails unexpectedly is logged (then once an hour while it goes on) and the
+(#558); a reading other than the one it is stuck at, or none (the panel unplugged), ends the wait, so a panel
+plugged back in is set at its next check. A check that fails unexpectedly is logged (then once an hour while it goes on) and the
 reading dropped, so none looks current. Not read while the panel is off: the signal is off by design
 then, and setting a mode would turn it on.
 """
@@ -76,6 +78,9 @@ MODE_CHECK_S = 60
 MODE_TRIES = 3
 # Then it tries once this often: an input switched back may take MODE again.
 MODE_RETRY_S = 3600
+# A kiosk restart that fails is tried again this much later, this many times in all (review of #560).
+RESTART_RETRY_S = 30
+RESTART_TRIES = 3
 # wlr-randr's line for the mode in use: "    1920x1080 px, 60.000000 Hz (preferred, current)".
 MODE_LINE = re.compile(r"^\s+(\d+)x(\d+) px, ([\d.]+) Hz \([^)]*\bcurrent\b")
 
@@ -226,8 +231,9 @@ def read_mode():
     return (out, mode) if mode else None
 
 
-# The mode watch's own counts: sets that took, failed sets in a row, and the monotonic time before which none is tried.
-mode_watch = {"resets": 0, "failed": 0, "next_try": 0.0}
+# The mode watch's own counts: sets that took, failed sets in a row, the monotonic time before which none is tried,
+# and the mode it is stuck at while it waits.
+mode_watch = {"resets": 0, "failed": 0, "next_try": 0.0, "stuck_at": None}
 # Checks that failed in a row, and the monotonic time before which another failure is not logged (review of #560).
 mode_errors = {"count": 0, "next_log": 0.0}
 
@@ -239,11 +245,14 @@ def check_mode(now):
             return
         found = read_mode()
         if not found:
+            # Unplugged, or its input switched away: whatever comes back is set at once (review of #560).
+            mode_watch.update(failed=0, next_try=0.0, stuck_at=None)
             return
         out, mode = found
-        if mode == MODE:
-            mode_watch.update(failed=0, next_try=0.0)
-        elif now >= mode_watch["next_try"]:
+        if mode == MODE or mode_watch["stuck_at"] not in (None, mode):
+            # Back at MODE, or stuck and now at another mode (a hotplug, an input switch): no wait.
+            mode_watch.update(failed=0, next_try=0.0, stuck_at=None)
+        if mode != MODE and now >= mode_watch["next_try"]:
             rc, msg = run("wlr-randr", "--output", out, "--mode", MODE)
             after = read_mode()
             was, mode = mode, after[1] if after else mode
@@ -255,7 +264,7 @@ def check_mode(now):
                 mode_watch["failed"] += 1
                 stuck = mode_watch["failed"] >= MODE_TRIES
                 if stuck:
-                    mode_watch["next_try"] = now + MODE_RETRY_S
+                    mode_watch.update(next_try=now + MODE_RETRY_S, stuck_at=mode)
                 then = f"; stuck at {mode}, next try in {MODE_RETRY_S // 60} min" if stuck else ""
                 print(f"output at {was}, not {MODE}: set back, still {mode}{why}{then}", flush=True)
         state["output"] = {"mode": mode, "resets": mode_watch["resets"]}
@@ -286,16 +295,40 @@ def watch_mode():
 last_beat = None
 
 
-def watch_player():
+# Restarts that failed in a row, and the monotonic time the next is tried; None while none is due (review of #560).
+restarts = {"failed": 0, "retry_at": None}
+
+
+def check_player(now):
+    """One check of the player's beat, at `now` on the monotonic clock: restart the kiosk when it has gone quiet."""
     global last_beat
+    stale = last_beat is not None and now - last_beat > STALE_S
+    retry = restarts["retry_at"] is not None and now >= restarts["retry_at"]
+    if not (stale or retry):
+        return
+    last_beat = None
+    restarts["retry_at"] = None
+    rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
+    if rc == 0:
+        restarts["failed"] = 0
+        print(f"no beat from the player for {STALE_S} s: kiosk restart queued", flush=True)
+        return
+    restarts["failed"] += 1
+    again = restarts["failed"] < RESTART_TRIES
+    then = f"next try in {RESTART_RETRY_S} s" if again else "no more tries until the player beats"
+    print(f"no beat from the player for {STALE_S} s: kiosk restart failed ({restarts['failed']} of {RESTART_TRIES}): {out.strip()[:120]}; {then}", flush=True)
+    if again:
+        restarts["retry_at"] = now + RESTART_RETRY_S
+    else:
+        restarts["failed"] = 0
+
+
+def watch_player():
     while True:
         time.sleep(5)
         # A failure is logged and the watch goes on: a thread that ends leaves no watchdog (#558).
         try:
-            if last_beat is not None and time.monotonic() - last_beat > STALE_S:
-                last_beat = None
-                rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
-                print(f"no beat from the player for {STALE_S} s: kiosk restart {'queued' if rc == 0 else 'failed: ' + out.strip()[:120]}", flush=True)
+            check_player(time.monotonic())
         except Exception as e:
             print(f"player check failed: {e!r}", flush=True)
 
@@ -355,6 +388,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "forbidden"})
         if self.path == "/alive":
             last_beat = time.monotonic()
+            restarts.update(failed=0, retry_at=None)
             self.reply(200, {})
         elif self.path in ("/display/on", "/display/off"):
             self.reply(200, set_display(self.path.endswith("/on")))
