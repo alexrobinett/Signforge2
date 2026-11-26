@@ -101,6 +101,10 @@
     }
   },
   "files": {
+    "030f1ff3f724b2937c07da82a4c7f6dec4f40d0ef2588305d56010e01e96766b": {
+      "size": 385952,
+      "type": "text/html"
+    },
     "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
       "size": 401879,
       "type": "text/html"
@@ -160,10 +164,6 @@
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72": {
-      "size": 385461,
-      "type": "text/html"
     },
     "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
       "size": 398206,
@@ -891,10 +891,10 @@
       },
       "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
     },
-    "base/news@2.0.0": {
+    "base/news@2.0.1": {
       "manifest": {
         "id": "news",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1013,7 +1013,7 @@
         },
         "protocol": 2
       },
-      "html": "caafbcfe18eed44030fc7ccda709f6bac3d1535944e8401320380e966da10c72"
+      "html": "030f1ff3f724b2937c07da82a4c7f6dec4f40d0ef2588305d56010e01e96766b"
     },
     "base/room-status@1.0.2": {
       "manifest": {
@@ -1314,7 +1314,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.0.1",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1345,7 +1345,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.0.1",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1376,7 +1376,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.0.0",
+      "template": "base/news@2.0.1",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1532,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "3c1bb63d55456297cbd9d741f48e22a90cdab22d51e156a8d060c96f6d51492a"
+  "id": "7ca641fd7d0d5fc28644b891d89da889bee57637f6f51c69ad83b3be83a4ded5"
 }

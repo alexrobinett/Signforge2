@@ -1,5 +1,5 @@
 import { applyLook, crawl, LOOKS } from '@signforge/template-looks';
-import { now as clockNow, defineTemplate, formatter, type TemplateContext } from '@signforge/template-sdk';
+import { now as clockNow, defineTemplate, fitWords, formatter, type TemplateContext } from '@signforge/template-sdk';
 import { bindRow, rowImage } from '@signforge/template-sdk/rows';
 
 type Look = (typeof LOOKS)[number];
@@ -182,19 +182,29 @@ defineTemplate({
 });
 
 /**
- * Each lead headline at the largest step whose lines hold it: its clamp's ellipsis comes only at the smallest. Every
- * headline is read before any is stepped, so stories that fit cost one layout between them.
+ * Each lead headline at the largest step whose lines (the look's `--nw-lines`) hold it, cut on a word only at the
+ * smallest. A headline that fits is only read, so stories that fit cost one layout between them.
  */
 function fitHeadlines(stories: HTMLElement[]): void {
-  const over = (el: HTMLElement) => {
-    const h = el.querySelector<HTMLElement>('.headline')!;
-    return h.scrollHeight > h.clientHeight + Number.parseFloat(getComputedStyle(h).fontSize) / 2 || h.scrollWidth > h.clientWidth + 1;
+  /** More lines than the look gives a headline. */
+  const over = (h: HTMLElement) => {
+    const s = getComputedStyle(h);
+    return h.offsetHeight > Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight) + 1;
   };
-  for (const story of stories.filter(over))
+  for (const story of stories) {
+    const h = story.querySelector<HTMLElement>('.headline')!;
+    if (!over(h)) continue;
     for (const step of HEADLINE_STEPS.slice(1)) {
       story.style.setProperty('--fit', String(step));
-      if (!over(story)) break;
+      if (!over(h)) break;
     }
+    // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders.
+    if (over(h))
+      h.textContent = fitWords(h.textContent ?? '', (text) => {
+        h.textContent = text;
+        return !over(h);
+      });
+  }
 }
 
 /**

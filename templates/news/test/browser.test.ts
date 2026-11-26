@@ -270,6 +270,42 @@ describe('news 2.0 (#202)', () => {
     expect(items?.type === 'list' && items.item.summary).toMatchObject({ maxLength: NEWS_SUMMARY_MAX });
   });
 
+  // Descenders (g, j, p, q, y) stand below a tight display line: no text box may clip them (owner's report on #476:
+  // "Long." and "Surge." in Poster's lead). Copy that fits, so turning every text box's clipping off changes no pixel.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`clips no descender in any text box, in every look, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const deep = [
+        story(0, { title: 'Jumpy prices dip; July gets quiet', summary: 'Gloomy pygmy yaks jog by; quaint jugglers pay up.', source: 'Pygmy Daily' }),
+        ...[1, 2, 3, 4].map((i) => story(i, { title: `Jogging quaggy pygmy yaks, page ${i}`, source: 'gypsy jay' })),
+      ];
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show({ look, items: deep }, photos(5, bare ? [0] : []));
+          await r.hst.post('fresh', 'play');
+          await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+          const clip = await f.evaluate(() => {
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = 4000;
+            }
+            const b = document.querySelector('.stage')!.getBoundingClientRect();
+            return { x: b.x, y: b.y, width: b.width, height: b.height };
+          });
+          const clipped = await r.hst.page.screenshot({ clip });
+          await f.evaluate(() => {
+            const el = document.createElement('style');
+            el.id = 'unclipped';
+            el.textContent = '.headline, .rtitle, .summary, .meta, .src, .credit, .lk-mask { overflow: visible !important; }';
+            document.head.append(el);
+          });
+          if (!(await r.hst.page.screenshot({ clip })).equals(clipped)) found.push(`${look}, ${bare ? 'bare lead' : 'photo lead'}`);
+          await f.evaluate(() => document.getElementById('unclipped')!.remove());
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
     const r = await frame();
     const read = (f: Frame) =>

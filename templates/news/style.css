@@ -176,19 +176,29 @@ ol {
   flex: none;
   color: var(--lk-muted);
 }
+/* The headline's size, on its story: the kit's mask around it takes its room for descenders from it. */
+.story {
+  --nw-hl-size: calc(var(--nw-headline) * var(--lk-scale, 1) * var(--fit, 1));
+}
+.story.no-photo {
+  --nw-hl-size: calc(var(--nw-headline) * var(--nw-bare-step) * var(--lk-scale, 1) * var(--fit, 1));
+}
+/* Set solid (Poster at 0.94), a line's descenders (g, j, p, q, y) stand below its box, and Poster's J swings left of it:
+   nothing clips the headline, and the mask it slides out of (Poster, Night) has room for them below and at the sides,
+   without moving what is around it (owner's report on #476). Too long a headline is cut on a word to its lines in
+   main.ts, not clamped. */
+.story .lk-mask {
+  padding: 0 calc(var(--nw-hl-size) * 0.15) calc(var(--nw-hl-size) * 0.3);
+  margin: 0 calc(var(--nw-hl-size) * -0.15) calc(var(--nw-hl-size) * -0.3);
+}
 .headline {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--nw-lines);
-  overflow: hidden;
   overflow-wrap: anywhere;
-  font: var(--lk-display-weight) calc(var(--nw-headline) * var(--lk-scale, 1) * var(--fit, 1)) / var(--lk-display-leading) var(--lk-font-display);
+  font: var(--lk-display-weight) var(--nw-hl-size) / var(--lk-display-leading) var(--lk-font-display);
   letter-spacing: var(--lk-display-tracking);
   text-wrap: balance;
 }
 .no-photo .headline {
   --nw-lines: var(--nw-bare-lines);
-  font-size: calc(var(--nw-headline) * var(--nw-bare-step) * var(--lk-scale, 1) * var(--fit, 1));
 }
 .summary {
   display: -webkit-box;
