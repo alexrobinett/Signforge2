@@ -100,6 +100,54 @@ describe('announcement (#197)', () => {
       expect(found).toEqual([]);
     }, 180_000);
 
+  // The board's announcement (#news-design): facts as ruled rows that wrap rather than cut ("9 am" stays whole), the
+  // code's label under it, the label as text not a pill, a straight photo block, and one accent a look.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`sets facts as rows that never cut, the code's label under it and one accent a look, ${orientation}`, async () => {
+      const k = await screenFrame(t(), orientation, photo);
+      const found: string[] = [];
+      const facts = [
+        { label: 'Where', value: 'Pier 9, third floor' },
+        { label: 'When', value: 'Monday 30 November, 9 am' },
+      ];
+      for (const look of looks) {
+        const f = await k.play({ look, ...everything, facts }, demo, undefined, logo);
+        const seen = await f.evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 3000;
+          const style = (el: Element, pseudo?: string) => getComputedStyle(el, pseudo);
+          const facts = [...document.querySelectorAll<HTMLElement>('.fact')];
+          // As computed, like the colours it is compared with: the custom property holds what the kit wrote (hex).
+          const accents = ['--lk-accent-ink', '--lk-accent-ink-large'].map((name) => {
+            const probe = document.body.appendChild(document.createElement('i'));
+            probe.style.color = `var(${name})`;
+            const color = style(probe).color;
+            probe.remove();
+            return color;
+          });
+          const inAccent = [...document.querySelectorAll('.copy *')].filter(
+            (el) => el.children.length === 0 && el.textContent && accents.includes(style(el).color),
+          );
+          return {
+            rows: facts.every((el) => style(el).flexDirection === 'row'),
+            // Cut: the clamp hides at least half a line (glyphs overhang a tight leading by a few pixels, as main.ts allows).
+            cut: facts.map((el) => el.querySelector('dd')!).filter((dd) => dd.scrollHeight - dd.clientHeight > Number.parseFloat(style(dd).fontSize) / 2)
+              .length,
+            under: style(document.querySelector('.qr')!).flexDirection,
+            pill: style(document.querySelector('.pill')!).backgroundColor,
+            tilt: style(document.querySelector('.photo')!, '::before').transform,
+            accents: inAccent.length,
+          };
+        });
+        if (!seen.rows) found.push(`${look}: facts are not rows`);
+        if (seen.cut) found.push(`${look}: ${seen.cut} fact values cut`);
+        if (seen.under !== 'column') found.push(`${look}: the code's label is not under it`);
+        if (seen.pill !== 'rgba(0, 0, 0, 0)') found.push(`${look}: the label is a pill`);
+        if (seen.tilt !== 'none') found.push(`${look}: the photo's block is tilted`);
+        if (seen.accents > 1) found.push(`${look}: ${seen.accents} texts in the accent`);
+      }
+      expect(found).toEqual([]);
+    });
+
   // #224: with it, a portrait screen gets the landscape rendition, which must never be drawn larger than it is.
   it('draws the photo within the portraitBox it declares, in every look and toggle, over the whole spot', async () => {
     const { manifest } = t();
@@ -213,7 +261,8 @@ describe('announcement (#197)', () => {
       const k = await screenFrame(t(), orientation, photo);
       for (const [kit, theme] of kits)
         for (const look of looks) {
-          const f = await k.play({ look, qrUrl: long.qrUrl }, theme);
+          // With every field at its limit: long copy gives way, never the code (#603's review).
+          const f = await k.play({ look, ...long }, theme);
           const { fills, clip, vmin } = await f.evaluate(() => {
             for (const a of document.getAnimations()) a.currentTime = 3000;
             const svg = document.querySelector('#qr svg')!;

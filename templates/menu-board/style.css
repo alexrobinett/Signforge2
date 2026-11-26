@@ -123,14 +123,12 @@ body {
   --bg: var(--sf-bg, #14110f);
   --ink: var(--sf-text, #f6efe6);
   --muted: var(--sf-muted, color-mix(in srgb, var(--ink) 62%, transparent));
-  --card: color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.04)) 90%, var(--sf-text, transparent));
 }
 /* The light theme swaps the kit's background and text: the same pair, so it stays legible. */
 .light {
   --bg: var(--sf-text, #f7f1e8);
   --ink: var(--sf-bg, #1d1a17);
   --muted: color-mix(in srgb, var(--ink) 60%, transparent);
-  --card: color-mix(in srgb, var(--ink) 3.5%, transparent);
 }
 html,
 body {
@@ -144,15 +142,19 @@ body {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  --on-accent: var(--sf-on-accent, var(--bg));
   color: var(--ink);
   background: var(--bg);
   padding: calc(var(--u) * 6) calc(var(--u) * 8);
   display: flex;
   flex-direction: column;
 }
+/* The header hangs top-left, the subtitle on the title's baseline, over a hairline. */
 header {
-  text-align: center;
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 3);
+  padding-bottom: calc(var(--u) * 2);
+  border-bottom: max(1px, 0.12vmin) solid currentColor;
   margin-bottom: calc(var(--u) * 4);
   will-change: transform, opacity;
   animation:
@@ -162,24 +164,14 @@ header {
 }
 h1 {
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
-  font-size: calc(var(--u) * 8.5);
+  font-size: calc(var(--u) * 7.4);
   font-weight: 900;
   letter-spacing: -0.02em;
   line-height: 1;
 }
-h1::after {
-  content: '';
-  display: block;
-  width: calc(var(--u) * 10);
-  height: 0.5vmin;
-  margin: calc(var(--u) * 2) auto 0;
-  background: var(--accent);
-  border-radius: 1vmin;
-}
 .subtitle {
-  font-size: calc(var(--u) * 3);
+  font-size: calc(var(--u) * 3.4);
   color: var(--muted);
-  margin-top: calc(var(--u) * 1.6);
 }
 .subtitle:empty {
   display: none;
@@ -198,10 +190,10 @@ h1::after {
   grid-template-columns: minmax(0, 90vmin);
   justify-content: center;
 }
+/* Ruled rows on the ground, no cards. */
 .item {
-  padding: calc(var(--u) * 1.3) calc(var(--u) * 2);
-  border-radius: var(--sf-radius, calc(var(--u) * 1.4));
-  background: var(--card);
+  padding: calc(var(--u) * 1.8) 0;
+  border-bottom: max(1px, 0.1vmin) solid color-mix(in srgb, currentColor 16%, transparent);
   will-change: transform, opacity;
   animation:
     rise-in 0.6s var(--d-in) both,
@@ -217,16 +209,11 @@ h1::after {
   font-size: calc(var(--u) * 3.7);
   font-weight: 750;
 }
+/* A tag is a word in the accent, the one place it is used. */
 .tag {
-  font-size: calc(var(--u) * 1.8);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--on-accent);
-  background: var(--accent);
-  padding: 0.2em 0.55em;
-  border-radius: 0.4em;
-  transform: translateY(-0.2em);
+  font-size: calc(var(--u) * 2.6);
+  font-weight: 600;
+  color: var(--accent-text);
 }
 .tag:empty {
   display: none;
@@ -235,15 +222,14 @@ h1::after {
   flex: 1;
   border-bottom: 0.35vmin dotted var(--muted);
   transform: translateY(-0.35em);
-  opacity: 0.6;
+  opacity: 0.35;
 }
 .price {
   font-size: calc(var(--u) * 3.7);
   font-weight: 800;
-  color: var(--accent-text);
 }
 .desc {
-  font-size: calc(var(--u) * 2.4);
+  font-size: calc(var(--u) * 2.8);
   color: var(--muted);
   margin-top: calc(var(--u) * 0.5);
 }
@@ -251,8 +237,7 @@ h1::after {
   display: none;
 }
 .footnote {
-  text-align: center;
-  font-size: calc(var(--u) * 2.8);
+  font-size: calc(var(--u) * 3);
   color: var(--muted);
   margin-top: calc(var(--u) * 3);
   animation:
@@ -275,14 +260,14 @@ h1::after {
   row-gap: calc(var(--u) * 3);
 }
 [data-orientation='portrait'] .item {
-  padding: calc(var(--u) * 2) calc(var(--u) * 2.6);
+  padding: calc(var(--u) * 2) 0;
 }
 [data-orientation='portrait'] .name,
 [data-orientation='portrait'] .price {
   font-size: calc(var(--u) * 4.4);
 }
 [data-orientation='portrait'] .desc {
-  font-size: calc(var(--u) * 2.9);
+  font-size: calc(var(--u) * 3);
 }
 [data-orientation='portrait'] .footnote {
   margin-top: calc(var(--u) * 5);

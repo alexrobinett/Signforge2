@@ -7,8 +7,8 @@
     "orientation": "landscape"
   },
   "files": {
-    "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e": {
-      "size": 79560,
+    "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c": {
+      "size": 78652,
       "type": "text/html"
     },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
@@ -72,8 +72,8 @@
       "size": 77944,
       "type": "text/html"
     },
-    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
-      "size": 395766,
+    "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1": {
+      "size": 395144,
       "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
@@ -81,8 +81,8 @@
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
     },
-    "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b": {
-      "size": 81204,
+    "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62": {
+      "size": 80559,
       "type": "text/html"
     },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
@@ -206,10 +206,10 @@
       },
       "html": "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e"
     },
-    "base/announcement@1.1.2": {
+    "base/announcement@1.2.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -335,7 +335,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
+      "html": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1"
     },
     "base/clock@1.4.0": {
       "manifest": {
@@ -604,10 +604,10 @@
       },
       "html": "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79"
     },
-    "base/agenda@1.4.0": {
+    "base/agenda@1.5.0": {
       "manifest": {
         "id": "agenda",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "name": "Agenda",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
         "fields": {
@@ -693,7 +693,7 @@
         },
         "protocol": 2
       },
-      "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
+      "html": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62"
     },
     "base/info-frame@1.2.0": {
       "manifest": {
@@ -985,10 +985,10 @@
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
-    "base/menu-board@1.4.0": {
+    "base/menu-board@1.5.0": {
       "manifest": {
         "id": "menu-board",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "name": "Menu Board",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
         "fields": {
@@ -1080,7 +1080,7 @@
         },
         "protocol": 2
       },
-      "html": "07f8b602dceb1ecf0455f5e52c329257ed7940c270c3cf855de391ec65b1610e"
+      "html": "2bf86ebe974e222ccc2e3756cf50fee034e6e87469cc4f25435e0d83c6f60d7c"
     },
     "base/news@2.1.2": {
       "manifest": {
@@ -1517,7 +1517,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.1.2",
+      "template": "base/announcement@1.2.0",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -1608,7 +1608,7 @@
       "id": "holidays",
       "name": "US holidays (Google Calendar)",
       "kind": "template",
-      "template": "base/agenda@1.4.0",
+      "template": "base/agenda@1.5.0",
       "data": {
         "title": "Holidays",
         "subtitle": "United States",
@@ -1755,7 +1755,7 @@
       "id": "meeting-room",
       "name": "Meeting room (fixed data)",
       "kind": "template",
-      "template": "base/agenda@1.4.0",
+      "template": "base/agenda@1.5.0",
       "data": {
         "title": "Room 4B",
         "subtitle": "This week's bookings",
@@ -1807,7 +1807,7 @@
       "id": "menu",
       "name": "Coffee menu",
       "kind": "template",
-      "template": "base/menu-board@1.4.0",
+      "template": "base/menu-board@1.5.0",
       "data": {
         "title": "Coffee bar",
         "subtitle": "Made to order, all day",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "8904a0a589a197d492e2dc15e9e174b7d0ccdf0f7e88038237b8f69dd738373e"
+  "id": "9bec5882192d621f5fc463b4618dab580c17bf36c63547dff14ffed0406ed15a"
 }
