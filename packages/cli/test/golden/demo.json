@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
+      "onPrimary": "#ffffff",
       "accent": "#f97316",
+      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb",
-      "onPrimary": "#ffffff",
-      "onAccent": "#000000"
+      "muted": "#a5b4cb"
     },
     "shape": "soft",
     "fonts": {
@@ -117,6 +117,10 @@
       "size": 12704,
       "type": "font/woff2"
     },
+    "67e5d281f57bbedff77858ca4162530d071f531dcef7c5a2fd98984d44bed1f0": {
+      "size": 395060,
+      "type": "text/html"
+    },
     "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
       "size": 400856,
       "type": "text/html"
@@ -153,10 +157,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
-      "size": 395766,
-      "type": "text/html"
-    },
     "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
       "size": 393916,
       "type": "text/html"
@@ -179,10 +179,10 @@
     }
   },
   "templates": {
-    "base/announcement@1.1.2": {
+    "base/announcement@1.2.0": {
       "manifest": {
         "id": "announcement",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -224,7 +224,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -237,6 +236,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -308,7 +308,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
+      "html": "67e5d281f57bbedff77858ca4162530d071f531dcef7c5a2fd98984d44bed1f0"
     },
     "base/countdown@1.1.1": {
       "manifest": {
@@ -382,7 +382,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -395,6 +394,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -755,8 +755,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -773,7 +771,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -864,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -892,18 +892,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -929,8 +929,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -957,7 +955,9 @@
                 "type": "image",
                 "label": "Photo"
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "language": {
             "type": "text",
@@ -1015,14 +1015,14 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1072,8 +1072,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1098,7 +1096,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,13 +1142,13 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     }
@@ -1158,7 +1158,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.1.2",
+      "template": "base/announcement@1.2.0",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "d784608a41d2841f3f352e492b590bec86276cf9c920f1c7b2721fef8c772cee"
+  "id": "3980b63765c09ea9b7b5b14fdb8ae5bc400be1a60616a05856203479dd3f5a1f"
 }
