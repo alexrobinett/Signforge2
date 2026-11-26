@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
-      "onPrimary": "#ffffff",
       "accent": "#f97316",
-      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb"
+      "muted": "#a5b4cb",
+      "onPrimary": "#ffffff",
+      "onAccent": "#000000"
     },
     "shape": "soft",
     "fonts": {
@@ -141,6 +141,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1": {
+      "size": 399498,
+      "type": "text/html"
+    },
     "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16": {
       "size": 12672,
       "type": "font/woff2"
@@ -151,10 +155,6 @@
     },
     "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
       "size": 395766,
-      "type": "text/html"
-    },
-    "d4baea9c7886823cc2a124bd4cf112f1f1c8f29dd11eec1f6e38a281c35a8a14": {
-      "size": 398807,
       "type": "text/html"
     },
     "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9": {
@@ -224,6 +224,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -236,7 +237,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": []
           },
           "photo": {
@@ -382,6 +382,7 @@
           "facts": {
             "type": "list",
             "label": "Facts",
+            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -394,7 +395,6 @@
                 "maxLength": 32
               }
             },
-            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -755,6 +755,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -771,9 +773,7 @@
                 "label": "Source",
                 "default": ""
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "crawlLabel": {
             "type": "text",
@@ -864,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
+              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -892,18 +892,18 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              },
-              "label": "Weather"
+              }
             },
             "headlines": {
+              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              },
-              "label": "Headlines"
+              }
             }
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
@@ -929,6 +929,8 @@
           "items": {
             "type": "list",
             "label": "Headlines",
+            "maxItems": 30,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -955,9 +957,7 @@
                 "type": "image",
                 "label": "Photo"
               }
-            },
-            "maxItems": 30,
-            "default": []
+            }
           },
           "language": {
             "type": "text",
@@ -1015,14 +1015,14 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "rss",
           "fields": {
             "items": "items",
             "language": "language"
           }
-        }
+        },
+        "protocol": 2
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
@@ -1072,6 +1072,8 @@
           "events": {
             "type": "list",
             "label": "Bookings",
+            "maxItems": 25,
+            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -1096,9 +1098,7 @@
                 "label": "Organiser",
                 "default": ""
               }
-            },
-            "maxItems": 25,
-            "default": []
+            }
           },
           "showSchedule": {
             "type": "boolean",
@@ -1142,15 +1142,15 @@
         ],
         "uses": [],
         "background": "#000000",
-        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        }
+        },
+        "protocol": 2
       },
-      "html": "d4baea9c7886823cc2a124bd4cf112f1f1c8f29dd11eec1f6e38a281c35a8a14"
+      "html": "ff6d7b87ee9cfabf893469c44bbdd04d2cec4585e4df712cd74a873b39fa81c1"
     }
   },
   "spots": {
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "cefb231f3b6c2a4f0dda65b6cd16af7708f6e6e958a4e45ce86ccb7b97b77895"
+  "id": "d649b7197f1aa9cb304c73024823dcfd1b19cc064fdc8ca7aea5916e5ea65c81"
 }
