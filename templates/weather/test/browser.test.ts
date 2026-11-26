@@ -166,24 +166,29 @@ for (const orientation of ['landscape', 'portrait'] as const)
   });
 
 // The board's weather (#news-design): the glass card kept, lighter, with a hairline edge and no shadow; no clouds parked
-// on the top edge; the city in title case; the unit at the figures' cap height; two rows of tabular figures.
+// on the top edge; the city in title case, its descenders clear of the figures (Sydney); the unit at the figures' cap
+// height; two rows of tabular figures.
 for (const orientation of ['landscape', 'portrait'] as const)
   it(`keeps a lighter glass card with no edge clouds, the city in title case and the unit at cap height, ${orientation}`, async () => {
     const k = await screenFrame(t(), orientation, {});
-    const f = await k.play({ code: 2, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 });
+    const f = await k.play({ city: 'Sydney', code: 2, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 });
     const seen = await f.evaluate(() => {
       for (const a of document.getAnimations()) a.currentTime = 3000;
       const style = (sel: string) => getComputedStyle(document.querySelector(sel)!);
-      const top = (sel: string) => Math.round(document.querySelector(sel)!.getBoundingClientRect().top);
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const vmin = Math.min(innerWidth, innerHeight) / 100;
+      // The alpha as computed: `rgba(r, g, b, a)` or `color(srgb r g b / a)`; with none it is opaque.
+      const bg = style('.info').backgroundColor;
+      const alpha = Number((bg.match(/\/\s*([\d.]+)\)$/) ?? bg.match(/^rgba\(.*,\s*([\d.]+)\)$/))?.[1] ?? 1);
       return {
         clouds: document.querySelectorAll('.cloud:not(.hero)').length,
-        glass:
-          style('.info').backgroundColor.includes('/') ||
-          style('.info').backgroundColor.startsWith('rgba') ||
-          style('.info').backgroundColor.startsWith('color('),
+        glass: alpha < 1,
         edge: style('.info').boxShadow.includes('inset'),
         city: style('.city').textTransform,
-        unit: top('#temp') === top('.temp .unit'),
+        // The city's line box holds its descenders; the figures' box starts at their cap top.
+        clear: (box('#temp').top - box('.city').bottom) / vmin >= 1,
+        // Both boxes trimmed to cap height, which the row then aligns: their box tops match whether trimmed or not.
+        unit: [style('#temp').getPropertyValue('text-box'), style('.temp .unit').getPropertyValue('text-box')].every((v) => v.includes('cap')),
         rows: [
           style('.range').gridTemplateColumns.split(' ').length,
           style('.extra').gridTemplateColumns.split(' ').length,
@@ -191,5 +196,5 @@ for (const orientation of ['landscape', 'portrait'] as const)
         ],
       };
     });
-    expect(seen).toEqual({ clouds: 0, glass: true, edge: true, city: 'none', unit: true, rows: [2, 2, 'tabular-nums'] });
+    expect(seen).toEqual({ clouds: 0, glass: true, edge: true, city: 'none', clear: true, unit: true, rows: [2, 2, 'tabular-nums'] });
   });

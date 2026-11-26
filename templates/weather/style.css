@@ -489,6 +489,8 @@ body {
 .temp {
   display: flex;
   align-items: flex-start;
+  /* The trim below takes the figures' top leading, so this is the room the city's descenders (Sydney) need. */
+  margin-top: calc(var(--u) * 1.8);
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
   font-size: calc(var(--u) * 34);
   font-weight: 900;
