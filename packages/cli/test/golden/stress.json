@@ -40,8 +40,8 @@
       "size": 44306,
       "type": "image/png"
     },
-    "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33": {
-      "size": 78184,
+    "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2": {
+      "size": 400856,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
@@ -68,8 +68,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "a643ed05e2f25b7c22480e9b081a5a7f0ac6b8d7804a2eb254d7726362bd2388": {
-      "size": 399642,
+    "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3": {
+      "size": 77944,
       "type": "text/html"
     },
     "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27": {
@@ -337,10 +337,10 @@
       },
       "html": "c444c26f643d435fc222d6d3979685351ff18e87797e27b000a1878c0e168e27"
     },
-    "base/clock@1.3.0": {
+    "base/clock@1.4.0": {
       "manifest": {
         "id": "clock",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "name": "Clock",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
         "fields": {
@@ -385,7 +385,7 @@
         "background": "#05070d",
         "protocol": 2
       },
-      "html": "555e5aba84990005644520794fef8be0fa45f5268fffa3e850de285ea1a75f33"
+      "html": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3"
     },
     "base/countdown@1.1.1": {
       "manifest": {
@@ -695,10 +695,10 @@
       },
       "html": "d56cd8529d51c78161c97ef5a5769e3fc9645795e15ecc1222ba22dd8eaf2c2b"
     },
-    "base/info-frame@1.3.0": {
+    "base/info-frame@1.2.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.3.0",
+        "version": "1.2.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -983,7 +983,7 @@
         },
         "protocol": 2
       },
-      "html": "a643ed05e2f25b7c22480e9b081a5a7f0ac6b8d7804a2eb254d7726362bd2388"
+      "html": "7cb06e8c6fa706a173f010f063d3b9f5d7a45c82029cc6ac20b3757c884f66c2"
     },
     "base/menu-board@1.4.0": {
       "manifest": {
@@ -1544,7 +1544,7 @@
       "id": "clock",
       "name": "Clock",
       "kind": "template",
-      "template": "base/clock@1.3.0",
+      "template": "base/clock@1.4.0",
       "data": {
         "greeting": "",
         "message": "Welcome to SignForge",
@@ -1630,7 +1630,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.3.0",
+      "template": "base/info-frame@1.2.0",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "b48aba0f7efdc422fcae744bedaf08de3ff996e7e1bb0f41a64454c296435c1d"
+  "id": "829f0a4be0ed8f1ffa2065d64f58958f1084bf0b98837ae40fdf89b2167a6547"
 }
