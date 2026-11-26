@@ -763,6 +763,31 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     await org.scope.screens.update(org.screen, { desiredManifestId: manifestId });
   }
 
+  it('names the photos stored since its last poll in the next snapshot, though the feed answers 304 to a conditional request', async () => {
+    const org = await seedOrg(env.DB, `push-481-probe-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://probe.test/rss';
+    const id = await news(feed, { org, bind: false });
+    await pushed(org, [id]);
+    const photo = (i: number) => `https://cdn.probe.test/${i}.jpg`;
+    const rss = web({ [feed]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body: feedOf(2, photo), headers: { etag: '"rss"' } }) });
+    await poll({ now: NOW, guards: rss.guards });
+    const jobs = take().filter((j) => j.sourceId === id);
+    const { images } = imagesStub();
+    const bytes = jpeg(320, 180, 'probe');
+    await consume(jobs, { guards: web(Object.fromEntries(jobs.map((j) => [j.url, { body: bytes }]))).guards, images }, NOW + MIN);
+    // A stored copy its snapshot does not name clears the source's validators: the next poll reads the feed whole.
+    expect(await org.scope.dataSources.get(id)).toMatchObject({ etag: null, lastModified: null });
+    await org.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN });
+    await poll({ now: NOW + 5 * MIN, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.has('if-none-match')).toBe(false);
+    expect((await snapshot(id, org)).items.map((item) => item.image)).toEqual([
+      expect.objectContaining({ file: expect.any(String) }),
+      expect.objectContaining({ file: expect.any(String) }),
+    ]);
+  });
+
   it("queues photos for a source only a screen's pushed manifest shows: no published spot binds it", async () => {
     const org = await seedOrg(env.DB, `push-481-${++n}`);
     extraPollOrgs.add(org.orgId);
@@ -873,11 +898,31 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     // Measured: pollInit is one batch, the screens' manifests a statement in it; the manifests themselves are R2 reads, not D1.
     // 12 calls is what D1 counts against an invocation's 50.
     expect(counter.counts()).toEqual({ apiCalls: 12, statements: 36 });
-    expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(NEW_PER_ORG_PER_DAY);
+    // Each a first fill (#481): its own day's budget.
+    expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(5 * NEW_PER_SOURCE_PER_DAY);
   });
 });
 
 describe('budgets, resilience and cleanup', () => {
+  it("gives a source its first photos though two others spent the org's day, as demo's NYT needed (#481)", async () => {
+    const org = await seedOrg(env.DB, `first-fill-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const guardian = await news('https://first-guardian.test/rss', { org });
+    const verge = await news('https://first-verge.test/rss', { org });
+    await poll({
+      now: NOW,
+      guards: web({
+        'https://first-guardian.test/rss': { body: feedOf(10, (i) => `https://cdn.first-guardian.test/${i}.jpg`) },
+        'https://first-verge.test/rss': { body: feedOf(10, (i) => `https://cdn.first-verge.test/${i}.jpg`) },
+      }).guards,
+    });
+    expect(take().filter((j) => j.sourceId === guardian || j.sourceId === verge)).toHaveLength(NEW_PER_ORG_PER_DAY);
+    const nyt = await news('https://first-nyt.test/rss', { org, at: NOW + 5 * MIN });
+    await poll({ now: NOW + 5 * MIN, guards: web({ 'https://first-nyt.test/rss': { body: feedOf(9, (i) => `https://cdn.first-nyt.test/${i}.jpg`) } }).guards });
+    expect(take().filter((j) => j.sourceId === nyt)).toHaveLength(9);
+  });
+
   it('caps new photos per source per day and per org per day, resuming the next day', async () => {
     const s1 = await news('https://b1.test/rss');
     const s2 = await news('https://b2.test/rss');
@@ -893,8 +938,8 @@ describe('budgets, resilience and cleanup', () => {
       }).guards,
     });
     const first = take();
-    // s1 + s2 hit NEW_PER_ORG_PER_DAY (20); s3 gets 0.
-    expect(first).toHaveLength(NEW_PER_ORG_PER_DAY);
+    // Each holds none yet, so each takes its own day's budget (#481): s1 its 10 of 12, s2 its 10, s3 its 5.
+    expect(first).toHaveLength(NEW_PER_SOURCE_PER_DAY * 2 + 5);
     expect(first.filter((j) => j.sourceId === s1).length).toBeLessThanOrEqual(NEW_PER_SOURCE_PER_DAY);
     expect(first.filter((j) => j.sourceId === s2).length).toBeLessThanOrEqual(NEW_PER_SOURCE_PER_DAY);
 
@@ -903,6 +948,14 @@ describe('budgets, resilience and cleanup', () => {
     await poll({
       now: NOW + 5 * MIN,
       guards: web({ 'https://b1.test/rss': { body: feedOf(1, () => 'https://cdn.b1.test/extra.jpg') } }).guards,
+    });
+    expect(take()).toEqual([]);
+
+    // s3 holds some now, and the org's day is spent: its new stories wait.
+    await o.scope.dataSources.update(s3, { nextPollAt: NOW + 10 * MIN, etag: null });
+    await poll({
+      now: NOW + 10 * MIN,
+      guards: web({ 'https://b3.test/rss': { body: feedOf(1, () => 'https://cdn.b3.test/rotated.jpg') } }).guards,
     });
     expect(take()).toEqual([]);
 
@@ -1073,7 +1126,9 @@ describe('budgets, resilience and cleanup', () => {
 
     // Phase 1 at cleanupAt: forgets dropUrl and queues dropSha durably in feed_image_deletes (kept during grace window).
     const cleanupAt = NOW + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
+    // Oldest first, 100 a run: earlier tests' rows are older, so it may take more than one run to reach this one.
     expect(await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt)).toBeGreaterThanOrEqual(1);
+    for (let run = 0; run < 10 && (await row(dropUrl)); run++) await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt);
     expect(await row(dropUrl)).toBeUndefined();
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toContain(dropSha);
     expect(photoBlobs.has(feedBlobKey(o.orgId, dropSha))).toBe(true);
@@ -1262,8 +1317,8 @@ describe('budgets, resilience and cleanup', () => {
     const pollCounts = counter.counts();
     expect(pollCounts.apiCalls).toBeLessThan(25);
     expect(pollCounts.statements).toBeLessThan(40);
-    // All 5 sources saved their snapshots and queued within the org's daily budget.
-    expect(take()).toHaveLength(NEW_PER_ORG_PER_DAY);
+    // All 5 sources saved their snapshots and queued their first photos, each within its own day's budget (#481).
+    expect(take()).toHaveLength(5 * NEW_PER_SOURCE_PER_DAY);
 
     // 2. Cleanup of 25 expired rows with 2 distinct hashes each (50 hashes) stays well under 50 D1 queries.
     for (let i = 0; i < 25; i++) {

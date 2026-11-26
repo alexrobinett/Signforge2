@@ -44,6 +44,8 @@ export const PHOTOS_PER_SOURCE = 10;
  * Photos new to the org that one source, and the whole org, may queue in a day. A story past them
  * plays with no photo until the next day. At most 20 a day is 600 a month: at ~1 Images
  * transformation per typical web photo, an org at its cap uses about an eighth of the 5,000 free ones.
+ * A source's first photos, while it holds none, count against its own day only (#481): every source
+ * an org shows gets its photos once, whatever order they poll in, at most 10 sources × 10 once.
  */
 export const NEW_PER_SOURCE_PER_DAY = 10;
 export const NEW_PER_ORG_PER_DAY = 20;
@@ -191,7 +193,8 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
           .insert(fi)
           .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
             WITH counts AS (
-              SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n
+              SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n,
+                (SELECT count(*) FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.sourceId} = ${dataSourceId}) AS src_all
               FROM ${fi}
               WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
             )
@@ -201,7 +204,8 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
               WHERE NOT ${alreadyKnown}
               ORDER BY jobs.key
-              LIMIT (SELECT MAX(0, MIN(${NEW_PER_SOURCE_PER_DAY} - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) FROM counts)
+              -- A source's first photos, while it holds none, take its own day's budget whatever the org has used (#481).
+              LIMIT (SELECT MAX(0, MIN(${NEW_PER_SOURCE_PER_DAY} - src_n, CASE WHEN src_all = 0 THEN ${NEW_PER_SOURCE_PER_DAY} ELSE ${NEW_PER_ORG_PER_DAY} - org_n END)) FROM counts)
             )
           ) WHERE ${current}`)
           .onConflictDoUpdate({

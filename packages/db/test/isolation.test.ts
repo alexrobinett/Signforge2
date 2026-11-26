@@ -612,7 +612,10 @@ describe('feed photos', () => {
     await ensureSource(s.b, 'one');
     expect(await hold(s.a, 'one', { again: [], fresh: urls('one', NEW_PER_SOURCE_PER_DAY + 2) }, t)).toEqual(urls('one', NEW_PER_SOURCE_PER_DAY));
     expect(await hold(s.a, 'two', { again: [], fresh: urls('two', NEW_PER_SOURCE_PER_DAY) }, t)).toHaveLength(NEW_PER_ORG_PER_DAY - NEW_PER_SOURCE_PER_DAY);
-    expect(await hold(s.a, 'three', { again: [], fresh: urls('three', 1) }, t)).toEqual([]);
+    // A source holding none yet takes its own day's budget, the org's spent or not (#481)…
+    expect(await hold(s.a, 'three', { again: [], fresh: urls('three', 1) }, t)).toEqual(urls('three', 1));
+    // …and one that holds some is held to the org's.
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one-more', 1) }, t)).toEqual([]);
     // Org B's day is its own.
     expect(await hold(s.b, 'one', { again: [], fresh: urls('one', 1) }, t)).toEqual(urls('one', 1));
   });
