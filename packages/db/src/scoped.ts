@@ -1738,11 +1738,9 @@ export function scoped(d1: D1Database, orgId: string) {
           // Not expired at its decision's time, nor by the database's own clock as the batch runs: a
           // decision whose batch runs late (a publish that took long) commits nothing past the expiry.
           const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER))`;
-          // Changed since, or past its expiry: either way not the request that was read.
-          const stale = async () => {
-            const row = await publishRequests.get(current.id);
-            return row && row.rowVersion === current.rowVersion && row.expiresAt > Math.max(decision.now, Date.now()) ? undefined : (row?.rowVersion ?? 0);
-          };
+          // Changed since, or past its expiry by either clock: either way not the request that was read. Asked only once the
+          // guard failed, so never "holds again" by the Worker's clock, which may be behind the database's (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
         /**
@@ -1756,12 +1754,8 @@ export function scoped(d1: D1Database, orgId: string) {
           const changed = publishRequests.stage.update(current, { status: 'pending', decidedBy: null, decidedAt: null, publishId: null });
           const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${current.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
           const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.status} = 'declined' AND ${pr.expiresAt} > ${now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER)) AND NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${current.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
-          const stale = async () => {
-            const row = await publishRequests.get(current.id);
-            return row && row.rowVersion === current.rowVersion && row.status === 'declined' && row.expiresAt > Math.max(now, Date.now())
-              ? undefined
-              : (row?.rowVersion ?? 0);
-          };
+          // As `decide`'s: not the request that was read, by the database's clock too (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
       },
