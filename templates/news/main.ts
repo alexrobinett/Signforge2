@@ -126,6 +126,8 @@ defineTemplate({
           watch.disconnect();
           bare();
           el.style.removeProperty('--fit');
+          // From the title, not the cut made beside the photo.
+          el.querySelector('.headline')!.textContent = story.title;
           fitHeadlines([el]);
         });
         watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
@@ -213,7 +215,12 @@ function fitHeadlines(stories: HTMLElement[]): void {
     const s = getComputedStyle(h);
     return Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight);
   };
-  const over = (h: HTMLElement) => h.offsetHeight > room(h) + 1;
+  /** More lines than the look gives, or text that runs past its story's foot: a headline within its lines can still push the summary off (review of #492). */
+  const over = (h: HTMLElement) => {
+    if (h.offsetHeight > room(h) + 1) return true;
+    const text = h.closest<HTMLElement>('.text')!;
+    return text.offsetTop + text.offsetHeight > h.closest<HTMLElement>('.story')!.clientHeight + 1;
+  };
   let long = heads.filter(over);
   for (const step of HEADLINE_STEPS.slice(1)) {
     if (!long.length) return;
@@ -223,8 +230,11 @@ function fitHeadlines(stories: HTMLElement[]): void {
   // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
   // each word's line ends is read from the one layout there is; the cut is checked with one more.
   const full = long.map((h) => h.textContent!);
+  // Read from the greedy layout: a balanced one spreads the words over the lines, and holds fewer than they can.
+  for (const h of long) h.style.setProperty('text-wrap', 'wrap');
   const kept = long.map(wordsInRoom);
   long.forEach((h, i) => {
+    h.style.removeProperty('text-wrap');
     h.textContent = fitWords(full[i]!, (text) => text.trim().split(/\s+/).length <= kept[i]!);
   });
   long.forEach((h, i) => {
@@ -250,7 +260,9 @@ function fitHeadlines(stories: HTMLElement[]): void {
     for (const word of h.textContent!.matchAll(/\S+/g)) {
       range.setStart(text, word.index);
       range.setEnd(text, word.index + word[0].length);
-      if (range.getBoundingClientRect().bottom > limit) break;
+      const r = range.getBoundingClientRect();
+      // By the word's middle: set solid, a glyph box stands past its line's, and the last line would never count.
+      if ((r.top + r.bottom) / 2 > limit) break;
       n++;
     }
     return n;
