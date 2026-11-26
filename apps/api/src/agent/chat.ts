@@ -31,6 +31,7 @@
  */
 import { scoped } from '@signforge/db';
 import {
+  agentTimes,
   CMS_AGENT_CLIENT_ID,
   type Caller,
   describeInput,
@@ -331,7 +332,8 @@ function parsedJson(text: string): unknown {
  * can name org content too (a playlist that plays a spot, a spot holding sample text), so it is fenced as an output is (#122).
  */
 function asData(output: unknown): string {
-  const text = JSON.stringify(output);
+  // Times as an agent reads them, ISO 8601 (#345).
+  const text = JSON.stringify(agentTimes(output));
   return fenced('data', text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)} [cut: the rest was too long]` : text);
 }
 

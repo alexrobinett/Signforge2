@@ -182,6 +182,15 @@ describe('describe', () => {
       for (const name of await changers('owner', type)) expect(registry.get(name)?.mutates, `${type}: ${name}`).toBe(true);
   });
 
+  it("describes a type's times as an agent reads them, ISO 8601 (#345)", async () => {
+    const r = await dispatch(registry, 'describe', { type: 'spot' }, as('owner'));
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const { fields } = r.output as { fields: Record<string, { type?: unknown; format?: string }> };
+    expect(fields.createdAt).toMatchObject({ type: 'string', format: 'date-time' });
+    expect(fields.publishedAt).toMatchObject({ type: ['string', 'null'], format: 'date-time' });
+    expect(fields.durationMs).toMatchObject({ type: 'number' });
+  });
+
   it('describes every type a caller may read, its tools all in the registry', async () => {
     for (const type of TYPES) {
       for (const name of toolsOf(type)) expect(registry.get(name), `${type}: ${name}`).toBeDefined();

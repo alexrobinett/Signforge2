@@ -252,6 +252,15 @@ describe('POST /api/agent/chat', () => {
     expect(result.content.match(/<\/data>/g)).toHaveLength(1);
   });
 
+  it('gives the model every time in a tool output as ISO 8601, never ms (#345)', async () => {
+    const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'playlist', detail: 'full' } }] }, ANSWER] });
+    await s.scope.playlists.insert({ name: 'Lunch', transitionJson: JSON.stringify({ type: 'cut' }) });
+    await raw(await s.ask());
+    const result = s.model.asked[1].messages.at(-1).content[0].content;
+    expect(result).toMatch(/"createdAt":"\d{4}-\d{2}-\d{2}T[\d:.]+Z"/);
+    expect(result).not.toMatch(/"(at|since|[a-zA-Z]+At|[a-zA-Z]+Since)":\d/);
+  });
+
   it('refuses, unrun, a call to a tool it is never offered, whatever the model was told', async () => {
     const s = await setup({
       steps: [

@@ -8,6 +8,7 @@
 import { VIDEO_SPEC } from '@signforge/contract';
 import { z } from 'zod';
 import { effectiveScopes, type Grant, permits } from './dispatch';
+import { agentTimeProperties } from './agent-times';
 import { outputs } from './outputs';
 import { id } from './fields';
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
@@ -324,7 +325,12 @@ function rowFieldsOf(tools: Tools, type: ReadType, byIds: boolean): Record<strin
 }
 
 /** Every top-level field a row of `type` can have, with its JSON Schema: a list's rows, and what its get adds. */
+/** Every field of `type`'s `full` rows as JSON Schema, a time as the agent reads it: ISO 8601 (`agentTimes`). */
 function fieldsOf(tools: Tools, type: ReadType): Record<string, unknown> {
+  return agentTimeProperties(fieldsAsTools(tools, type));
+}
+
+function fieldsAsTools(tools: Tools, type: ReadType): Record<string, unknown> {
   const def = defOf(type);
   if (type === 'org')
     return {

@@ -3,7 +3,7 @@
  * give, so every tool's listing is tested without a request (test/mcp-tools.test.ts).
  */
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
-import { type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
+import { agentTimes, type DispatchResult, describeTools, type Grant, registry, servedByRead, type ToolServices } from '@signforge/tools';
 
 /** Tools that take something away for good: a person should look before an agent runs them. `takeover` can end one. */
 const DESTRUCTIVE = /^(delete|revoke|cancel)_|^(delete|roll_back_publish|takeover|disconnect)$/;
@@ -55,9 +55,11 @@ export function listedTools(grant: Grant, services: ToolServices): Tool[] {
  */
 export function callResult(result: DispatchResult): CallToolResult {
   if (result.ok) {
+    // Times as an agent reads them, ISO 8601 (#345).
+    const output = agentTimes(result.output);
     return {
-      content: [{ type: 'text', text: JSON.stringify(result.output) }],
-      ...(isRecord(result.output) ? { structuredContent: result.output } : {}),
+      content: [{ type: 'text', text: JSON.stringify(output) }],
+      ...(isRecord(output) ? { structuredContent: output } : {}),
     };
   }
   const { error, message, details } = result;

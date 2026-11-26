@@ -255,6 +255,19 @@ describe('tools', () => {
     expect(read?.structuredContent.items).toEqual(old?.structuredContent.playlists);
   });
 
+  it('gives every time as ISO 8601, and the CMS its ms (#345)', async () => {
+    const { t, owner, org } = await team();
+    const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'content:draft']);
+    const saved = await call(access_token, 'save_playlist', { name: 'Lobby', idempotencyKey: 'iso-times-1' });
+    const playlist = saved?.structuredContent.playlist;
+    expect(playlist.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const read = await call(access_token, 'read', { type: 'playlist', ids: [playlist.id], detail: 'full' });
+    expect(read?.structuredContent.items[0]).toMatchObject({ createdAt: playlist.createdAt, publishedAt: null });
+    // The CMS, which computes with them, still gets ms (/api/tools).
+    const cms = await owner.tool('read', { type: 'playlist', ids: [playlist.id], detail: 'full' });
+    expect((await cms.json<{ items: { createdAt: unknown }[] }>()).items[0]?.createdAt).toBe(Date.parse(playlist.createdAt));
+  });
+
   it('refuses an id or a version the listing no longer spells out (#345): the call checks the input, as invalid_input', async () => {
     const { t, owner, org } = await team();
     const { access_token } = await agentToken(t, owner, org.id, ['content:read', 'screens:manage']);

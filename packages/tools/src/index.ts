@@ -122,4 +122,5 @@ export {
 } from './screen-state';
 export { tally } from './rollout';
 export { orgSettings } from './settings';
+export { agentTimes } from './agent-times';
 export { madeBySpotEditor, reachesScreens, saveDataSourceInput, sourceRefusal } from './data-sources';
