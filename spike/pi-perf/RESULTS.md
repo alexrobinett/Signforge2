@@ -1250,3 +1250,19 @@ The same bench with every photo 700x560, as The Guardian's feed sends them, so e
 - Within the budget in landscape. Night's first run dropped 1.30% to two long frames while playing; two more runs of it dropped 0.11 and 0.17%, so it is not the layout.
 - Portrait prepares, 496 to 547 ms, are where 2.0.0's were with large photos (478 to 530): a small photo decodes faster and the wait for its load costs about as much. Over the budget by up to 47 ms in 7 of 8, as accepted for 2.0.0.
 
+
+## The bundle cache, with and without (issue #213, 2026-11-26)
+
+The player has kept each bundle it has read, by hash, for the manifest last prepared, since #91 (`framesFor` in `packages/player/src/slot.ts`): a spot that plays again reads nothing. #213 asked how much that saves on a large bundle. Master (`a6be8a32`) against the same build with the cache turned off (every prepare reads the bundle from Cache Storage and runs `containedFrames` on it), served beside the deployed player at `http://localhost:8090/b213/<build>/` so the kiosk's own origin and storage were not touched, the supervisor stopped while measured. `isolate.py 60 cut announcement+info-frame` on the static content, two bundles of 398 and 403 kB alternating, so every prepare after a run's first is a second play of its bundle. ABBA twice in landscape, once in portrait (output rotated with `wlr-randr --transform 90`, 1080x1920), five prepares a run.
+
+| Orientation | Build | Prepares after the first | Median | First prepare | Overall | Loading next | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cache | 324-379 (one 1,926) | 344 ms | 499-599 ms | 0.47, 0.50, 0.58, 3.14% | 13-16, 52% | 0.00-0.06% | 67 (one 1,583) ms |
+| | no cache | 379-596 | 501 ms | 549-617 ms | 1.22, 1.28, 1.36, 1.44% | 27-31% | 0.06% | 117-217 ms |
+| portrait | cache | 305-339 (one 575) | 311 ms | 509, 555 ms | 0.39, 0.44% | 12, 13% | 0.00, 0.03% | 50 ms |
+| | no cache | 358-507 | 455 ms | 495, 551 ms | 1.11, 1.17% | 26, 28% | 0.03, 0.09% | 133, 150 ms |
+
+- **Reading a 400 kB bundle again costs about 150 ms a prepare on the Pi** (157 ms landscape, 144 ms portrait, by median), and halves what the screen drops while the next spot loads. That is more than the 43 to 47 ms the parse and hash took timed alone in a tab (The look kit, above): inside a prepare the read and parse compete with the spot on screen.
+- **The cache's numbers are the per-template tables' own.** Its repeat prepares sit where the kit's templates measured on their own (Room status, Info frame, above).
+- **One cache run had a 1,926 ms prepare** with a 1,583 ms stall while loading, 3.14% overall. None of the other five cache runs, nor any no-cache run, came near it; it is not the cache (a hit does less than a miss) and was not chased further.
+- **Memory.** The cache holds, for each bundle of the manifest last prepared, its wrapper document (a few hundred bytes of policy) and its template document, about the bundle's own size: about the manifest's bundle bytes in all (2.26 MB for the 12 templates of this content), within a 4 GB Pi's means and bounded by what one manifest uses. A bundle a newly prepared manifest does not use is dropped then.
