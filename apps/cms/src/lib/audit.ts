@@ -92,6 +92,7 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
 export const ACTIONS: Record<string, { group: string; words: string; unlisted?: true }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
+  import_screen_labels: { group: 'Screens', words: 'Labels imported' },
   update_screen: { group: 'Screens', words: 'Changed' },
   // Not a What option of its own: Identified, Player restarted and Woken or put to sleep find its rows (list_audit_log).
   screen_command: { group: 'Screens', words: 'Command sent', unlisted: true },

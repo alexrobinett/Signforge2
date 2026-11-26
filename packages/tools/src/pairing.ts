@@ -69,7 +69,7 @@ const claimScreen = defineTool({
     const labels = input.labels ?? {};
     if (Object.keys(labels).length) {
       const change = { set: labels, remove: [] };
-      const over = overLimit(await org.screens.labels.list(), [screen.id], change);
+      const over = overLimit(await org.screens.labels.list(), [{ screenId: screen.id, ...change }]);
       if (over) throw over;
       write(await org.screens.labels.stage.update([screen.id], change, { newScreen: true }));
     }
@@ -79,7 +79,7 @@ const claimScreen = defineTool({
   refuseFailedCommit: async ({ org, input }) =>
     (await org.pairing.open(input.code, Date.now()))
       ? // Only the org's keys can have moved: no other change reaches the new screen. Any id not stored stands for it.
-        input.labels && overLimit(await org.screens.labels.list(), ['scr_claimed'], { set: input.labels, remove: [] })
+        input.labels && overLimit(await org.screens.labels.list(), [{ screenId: 'scr_claimed', set: input.labels, remove: [] }])
       : notOpen(input.code),
 });
 
