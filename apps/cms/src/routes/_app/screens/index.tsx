@@ -125,6 +125,7 @@ function ScreensPage() {
   const terms = termsOf(search.l);
   const keys = useQuery(labelKeysQuery(orgId)).data?.keys ?? [];
   const setTerms = (next: LabelTerm[]) => set({ l: termsParam(next) });
+  const openLabelFilter = useAppStore((s) => s.openLabelFilter);
   const sort = search.sort ?? 'name';
   const matching = (retired ? screens.filter(isRetired) : active).filter((s) => {
     if (search.group && !groupsOf.get(s.id)?.some((g) => g.id === search.group)) return false;
@@ -209,33 +210,36 @@ function ScreensPage() {
               Manage groups
             </Link>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <label htmlFor="screen-by">Group by</label>
-            <NativeSelect id="screen-by" value={search.by ?? ''} onChange={(e) => set({ by: e.target.value || undefined })}>
-              <option value="">Nothing</option>
-              {keys.map((k) => (
-                <option key={k.key} value={k.key}>
-                  {k.key}
-                </option>
-              ))}
-              {search.by && !keys.some((k) => k.key === search.by) && <option value={search.by}>{search.by}</option>}
-            </NativeSelect>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <label htmlFor="screen-status">Status</label>
-            <NativeSelect
-              id="screen-status"
-              value={search.status ?? ''}
-              onChange={(e) => set({ status: isStatusFilter(e.target.value) ? e.target.value : undefined })}
-            >
-              <option value="">Any</option>
-              {STATE_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {KIND_WORD[k]}
-                </option>
-              ))}
-              <option value="retired">Retired</option>
-            </NativeSelect>
+          {/* Group by and Status share a line on a phone, so the first screen stays in the first view. */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <label htmlFor="screen-by">Group by</label>
+              <NativeSelect id="screen-by" value={search.by ?? ''} onChange={(e) => set({ by: e.target.value || undefined })}>
+                <option value="">Nothing</option>
+                {keys.map((k) => (
+                  <option key={k.key} value={k.key}>
+                    {k.key}
+                  </option>
+                ))}
+                {search.by && !keys.some((k) => k.key === search.by) && <option value={search.by}>{search.by}</option>}
+              </NativeSelect>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <label htmlFor="screen-status">Status</label>
+              <NativeSelect
+                id="screen-status"
+                value={search.status ?? ''}
+                onChange={(e) => set({ status: isStatusFilter(e.target.value) ? e.target.value : undefined })}
+              >
+                <option value="">Any</option>
+                {STATE_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_WORD[k]}
+                  </option>
+                ))}
+                <option value="retired">Retired</option>
+              </NativeSelect>
+            </div>
           </div>
           <fieldset className="flex rounded-lg border border-border-strong bg-card p-0.5">
             <legend className="sr-only">View</legend>
@@ -255,6 +259,9 @@ function ScreensPage() {
               </Choice>
             ))}
           </fieldset>
+          <Button variant="outline" className="h-10" onClick={() => openLabelFilter()} disabled={!keys.length}>
+            <PlusIcon aria-hidden /> Filter
+          </Button>
         </EditorFields>
       </div>
 
@@ -436,8 +443,8 @@ function Section({ by, section, children }: { by: string; section: LabelSection<
 }
 
 /**
- * The label chips in the URL, each removable, and "+ Filter", which adds one from the keys and values the org's
- * screens have (`list_label_keys`). A chip on a key replaces that key's chip: a screen has one value of a key.
+ * The label chips in the URL, each removable, and the dialog the toolbar's "+ Filter" opens, which adds one from the
+ * keys and values the org's screens have (`list_label_keys`). A chip on a key replaces that key's chip: a screen has one value of a key.
  */
 function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: LabelKey[]; onChange: (terms: LabelTerm[]) => void }) {
   const open = useAppStore((s) => s.labels.filter);
@@ -448,45 +455,44 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
   const id = useId();
   const values = keys.find((k) => k.key === open?.key)?.values ?? [];
   return (
-    // A box of its own: EditorFields draws none, so the page's spacing would fall on nothing.
-    <div>
-      <EditorFields>
-        <div className="flex flex-wrap items-center gap-2">
-          {terms.length > 0 && (
-            <ul aria-label="Label filters" className="flex flex-wrap gap-2">
-              {terms.map((t) => (
-                <li key={t.key}>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border-strong bg-card py-0.5 pr-1 pl-3 text-sm">
-                    <button
-                      type="button"
-                      className="rounded outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      onClick={() => openLabelFilter(t.key, t.values)}
-                    >
-                      <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 rounded-full"
-                      aria-label={`Remove filter ${t.key}`}
-                      onClick={() => onChange(terms.filter((x) => x.key !== t.key))}
-                    >
-                      <XIcon aria-hidden />
-                    </Button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <Button variant="outline" size="sm" onClick={() => openLabelFilter()} disabled={!keys.length}>
-            <PlusIcon aria-hidden /> Filter
-          </Button>
-          {terms.length > 0 && (
-            <Button variant="link" size="sm" onClick={() => onChange([])}>
-              Clear filters
-            </Button>
-          )}
+    <>
+      {/* A box of its own, only with chips in it: EditorFields draws none, so the page's spacing would fall on nothing. */}
+      {terms.length > 0 && (
+        <div>
+          <EditorFields>
+            <div className="flex flex-wrap items-center gap-2">
+              <ul aria-label="Label filters" className="flex flex-wrap gap-2">
+                {terms.map((t) => (
+                  <li key={t.key}>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border-strong bg-card py-0.5 pr-1 pl-3 text-sm">
+                      <button
+                        type="button"
+                        className="rounded outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        onClick={() => openLabelFilter(t.key, t.values)}
+                      >
+                        <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 rounded-full"
+                        aria-label={`Remove filter ${t.key}`}
+                        onClick={() => onChange(terms.filter((x) => x.key !== t.key))}
+                      >
+                        <XIcon aria-hidden />
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="link" size="sm" onClick={() => onChange([])}>
+                Clear filters
+              </Button>
+            </div>
+          </EditorFields>
         </div>
+      )}
+      <EditorFields>
         <Dialog open={open !== null} onOpenChange={(o) => !o && close()}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -544,7 +550,7 @@ function LabelFilterRow({ terms, keys, onChange }: { terms: LabelTerm[]; keys: L
           </DialogContent>
         </Dialog>
       </EditorFields>
-    </div>
+    </>
   );
 }
 
