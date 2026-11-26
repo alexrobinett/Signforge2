@@ -158,16 +158,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const playing =
     desired && req.manifest.fallbackFrom === desired.id ? (await fileManifests(c.env.BLOBS, screen)).find((m) => m.id === req.manifest.active) : undefined;
   const last = screen.lastPhotos;
-  const { missing, ...snapshotsOut } = await snapshotsFor(
-    c.env,
-    screen,
-    desired,
-    req.snapshots,
-    req.blobs,
-    playable,
-    playing?.dataSources ?? new Set(),
-    last,
-  );
+  const { missing, ...snapshotsOut } = await snapshotsFor(c.env, screen, desired, req.snapshots, req.blobs, playable, playing?.dataSources ?? new Set(), last);
   const asked = snapshotsOut.blobs;
   // Soon again while more are missing than this reply asks for and the count still missing moves. When it holds (the
   // screen cannot fetch them, keeps only those it plays, or holds more than MAX_SYNC_BLOBS), one retry, for a reply

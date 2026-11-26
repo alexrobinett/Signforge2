@@ -338,7 +338,10 @@ describe('feed images on screens (#196)', () => {
       await expect.poll(() => reported(p), { timeout: 10_000 }).toEqual([f1, t1].sort());
     });
     // It boots with the panel off, so it cannot fall back before a sync's cleanup has run, however slow the machine.
-    await p.page.evaluate((until) => localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until })), new Date(Date.now() + 3_600_000).toISOString());
+    await p.page.evaluate(
+      (until) => localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until })),
+      new Date(Date.now() + 3_600_000).toISOString(),
+    );
     await p.page.reload();
     await p.until((s) => !s.displayOn && s.syncs > 1, 20_000);
     // Woken by the next sync: the broken spot fails again, and it falls back.

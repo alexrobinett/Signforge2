@@ -648,7 +648,12 @@ describe('snapshot feed blobs (#196)', () => {
         fetchedAt: 6000,
         checkedAt: 6000,
         dataJson: JSON.stringify({
-          items: Array.from({ length: stories }, (_, i) => ({ title: `Story ${i}`, published: '', source: '', image: { file: photos[2 * i], thumb: photos[2 * i + 1] } })),
+          items: Array.from({ length: stories }, (_, i) => ({
+            title: `Story ${i}`,
+            published: '',
+            source: '',
+            image: { file: photos[2 * i], thumb: photos[2 * i + 1] },
+          })),
         }),
       });
     }
@@ -658,7 +663,10 @@ describe('snapshot feed blobs (#196)', () => {
       dataSources: Object.fromEntries(ids.map((id) => [id, { id, refreshS: 300 }])),
       templates: { 'base/news@2.0.0': newsTemplate(true) },
       spots: Object.fromEntries(
-        ids.map((id, n) => [`n${n}`, { id: `n${n}`, kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: id, path: 'items' } } }]),
+        ids.map((id, n) => [
+          `n${n}`,
+          { id: `n${n}`, kind: 'template', template: 'base/news@2.0.0', data: { items: [] }, bindings: { items: { source: id, path: 'items' } } },
+        ]),
       ),
     });
     return { ids, snapshots: Object.fromEntries(ids.map((id) => [id, 6000])) };
@@ -687,7 +695,8 @@ describe('snapshot feed blobs (#196)', () => {
     const s = await setUp('sync-feed-blobs-standing');
     const one = await newsSources(s, OLD, 0, 1);
     const stuck = photosOf(0).slice(0, -1);
-    for (let i = 0; i < 3; i++) expect(await sync(s, body({ snapshots: one.snapshots, blobs: stuck }))).toMatchObject({ blobs: [photosOf(0).at(-1)], nextSyncS: 300 });
+    for (let i = 0; i < 3; i++)
+      expect(await sync(s, body({ snapshots: one.snapshots, blobs: stuck }))).toMatchObject({ blobs: [photosOf(0).at(-1)], nextSyncS: 300 });
     const three = await newsSources(s, NEW, 1, 2, 10, one.ids);
     const r = await sync(s, body({ snapshots: three.snapshots, blobs: stuck }));
     expect(r.blobs).toHaveLength(MAX_SYNC_RESPONSE_BLOBS);
