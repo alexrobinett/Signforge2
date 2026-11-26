@@ -1,5 +1,5 @@
 import { applyLook, crawl, LOOKS } from '@signforge/template-looks';
-import { now as clockNow, defineTemplate, formatter, type TemplateContext } from '@signforge/template-sdk';
+import { now as clockNow, defineTemplate, fitWords, formatter, type TemplateContext } from '@signforge/template-sdk';
 import { bindRow, rowImage } from '@signforge/template-sdk/rows';
 
 type Look = (typeof LOOKS)[number];
@@ -24,7 +24,7 @@ const SEPARATORS: Record<Look, string> = { pop: '  ·  ', poster: '  —  ', nig
 /** Stories in the list, which the lead rotates through: as many as fit each orientation's column at the look's row height. */
 const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
 
-/** The lead headline at each step, from the look's own size down to where 200 characters fit its lines. */
+/** The lead headline at each step, from the look's own size down; past the last, a headline is cut to its lines (cuts begin at about 90 to 120 characters). */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
 
 /** How long the list's marker takes to slide to the next story, ending as that story comes on. */
@@ -33,12 +33,17 @@ const MARKER_MS = 600;
 /** How long before its turn a later story's photo starts to load. */
 const LOAD_AHEAD_MS = 3000;
 
+/** The most a lead photo is drawn above its own size: past it, a feed's small photo looks soft (owner decision on #476). */
+const MAX_UPSCALE = 1.25;
+/** A smaller frame's share of the lead: its width beside the text in landscape, its height above it in portrait. */
+const SMALL_SHARE = { landscape: 0.42, portrait: 0.55 } as const;
+
 /**
  * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
  * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
  * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared by the next prepare.
  */
-let later: { img: HTMLImageElement; row: number; at: number }[] = [];
+let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number; title: string }[] = [];
 let timers: number[] = [];
 
 /** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
@@ -131,7 +136,7 @@ defineTemplate({
           bare();
         });
         watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
-        if (i > 0) later.push({ img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+        if (i > 0) later.push({ story: el, img: photo, row, at: i * slot - LOAD_AHEAD_MS, title: story.title });
       }
       const meta = el.querySelector('.meta');
       if (meta) {
@@ -148,15 +153,15 @@ defineTemplate({
 
     const listRows = [...rows.querySelectorAll<HTMLElement>(':scope > .row')];
     listRows.forEach((el, i) => {
-      const { story, row } = listed[i]!;
+      const { row } = listed[i]!;
       bindRow(el, ctx, 'items', row);
       const thumb = el.querySelector('.thumb');
       if (thumb && !rowImage(ctx, 'items', row, 'image', 'thumb')) {
-        // Never an empty frame: the story's source, or the feed's, by its first letter.
+        // Never an empty frame: the story's place in the list, 01 to 05. An initial repeated down the rows (every
+        // Guardian story is "World news") read as a placeholder (owner decision on #476).
         thumb.classList.add('none');
         thumb.querySelector('img')!.remove();
-        const name = [story.source, credit, story.title].map((s) => s.trim()).find(Boolean)!;
-        thumb.querySelector('.initial')!.textContent = [...name][0]!.toUpperCase();
+        thumb.querySelector('.number')!.textContent = String(i + 1).padStart(2, '0');
       }
     });
 
@@ -166,35 +171,142 @@ defineTemplate({
       crawl(strip, ctx);
     }
 
+    // The first story's photo has its size once loaded: a small one gets a smaller frame before its headline is fitted.
+    const first = stories[0]!.querySelector<HTMLImageElement>('.photo[src]');
+    if (first) {
+      const body = document.body;
+      await loaded(first);
+      // New data while it loaded: the SDK put a fresh document in place, which the next prepare fills.
+      if (document.body !== body) throw new Error('new data replaced this prepare');
+      frame(stories[0]!, first, ctx.orientation);
+    }
     fitHeadlines(stories);
     if (rows.isConnected && listRows.length) mark(ctx, listRows, stories.length, slot);
   },
   play(ctx) {
     document.getElementById('leads')!.style.visibility = '';
-    for (const { img, row, at } of later)
+    for (const { story, img, row, at, title } of later)
       timers.push(
         window.setTimeout(() => {
           img.dataset.sfSrc = 'image';
           bindRow(img, ctx, 'items', row);
+          void loaded(img).then(() => {
+            if (!frame(story, img, ctx.orientation)) return;
+            story.style.removeProperty('--fit');
+            // From the title, not the cut prepare made for the larger frame.
+            story.querySelector('.headline')!.textContent = title;
+            fitHeadlines([story]);
+          });
         }, at),
       );
   },
 });
 
+/** Resolves once `img` has loaded, or failed to. */
+const loaded = (img: HTMLImageElement) =>
+  img.complete
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        img.addEventListener('load', () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+      });
+
 /**
- * Each lead headline at the largest step whose lines hold it: its clamp's ellipsis comes only at the smallest. Every
- * headline is read before any is stepped, so stories that fit cost one layout between them.
+ * A photo the lead would draw more than MAX_UPSCALE times its own size: framed at that or less, beside the text in
+ * landscape and above it in portrait, the text taking the rest (`.small`). Returns whether it did.
+ */
+function frame(story: HTMLElement, img: HTMLImageElement, orientation: 'landscape' | 'portrait'): boolean {
+  const { naturalWidth: w, naturalHeight: h } = img;
+  const lead = story.getBoundingClientRect();
+  if (!w || !h || Math.max(lead.width / w, lead.height / h) <= MAX_UPSCALE) return false;
+  const room =
+    orientation === 'portrait' ? { w: lead.width, h: lead.height * SMALL_SHARE.portrait } : { w: lead.width * SMALL_SHARE.landscape, h: lead.height };
+  const scale = Math.min(MAX_UPSCALE, room.w / w, room.h / h);
+  story.classList.add('small');
+  story.style.setProperty('--nw-photo-w', `${Math.floor(w * scale)}px`);
+  story.style.setProperty('--nw-photo-h', `${Math.floor(h * scale)}px`);
+  return true;
+}
+
+/**
+ * Each lead headline at the largest step whose lines (the look's `--nw-lines`) hold it, cut on a word only at the
+ * smallest. Every story is written before any is read, so each step, and the cut, costs one layout however many
+ * stories there are. Fitted a story at a time, four headlines of about 120 characters took Poster's and Night's
+ * landscape prepares on the Pi to 483-514 ms, up to 34 ms over 2.0.0's (review of #492).
  */
 function fitHeadlines(stories: HTMLElement[]): void {
-  const over = (el: HTMLElement) => {
-    const h = el.querySelector<HTMLElement>('.headline')!;
-    return h.scrollHeight > h.clientHeight + Number.parseFloat(getComputedStyle(h).fontSize) / 2 || h.scrollWidth > h.clientWidth + 1;
+  const heads = stories.map((story) => story.querySelector<HTMLElement>('.headline')!);
+  /** The height the look's lines give a headline. */
+  const room = (h: HTMLElement) => {
+    const s = getComputedStyle(h);
+    return Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight);
   };
-  for (const story of stories.filter(over))
-    for (const step of HEADLINE_STEPS.slice(1)) {
-      story.style.setProperty('--fit', String(step));
-      if (!over(story)) break;
+  const over = (h: HTMLElement) => {
+    if (h.offsetHeight > room(h) + 1) return true;
+    const story = h.closest<HTMLElement>('.story')!;
+    if (!story.classList.contains('small')) return false;
+    const card = h.closest<HTMLElement>('.card')!;
+    return card.offsetTop < -1 || card.offsetTop + card.offsetHeight > story.clientHeight + 1;
+  };
+  let long = heads.filter(over);
+  for (const step of HEADLINE_STEPS.slice(1)) {
+    if (!long.length) return;
+    for (const h of long) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(step));
+    long = long.filter(over);
+  }
+  // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
+  // each word's line ends is read from the one layout there is; the cut is checked with one more.
+  const full = long.map((h) => h.textContent!);
+  // Read from the greedy layout: a balanced one spreads the words over the lines, and holds fewer than they can.
+  for (const h of long) h.style.setProperty('text-wrap', 'wrap');
+  const kept = long.map(wordsInRoom);
+  long.forEach((h, i) => {
+    h.style.removeProperty('text-wrap');
+    h.textContent = fitWords(full[i]!, (text) => text.trim().split(/\s+/).length <= kept[i]!);
+  });
+  long.forEach((h, i) => {
+    if (!over(h)) return;
+    // The "…" took the last word to another line, or there is no space to cut on (a URL, or a script written
+    // without them): searched with a layout a try, and between characters, so a headline never runs past its lines.
+    const fits = (text: string) => {
+      h.textContent = text;
+      return !over(h);
+    };
+    h.textContent = fitWords(full[i]!, fits);
+    if (over(h)) h.textContent = cutChars(full[i]!, fits);
+  });
+
+  /** How many of `h`'s words end within its lines, read from the layout it has (its only child is its text). */
+  function wordsInRoom(h: HTMLElement): number {
+    const text = h.firstChild!;
+    const box = h.getBoundingClientRect();
+    // The rects are as drawn, through the intro's transform at its start: measured as a share of the drawn height.
+    const limit = box.top + ((room(h) + 1) * box.height) / h.offsetHeight;
+    const range = document.createRange();
+    let n = 0;
+    for (const word of h.textContent!.matchAll(/\S+/g)) {
+      range.setStart(text, word.index);
+      range.setEnd(text, word.index + word[0].length);
+      const r = range.getBoundingClientRect();
+      // By the word's middle: set solid, a glyph box stands past its line's, and the last line would never count.
+      if ((r.top + r.bottom) / 2 > limit) break;
+      n++;
     }
+    return n;
+  }
+}
+
+/** The longest start of `text`, with "…", that `fits`: a search over its characters. */
+function cutChars(text: string, fits: (candidate: string) => boolean): string {
+  const chars = [...text];
+  let lo = 0;
+  let hi = chars.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(`${chars.slice(0, mid).join('')}…`)) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${chars.slice(0, lo).join('')}…`;
 }
 
 /**

@@ -88,10 +88,6 @@
       "size": 90095,
       "type": "text/html"
     },
-    "b819db69e78eed8d999ab19093d84deab29a1dd1997f30b457ad6fdaf8724b7c": {
-      "size": 385461,
-      "type": "text/html"
-    },
     "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a": {
       "size": 78257,
       "type": "text/html"
@@ -113,6 +109,10 @@
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
+    },
+    "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0": {
+      "size": 388707,
+      "type": "text/html"
     }
   },
   "templates": {
@@ -1066,10 +1066,10 @@
       },
       "html": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215"
     },
-    "base/news@2.0.1": {
+    "base/news@2.0.2": {
       "manifest": {
         "id": "news",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1188,7 +1188,7 @@
         },
         "protocol": 2
       },
-      "html": "b819db69e78eed8d999ab19093d84deab29a1dd1997f30b457ad6fdaf8724b7c"
+      "html": "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -1861,7 +1861,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -2205,5 +2205,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "583c6f4dc0817978bd0f63bb200dff71f4f2c8deaecaf0e8a7ebe327cfcf87b8"
+  "id": "60ef2cb87e10f372e2ae3e805986ce8bab906ebf48d378d52a111e60a3343145"
 }

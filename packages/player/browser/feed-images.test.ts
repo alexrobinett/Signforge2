@@ -8,7 +8,7 @@
 // - images still arrive while the manifest cannot be fetched
 // - falling back, only the photos of the manifest playing are fetched, and an adoption keeps every waiting snapshot's
 // - editor preview shows snapshot images and tolerates missing blobs
-// - the shipped news (2.0) plays the feed's photos, a story without one with its initial
+// - the shipped news (2.0) plays the feed's photos, a story without one with its place in the list
 import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { buildTemplate } from '@signforge/template-build';
@@ -520,7 +520,7 @@ describe('feed images on screens (#196)', () => {
     expect(msgs.some((m) => m.type === 'error')).toBe(false);
   }, 30_000);
 
-  it("plays the shipped news template with the feed's photos, a story without one with its initial", async () => {
+  it("plays the shipped news template with the feed's photos, a story without one with its place in the list", async () => {
     const built = await buildTemplate(resolve(import.meta.dirname, '../../../templates/news'));
     const htmlBuf = Buffer.from(built.html);
     const htmlSha = sha256(htmlBuf);
@@ -593,11 +593,11 @@ describe('feed images on screens (#196)', () => {
         lead: document.querySelector('.headline')!.textContent,
         photo: document.querySelector<HTMLImageElement>('.story .photo')?.naturalWidth ?? 0,
         thumbs: [...document.querySelectorAll('.row')].map(
-          (r) => r.querySelector<HTMLImageElement>('img')?.naturalWidth ?? r.querySelector('.initial')!.textContent,
+          (r) => r.querySelector<HTMLImageElement>('img')?.naturalWidth ?? r.querySelector('.number')!.textContent,
         ),
       }));
     };
-    await expect.poll(shown, { timeout: 10_000 }).toEqual({ lead: 'Lead story with photo', photo: 32, thumbs: [16, 'N'] });
+    await expect.poll(shown, { timeout: 10_000 }).toEqual({ lead: 'Lead story with photo', photo: 32, thumbs: [16, '02'] });
     // Each photo fetched once.
     for (const sha of [sha256(lead), sha256(thumb)]) expect(requestsFor(p, sha), sha).toHaveLength(1);
   }, 30_000);

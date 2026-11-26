@@ -169,8 +169,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b819db69e78eed8d999ab19093d84deab29a1dd1997f30b457ad6fdaf8724b7c": {
-      "size": 385461,
+    "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0": {
+      "size": 388707,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -891,10 +891,10 @@
       },
       "html": "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396"
     },
-    "base/news@2.0.1": {
+    "base/news@2.0.2": {
       "manifest": {
         "id": "news",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "name": "News",
         "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
         "fields": {
@@ -1013,7 +1013,7 @@
         },
         "protocol": 2
       },
-      "html": "b819db69e78eed8d999ab19093d84deab29a1dd1997f30b457ad6fdaf8724b7c"
+      "html": "f87d159b1ce0d73aa391e3094b5048fed125876058650568c6652dfcc223abe0"
     },
     "base/room-status@1.0.3": {
       "manifest": {
@@ -1314,7 +1314,7 @@
       "id": "news-guardian",
       "name": "The Guardian (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The Guardian",
@@ -1345,7 +1345,7 @@
       "id": "news-nyt",
       "name": "New York Times (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The New York Times",
@@ -1376,7 +1376,7 @@
       "id": "news-verge",
       "name": "The Verge (live)",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.0.2",
       "data": {
         "title": "Latest news",
         "source": "The Verge",
@@ -1532,5 +1532,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "fe40bd8a016f6657a1e7b53f984edb857140ea0d13e5a0dab47fd3da137d734a"
+  "id": "a6f5654124df38997746a6059d7c5d116dbae5867d90e5553e3bc899bc842e85"
 }
