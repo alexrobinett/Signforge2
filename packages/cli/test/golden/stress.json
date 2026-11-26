@@ -20,12 +20,12 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08": {
-      "size": 90063,
+    "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda": {
+      "size": 90311,
       "type": "text/html"
     },
-    "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46": {
-      "size": 81141,
+    "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660": {
+      "size": 81033,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -1201,10 +1201,10 @@
       },
       "html": "fc9e7942e59b5736ed54530bef9537e12666ad24e4dae1babba1aa24b8d6c8a5"
     },
-    "base/photo-promo@1.5.0": {
+    "base/photo-promo@1.6.0": {
       "manifest": {
         "id": "photo-promo",
-        "version": "1.5.0",
+        "version": "1.6.0",
         "name": "Photo Promo",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
         "fields": {
@@ -1250,7 +1250,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "24bdbe9f334a2bf1fe8b1fb4ffbce803fd57714f51b3704f59b86b7f9b498d46"
+      "html": "7feecab1bb8f2f39816e885ebf9edc101438a9f831b808e4579cb884f81c8660"
     },
     "base/room-status@1.1.1": {
       "manifest": {
@@ -1378,10 +1378,10 @@
       },
       "html": "aa9585ba27112de9b39d3f390cb6cc56ea2e4fea7b7c123ccc4980387ba51973"
     },
-    "base/weather@1.7.0": {
+    "base/weather@1.6.1": {
       "manifest": {
         "id": "weather",
-        "version": "1.7.0",
+        "version": "1.6.1",
         "name": "Weather Now",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "fields": {
@@ -1489,7 +1489,7 @@
           }
         }
       },
-      "html": "7d74ac1545d21d55c6400f40cb1bf17c114a36c3bdedfd10e400feb981aa4f08"
+      "html": "852a05bc3cbdc5f38a157c3a79dcc69136a5f8679adbc5f5ac32b2288013cbda"
     }
   },
   "spots": {
@@ -1902,7 +1902,7 @@
       "id": "photo-berries",
       "name": "Photo promo, 1080p photo",
       "kind": "template",
-      "template": "base/photo-promo@1.5.0",
+      "template": "base/photo-promo@1.6.0",
       "data": {
         "eyebrow": "This week",
         "headline": "Fresh picked",
@@ -1918,7 +1918,7 @@
       "id": "photo-kitchen",
       "name": "Photo promo, 4K photo 2",
       "kind": "template",
-      "template": "base/photo-promo@1.5.0",
+      "template": "base/photo-promo@1.6.0",
       "data": {
         "eyebrow": "Made here",
         "headline": "Hot and ready",
@@ -1934,7 +1934,7 @@
       "id": "photo-river",
       "name": "Photo promo, 4K photo",
       "kind": "template",
-      "template": "base/photo-promo@1.5.0",
+      "template": "base/photo-promo@1.6.0",
       "data": {
         "eyebrow": "Weekend escape",
         "headline": "Go further",
@@ -2023,7 +2023,7 @@
       "id": "weather-live",
       "name": "Weather, live",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Atlanta",
         "temp": 72,
@@ -2083,7 +2083,7 @@
       "id": "weather-rain",
       "name": "Weather, rain (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Seattle",
         "temp": 52,
@@ -2105,7 +2105,7 @@
       "id": "weather-snow",
       "name": "Weather, snow (fixed data)",
       "kind": "template",
-      "template": "base/weather@1.7.0",
+      "template": "base/weather@1.6.1",
       "data": {
         "city": "Denver",
         "temp": 28,
@@ -2215,5 +2215,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "738338b35e469029edabf00b00c0fcc0b194743952b87a411d613d0a860c2273"
+  "id": "b1fc365a4f1b120cbde64d2ff0694a4dc9dc0e0424d0605d74669c02ee0c0e77"
 }
