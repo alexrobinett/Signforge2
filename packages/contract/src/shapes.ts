@@ -644,8 +644,8 @@ export const MAX_SNAPSHOT_BYTES = 65_536;
  * A snapshot the server has not confirmed (`checkedAt`) for this long is stale, unless it says sooner
  * (`DataSnapshot.staleS`): a screen plays the spot's static fallback rather than old data. The poller backs off to 6
  * hours on failure, so a source gets several tries before its screens fall back. A snapshot with no `checkedAt` a
- * screen can read is stale. A screen whose clock it does not trust yet (no good sync since it started, docs/architecture.md,
- * Player, Clock) cannot tell a snapshot's age: one with a shorter `staleS` is stale then, and any other is judged by
+ * screen can read is stale. A screen whose clock it does not trust (its corrected time before the player's build or its
+ * last sync, such as a reboot that lost the time: docs/architecture.md, Player, Clock) cannot tell a snapshot's age: one with a shorter `staleS` is stale then, and any other is judged by
  * this day as before, so a screen restarted with no network keeps its menu.
  */
 export const SNAPSHOT_STALE_MS = 24 * 3_600_000;

@@ -112,9 +112,9 @@ const wholeNumbers = (v: unknown): v is number[] => Array.isArray(v) && Array.fr
 const versions: (v: unknown) => v is readonly number[] = wholeNumbers;
 /** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
 export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
-/** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 /** A snapshot's stale age: whole seconds from a minute to SNAPSHOT_STALE_MS. */
 const isStaleS = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= MIN_REFRESH_S && (v as number) * 1000 <= SNAPSHOT_STALE_MS;
+/** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
 /** A value from the input, safe to put in a message: never throws, never long. */
@@ -1156,7 +1156,8 @@ function manifestRules(m: unknown): string[] {
     if (own(d, 'id') !== key) errors.push(`data source "${key}" is listed under a different id ("${show(own(d, 'id'))}")`);
     if (!isIdValue(key)) errors.push(`data source id "${key}" is not a valid id`);
     const r = own(d, 'refreshS');
-    if (!(isNum(r) && r >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
+    if (!(Number.isSafeInteger(r) && (r as number) >= MIN_REFRESH_S))
+      errors.push(`data source "${key}": refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
   }
   return errors;
 }

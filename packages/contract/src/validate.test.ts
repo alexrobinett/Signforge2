@@ -1157,6 +1157,14 @@ describe("a manifest's shape (#156)", () => {
     delete m.playlists.all!.name;
     expect(validateManifest(m)).toEqual(['playlist "all": name must be text']);
   });
+
+  it("refuses a data source's refreshS that is not whole seconds from a minute (review of #630)", () => {
+    for (const refreshS of [90.5, 59, undefined, '300']) {
+      const m = validManifest() as unknown as { dataSources: Record<string, Record<string, unknown>> };
+      m.dataSources.feed!.refreshS = refreshS;
+      expect(validateManifest(m), String(refreshS)).toEqual(['data source "feed": refreshS must be whole seconds, at least 60']);
+    }
+  });
 });
 
 describe("a snapshot's stale age (#624)", () => {
