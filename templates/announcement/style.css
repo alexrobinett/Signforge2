@@ -276,6 +276,8 @@ body {
   align-self: end;
 }
 [data-look='pop'] .qr {
+  /* Beside the meta, the code sets its row's height: at max-length copy it steps down with the body, to a size still read across a room. */
+  --qr: calc(30vmin * max(var(--fit-body), 0.75));
   margin-left: 3.7vmin;
   font-family: var(--lk-font-display);
   font-weight: 700;
