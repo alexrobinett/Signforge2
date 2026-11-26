@@ -21,6 +21,7 @@ import {
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
+  SNAPSHOT_STALE_MS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
   MAX_SYNC_RESPONSE_BLOBS,
@@ -1154,6 +1155,9 @@ function manifestRules(m: unknown): string[] {
     if (!isIdValue(key)) errors.push(`data source id "${key}" is not a valid id`);
     const r = own(d, 'refreshS');
     if (!(isNum(r) && r >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
+    const stale = own(d, 'staleS');
+    if (stale !== undefined && !(typeof stale === 'number' && Number.isSafeInteger(stale) && stale >= MIN_REFRESH_S && stale * 1000 <= SNAPSHOT_STALE_MS))
+      errors.push(`data source "${key}": staleS must be a whole number from ${MIN_REFRESH_S} to ${SNAPSHOT_STALE_MS / 1000}`);
   }
   return errors;
 }
@@ -1281,7 +1285,7 @@ export const manifestShape = object(
     spots: record(spotShape, (k) => `spot "${k}"`, 'spots must be an object'),
     playlists: record(playlistShape, (k) => `playlist "${k}"`, 'playlists must be an object'),
     dataSources: record(
-      object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'),
+      object({ id: text('id'), refreshS: number('refreshS'), staleS: optional(number('staleS')) }, 'is not an object'),
       (k) => `data source "${k}"`,
       'dataSources must be an object',
     ),

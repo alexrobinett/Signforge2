@@ -1159,6 +1159,21 @@ describe("a manifest's shape (#156)", () => {
   });
 });
 
+describe("a data source's stale age (#624)", () => {
+  const withStale = (staleS: unknown) => {
+    const m = validManifest() as unknown as { dataSources: Record<string, Record<string, unknown>> };
+    m.dataSources.feed!.staleS = staleS;
+    return m;
+  };
+  it('takes whole seconds from a minute to a day, and none at all', () => {
+    expect(validateManifest(validManifest())).toEqual([]);
+    expect(validateManifest(withStale(60))).toEqual([]);
+    expect(validateManifest(withStale(86_400))).toEqual([]);
+    const problem = ['data source "feed": staleS must be a whole number from 60 to 86400'];
+    for (const bad of [59, 86_401, 90.5, '600', null]) expect(validateManifest(withStale(bad)), String(bad)).toEqual(problem);
+  });
+});
+
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
     expect(MANIFEST_SCHEMA).toBe(8);
