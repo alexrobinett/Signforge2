@@ -51,7 +51,12 @@ import {
   type DeviceSocketMessage,
   type DeviceCommand,
   type DataSnapshot,
+  type Capability,
   type FieldDef,
+  type ListItemFieldDef,
+  type LiveData,
+  type PreviewHostMessage,
+  type TemplateRuntimeReport,
   type Orientation,
   type Playlist,
   type ScheduleEntry,
@@ -129,6 +134,19 @@ const problemsOf = <T>(shape: Shape<T>, v: unknown): string[] => {
   const r = shape.read(v);
   return r.ok ? [] : r.problems;
 };
+
+/** `rules`, in the words and order they always had, and then `shape`, which gives back only the declared keys (#156). */
+const checked = <T>(rules: (v: unknown) => string[], shape: Shape<T>): Shape<T> =>
+  custom((v) => {
+    const problems = rules(v);
+    return problems.length ? refused(problems) : shape.read(v);
+  });
+
+const text = (what: string) => is(isStr, `${what} must be text`);
+const number = (what: string) => is(isNum, `${what} must be a number`);
+const textMap = (what: string) => record(text('it'), (k) => `${what} "${k}"`, `${what}s must map names to text`);
+const texts = (what: string) => is((v): v is string[] => Array.isArray(v) && Array.from(v).every(isStr), `${what} must be a list of text`);
+const oneOf = <const L extends readonly string[]>(values: L, problem: string) => is((v): v is L[number] => values.some((x) => x === v), problem);
 
 const prefix = (where: string, problems: string[]) => problems.map((p) => `${where}: ${p}`);
 /** Check each item of a list; problems are prefixed with the 1-based position. */
@@ -360,8 +378,8 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
   return out;
 }
 
-/** Check a template's `template.json`. Returns problems; empty means valid. */
-export function validateTemplateManifest(m: unknown): string[] {
+/** The rules of a template's `template.json` beyond its shape. */
+function templateManifestRules(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
   if (!isStr(m.id) || !/^[a-z0-9][a-z0-9-]*$/.test(m.id)) errors.push('id must be lowercase letters, digits and dashes');
@@ -384,6 +402,102 @@ export function validateTemplateManifest(m: unknown): string[] {
   if (m.live !== undefined) errors.push(...prefix('live', liveProblems(m.live, isObj(m.fields) ? m.fields : {})));
   return errors;
 }
+
+const label = text('label');
+const scalarCases = {
+  text: object(
+    { type: literal('text', ''), label, default: optional(text('default')), maxLength: optional(number('maxLength')), maxMarks: optional(number('maxMarks')) },
+    '',
+  ),
+  number: object(
+    {
+      type: literal('number', ''),
+      label,
+      default: optional(number('default')),
+      min: optional(number('min')),
+      max: optional(number('max')),
+      step: optional(number('step')),
+    },
+    '',
+  ),
+  boolean: object({ type: literal('boolean', ''), label, default: optional(is(isBool, 'default must be true or false')) }, ''),
+  color: object({ type: literal('color', ''), label, default: optional(text('default')) }, ''),
+  select: object({ type: literal('select', ''), label, options: texts('options'), default: optional(text('default')) }, ''),
+  url: object(
+    { type: literal('url', ''), label, default: optional(text('default')), maxLength: optional(number('maxLength')), maxBytes: optional(number('maxBytes')) },
+    '',
+  ),
+  date: object({ type: literal('date', ''), label, default: optional(text('default')), min: optional(text('min')), max: optional(text('max')) }, ''),
+  datetime: object({ type: literal('datetime', ''), label, default: optional(text('default')), min: optional(text('min')), max: optional(text('max')) }, ''),
+};
+const FIELD_TYPES = 'type must be text, number, boolean, color, select, url, date, datetime, image or list';
+const listItemFieldShape = variant('type', { ...scalarCases, image: object({ type: literal('image', ''), label }, '') }, FIELD_TYPES);
+assertSame<Same<Infer<typeof listItemFieldShape>, ListItemFieldDef>>();
+const fieldDefShape = variant(
+  'type',
+  {
+    ...scalarCases,
+    image: object(
+      { type: literal('image', ''), label, portraitBox: optional(object({ w: number('w'), h: number('h') }, 'portraitBox must be an object')) },
+      '',
+    ),
+    list: object(
+      {
+        type: literal('list', ''),
+        label,
+        item: record(listItemFieldShape, (k) => `item "${k}"`, 'item must be an object'),
+        maxItems: optional(number('maxItems')),
+        default: optional(listOf('default row', is(isObj, 'is not an object'))),
+      },
+      '',
+    ),
+  },
+  FIELD_TYPES,
+);
+assertSame<Same<Infer<typeof fieldDefShape>, FieldDef>>();
+
+const liveSourceFields = {
+  source: oneOf(LIVE_SOURCES, `source must be one of ${LIVE_SOURCES.join(', ')}`),
+  fields: textMap('field'),
+  place: optional(text('place')),
+  units: optional(object({ temperature: optional(text('temperature')), wind: optional(text('wind')) }, 'units must be an object')),
+};
+const liveSourceShape = object(liveSourceFields, 'must be an object');
+const liveSourcesShape = object(
+  { sources: record(object({ ...liveSourceFields, label }, 'must be an object'), (k) => `source "${k}"`, 'sources must be an object') },
+  'must be an object',
+);
+/** One source, or several by name: told apart by `sources`, as the rules tell them. */
+const liveDataShape = custom<LiveData>((v) => (isObj(v) && Object.hasOwn(v, 'sources') ? liveSourcesShape.read(v) : liveSourceShape.read(v)));
+
+const templateManifestFields = object(
+  {
+    id: text('id'),
+    version: text('version'),
+    name: text('name'),
+    description: optional(text('description')),
+    fields: record(fieldDefShape, (k) => `field "${k}"`, 'fields is required'),
+    duration: object({ defaultMs: number('defaultMs'), minMs: number('minMs'), maxMs: number('maxMs') }, 'duration must be an object'),
+    orientations: is(
+      (v): v is Orientation[] => Array.isArray(v) && Array.from(v).every((o) => o === 'landscape' || o === 'portrait'),
+      'orientations must list landscape and/or portrait',
+    ),
+    uses: is(
+      (v): v is Capability[] => Array.isArray(v) && Array.from(v).every((u) => u === 'canvas' || u === 'webgl' || u === 'audio'),
+      'uses may list only canvas, webgl and audio',
+    ),
+    background: text('background'),
+    protocol: optional(number('protocol')),
+    live: optional(liveDataShape),
+  },
+  'manifest is not an object',
+);
+assertSame<Same<Infer<typeof templateManifestFields>, TemplateManifest>>();
+
+/** `template.json`, as a template's manifest is declared (#156). */
+export const templateManifestShape = checked(templateManifestRules, templateManifestFields);
+/** Check a template's manifest. Returns problems; empty means it is valid. */
+export const validateTemplateManifest = (m: unknown): string[] => problemsOf(templateManifestShape, m);
 
 /** What is wrong with a template's `live` declaration, given its fields: one source, or several by name. */
 function liveProblems(live: unknown, fields: Obj): string[] {
@@ -756,8 +870,8 @@ export function scheduleEntryProblems(e: unknown): string[] {
   return out;
 }
 
-/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
-export function displayHoursProblems(hours: unknown): string[] {
+/** The rules of a screen's display hours beyond their shape. */
+function displayHoursRules(hours: unknown): string[] {
   if (!isObj(hours)) return ['display hours must be an object'];
   const errors: string[] = [];
   if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
@@ -812,8 +926,8 @@ function fontProblems(where: string, f: unknown): string[] {
   return errors;
 }
 
-/** Check a brand kit as the manifest carries it. Problems are not prefixed; the manifest adds `brand: `. */
-export function validateBrandKit(b: unknown): string[] {
+/** The rules of a brand kit, as the manifest carries it, beyond its shape. Problems are not prefixed; the manifest adds `brand: `. */
+function brandKitRules(b: unknown): string[] {
   if (!isObj(b)) return ['brand must be an object'];
   const errors: string[] = [];
   if (!isIdValue(b.id)) errors.push('id is not a valid id');
@@ -827,6 +941,48 @@ export function validateBrandKit(b: unknown): string[] {
   }
   return errors;
 }
+
+const brandFontShape = (which: string) =>
+  object(
+    {
+      id: text('id'),
+      family: text('family'),
+      files: listOf(
+        `${which} font file`,
+        object({ weight: number('weight'), style: oneOf(['normal', 'italic'], 'style must be normal or italic'), file: text('file') }, 'is not an object'),
+      ),
+    },
+    `${which} font must be an object`,
+  );
+const colour = (c: string) => text(`colour "${c}"`);
+const brandKitFields = object(
+  {
+    id: text('id'),
+    colors: object(
+      {
+        primary: colour('primary'),
+        onPrimary: colour('onPrimary'),
+        accent: colour('accent'),
+        onAccent: colour('onAccent'),
+        background: colour('background'),
+        surface: colour('surface'),
+        text: colour('text'),
+        muted: colour('muted'),
+      },
+      'colors must be an object',
+    ),
+    shape: oneOf(BRAND_SHAPES, 'shape must be square, soft or round'),
+    fonts: object({ display: optional(brandFontShape('display')), body: optional(brandFontShape('body')) }, 'fonts must be an object'),
+    logo: optional(object({ onDark: text('onDark'), onLight: optional(text('onLight')) }, 'logo must be an object')),
+  },
+  'brand must be an object',
+);
+assertSame<Same<Infer<typeof brandKitFields>, BrandKit>>();
+
+/** One screen's brand kit, as declared (#156). */
+export const brandKitShape = checked(brandKitRules, brandKitFields);
+/** Check a brand kit. Returns problems; empty means it is valid. */
+export const validateBrandKit = (b: unknown): string[] => problemsOf(brandKitShape, b);
 
 // ------------------------------------------------------------- screen manifest
 
@@ -1002,13 +1158,6 @@ function manifestRules(m: unknown): string[] {
   return errors;
 }
 
-const text = (what: string) => is(isStr, `${what} must be text`);
-const number = (what: string) => is(isNum, `${what} must be a number`);
-const textMap = (what: string) => record(text('it'), (k) => `${what} "${k}"`, `${what}s must map names to text`);
-
-/** Its own check until #156's last step, which declares it: here, the value as it is. */
-const asItIs = <T>(problem: string) => custom<T>((v) => (isObj(v) ? accepted(v as T) : refused([problem])));
-
 const timeWindowShape = object({ from: text('from'), to: text('to') }, 'a window must be an object');
 const displayHoursShape = object(
   {
@@ -1018,6 +1167,11 @@ const displayHoursShape = object(
   'display hours must be an object',
 );
 assertSame<Same<Infer<typeof displayHoursShape>, DisplayHours>>();
+
+/** A screen's display hours, as declared (#156). */
+export const validDisplayHoursShape = checked(displayHoursRules, displayHoursShape);
+/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
+export const displayHoursProblems = (hours: unknown): string[] => problemsOf(validDisplayHoursShape, hours);
 
 const spotBase = { id: text('id'), name: text('name'), durationMs: number('durationMs') };
 const fit = is((v): v is 'cover' | 'contain' => v === 'cover' || v === 'contain', 'fit must be cover or contain');
@@ -1120,7 +1274,7 @@ export const manifestShape = object(
       'files must be an object',
     ),
     templates: record(
-      object({ manifest: asItIs<TemplateManifest>('has no manifest'), html: text('html') }, 'is not an object'),
+      object({ manifest: templateManifestFields, html: text('html') }, 'is not an object'),
       (k) => `template "${k}"`,
       'templates must be an object',
     ),
@@ -1133,17 +1287,14 @@ export const manifestShape = object(
     ),
     schedule: listOf('schedule entry', scheduleEntryShape),
     defaultPlaylist: text('defaultPlaylist'),
-    brand: optional(asItIs<BrandKit>('brand must be an object')),
+    brand: optional(brandKitFields),
   },
   'manifest is not an object',
 );
 assertSame<Same<Infer<typeof manifestShape>, ScreenManifest>>();
 
 /** A manifest a player can play: every rule, and then its shape, which leaves out any key the contract does not declare. */
-export const validManifestShape = custom<ScreenManifest>((m) => {
-  const problems = manifestRules(m);
-  return problems.length ? refused(problems) : manifestShape.read(m);
-});
+export const validManifestShape = checked(manifestRules, manifestShape);
 
 /** Check a screen manifest. Returns problems; empty means a player can play it. */
 export const validateManifest = (m: unknown): string[] => problemsOf(validManifestShape, m);
@@ -1401,10 +1552,10 @@ export const validateDeviceSocketMessage = (msg: unknown) => problemsOf(deviceSo
 
 // ------------------------------------------------------------- preview channel
 
-const isBlob = (v: unknown) => typeof Blob !== 'undefined' && v instanceof Blob;
+const isBlob = (v: unknown): v is Blob => typeof Blob !== 'undefined' && v instanceof Blob;
 
-/** A message from the CMS page, as the preview player receives it (after its origin check). */
-export function validatePreviewHostMessage(msg: unknown): string[] {
+/** The rules of a message from the CMS page beyond its shape. */
+function previewHostMessageRules(msg: unknown): string[] {
   if (!isObj(msg)) return ['message is not an object'];
   if (msg.sfPreview !== PREVIEW_PROTOCOL) return [`preview protocol ${show(msg.sfPreview)} is not ${PREVIEW_PROTOCOL}`];
   if (msg.type !== 'draft') return ['message type must be draft'];
@@ -1420,6 +1571,24 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
   if (msg.data !== undefined) errors.push(...list('snapshot', msg.data, validateDataSnapshot));
   return errors;
 }
+
+/** A message from the CMS page, as the preview player receives it (after its origin check), as declared (#156). */
+export const previewHostMessageShape = checked(
+  previewHostMessageRules,
+  object(
+    {
+      sfPreview: number('sfPreview'),
+      type: literal('draft', 'message type must be draft'),
+      manifest: manifestShape,
+      files: optional(record(is(isBlob, 'is not a Blob'), (k) => `file "${k.slice(0, 12)}"`, 'files must be an object of hash to Blob')),
+      data: optional(listOf('snapshot', dataSnapshotShape)),
+    },
+    'message is not an object',
+  ),
+);
+assertSame<Same<Infer<typeof previewHostMessageShape>, PreviewHostMessage>>();
+/** Check a message from the CMS page. Returns problems; empty means it is valid. */
+export const validatePreviewHostMessage = (msg: unknown): string[] => problemsOf(previewHostMessageShape, msg);
 
 // ------------------------------------------------------------- template bundle
 
@@ -1636,8 +1805,8 @@ function renderProblems(r: unknown): string[] {
   return errors;
 }
 
-/** A runtime check's report, as the server receives it from the check Worker. */
-export function validateTemplateRuntimeReport(r: unknown): string[] {
+/** The rules of a runtime check's report beyond its shape. */
+function templateRuntimeReportRules(r: unknown): string[] {
   if (!isObj(r)) return ['report is not an object'];
   const errors: string[] = [];
   if (typeof r.ok !== 'boolean') errors.push('ok must be true or false');
@@ -1648,3 +1817,34 @@ export function validateTemplateRuntimeReport(r: unknown): string[] {
   if (!isMs(own(r.cost, 'startMs')) || !isMs(own(r.cost, 'checkMs'))) errors.push('cost must have startMs and checkMs');
   return errors;
 }
+
+const time = (what: string) => is((v): v is number => isMs(v), `${what} must be a time in ms`);
+const renderShape = object(
+  {
+    orientation: oneOf(['landscape', 'portrait'], 'orientation must be landscape or portrait'),
+    viewport: object({ width: number('width'), height: number('height') }, 'viewport must be an object'),
+    readyMs: is((v): v is number | null => v === null || isMs(v), 'readyMs must be a time in ms or null'),
+    frames: custom<{ count: number; longestMs: number } | null>((v) =>
+      v === null ? accepted(null) : object({ count: number('count'), longestMs: time('longestMs') }, 'frames must be null or an object').read(v),
+    ),
+  },
+  'is not an object',
+);
+
+/** A runtime check's report, as the server receives it from the check Worker, as declared (#156). */
+export const templateRuntimeReportShape = checked(
+  templateRuntimeReportRules,
+  object(
+    {
+      ok: is(isBool, 'ok must be true or false'),
+      problems: texts('problems'),
+      runner: object({ image: text('image'), browser: text('browser') }, 'runner must be an object'),
+      renders: listOf('render', renderShape),
+      cost: object({ startMs: time('startMs'), checkMs: time('checkMs') }, 'cost must be an object'),
+    },
+    'report is not an object',
+  ),
+);
+assertSame<Same<Infer<typeof templateRuntimeReportShape>, TemplateRuntimeReport>>();
+/** Check a runtime check's report. Returns problems; empty means it is valid. */
+export const validateTemplateRuntimeReport = (r: unknown): string[] => problemsOf(templateRuntimeReportShape, r);

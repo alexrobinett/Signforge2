@@ -1,0 +1,62 @@
+[
+  {
+    "id": "news",
+    "version": 1764158400000,
+    "fetchedAt": "2026-11-26T12:00:00.000Z",
+    "checkedAt": "2026-11-26T12:00:00.000Z",
+    "data": {
+      "title": "BBC News",
+      "language": "en-gb",
+      "items": [
+        {
+          "title": "US announces new tariffs on host of countries including China",
+          "published": "2026-11-26T04:10:58+00:00",
+          "source": "BBC News",
+          "summary": "The new levies would hit many of America's biggest trading partners, including China and the EU."
+        },
+        {
+          "title": "Images of asteroid targeted to test Earth's defences reveal stadium-sized crater",
+          "published": "2026-11-25T17:30:16+00:00",
+          "source": "BBC News",
+          "summary": "The asteroid's surface was transformed after a spacecraft was deliberately crashed into it four years ago"
+        }
+      ]
+    }
+  },
+  {
+    "id": "calendar",
+    "version": 1764158400000,
+    "fetchedAt": "2026-11-26T12:00:00.000Z",
+    "checkedAt": "2026-11-26T12:00:00.000Z",
+    "data": {
+      "events": []
+    }
+  },
+  {
+    "id": "menu",
+    "version": 1764158400000,
+    "fetchedAt": "2026-11-26T12:00:00.000Z",
+    "checkedAt": "2026-11-26T12:00:00.000Z",
+    "data": {
+      "columns": ["Item", "Price", "Description", "Section", "Tag"],
+      "rows": [
+        ["Tomato soup", "4.50", "Basil, cream", "Starters", "Vegan"],
+        ["Fish \"n\" chips", "$12", "", "Mains", "Popular"],
+        ["Shepherd's pie", "11", "Lamb,\nmash", "Mains", ""],
+        ["Lemon tart", "6.25", "", "Desserts", "New"]
+      ]
+    }
+  },
+  {
+    "id": "weather",
+    "version": 1764158400000,
+    "fetchedAt": "2026-11-26T12:00:00.000Z",
+    "checkedAt": "2026-11-26T12:00:00.000Z",
+    "data": {
+      "daily": {
+        "temperature_2m_max": [12.1, 13.4],
+        "weather_code": [3, 61]
+      }
+    }
+  }
+]

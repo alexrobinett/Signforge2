@@ -296,8 +296,8 @@ export const OUTCOMES = ['playing', 'downloading', 'asleep', 'unreachable', 'wai
 export const TEMPLATE_STATUSES = ['draft', 'approved', 'retired'] as const;
 
 /**
- * A built `template.json`. Checked loosely: the contract has no runtime schema for it yet (M3-31);
- * `checkTemplateBundle` checked it in full when the version was registered.
+ * A built `template.json`, as a tool's output describes it: checked loosely here, as the contract's
+ * `templateManifestShape` read it in full when the version was registered (`checkTemplateBundle`).
  */
 const manifestOutput = z
   .custom<TemplateManifest>(

@@ -1,41 +1,32 @@
 /**
- * Each validator in `validate.ts` as a parser: the same check, but a value that passes comes back
- * typed, so a caller never casts what it has just checked. The device messages, the manifest and the data snapshot are read by their declared shapes
- * (`shape.ts`, #156) and come back as exactly the shape, any key they do not declare left out; the rest still pass
- * the input itself through this file's cast until #156's next steps.
+ * Each shape in `validate.ts` as a parser: the same check as its validator, but a value that passes comes back typed,
+ * as exactly the shape, any key it does not declare left out (`shape.ts`, #156). A caller never casts what it has just
+ * checked.
  */
-import type { BrandKit, DisplayHours, PreviewHostMessage, TemplateManifest, TemplateRuntimeReport } from './shapes.ts';
 import {
+  brandKitShape,
   dataSnapshotShape,
   deviceCommandShape,
   deviceSocketMessageShape,
-  displayHoursProblems,
   pairPollResponseShape,
   pairStartRequestShape,
   pairStartResponseShape,
+  previewHostMessageShape,
   serverSocketMessageShape,
   syncRequestShape,
   syncResponseShape,
-  validateBrandKit,
-  validatePreviewHostMessage,
-  validateTemplateManifest,
-  validateTemplateRuntimeReport,
+  templateManifestShape,
+  templateRuntimeReportShape,
+  validDisplayHoursShape,
   validManifestShape,
 } from './validate.ts';
 
-/** The input itself, typed, when it passes; otherwise the validator's problems. */
+/** The value, typed, when it passes; otherwise the validator's problems. */
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problems: string[] };
 
-const parser =
-  <T>(validate: (input: unknown) => string[]) =>
-  (input: unknown): Parsed<T> => {
-    const problems = validate(input);
-    return problems.length ? { ok: false, problems } : { ok: true, value: input as T };
-  };
-
-export const parseTemplateManifest = parser<TemplateManifest>(validateTemplateManifest);
-export const parseBrandKit = parser<BrandKit>(validateBrandKit);
-export const parseDisplayHours = parser<DisplayHours>(displayHoursProblems);
+export const parseTemplateManifest = templateManifestShape.read;
+export const parseBrandKit = brandKitShape.read;
+export const parseDisplayHours = validDisplayHoursShape.read;
 export const parseManifest = validManifestShape.read;
 export const parseDataSnapshot = dataSnapshotShape.read;
 export const parsePairStartRequest = pairStartRequestShape.read;
@@ -46,5 +37,5 @@ export const parseSyncRequest = syncRequestShape.read;
 export const parseSyncResponse = syncResponseShape.read;
 export const parseServerSocketMessage = serverSocketMessageShape.read;
 export const parseDeviceSocketMessage = deviceSocketMessageShape.read;
-export const parsePreviewHostMessage = parser<PreviewHostMessage>(validatePreviewHostMessage);
-export const parseTemplateRuntimeReport = parser<TemplateRuntimeReport>(validateTemplateRuntimeReport);
+export const parsePreviewHostMessage = previewHostMessageShape.read;
+export const parseTemplateRuntimeReport = templateRuntimeReportShape.read;
