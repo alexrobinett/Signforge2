@@ -310,14 +310,16 @@ describe('delete, takeover and the uploads (#345 PR 5): one tool each, refusing 
     return r.ok ? [] : (r.details as { path: string }[]).map((d) => d.path);
   };
 
-  it('refuses ifVersion on a delete of anything but a schedule entry', async () => {
-    expect(await paths('delete', { type: 'playlist', id: o.playlist, ifVersion: 1 })).toEqual(['ifVersion']);
+  it('refuses ifVersion on a delete of anything but a playlist or a schedule entry, and one of a version that moved (#408)', async () => {
+    expect(await paths('delete', { type: 'asset', id: o.asset, ifVersion: 1 })).toEqual(['ifVersion']);
+    expect(await refusal('delete', { type: 'playlist', id: o.playlist, ifVersion: 99 })).toMatchObject({ ok: false, error: 'conflict' });
     expect(await refusal('delete', { type: 'schedule_entry', id: o.scheduleEntry, ifVersion: 99 })).toMatchObject({ ok: false, error: 'conflict' });
   });
 
   it('refuses a takeover missing what its action needs, or given what the other action takes', async () => {
     expect(await paths('takeover', { action: 'end' })).toEqual(['scheduleEntryId']);
     expect(await paths('takeover', { action: 'end', scheduleEntryId: o.scheduleEntry, playlistId: o.playlist })).toEqual(['playlistId']);
+    expect(await paths('takeover', { action: 'end', scheduleEntryId: o.scheduleEntry, ifReach: [] })).toEqual(['ifReach']);
     expect(await paths('takeover', { action: 'publish', target: 'org' })).toEqual(['playlistId', 'endsAt']);
     expect(await paths('takeover', { action: 'publish', scheduleEntryId: o.scheduleEntry, playlistId: o.playlist, target: 'org', endsAt: 'x' })).toEqual([
       'scheduleEntryId',
