@@ -240,7 +240,11 @@ export class Slot {
   /** The frame was sent `play` since its load: a refit plays it again. */
   private started = false;
 
-  constructor() {
+  /**
+   * `died` hears that the spot loaded here died after its load, and the slot is blank: a refit
+   * failed, or the template navigated away. A failure while loading rejects `prepare` instead.
+   */
+  constructor(private readonly died: (why: string) => void) {
     this.el.className = 'slot';
     document.body.appendChild(this.el);
     addEventListener('resize', () => this.refit());
@@ -271,8 +275,9 @@ export class Slot {
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => {
       timer = window.setTimeout(() => {
-        abort.abort();
+        // Rejected before the abort settles `work`, so the race always reports the timeout.
         reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`));
+        abort.abort();
       }, READY_TIMEOUT_MS);
     });
     try {
@@ -300,8 +305,8 @@ export class Slot {
    * reloads its frame), as playing if it was. Image, video and URL spots fill the slot, so they
    * need nothing. A refit waits for the load and the refit before it, and later resizes join the
    * one waiting, so a burst of resizes costs at most two inits, and the last one has the last size.
-   * A refit that fails blanks the slot, as a template that navigates away does: the frame has
-   * been reset by then, and shows its markup without data.
+   * A refit that fails blanks the slot and reports it (`died`), as a template that navigates away
+   * does: the frame has been reset by then, and shows its markup without data.
    */
   private refit(): void {
     if (this.refitQueued) return;
@@ -324,12 +329,14 @@ export class Slot {
   private async fitAgain(): Promise<void> {
     const live = this.live;
     if (!live || !this.abort || this.abort.signal.aborted) return;
+    // `live.spot` follows a preview update; this is the spot the refit is for.
+    const spot = live.spot;
     const fit = fitTo(live.template);
     if (fit.orientation === live.orientation && fit.viewport.width === live.viewport.width && fit.viewport.height === live.viewport.height) return;
     const replay = this.started;
     try {
       if (live.protocol < 2) {
-        await this.prepare(live.spot, live.manifest, false);
+        await this.prepare(spot, live.manifest, false);
       } else {
         const signal = this.abort.signal;
         this.size(live.wrapperFrame, fit);
@@ -338,11 +345,13 @@ export class Slot {
         await this.resetToReady(live, signal);
       }
     } catch (err) {
-      // Cleared or given another spot meanwhile: nothing of this refit is on screen.
-      if (this.spot !== live.spot) throw err;
-      console.warn(`[sf] refit ${live.spot.id}: ${err instanceof Error ? err.message : String(err)}`);
+      // Cleared, or given another spot or a new draft meanwhile: nothing of this refit is on screen.
+      if (this.spot !== spot) throw err;
+      const why = `refit failed: ${err instanceof Error ? err.message : String(err)}`;
+      console.warn(`[sf] ${spot.id}: ${why}`);
       this.abort?.abort();
       this.el.replaceChildren();
+      this.died(`${spot.id}: ${why}`);
       throw err;
     }
     if (replay) {
@@ -414,8 +423,19 @@ export class Slot {
     const live = this.live!;
     live.waiter?.reject(new Error('superseded'));
     return new Promise<void>((resolve, reject) => {
-      live.waiter = { resolve, reject };
-      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+      // Cleared once settled, so `waiter` is set only while a load, a refit or an update waits.
+      const waiter = {
+        resolve: () => {
+          if (live.waiter === waiter) live.waiter = undefined;
+          resolve();
+        },
+        reject: (err: Error) => {
+          if (live.waiter === waiter) live.waiter = undefined;
+          reject(err);
+        },
+      };
+      live.waiter = waiter;
+      signal.addEventListener('abort', () => waiter.reject(new Error('cancelled')), { once: true });
       send();
     });
   }
@@ -486,8 +506,8 @@ export class Slot {
       orientation: fit.orientation,
       viewport: fit.viewport,
     });
-    // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
-    // it is already playing, blank it until the next spot.
+    // A second load is a navigation, which the policy turned into an error page. Fail the load or
+    // refit waiting; once loaded, blank the slot and report it (`died`), so playback moves on.
     let loads = 0;
     frame.addEventListener(
       'load',
@@ -495,7 +515,8 @@ export class Slot {
         if (++loads < 2) return;
         console.warn(`[sf] template ${spot.template} navigated away; removed`);
         wrapperFrame.remove();
-        live.waiter?.reject(new Error('template navigated away'));
+        if (live.waiter) live.waiter.reject(new Error('template navigated away'));
+        else this.died(`${live.spot.id}: template navigated away`);
       },
       { signal },
     );
@@ -549,22 +570,26 @@ export class Slot {
       return;
     }
     const signal = this.abort.signal;
-    const locale = screenLocale(manifest);
-    const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
-    reportRejected(rejected);
-    const [baseAssets, rowImages, theme] = await Promise.all([
-      spotAssets(spot, manifest),
-      resolveRowImages(t.manifest.fields, resolvedData),
-      brandTheme(manifest),
-    ]);
-    alive(signal);
-    Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
-    // The frames are reused, so a rename in the editor must reach their titles too.
-    live.frame.title = live.wrapperFrame.title = spot.name;
-    this.spot = spot;
-    await this.resetToReady(live, signal);
-    // This init had the size the last refit set: a refit it superseded failed for nothing.
-    this.fitted = this.fitted.catch(() => undefined);
+    const work = (async () => {
+      const locale = screenLocale(manifest);
+      const { data: resolvedData, rejected } = resolveSpotData(spot, t.manifest.fields, liveData, now(), locale);
+      reportRejected(rejected);
+      const [baseAssets, rowImages, theme] = await Promise.all([
+        spotAssets(spot, manifest),
+        resolveRowImages(t.manifest.fields, resolvedData),
+        brandTheme(manifest),
+      ]);
+      alive(signal);
+      Object.assign(live, { spot, manifest, data: rowImages.data, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
+      // The frames are reused, so a rename in the editor must reach their titles too.
+      live.frame.title = live.wrapperFrame.title = spot.name;
+      this.spot = spot;
+      await this.resetToReady(live, signal);
+    })();
+    // Queued as a load: a refit waits for it, and one it supersedes gives way quietly (see `fitAgain`).
+    this.loading = work.catch(() => undefined);
+    this.fitted = Promise.all([this.fitted.catch(() => undefined), this.loading]).then(() => undefined);
+    await work;
     await this.play();
   }
 

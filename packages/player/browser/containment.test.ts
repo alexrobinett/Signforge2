@@ -19,13 +19,13 @@ const h = useHarness({ siteIsolation: true });
  * popup. (Playwright also reports requests CSP blocked before they were sent, so its request
  * events are not evidence.)
  */
-async function hostile(mode: FixtureMode, target?: string, templateHtml = h.templateHtml) {
+async function hostile(mode: FixtureMode, target?: string, templateHtml = h.templateHtml, evilMs = 800) {
   const popups: string[] = [];
   const p = await h.openPlayer((server) => {
     server.publish(
       buildContent(templateHtml, [
         { id: 'a', durationMs: 800 },
-        { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: 800 },
+        { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: evilMs },
         { id: 'b', durationMs: 800 },
       ]),
     );
@@ -83,14 +83,14 @@ describe('a template that navigates its own frame', () => {
     });
   }
 
-  it('is stopped and blanked when it navigates while playing, and the next spot plays', async () => {
-    const { p, leaks } = await hostile('navigate-on-play');
-    await p.until((s) => spotsPlayed(s).includes('evil'));
-    await expect.poll(() => p.console.some((l) => l.includes('navigated'))).toBe(true);
-    // Blanked: no template is left on screen during the rest of its play.
-    expect(await p.onScreen()).toBeUndefined();
+  it('is stopped and skipped when it navigates as it starts to play, and the next spot cuts in (#522)', async () => {
+    // An hour long: b plays within the wait only if evil gives way when it dies.
+    const { p, leaks } = await hostile('navigate-on-play', undefined, h.templateHtml, 3_600_000);
     const s = await afterEvil(p);
-    expect(spotsPlayed(s)).toEqual(['a', 'evil', 'b']);
+    // Whether evil's play counted first depends on when the navigation lands; it is skipped either way.
+    expect(spotsPlayed(s).filter((id) => id !== 'evil')).toEqual(['a', 'b']);
+    expect(s.lastError).toBe('evil: template navigated away');
+    expect(p.console.some((l) => l.includes('navigated'))).toBe(true);
     expect(leaks()).toEqual([]);
   });
 });

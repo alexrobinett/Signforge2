@@ -141,10 +141,15 @@ export class Playback {
   #cancelTakeoverTimer = () => {};
   /** Preview: raised when a draft is adopted, so a play prepared from the older draft is prepared again at once. */
   #drafted = new Signal();
+  /** Slots whose spot died after its load (`died`), until they are loaded again. */
+  #dead = new Set<SlotIndex>();
+  /** Raised when the spot on screen dies, so it gives way as a takeover does: `#cutIn`. */
+  #frontDied = new Signal();
 
   constructor(private readonly o: PlaybackOptions) {
     this.#asleep.reset();
     this.#tookOver.reset();
+    this.#frontDied.reset();
   }
 
   /** The manifest playing, testing overrides applied. */
@@ -201,6 +206,19 @@ export class Playback {
     }
   }
 
+  /**
+   * The spot loaded in `slot` died and the slot is blank (a refit failed, the template navigated
+   * away). It counts as skipped. On screen, the next spot cuts in as soon as it is ready, instead
+   * of the slot staying blank for the rest of the spot; underneath, it is never shown.
+   */
+  died(slot: SlotIndex, why: string): void {
+    this.#dead.add(slot);
+    this.o.events.skipped(why);
+    if (slot !== this.#front || !this.#onScreen) return;
+    this.#cutIn = true;
+    this.#frontDied.raise();
+  }
+
   /** The display loop's decision. Off, the spot on screen gives way at once and nothing is drawn until it is on again. */
   display(on: boolean): void {
     if (on) this.#asleep.reset();
@@ -238,6 +256,7 @@ export class Playback {
     const step = this.#sequencer.next(chosenAt, clock.trust());
     this.#chosenTakeover = activeTakeover(m, chosenAt, clock.trust());
     this.#tookOver.reset();
+    this.#frontDied.reset();
     this.watchTakeover();
     if (!step) {
       this.blank('SignForge\nNothing is scheduled for this screen.');
@@ -282,6 +301,12 @@ export class Playback {
       this.#cutIn = true;
       return;
     }
+    // The spot loaded here died while it waited (a refit failed, it navigated away): `died` counted it, and it is never shown.
+    if (this.#dead.has(slot)) {
+      slots.clear(slot);
+      pins.release('preparing');
+      return this.failed(step, m);
+    }
     this.#cutIn = false;
     events.status('');
     const startedAt = clock.mono();
@@ -289,26 +314,34 @@ export class Playback {
     const shownAt = clock.now();
     this.activity.phase = 'transition';
     const prev = this.#onScreen;
-    const { started, done } = slots.show(slot, prev ? this.#front : undefined, tr);
+    const prevSlot = this.#front;
+    // On screen from here, before `show` plays it: a death from now on is the spot on screen's (`died`).
+    this.#front = slot;
+    this.#onScreen = { spot: step.spot, manifest: m, startedAt };
+    const { started, done } = slots.show(slot, prev ? prevSlot : undefined, tr);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
     const playing = this.filesFor(step.spot, m);
     pins.hold('playing', prev ? [...playing, ...this.filesFor(prev.spot, prev.manifest)] : playing);
     pins.release('preparing');
-    this.#front = slot;
-    this.#onScreen = { spot: step.spot, manifest: m, startedAt };
     // A spot counts, and plays, once it has started: a video whose play() the browser refuses is a failed spot.
     const playedOk = await started.then(
       () => true,
       (err: unknown) => {
-        events.skipped(`${step.spot.id}: did not start: ${message(err)}`);
+        // A failed refit rejects `play` too, and `died` has counted it.
+        if (!this.#dead.has(slot)) events.skipped(`${step.spot.id}: did not start: ${message(err)}`);
         return false;
       },
     );
     await done;
     pins.hold('playing', playing);
     this.activity.phase = 'play';
-    if (!playedOk) return this.failed(step, m);
+    // One that did not start, or died before its play counted, is not played: its slot is blank,
+    // so the next spot cuts in as soon as it is ready. On a one-spot playlist, the same spot again.
+    if (!playedOk || this.#dead.has(slot)) {
+      this.#cutIn = true;
+      return this.failed(step, m);
+    }
     // After the transition: storing the play and a new last good manifest costs frames on a Pi.
     this.#failures = 0;
     this.#failedInManifest = 0;
@@ -327,7 +360,7 @@ export class Playback {
   }
 
   private hold(ms: number): Promise<void> {
-    return Promise.race([this.wait(ms), this.#asleep.promise, this.#tookOver.promise]);
+    return Promise.race([this.wait(ms), this.#asleep.promise, this.#tookOver.promise, this.#frontDied.promise]);
   }
 
   private watchTakeover(): void {
@@ -351,6 +384,7 @@ export class Playback {
   private blank(text: string): void {
     this.o.slots.clear(0);
     this.o.slots.clear(1);
+    this.#dead.clear();
     this.#onScreen = undefined;
     this.o.pins.release('playing');
     this.o.pins.release('preparing');
@@ -358,6 +392,7 @@ export class Playback {
   }
 
   private async prepare(slot: SlotIndex, step: Step, m: ScreenManifest): Promise<boolean> {
+    this.#dead.delete(slot);
     try {
       const t0 = this.o.clock.mono();
       await this.o.slots.prepare(slot, step.spot, m);

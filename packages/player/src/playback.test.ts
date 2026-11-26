@@ -55,6 +55,8 @@ class FakeSlots implements PlaybackSlots {
   readonly held: ({ spot: Spot; manifest: ScreenManifest } | undefined)[] = [undefined, undefined];
   /** Spots whose prepare rejects. */
   readonly failing = new Set<string>();
+  /** Spots whose next start rejects, as a video whose `play()` the browser refuses does. */
+  readonly refuseNext = new Set<string>();
   private gate?: Promise<void>;
 
   constructor(private clock: FakeClock) {}
@@ -83,7 +85,8 @@ class FakeSlots implements PlaybackSlots {
     const done = new Promise<void>((r) => this.clock.after(ms, r)).then(() => {
       if (prev !== undefined) this.held[prev] = undefined;
     });
-    return { started: Promise.resolve(), done };
+    const refused = this.refuseNext.delete(held.spot.id);
+    return { started: refused ? Promise.reject(new Error('play() refused')) : Promise.resolve(), done };
   }
 
   clear(slot: SlotIndex): void {
@@ -452,6 +455,58 @@ describe('playback', () => {
       expect(seen.good).toEqual(['m1']);
       expect(playback.lastGood?.id).toBe('m1');
       expect(pins.holders.get('last-good')).toEqual(['sha-a']);
+    });
+  });
+
+  describe('a spot that dies (#522)', () => {
+    it('on screen, gives way at once to the next play, the same spot on a one-spot playlist', async () => {
+      const { clock, slots, seen, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', HOUR)]));
+      run();
+      await clock.until(MINUTE);
+      expect(slots.log[0]).toBe('0 prepare 1 a@m1');
+      playback.died(1, 'a: template navigated away');
+      await clock.until(2 * MINUTE);
+      expect(shown()).toEqual(['a@m1 200', `a@m1 ${MINUTE + PREPARE_MS}`]);
+      expect(seen.skipped).toEqual(['a: template navigated away']);
+      expect(seen.played).toEqual(['a@m1', 'a@m1']);
+    });
+
+    it('underneath, is never shown, and the spot on screen plays its full length', async () => {
+      const { clock, seen, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
+      run();
+      // b loads into slot 0 from 7.2 s and is ready at 7.4 s.
+      await clock.until(8 * SECOND);
+      playback.died(0, 'b: refit failed: not ready within 2000 ms');
+      await clock.until(15 * SECOND);
+      // Found dead at its turn: a stays on screen while its next play loads.
+      expect(shown()).toEqual(['a@m1 200', `a@m1 ${10 * SECOND + 2 * PREPARE_MS}`]);
+      expect(seen.skipped).toEqual(['b: refit failed: not ready within 2000 ms']);
+    });
+
+    it('before its play counted, in the transition, is not played', async () => {
+      const { clock, seen, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', HOUR)], { transition: { type: 'crossfade', ms: 600 } }));
+      run();
+      await clock.until(500);
+      playback.died(1, 'a: refit failed: template error: boom');
+      await clock.until(MINUTE);
+      // After the transition (200 to 800 ms), the next play loads.
+      expect(shown()).toEqual(['a@m1 200', `a@m1 ${800 + PREPARE_MS}`]);
+      expect(seen.skipped).toEqual(['a: refit failed: template error: boom']);
+      expect(seen.played).toEqual(['a@m1']);
+    });
+
+    it('whose start is refused gives way at once, not after its length', async () => {
+      const { clock, slots, seen, playback, run, shown } = setup();
+      slots.refuseNext.add('a');
+      playback.adopt(manifest('m1', [spot('a', HOUR)]));
+      run();
+      await clock.until(MINUTE);
+      expect(shown()).toEqual(['a@m1 200', `a@m1 ${2 * PREPARE_MS}`]);
+      expect(seen.skipped).toEqual(['a: did not start: play() refused']);
+      expect(seen.played).toEqual(['a@m1']);
     });
   });
 });

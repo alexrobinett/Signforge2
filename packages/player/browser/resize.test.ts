@@ -6,7 +6,7 @@
 import type { Page } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import { buildContent, TEMPLATE_KEY } from './content';
-import { useHarness, visibleFrame } from './harness';
+import { spotsPlayed, useHarness, visibleFrame } from './harness';
 
 const h = useHarness();
 
@@ -111,13 +111,19 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
   });
 
   it('coalesces resizes during a refit into one more init, with the last size', async () => {
-    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])));
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])), {}, { clockAt: new Date('2026-11-26T12:00:00Z') });
     await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', playing: '1' });
     const frame = (await visibleFrame(p.page, 'label'))!;
     await frame.evaluate(() => {
       const w = window as unknown as { sfHold?: Promise<void>; sfRelease?: () => void };
       w.sfHold = new Promise((r) => (w.sfRelease = r));
     });
+    await p.page.evaluate(() => {
+      const w = window as unknown as { lastResize?: string };
+      addEventListener('resize', () => (w.lastResize = `${innerWidth}x${innerHeight}`));
+    });
+    // The page's timers stand still until `resume`, the refit's 2 s ready timeout among them.
+    await p.page.clock.pauseAt((await p.page.evaluate(() => Date.now())) + 1000);
 
     await p.page.setViewportSize(PORTRAIT);
     // The refit is under way, held in the template's prepare.
@@ -125,14 +131,15 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
     await p.page.setViewportSize(LANDSCAPE);
     await p.page.setViewportSize(PORTRAIT);
     await p.page.setViewportSize({ width: 960, height: 600 });
-    // Resize events are dispatched before animation frame callbacks: after two frames all three have been.
-    await p.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    // The player's own listener comes first, so it has seen the last size too.
+    await expect.poll(() => p.page.evaluate(() => (window as unknown as { lastResize?: string }).lastResize)).toBe('960x600');
     await frame.evaluate(() => (window as unknown as { sfRelease: () => void }).sfRelease());
+    await p.page.clock.resume();
 
     await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '3', viewport: '960x600 landscape', playing: '1', wrapper: '960x600' });
   });
 
-  it('blanks a template on screen whose refit fails, rather than leave its markup without data', async () => {
+  it('loads a template on screen whose refit fails afresh at the new size, and counts it skipped (#522)', async () => {
     const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 60_000 }])));
     await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', playing: '1' });
     await (await visibleFrame(p.page, 'label'))!.evaluate(() => {
@@ -140,8 +147,11 @@ parent.postMessage({ sf: 1, type: 'loaded' }, '*');
     });
 
     await p.page.setViewportSize(PORTRAIT);
-    await expect.poll(() => p.console).toContainEqual('warning: [sf] refit a: template error: fixture refit failed');
-    expect(await fitted(p.page)).toBeUndefined();
-    expect(await p.page.locator('.slot iframe').count()).toBe(0);
+    // Its next play cuts in at once, in a fresh frame, rather than the slot staying blank for 60 s.
+    await expect.poll(() => fitted(p.page)).toMatchObject({ inits: '1', viewport: '540x960 portrait', playing: '1' });
+    const s = await p.state();
+    expect(s.skipped).toBe(1);
+    expect(s.lastError).toBe('a: refit failed: template error: fixture refit failed');
+    expect(spotsPlayed(s)).toEqual(['a', 'a']);
   });
 });

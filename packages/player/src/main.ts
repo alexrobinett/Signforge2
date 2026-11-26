@@ -289,7 +289,8 @@ function renderHud(): void {
 }
 
 // ------------------------------------------------------------------ playback
-const slots = [new Slot(), new Slot()] as const;
+// `playback` is made below; a slot reports a death only once its spot has loaded.
+const slots = [new Slot((why) => playback.died(0, why)), new Slot((why) => playback.died(1, why))] as const;
 let lastProgress = performance.now();
 
 /**
