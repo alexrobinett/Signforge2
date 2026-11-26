@@ -49,19 +49,19 @@ const openCountingReads = (content: Content, more?: (page: Page) => Promise<unkn
       },
     },
   );
-/** How often the player read the file `sha`. */
+/** How often the player read the file `sha` from its file cache (not a download's partial copy, which ends in its hash too). */
 const readsOf = (p: Player, sha: string) =>
   p.page.evaluate(
     (sha) =>
       Object.entries((window as unknown as { sfReads: Record<string, number> }).sfReads)
-        .filter(([url]) => url.endsWith(sha))
+        .filter(([url]) => url.endsWith(`/_sf/blob/${sha}`))
         .reduce((n, [, c]) => n + c, 0),
     sha,
   );
 /** The order the player first read each of `shas` in. */
 const readOrder = async (p: Player, shas: string[]) => {
   const order = await p.page.evaluate(() => (window as unknown as { sfOrder: string[] }).sfOrder);
-  return [...new Set(order.flatMap((url) => shas.filter((sha) => url.endsWith(sha))))];
+  return [...new Set(order.flatMap((url) => shas.filter((sha) => url.endsWith(`/_sf/blob/${sha}`))))];
 };
 
 /**
@@ -179,6 +179,34 @@ describe('content files', () => {
     expect(s.lastError).toBe('');
     expect(s.log.length).toBe(s.played);
     expect(await readsOf(p, bundle.b!)).toBe(0);
+  });
+
+  it('plays, and reads ahead, where no worker can be made: the bundles are contained on the page (#561)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a']);
+    const p = await openCountingReads(content, (page) => page.addInitScript(() => Reflect.deleteProperty(window, 'Worker')));
+    const s = await p.until((s) => s.played >= 3);
+    expect(s.lastError).toBe('');
+    expect(s.log.length).toBe(s.played);
+    await expect.poll(() => readsOf(p, bundle.b!)).toBe(1);
+  });
+
+  it('tries a bundle it cannot read ahead once, not again at every play (#561)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a']);
+    // b's file misses in the cache, as one the browser evicted does; its reads are still counted.
+    const p = await openCountingReads(content, (page) =>
+      page.addInitScript((sha) => {
+        const match = Cache.prototype.match;
+        Cache.prototype.match = function (request, options) {
+          const url = typeof request === 'string' ? request : request instanceof Request ? request.url : String(request);
+          // Through the counting wrapper, so the read is counted, then a miss.
+          return url.endsWith(`/_sf/blob/${sha}`) ? match.call(this, request, options).then(() => undefined) : match.call(this, request, options);
+        };
+      }, bundle.b!),
+    );
+    await p.until((s) => s.log.length >= 1);
+    await expect.poll(() => readsOf(p, bundle.b!)).toBe(1);
+    await p.until((s) => s.log.length >= 5);
+    expect(await readsOf(p, bundle.b!)).toBe(1);
   });
 
   it('drops a read that failed after the manifest changed, so the next prepare reads again (#232)', async () => {
