@@ -938,8 +938,9 @@ export function scoped(d1: D1Database, orgId: string) {
           /**
            * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless what a smart group's rule reads
            * is as read (#186, review of #608): the labels of its `keys` (`rows`, those read), and, when it names a system
-           * label, each screen's settings it comes from (`screens`). A label of another key edited meanwhile changes
-           * nothing the rule reads, and does not refuse it.
+           * label or has a `missing` term (a screen claimed meanwhile has no labels, so it matches), the screens and the
+           * settings system labels come from (`screens`). A label of another key edited meanwhile changes nothing the rule
+           * reads, and does not refuse it.
            */
           are: (
             keys: readonly string[],
