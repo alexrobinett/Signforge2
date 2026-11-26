@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { Orientation } from '@signforge/contract';
-import { host, LIGHT_KIT, noDemoAndLight, paintedContrast, screenFrame, spotData, useTemplate } from '@signforge/template-test';
+import { host, LIGHT_KIT, motionContract, noDemoAndLight, paintedContrast, screenFrame, spotData, useTemplate } from '@signforge/template-test';
 
 const photo = { photo: '#808080' };
 const t = useTemplate(new URL('../looks-test', import.meta.url), {
@@ -131,10 +131,20 @@ describe('the look kit (#190)', () => {
       }, durationMs);
       expect(props, look).toEqual(['opacity', 'transform']);
       const both = (sel: string) => `${sel} intro, outro at the end`;
-      const photo = look === 'poster' ? ['.photo ', both('.cover')] : [both('.photo'), '.cover '];
+      // In Poster the photo comes in under the ink block's wipe, and leaves with everything else.
+      const photo = look === 'poster' ? ['.photo outro at the end', both('.cover')] : [both('.photo'), '.cover '];
       expect(ends, look).toEqual([...['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker'].map(both), ...photo]);
     }
   });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`moves as D does in every look, ${orientation}: in on the decelerating curve, out on its own accelerating one, at most 1.5vmin, no overshoot`, async () => {
+      const k = await kitFrame(orientation);
+      const durationMs = 11_000;
+      const found: string[] = [];
+      for (const look of looks) for (const line of await motionContract(await k.play({ look }, undefined, durationMs), durationMs)) found.push(`${look}: ${line}`);
+      expect(found).toEqual([]);
+    });
 
   // A photo drifting across a portrait screen's width took the test template over 1% of frames
   // dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until one measures under.

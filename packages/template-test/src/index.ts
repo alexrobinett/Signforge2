@@ -769,3 +769,83 @@ export const motion = (f: Frame, durationMs: number, every = false) =>
     },
     { durationMs, every },
   );
+
+/** D's motion (#news-design, docs/template-spec.md, Motion): the curves and limits `motionContract` holds a spot to. */
+export const MOTION = {
+  easeIn: 'cubic-bezier(0.05, 0.7, 0.1, 1)',
+  easeOut: 'cubic-bezier(0.3, 0, 0.8, 0.15)',
+  introMs: [400, 650],
+  outroMs: 300,
+  travelVmin: 1.5,
+  scale: [0.94, 1.04],
+} as const;
+
+/**
+ * Where a play of `durationMs` breaks D's motion, one line each: none when it keeps it. Every element that arrives
+ * does so on the decelerating curve in 400 to 650 ms; every element that leaves does so on the accelerating curve in
+ * 300 ms, ending as the spot does, with keyframes of its own rather than its entrance reversed. Nothing travels more
+ * than 1.5vmin or scales past 0.94 to 1.04 (text rising out of a `.lk-mask` is the one exception), nothing overshoots
+ * (two keyframes and no bezier leaving [0, 1]), only transform and opacity move, and nothing loops but `loops`.
+ * Read by seeking each animation, so it takes no wall clock.
+ */
+export const motionContract = (f: Frame, durationMs: number, loops = '.lk-crawl, .lk-ping') =>
+  f.evaluate(
+    ({ durationMs, loops, m }) => {
+      const found: string[] = [];
+      const name = (el: Element) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
+      const vmin = Math.min(innerWidth, innerHeight) / 100;
+      const beziers = (easing: string) => [...easing.matchAll(/cubic-bezier\(([^)]*)\)/g)].map((b) => b[1]!.split(',').map(Number));
+      const animations = document.getAnimations().filter((a): a is CSSAnimation => a instanceof CSSAnimation);
+      for (const a of animations) {
+        const effect = a.effect as KeyframeEffect;
+        const el = effect.target!;
+        const who = `${name(el)} ${a.animationName}`;
+        const frames = effect.getKeyframes();
+        const timing = effect.getComputedTiming();
+        for (const k of frames) {
+          for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform'].includes(p)) found.push(`${who} moves ${p}`);
+          for (const [, y1, , y2] of beziers(String(k.easing))) if (y1! < 0 || y1! > 1 || y2! < 0 || y2! > 1) found.push(`${who} overshoots on ${k.easing}`);
+        }
+        if (timing.iterations === Number.POSITIVE_INFINITY) {
+          if (!el.matches(loops)) found.push(`${who} loops`);
+          continue;
+        }
+        if (frames.length > 2) found.push(`${who} has ${frames.length} keyframes, passing its rest`);
+        const start = Number(timing.delay ?? 0);
+        const dur = Number(timing.duration);
+        const end = Math.round(Number(timing.endTime));
+        const easing = String(frames[0]?.easing);
+        // An exit is short and ends with the spot; a push-in over the whole play (`lk-drift`) is neither entrance nor exit.
+        if (end === durationMs && dur <= durationMs / 2) {
+          if (Math.round(dur) !== m.outroMs) found.push(`${who} leaves in ${Math.round(dur)} ms`);
+          if (easing !== m.easeOut) found.push(`${who} leaves on ${easing}`);
+          if (a.effect && (a.effect as KeyframeEffect).getTiming().direction === 'reverse') found.push(`${who} leaves by reversing its entrance`);
+        } else if (start < durationMs / 2 && dur < durationMs) {
+          if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
+          if (easing !== m.easeIn) found.push(`${who} arrives on ${easing}`);
+        }
+        // How far it moves: its transform where it starts, set by seeking it there, against its own rest.
+        if (el.closest('.lk-mask')) continue;
+        // Every animation of the element at the same moment, as they play: an exit sampled while the entrance still sat
+        // at its start would read the entrance's offset.
+        const together = el.getAnimations();
+        const was = together.map((x) => x.currentTime);
+        const sample = (t: number) => {
+          for (const x of together) x.currentTime = t;
+          const transform = getComputedStyle(el).transform;
+          return new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
+        };
+        for (const t of [start, start + dur - 0.01]) {
+          const x = sample(t);
+          const travel = Math.hypot(x.m41, x.m42) / vmin;
+          // A rule drawn across, or a cover wiped away, scales along one axis only: a reveal, not a size change.
+          const [sx, sy] = [Math.hypot(x.m11, x.m12), Math.hypot(x.m21, x.m22)];
+          if (travel > m.travelVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+          if (Math.abs(sx - sy) < 0.001 && (sx < m.scale[0] - 0.001 || sx > m.scale[1] + 0.001)) found.push(`${who} scales to ${sx.toFixed(2)}`);
+        }
+        together.forEach((x, i) => (x.currentTime = was[i] ?? null));
+      }
+      return [...new Set(found)];
+    },
+    { durationMs, loops, m: MOTION },
+  );
