@@ -3,6 +3,7 @@
 import { build } from 'esbuild';
 import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { frameHostScript } from './frame-host-script.ts';
 
 const { version }: { version: string } = createRequire(import.meta.url)('playwright-core/package.json');
 await build({
@@ -12,6 +13,7 @@ await build({
   format: 'esm',
   target: 'node24',
   external: ['playwright-core'],
+  define: { __SF_FRAME_HOST__: JSON.stringify(await frameHostScript()) },
   outfile: 'dist/runner.mjs',
 });
 writeFileSync('dist/package.json', `${JSON.stringify({ private: true, type: 'module', dependencies: { 'playwright-core': version } }, null, 2)}\n`);
