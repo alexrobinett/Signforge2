@@ -340,6 +340,7 @@ describe('list_audit_log over /api/tools', () => {
     await owner.createOrg('Second Co');
     const res = await owner.tool('list_audit_log', { limit: 1, cursor: next });
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: 'invalid_input', message: expect.stringContaining('another organization') });
+    // Sealed for the first org (#345), it opens in no other.
+    expect(await res.json()).toMatchObject({ error: 'invalid_input', details: [{ path: 'cursor' }] });
   });
 });

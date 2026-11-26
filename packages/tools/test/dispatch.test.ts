@@ -23,6 +23,7 @@ import {
   type ScreenNotifier,
   ToolError,
   type ToolServices,
+  type CursorSealer,
 } from '../src';
 import { racing } from './calls';
 import { fakeServices } from './services';
@@ -818,6 +819,42 @@ describe('tool services', () => {
     expect(await dispatch(reg, 'find_nearby', { query: 'Atlanta' }, { ...caller('viewer'), services })).toEqual({ ok: true, output: { found: 0 } });
     expect(ran).toHaveLength(1);
     expect(ran[0]).toBe(services);
+  });
+});
+
+describe("a list's cursor (#345)", () => {
+  /** Reversible, so a test sees what was sealed and for which org and tool. */
+  const cursors: CursorSealer = {
+    seal: async ({ orgId, tool }, cursor) => `sealed:${orgId}/${tool}:${cursor}`,
+    open: async ({ orgId, tool }, sealed) => (sealed.startsWith(`sealed:${orgId}/${tool}:`) ? sealed.slice(`sealed:${orgId}/${tool}:`.length) : undefined),
+  };
+  const sealing = (): Caller => ({ ...caller('viewer'), services: { ...fakeServices, cursors } });
+
+  it('is sealed for its org and tool as it leaves, and opened as it comes back, so the next page follows', async () => {
+    const first = await dispatch(registry, 'list_spots', { limit: 1 }, sealing());
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    const { next, spots } = first.output as { next: string; spots: { id: string }[] };
+    expect(next).toMatch(new RegExp(`^sealed:${o.orgId}/list_spots:`));
+    const second = await dispatch(registry, 'list_spots', { limit: 1, cursor: next }, sealing());
+    expect(second).toMatchObject({ ok: true });
+    if (second.ok) expect((second.output as { spots: { id: string }[] }).spots[0]?.id).not.toBe(spots[0]?.id);
+  });
+
+  it("refuses a cursor not sealed for this list: a plain one, another tool's, another org's", async () => {
+    const first = await dispatch(registry, 'list_spots', { limit: 1 }, sealing());
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    const next = (first.output as { next: string }).next;
+    const plain = next.slice(`sealed:${o.orgId}/list_spots:`.length);
+    for (const [name, cursor] of [
+      ['list_spots', plain],
+      ['list_playlists', next],
+      ['list_spots', next.replace(o.orgId, 'org-other')],
+    ] as const)
+      expect(await dispatch(registry, name, { limit: 1, cursor }, sealing()), `${name} ${cursor}`).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'cursor' }],
+      });
   });
 });
 

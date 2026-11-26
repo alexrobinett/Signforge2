@@ -25,6 +25,7 @@ export {
   type AlertSecretSealer,
   type AnyTool,
   type Connectors,
+  type CursorSealer,
   type DataScope,
   type FeedUrlSealer,
   type Place,

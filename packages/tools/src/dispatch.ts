@@ -156,10 +156,26 @@ export async function dispatch<D extends DataScope>(
   caller: Caller<D>,
 ): Promise<DispatchResult> {
   const audited = { row: false };
-  const result = await dispatchCall(registry, name, rawInput, caller, audited);
+  // A list's cursor as its tool made it, opened here and sealed again below, for this org and tool alone (#345).
+  const sealer = caller.services.cursors;
+  const orgId = 'orgId' in caller.org ? caller.org.orgId : null;
+  const scope = sealer && orgId ? { orgId, tool: name } : undefined;
+  let input = rawInput;
+  if (sealer && scope && isRecord(rawInput) && typeof rawInput.cursor === 'string') {
+    const cursor = await sealer.open(scope, rawInput.cursor);
+    if (cursor === undefined)
+      return fail('invalid_input', 'cursor is not one this list returned; start again without it', [{ path: 'cursor', message: 'not a cursor from this list' }]);
+    input = { ...rawInput, cursor };
+  }
+  const result = await dispatchCall(registry, name, input, caller, audited);
   // A person's press of a card (#269) is recorded however it is refused: by role, scope, a check, a lost race.
-  return caller.confirmed && !result.ok && !audited.row ? refusedPress(registry, name, rawInput, caller, result) : result;
+  if (caller.confirmed && !result.ok && !audited.row) return refusedPress(registry, name, rawInput, caller, result);
+  if (sealer && scope && result.ok && isRecord(result.output) && typeof result.output.next === 'string')
+    return { ok: true, output: { ...result.output, next: await sealer.seal(scope, result.output.next) } };
+  return result;
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
  * A person's press of a confirmation card (`Caller.confirmed`), refused: its audit row alone, with the
