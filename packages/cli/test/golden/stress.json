@@ -16,17 +16,25 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28": {
-      "size": 401879,
-      "type": "text/html"
-    },
     "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357": {
       "size": 81112,
+      "type": "text/html"
+    },
+    "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56": {
+      "size": 398206,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45": {
+      "size": 401879,
+      "type": "text/html"
+    },
+    "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396": {
+      "size": 403253,
+      "type": "text/html"
     },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
@@ -48,7 +56,7 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c": {
+    "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f": {
       "size": 396225,
       "type": "text/html"
     },
@@ -63,6 +71,10 @@
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "9d41fc8497b67bcfa2364129f201aab81db6fcfe5f2c8f2f166d4dd9f01bf420": {
+      "size": 385402,
+      "type": "text/html"
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
@@ -97,22 +109,10 @@
       "size": 46747,
       "type": "image/png"
     },
-    "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a": {
-      "size": 398206,
-      "type": "text/html"
-    },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
-    },
-    "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c": {
-      "size": 403253,
-      "type": "text/html"
-    },
-    "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b": {
-      "size": 388707,
-      "type": "text/html"
     }
   },
   "templates": {
@@ -206,10 +206,10 @@
       },
       "html": "87e6573a825c3277fec7d495b62d8ff852331039f30f4f5be2f8f15e56cea5ee"
     },
-    "base/announcement@1.0.2": {
+    "base/announcement@1.0.3": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -331,7 +331,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "def951d378b0e66e6f9b6ab149118b78f346e4a069acbbb7702930d76c6d4f3a"
+      "html": "302515482a851cb73a56c429faceb65e8467854be4ec4b596223493f30f41b56"
     },
     "base/clock@1.2.4": {
       "manifest": {
@@ -383,10 +383,10 @@
       },
       "html": "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a"
     },
-    "base/countdown@1.0.2": {
+    "base/countdown@1.0.3": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -509,7 +509,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "8297823b1e5aab66e91d9115215263a1493fae8cf8aa4f9fbff18c925dd3e59c"
+      "html": "85cb771c399e20969ed1f858ca7e1e820bf488a0654882e83a798f8654f1a05f"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -679,10 +679,10 @@
       },
       "html": "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357"
     },
-    "base/info-frame@1.0.2": {
+    "base/info-frame@1.0.3": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -967,7 +967,7 @@
         },
         "protocol": 2
       },
-      "html": "f59fc625badb1c14cb30e23f0d574f87bd0af7b9f049a143aebf123155e3467c"
+      "html": "4a7e7826a077ed4e87f77f0f05f2bd6b2cd3da8d03441e01a8d20175bb32c396"
     },
     "base/menu-board@1.3.1": {
       "manifest": {
@@ -1066,12 +1066,12 @@
       },
       "html": "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215"
     },
-    "base/news@2.0.1": {
+    "base/news@2.1.0": {
       "manifest": {
         "id": "news",
-        "version": "2.0.1",
+        "version": "2.1.0",
         "name": "News",
-        "description": "The lead story large with its photo and summary, rotating through the top stories, a list that marks the one on screen, and every headline in a crawl. Bind the headlines to an RSS data source.",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
         "fields": {
           "title": {
             "type": "text",
@@ -1154,17 +1154,12 @@
           },
           "showList": {
             "type": "boolean",
-            "label": "Show the story list",
+            "label": "Show the story strip",
             "default": true
           },
           "showMeta": {
             "type": "boolean",
             "label": "Show the source and age",
-            "default": true
-          },
-          "showCrawl": {
-            "type": "boolean",
-            "label": "Show the crawl",
             "default": true
           }
         },
@@ -1188,7 +1183,7 @@
         },
         "protocol": 2
       },
-      "html": "fb4c950f7817e425803c0687e12b6b991f47e90af96e1fd770ab127026ec781b"
+      "html": "9d41fc8497b67bcfa2364129f201aab81db6fcfe5f2c8f2f166d4dd9f01bf420"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -1241,10 +1236,10 @@
       },
       "html": "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2"
     },
-    "base/room-status@1.0.2": {
+    "base/room-status@1.0.3": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1365,7 +1360,7 @@
         },
         "protocol": 2
       },
-      "html": "29463caf4088c94f2cb2b0c116f9724a107b5ad008c59d23f1082006def60f28"
+      "html": "373fa9538375a525b306968036c3b0923d956edb698dc1c5bf851762c407df45"
     },
     "base/weather@1.5.1": {
       "manifest": {
@@ -1506,7 +1501,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.0.2",
+      "template": "base/announcement@1.0.3",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -1548,7 +1543,7 @@
       "id": "countdown",
       "name": "Countdown (minutes ticking)",
       "kind": "template",
-      "template": "base/countdown@1.0.2",
+      "template": "base/countdown@1.0.3",
       "data": {
         "look": "night",
         "mode": "up",
@@ -1619,7 +1614,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.0.2",
+      "template": "base/info-frame@1.0.3",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -1861,7 +1856,7 @@
       "id": "news",
       "name": "NPR headlines",
       "kind": "template",
-      "template": "base/news@2.0.1",
+      "template": "base/news@2.1.0",
       "data": {
         "title": "Latest news",
         "source": "NPR",
@@ -1872,8 +1867,7 @@
         "showImages": true,
         "showSummary": true,
         "showList": true,
-        "showMeta": true,
-        "showCrawl": true
+        "showMeta": true
       },
       "assets": {},
       "durationMs": 15000,
@@ -1940,7 +1934,7 @@
       "id": "room-status",
       "name": "Room status (live calendar)",
       "kind": "template",
-      "template": "base/room-status@1.0.2",
+      "template": "base/room-status@1.0.3",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -2205,5 +2199,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "f4301a8026ad84b2e0c974b7f5ce597d5477f85075d42167a65c9c1b5c68ed29"
+  "id": "7e40b5799162905a3bd6c7793fecd384dcc945a4ca98cbd592da79fa9c7624dc"
 }

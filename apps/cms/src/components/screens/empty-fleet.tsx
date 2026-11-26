@@ -19,7 +19,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
           <h2 id="empty-fleet" className="text-2xl font-semibold tracking-tight">
             See your first spot on a screen
           </h2>
-          <p className="text-[15px] leading-relaxed text-foreground/85">
+          <p className="text-md leading-relaxed text-foreground/85">
             Turn on a screen with the SignForge player. It shows a pairing code; type it here and the screen is yours. A test screen in a browser tab runs the
             same player and pairs the same way.
           </p>
@@ -37,7 +37,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
                   onClick={() => named || nameNewScreen('Test screen')}
                   data-slot="button"
                   data-variant="default"
-                  className="inline-flex h-11 items-center gap-2 self-start rounded-lg bg-primary px-4 text-[15px] font-semibold text-primary-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="inline-flex h-11 items-center gap-2 self-start rounded-lg bg-primary px-4 text-md font-semibold text-primary-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   Open a test screen <ExternalLinkIcon className="size-4" aria-hidden />
                   <span className="sr-only">(opens in a new tab)</span>
@@ -68,14 +68,14 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
           <div
             role="img"
             aria-label="A screen showing its pairing code"
-            className="flex aspect-video flex-col items-center justify-center gap-3 bg-[#0f1115] text-white"
+            className="flex aspect-video flex-col items-center justify-center gap-3 bg-stage text-stage-foreground"
           >
-            <span className="text-[15px] text-[#d0d5dd]">Pair this screen</span>
+            <span className="text-md">Pair this screen</span>
             <span className="font-mono text-4xl font-semibold tracking-[0.08em] sm:text-5xl">K7M 2QX</span>
-            <span className="text-[13px] text-[#b8b8b8]">Enter this code in SignForge to add the screen</span>
+            <span className="text-meta text-stage-muted-foreground">Enter this code in SignForge to add the screen</span>
           </div>
         </div>
-        <figcaption className="text-[13px] text-muted-foreground">
+        <figcaption className="text-meta text-muted-foreground">
           What a screen shows until it is paired. After pairing it plays what you publish to it, and appears here with its status.
         </figcaption>
       </figure>
@@ -85,7 +85,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
 
 function Step({ n }: { n: number }) {
   return (
-    <span aria-hidden className="grid size-7 flex-none place-items-center rounded-full bg-primary text-[13px] font-semibold text-primary-foreground">
+    <span aria-hidden className="grid size-7 flex-none place-items-center rounded-full bg-primary text-meta font-semibold text-primary-foreground">
       {n}
     </span>
   );

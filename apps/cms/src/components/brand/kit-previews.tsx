@@ -37,7 +37,7 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
 
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1.5">
-      <div ref={boxRef} className="relative aspect-video overflow-hidden rounded-lg bg-black ring-1 ring-border">
+      <div ref={boxRef} className="relative aspect-video overflow-hidden rounded-lg bg-letterbox ring-1 ring-border">
         {hydrated && (
           <iframe
             ref={frameRef}

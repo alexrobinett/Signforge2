@@ -41,12 +41,15 @@ const DAY_MS = 24 * HOUR_MS;
 /** Stories per source with a photo: the first, newest ones. No template shows more of a feed's photos. */
 export const PHOTOS_PER_SOURCE = 10;
 /**
- * Photos new to the org that one source, and the whole org, may queue in a day. A story past them
- * plays with no photo until the next day. At most 20 a day is 600 a month: at ~1 Images
- * transformation per typical web photo, an org at its cap uses about an eighth of the 5,000 free ones.
+ * Photos new to the org that one source, and the whole org, may queue in a day (owner decision on #339).
+ * A story past them plays with no photo until the next day. The org's 60 are a hard ceiling, however
+ * many source ids hold photos: 1,800 a month, at ~1 Images transformation each (its thumbnail), about
+ * 36% of the 5,000 free ones. They are shared fairly (#481): each source may take its share,
+ * `min(NEW_PER_SOURCE_PER_DAY, NEW_PER_ORG_PER_DAY / the org's RSS sources whose photos a screen shows)`,
+ * floored, so the sources that poll first never take another's, and every source an org shows gets photos every day.
  */
-export const NEW_PER_SOURCE_PER_DAY = 10;
-export const NEW_PER_ORG_PER_DAY = 20;
+export const NEW_PER_SOURCE_PER_DAY = 30;
+export const NEW_PER_ORG_PER_DAY = 60;
 /** How long a queued URL is held: past the consumer's tries, so polls meanwhile do not queue it again. */
 export const HOLD_MS = 15 * MINUTE_MS;
 /** How long a fetched photo is kept as it is before a poll that still names it queues a conditional fetch. */
@@ -191,7 +194,10 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
           .insert(fi)
           .select(sql`SELECT ${orgId}, url, ${dataSourceId}, NULL, NULL, NULL, NULL, NULL, ${read.now + HOLD_MS}, NULL, 0, ${read.now}, ${read.now} FROM (
             WITH counts AS (
-              SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n
+              SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${dataSourceId}), 0) AS src_n,
+                -- The org's RSS sources whose photos a screen shows: a full read records their URLs only then, and this one is shown.
+                (SELECT count(*) FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.format} = 'rss' AND ${ds.photos} = 1
+                  AND (${ds.photoUrlsJson} IS NOT NULL OR ${ds.id} = ${dataSourceId})) AS sources
               FROM ${fi}
               WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
             )
@@ -201,7 +207,8 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
               WHERE NOT ${alreadyKnown}
               ORDER BY jobs.key
-              LIMIT (SELECT MAX(0, MIN(${NEW_PER_SOURCE_PER_DAY} - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) FROM counts)
+              -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
+              LIMIT (SELECT CAST(MAX(0, MIN(MIN(${NEW_PER_SOURCE_PER_DAY}, ${NEW_PER_ORG_PER_DAY} / MAX(1, sources)) - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) AS INTEGER) FROM counts)
             )
           ) WHERE ${current}`)
           .onConflictDoUpdate({

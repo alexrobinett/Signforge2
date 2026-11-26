@@ -272,16 +272,18 @@
   --lk-ping-motion: none;
   --lk-crawl-speed: 8.3vmin;
 }
+/* Ember (owner's pick, 2026-11-26): a warm near-black, paper-warm text, a muted tone a clear step below it (8.4:1, the
+   text 16:1), and one accent, amber (10:1), for both the fills and the marks. */
 [data-look='night'] {
-  --lk-bg: var(--sf-bg, #0e1512);
-  --lk-surface: var(--sf-surface, #18231e);
-  --lk-text: var(--sf-text, #f2f5f0);
-  --lk-muted: var(--sf-muted, #cbd5cf);
-  --lk-primary: var(--sf-primary, #d4ff3a);
-  --lk-on-primary: var(--sf-on-primary, #0e1512);
-  --lk-accent: var(--sf-accent, #c4b5fd);
-  --lk-on-accent: var(--sf-on-accent, #0e1512);
-  --lk-rule-color: color-mix(in srgb, var(--lk-text) 16%, var(--lk-bg));
+  --lk-bg: var(--sf-bg, #15110e);
+  --lk-surface: var(--sf-surface, #221c17);
+  --lk-text: var(--sf-text, #f4ece1);
+  --lk-muted: var(--sf-muted, #b9ab9a);
+  --lk-primary: var(--sf-primary, #ffab40);
+  --lk-on-primary: var(--sf-on-primary, #15110e);
+  --lk-accent: var(--sf-accent, #ffab40);
+  --lk-on-accent: var(--sf-on-accent, #15110e);
+  --lk-rule-color: color-mix(in srgb, var(--lk-text) 11%, var(--lk-bg));
 
   --lk-font-display: 'lk-night', sans-serif;
   --lk-font-body: 'lk-body', sans-serif;

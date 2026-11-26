@@ -376,12 +376,12 @@ beforeEach(() => {
   take();
 });
 
-// Only a test's own sources and spots are active in it.
+// Only a test's own sources and spots are active in it: the rest are not due, and hold no share of an org's photo day.
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const org of [o.orgId, 'photos-other', ...extraPollOrgs])
     for (const d of await testScope(env.DB, org).dataSources.list())
-      await testScope(env.DB, org).dataSources.update(d.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
+      await testScope(env.DB, org).dataSources.update(d.id, { nextPollAt: Number.MAX_SAFE_INTEGER, photos: false });
   extraPollOrgs.clear();
   for (const s of createdSpots.splice(0)) await testScope(env.DB, s.orgId).spots.delete(s.id);
 });
@@ -763,6 +763,31 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     await org.scope.screens.update(org.screen, { desiredManifestId: manifestId });
   }
 
+  it('names the photos stored since its last poll in the next snapshot, though the feed answers 304 to a conditional request', async () => {
+    const org = await seedOrg(env.DB, `push-481-probe-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feed = 'https://probe.test/rss';
+    const id = await news(feed, { org, bind: false });
+    await pushed(org, [id]);
+    const photo = (i: number) => `https://cdn.probe.test/${i}.jpg`;
+    const rss = web({ [feed]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body: feedOf(2, photo), headers: { etag: '"rss"' } }) });
+    await poll({ now: NOW, guards: rss.guards });
+    const jobs = take().filter((j) => j.sourceId === id);
+    const { images } = imagesStub();
+    const bytes = jpeg(320, 180, 'probe');
+    await consume(jobs, { guards: web(Object.fromEntries(jobs.map((j) => [j.url, { body: bytes }]))).guards, images }, NOW + MIN);
+    // A stored copy its snapshot does not name clears the source's validators: the next poll reads the feed whole.
+    expect(await org.scope.dataSources.get(id)).toMatchObject({ etag: null, lastModified: null });
+    await org.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN });
+    await poll({ now: NOW + 5 * MIN, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.has('if-none-match')).toBe(false);
+    expect((await snapshot(id, org)).items.map((item) => item.image)).toEqual([
+      expect.objectContaining({ file: expect.any(String) }),
+      expect.objectContaining({ file: expect.any(String) }),
+    ]);
+  });
+
   it("queues photos for a source only a screen's pushed manifest shows: no published spot binds it", async () => {
     const org = await seedOrg(env.DB, `push-481-${++n}`);
     extraPollOrgs.add(org.orgId);
@@ -873,46 +898,49 @@ describe('photos for what screens play, and a feed unchanged since photos were t
     // Measured: pollInit is one batch, the screens' manifests a statement in it; the manifests themselves are R2 reads, not D1.
     // 12 calls is what D1 counts against an invocation's 50.
     expect(counter.counts()).toEqual({ apiCalls: 12, statements: 36 });
-    expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(NEW_PER_ORG_PER_DAY);
+    // Ten each, within each source's share of the org's day (60 / 5).
+    expect(take().filter((job) => ids.includes(job.sourceId))).toHaveLength(50);
   });
 });
 
 describe('budgets, resilience and cleanup', () => {
-  it('caps new photos per source per day and per org per day, resuming the next day', async () => {
+  it("gives each of an org's photo sources its fair share of the day, whichever polls first, as demo's NYT needed (#481)", async () => {
+    const org = await seedOrg(env.DB, `fair-share-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feeds = ['guardian', 'verge', 'nyt'];
+    const ids = new Map<string, string>();
+    for (const f of feeds) ids.set(f, await news(`https://share-${f}.test/rss`, { org }));
+    // Three busy feeds, ten unseen photos each poll, an hour apart: the share is 60 / 3 = 20 each, never another's.
+    let serial = 0;
+    for (let hour = 0; hour < 4; hour++) {
+      const at = NOW + hour * 60 * MIN;
+      for (const id of ids.values()) await org.scope.dataSources.update(id, { nextPollAt: at, etag: null });
+      await poll({
+        now: at,
+        guards: web(
+          Object.fromEntries(feeds.map((f) => [`https://share-${f}.test/rss`, { body: feedOf(10, () => `https://cdn.share-${f}.test/${serial++}.jpg`) }])),
+        ).guards,
+      });
+    }
+    const jobs = take();
+    for (const [f, id] of ids)
+      expect(jobs.filter((j) => j.sourceId === id).length, f).toBe(Math.min(NEW_PER_SOURCE_PER_DAY, NEW_PER_ORG_PER_DAY / feeds.length));
+    expect(jobs).toHaveLength(NEW_PER_ORG_PER_DAY);
+  });
+
+  it('resumes a day later: the 24 hours since a photo was held are what count', async () => {
     const s1 = await news('https://b1.test/rss');
-    const s2 = await news('https://b2.test/rss');
-    const s3 = await news('https://b3.test/rss');
-
-    // Source 1 queues NEW_PER_SOURCE_PER_DAY (10); more new URLs on source 1 the same day are skipped.
-    await poll({
-      now: NOW,
-      guards: web({
-        'https://b1.test/rss': { body: feedOf(12, (i) => `https://cdn.b1.test/day1-${i}.jpg`) },
-        'https://b2.test/rss': { body: feedOf(10, (i) => `https://cdn.b2.test/day1-${i}.jpg`) },
-        'https://b3.test/rss': { body: feedOf(5, (i) => `https://cdn.b3.test/day1-${i}.jpg`) },
-      }).guards,
-    });
-    const first = take();
-    // s1 + s2 hit NEW_PER_ORG_PER_DAY (20); s3 gets 0.
-    expect(first).toHaveLength(NEW_PER_ORG_PER_DAY);
-    expect(first.filter((j) => j.sourceId === s1).length).toBeLessThanOrEqual(NEW_PER_SOURCE_PER_DAY);
-    expect(first.filter((j) => j.sourceId === s2).length).toBeLessThanOrEqual(NEW_PER_SOURCE_PER_DAY);
-
-    // Another new URL on s1 the same day is refused by both caps.
-    await o.scope.dataSources.update(s1, { nextPollAt: NOW + 5 * MIN, etag: null });
-    await poll({
-      now: NOW + 5 * MIN,
-      guards: web({ 'https://b1.test/rss': { body: feedOf(1, () => 'https://cdn.b1.test/extra.jpg') } }).guards,
-    });
-    expect(take()).toEqual([]);
-
-    // 24 hours later, the budget resets and s3 can queue its photos.
-    await o.scope.dataSources.update(s3, { nextPollAt: NOW + DAY_MS + 1, etag: null });
-    await poll({
-      now: NOW + DAY_MS + 1,
-      guards: web({ 'https://b3.test/rss': { body: feedOf(3, (i) => `https://cdn.b3.test/day2-${i}.jpg`) } }).guards,
-    });
-    expect(take()).toHaveLength(3);
+    const photos = (tag: string) => feedOf(10, (i) => `https://cdn.b1.test/${tag}-${i}.jpg`);
+    // Alone with photos on, the source's share is its own cap.
+    for (let k = 0; k < 4; k++) {
+      await o.scope.dataSources.update(s1, { nextPollAt: NOW + k * 5 * MIN, etag: null });
+      await poll({ now: NOW + k * 5 * MIN, guards: web({ 'https://b1.test/rss': { body: photos(`day1-${k}`) } }).guards });
+    }
+    expect(take()).toHaveLength(NEW_PER_SOURCE_PER_DAY);
+    await o.scope.dataSources.update(s1, { nextPollAt: NOW + DAY_MS + 1, etag: null });
+    await poll({ now: NOW + DAY_MS + 1, guards: web({ 'https://b1.test/rss': { body: photos('day2') } }).guards });
+    expect(take()).toHaveLength(10);
   });
 
   it('saves headlines even when the photos queue rejects enqueue', async () => {
@@ -1262,8 +1290,8 @@ describe('budgets, resilience and cleanup', () => {
     const pollCounts = counter.counts();
     expect(pollCounts.apiCalls).toBeLessThan(25);
     expect(pollCounts.statements).toBeLessThan(40);
-    // All 5 sources saved their snapshots and queued within the org's daily budget.
-    expect(take()).toHaveLength(NEW_PER_ORG_PER_DAY);
+    // All 5 sources saved their snapshots and queued their ten, each within its share of the org's day (60 / 5).
+    expect(take()).toHaveLength(50);
 
     // 2. Cleanup of 25 expired rows with 2 distinct hashes each (50 hashes) stays well under 50 D1 queries.
     for (let i = 0; i < 25; i++) {
