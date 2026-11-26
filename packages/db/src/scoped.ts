@@ -88,9 +88,10 @@ interface AuditPage {
   /**
    * With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the
    * default, for `set_default_playlist`) and whose recorded input has, or lacks, each key of `inputHas` (a save with or
-   * without its id, for the create or update it replaced).
+   * without its id, for the create or update it replaced), and at least one key of `inputHasAny` (a screen's update that
+   * changed a setting, for the tool it replaced).
    */
-  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>> };
+  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>>; inputHasAny?: readonly string[] };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -877,9 +878,11 @@ export function scoped(d1: D1Database, orgId: string) {
         const update = d1
           .prepare(
             // The SET's right sides read the row as it was: the stored heartbeat is the last sync's.
+            // A screen that said the same at the last sync had fallen back by then: a row from before
+            // migration 0046 has no `fallback_since`, and takes that heartbeat's time, not this one's (#474).
             `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
                fallback_since = CASE WHEN ? IS NULL THEN NULL
-                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, ?) ELSE ? END${report.sql}
+                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, json_extract(heartbeat_json, '$.at'), ?) ELSE ? END${report.sql}
              WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
           .bind(v.at, v.playerVersion, v.heartbeatJson, v.fallbackFrom, v.fallbackFrom, v.at, v.at, ...report.args, orgId, screenId, ...markArgs);
@@ -2408,6 +2411,8 @@ export function scoped(d1: D1Database, orgId: string) {
               const value = sql`json_extract(${a.detailJson}, ${`$.input.${key}`})`;
               return has ? sql`${value} is not null` : sql`${value} is null`;
             }),
+            // json_type, not json_extract: a key given as null (hours cleared) is there, and json_extract reads it as absent (#545).
+            ...(also.inputHasAny?.length ? [or(...also.inputHasAny.map((key) => sql`json_type(${a.detailJson}, ${`$.input.${key}`}) is not null`))!] : []),
           ];
           where.push(alsoWhere ? or(eq(a.action, p.action), and(...alsoWhere))! : eq(a.action, p.action));
         }

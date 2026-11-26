@@ -204,8 +204,11 @@ describe('table sources', () => {
     expect(await fields({ format: 'csv', feedUrl: 'https://menu.example.com/a.csv', ifVersion: 1 })).toEqual({ error: 'invalid_input', paths: ['ifVersion'] });
     expect(await fields({ name: 'Menu', format: 'csv', connectionId: 'con_x', resource: 'A1' })).toEqual({
       error: 'invalid_input',
-      paths: ['connectionId', 'resource'],
+      paths: ['feedUrl', 'connectionId', 'resource'],
     });
+    // A feed with no feedUrl, and a provider source with no resource: each points at what is missing (#507).
+    expect(await fields({ name: 'Menu', format: 'csv' })).toEqual({ error: 'invalid_input', paths: ['feedUrl'] });
+    expect(await fields({ name: 'Rota', format: 'provider', connectionId: 'con_x' })).toEqual({ error: 'invalid_input', paths: ['resource'] });
     await call('save_data_source', { id: 'paths', name: 'Paths', format: 'csv', feedUrl: 'https://menu.example.com/p.csv' });
     expect(await fields({ dataSourceId: 'paths', format: 'json' })).toEqual({ error: 'invalid_input', paths: ['format'] });
     expect(await fields({ dataSourceId: 'paths', horizonDays: 9 })).toEqual({ error: 'invalid_input', paths: ['horizonDays'] });

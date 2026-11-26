@@ -113,7 +113,8 @@ type AfterFailure = 'fall back' | 'pause';
 
 /**
  * The spot on screen. `counted`: its play counted (`played`) and has not been taken back.
- * `settled`: it has ended a run of failures (`settleTurn`), which a play does once.
+ * `ended`: the run of failures it ended (`settleTurn`), which a play does once, kept so that it
+ * gives the run back if it dies.
  */
 interface OnScreen {
   step: Step;
@@ -122,7 +123,14 @@ interface OnScreen {
   startedAt: number;
   shownAt: number;
   counted: boolean;
-  settled: boolean;
+  ended?: Run;
+}
+
+/** A run of failures: in a row, and of the manifest failing (`#failingManifest`). */
+interface Run {
+  failures: number;
+  inManifest: number;
+  manifest: string;
 }
 
 export class Playback {
@@ -254,6 +262,12 @@ export class Playback {
     if (!on.counted) return;
     on.counted = false;
     this.o.events.unplayed(on.step, on.manifest.id, on.shownAt);
+    // It ended a run it had no right to: the run goes on, with what failed since (a load underneath, #542).
+    if (on.ended) {
+      this.#failures += on.ended.failures;
+      if (this.#failingManifest === on.ended.manifest) this.#failedInManifest += on.ended.inManifest;
+      on.ended = undefined;
+    }
     // Counted now, while it is the spot on screen and dead: by the next pass another play may be.
     this.#afterDeath = this.countFailure(on.step, on.manifest);
   }
@@ -263,11 +277,12 @@ export class Playback {
    * swap, failure or sleep comes: by then it has played as long as its turn allowed. A template
    * cannot reach that while it dies, whenever in its play it dies, so a template that dies on
    * every play reaches the pause. Once a play: failures after it, while it plays on, are a run.
+   * A play that dies later gives the run back (`died`).
    */
   private settleTurn(): void {
     const on = this.#onScreen;
-    if (!on?.counted || on.settled || this.#dead.has(this.#front)) return;
-    on.settled = true;
+    if (!on?.counted || on.ended || this.#dead.has(this.#front)) return;
+    on.ended = { failures: this.#failures, inManifest: this.#failedInManifest, manifest: this.#failingManifest };
     this.#failures = 0;
     this.#failedInManifest = 0;
   }
@@ -315,6 +330,7 @@ export class Playback {
     this.#frontDied.reset();
     this.watchTakeover();
     if (!step) {
+      this.settleTurn();
       this.blank('SignForge\nNothing is scheduled for this screen.');
       events.progress(); // waiting on purpose, not stuck
       return this.wait(5000);
@@ -358,10 +374,12 @@ export class Playback {
       return;
     }
     // The spot on screen died while this one loaded, and its death calls for the pause or the
-    // fallback: that comes first, and this play is dropped (a pause blanks both slots).
+    // fallback: that comes first, and this play is dropped (a pause blanks both slots), to be
+    // chosen again after it.
     if (this.#afterDeath) {
       slots.clear(slot);
       pins.release('preparing');
+      this.#sequencer.again();
       return this.afterDeath();
     }
     // The spot loaded here died while it waited (a refit failed, it navigated away): `died` counted it, and it is never shown.
@@ -382,7 +400,7 @@ export class Playback {
     this.#back = undefined;
     // On screen from here, before `show` plays it: a death from now on is the spot on screen's (`died`).
     this.#front = slot;
-    const on: OnScreen = { step, spot: step.spot, manifest: m, startedAt, shownAt, counted: false, settled: false };
+    const on: OnScreen = { step, spot: step.spot, manifest: m, startedAt, shownAt, counted: false };
     this.#onScreen = on;
     const { started, done } = slots.show(slot, prev ? prevSlot : undefined, tr);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is

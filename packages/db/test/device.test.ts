@@ -136,6 +136,21 @@ describe('screens.sync', () => {
     expect(await since()).toBeNull();
   });
 
+  it('dates a fallback from before migration 0046 from the stored heartbeat, not the next one (#474)', async () => {
+    const seeded = await seedOrg(env.DB, 'org-fallback-0046');
+    const r = seeded.scope;
+    const said = (at: number) =>
+      r.screens.sync(
+        seeded.screen,
+        beat({ at, seq: 0, counts: [], fallbackFrom: 'm7', heartbeatJson: JSON.stringify({ at, manifest: { fallbackFrom: 'm7' } }) }),
+      );
+    await said(HOUR + 1000);
+    // What 0046 left: the column added, null, beside a heartbeat that already fell back.
+    await env.DB.prepare('UPDATE screens SET fallback_since = NULL WHERE id = ?').bind(seeded.screen).run();
+    await said(HOUR + 5000);
+    expect((await r.screens.get(seeded.screen))!.fallbackSince).toBe(HOUR + 1000);
+  });
+
   it('stores a batch once, records the heartbeat, and keeps the highest seq per epoch', async () => {
     const seeded = await seedOrg(env.DB, 'org-sync');
     const r = seeded.scope;

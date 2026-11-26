@@ -975,7 +975,9 @@ export const outputs = {
   list_fonts: z.object({ fonts: z.array(fontOutput), next: nextOutput }),
   list_brand_kits: z.object({ brandKits: z.array(brandKitOutput), next: nextOutput }),
   get_brand_kit: kitResult,
-  save_brand_kit: kitResult,
+  save_brand_kit: kitResult.extend({
+    madeDefault: z.boolean().describe("Whether this save made it the organization's default: its first kit, or makeDefault on a kit that was not"),
+  }),
   assign_brand_kit: z.object({ brandKit: brandKitOutput.nullable() }),
   list_data_sources: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   get_data_source: z.object({ dataSource: dataSourceOutput, snapshot: snapshotOutput.nullable() }),
