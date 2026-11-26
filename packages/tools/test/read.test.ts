@@ -182,6 +182,27 @@ describe('describe', () => {
       for (const name of await changers('owner', type)) expect(registry.get(name)?.mutates, `${type}: ${name}`).toBe(true);
   });
 
+  it("keeps each fact a listed description no longer carries in its type's rules (#345's description pass)", async () => {
+    const rules = async (type: string) => {
+      const r = await dispatch(registry, 'describe', { type }, as('owner'));
+      return r.ok ? ((r.output as { rules: string | null }).rules ?? '') : '';
+    };
+    for (const [type, tool, fact] of [
+      ['publish', 'publish', 'set_default_playlist first'],
+      ['publish', 'publish', 'before any screen is compiled'],
+      ['spot', 'save_spot', 'fallback'],
+      ['brand_kit', 'save_brand_kit', 'none from its groups'],
+      ['schedule_entry', 'start_takeover', 'network down'],
+      ['asset', 'start_upload', 'smallest that covers its screen box'],
+    ] as const) {
+      expect(await rules(type), `${type}: ${fact}`).toContain(fact);
+      // The tool as it is listed: its description and its input's field descriptions.
+      const listed = JSON.stringify(describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === tool));
+      expect(listed, `${tool}: ${fact}`).not.toContain(fact);
+      expect(listed, tool).toContain(`describe(${type})`);
+    }
+  });
+
   it('describes every type a caller may read, its tools all in the registry', async () => {
     for (const type of TYPES) {
       for (const name of toolsOf(type)) expect(registry.get(name), `${type}: ${name}`).toBeDefined();
