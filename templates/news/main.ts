@@ -24,7 +24,7 @@ const SEPARATORS: Record<Look, string> = { pop: '  ·  ', poster: '  —  ', nig
 /** Stories in the list, which the lead rotates through: as many as fit each orientation's column at the look's row height. */
 const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
 
-/** The lead headline at each step, from the look's own size down to where 200 characters fit its lines. */
+/** The lead headline at each step, from the look's own size down; past the last, a headline is cut to its lines (cuts begin at about 90 to 120 characters). */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
 
 /** How long the list's marker takes to slide to the next story, ending as that story comes on. */
@@ -228,28 +228,72 @@ function frame(story: HTMLElement, img: HTMLImageElement, orientation: 'landscap
 
 /**
  * Each lead headline at the largest step whose lines (the look's `--nw-lines`) hold it, cut on a word only at the
- * smallest. A headline that fits is only read, so stories that fit cost one layout between them.
+ * smallest. Every story is written before any is read, so each step, and the cut, costs one layout however many
+ * stories there are. Fitted a story at a time, four headlines of about 120 characters took Poster's and Night's
+ * landscape prepares on the Pi to 483-514 ms, up to 34 ms over 2.0.0's (review of #492).
  */
 function fitHeadlines(stories: HTMLElement[]): void {
-  /** More lines than the look gives a headline. */
-  const over = (h: HTMLElement) => {
+  const heads = stories.map((story) => story.querySelector<HTMLElement>('.headline')!);
+  /** The height the look's lines give a headline. */
+  const room = (h: HTMLElement) => {
     const s = getComputedStyle(h);
-    return h.offsetHeight > Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight) + 1;
+    return Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight);
   };
-  for (const story of stories) {
-    const h = story.querySelector<HTMLElement>('.headline')!;
-    if (!over(h)) continue;
-    for (const step of HEADLINE_STEPS.slice(1)) {
-      story.style.setProperty('--fit', String(step));
-      if (!over(h)) break;
-    }
-    // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders.
-    if (over(h))
-      h.textContent = fitWords(h.textContent ?? '', (text) => {
-        h.textContent = text;
-        return !over(h);
-      });
+  const over = (h: HTMLElement) => h.offsetHeight > room(h) + 1;
+  let long = heads.filter(over);
+  for (const step of HEADLINE_STEPS.slice(1)) {
+    if (!long.length) return;
+    for (const h of long) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(step));
+    long = long.filter(over);
   }
+  // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
+  // each word's line ends is read from the one layout there is; the cut is checked with one more.
+  const full = long.map((h) => h.textContent!);
+  const kept = long.map(wordsInRoom);
+  long.forEach((h, i) => {
+    h.textContent = fitWords(full[i]!, (text) => text.trim().split(/\s+/).length <= kept[i]!);
+  });
+  long.forEach((h, i) => {
+    if (!over(h)) return;
+    // The "…" took the last word to another line, or there is no space to cut on (a URL, or a script written
+    // without them): searched with a layout a try, and between characters, so a headline never runs past its lines.
+    const fits = (text: string) => {
+      h.textContent = text;
+      return !over(h);
+    };
+    h.textContent = fitWords(full[i]!, fits);
+    if (over(h)) h.textContent = cutChars(full[i]!, fits);
+  });
+
+  /** How many of `h`'s words end within its lines, read from the layout it has (its only child is its text). */
+  function wordsInRoom(h: HTMLElement): number {
+    const text = h.firstChild!;
+    const box = h.getBoundingClientRect();
+    // The rects are as drawn, through the intro's transform at its start: measured as a share of the drawn height.
+    const limit = box.top + ((room(h) + 1) * box.height) / h.offsetHeight;
+    const range = document.createRange();
+    let n = 0;
+    for (const word of h.textContent!.matchAll(/\S+/g)) {
+      range.setStart(text, word.index);
+      range.setEnd(text, word.index + word[0].length);
+      if (range.getBoundingClientRect().bottom > limit) break;
+      n++;
+    }
+    return n;
+  }
+}
+
+/** The longest start of `text`, with "…", that `fits`: a search over its characters. */
+function cutChars(text: string, fits: (candidate: string) => boolean): string {
+  const chars = [...text];
+  let lo = 0;
+  let hi = chars.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(`${chars.slice(0, mid).join('')}…`)) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${chars.slice(0, lo).join('')}…`;
 }
 
 /**

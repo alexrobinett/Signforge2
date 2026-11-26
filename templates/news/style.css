@@ -479,3 +479,15 @@ ol {
 :root[data-orientation='portrait'] .story.small .card {
   grid-area: 2 / 1;
 }
+
+/* Poster's and Night's headline slides up out of its mask. The mask has room below it for descenders (0.3 of the
+   headline's size), where the kit's start, 110% of the headline's height down, left the top of a short headline showing
+   for the first few frames (review of #492): it starts below the room instead. */
+@keyframes nw-mask-up {
+  from {
+    transform: translateY(calc(100% + var(--nw-hl-size) * 0.5));
+  }
+}
+:root:is([data-look='poster'], [data-look='night']) .story .headline {
+  --lk-motion: nw-mask-up;
+}

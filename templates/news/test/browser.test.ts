@@ -360,6 +360,64 @@ describe('news 2.0 (#202)', () => {
     await f.waitForFunction(() => document.querySelectorAll('.story')[1]!.classList.contains('small'));
   });
 
+  // Poster's and Night's headline slides up out of a mask with room below for descenders: as its intro starts, none of
+  // it shows yet (review of #492: the top of a short headline showed in that room). In every look, as the others fade in.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`paints none of the headline as its intro starts, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const bare of [false, true]) {
+          const f = await r.show({ look, items: [story(0, { title: 'Short one' }), story(1)] }, photos(2, bare ? [0] : []));
+          await r.hst.post('fresh', 'play');
+          await f.waitForFunction(() => getComputedStyle(document.getElementById('leads')!).visibility === 'visible');
+          const clip = await f.evaluate(() => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const start = Math.max(
+              ...h
+                .getAnimations()
+                .map((a) => Number(a.effect!.getComputedTiming().delay ?? 0))
+                .filter((d) => d < 5000),
+            );
+            for (const a of document.getAnimations()) {
+              a.pause();
+              a.currentTime = start;
+            }
+            const b = h.closest('.card')!.getBoundingClientRect();
+            return { x: b.x, y: b.y, width: b.width, height: b.height };
+          });
+          const before = await r.hst.page.screenshot({ clip });
+          await f.evaluate(() => document.querySelector<HTMLElement>('.story .headline')!.style.setProperty('color', 'transparent'));
+          if (!(await r.hst.page.screenshot({ clip })).equals(before)) found.push(`${look}, ${bare ? 'bare lead' : 'photo lead'}`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  // A headline with nowhere to cut on a word (200 characters and no space) still keeps to its lines (review of #492).
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`keeps a headline with no spaces to its lines, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const lead of ['large', 'small', 'none'] as const) {
+          const items = [story(0, { title: 'W'.repeat(200), ...(lead === 'none' ? { image: undefined } : {}) }), story(1)];
+          const f = await r.show({ look, items }, photos(2, lead === 'none' ? [0] : [], lead === 'small' ? '700x560' : '1920x1080'));
+          const lines = await f.evaluate(() => {
+            const h = document.querySelector<HTMLElement>('.story .headline')!;
+            const s = getComputedStyle(h);
+            return {
+              lines: Math.round(h.offsetHeight / Number.parseFloat(s.lineHeight)),
+              max: Number(s.getPropertyValue('--nw-lines')),
+              cut: h.textContent!.endsWith('…'),
+            };
+          });
+          if (lines.lines > lines.max || !lines.cut)
+            found.push(`${look}, ${lead} lead photo: ${lines.lines} lines of ${lines.max}${lines.cut ? '' : ', not cut'}`);
+          for (const fault of await layoutFaults(f, '.thumb', '.marker')) found.push(`${look}, ${lead} lead photo: ${fault}`);
+        }
+      expect(found).toEqual([]);
+    }, 120_000);
+
   it('marks each toggle on the root and removes what is off, and what has nothing to show is off', async () => {
     const r = await frame();
     const read = (f: Frame) =>
