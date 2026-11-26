@@ -1575,9 +1575,17 @@ export function scoped(d1: D1Database, orgId: string) {
        * One email delivery of `event` per member in `userIds`, each its own row to send and retry (a
        * delivery addressed to approvers, fanned out when it is sent, M4-09): its event id names the
        * member, as one delivery per event and channel is kept, so a member already queued is left as it is.
+       * The first `claim` are claimed for the caller to send now, leased for `leaseMs` as a run's claim is
+       * (#396); the rest are due now. Returns the claimed rows it made, as they are.
        */
-      queueEmails: async (event: QueuedAlert['event'], userIds: readonly string[], now: number, giveUpAt: number): Promise<void> => {
-        const [first, ...rest] = userIds.map((toUserId) =>
+      queueEmails: async (
+        event: QueuedAlert['event'],
+        userIds: readonly string[],
+        now: number,
+        giveUpAt: number,
+        { claim, leaseMs }: { claim: number; leaseMs: number },
+      ): Promise<AlertDelivery[]> => {
+        const [first, ...rest] = userIds.map((toUserId, i) =>
           db
             .insert(ad)
             .values(
@@ -1589,15 +1597,18 @@ export function scoped(d1: D1Database, orgId: string) {
                 eventType: event.type,
                 eventJson: event.json,
                 toUserId,
-                nextAttemptAt: now,
                 giveUpAt,
                 createdAt: now,
                 updatedAt: now,
+                ...(i < claim ? { attempts: 1, lastAttemptAt: now, nextAttemptAt: now + leaseMs, leasedUntil: now + leaseMs } : { nextAttemptAt: now }),
               }) as never,
             )
-            .onConflictDoNothing(),
+            .onConflictDoNothing()
+            .returning(),
         );
-        if (first) await db.batch([first, ...rest]);
+        if (!first) return [];
+        const made: AlertDelivery[][] = await db.batch([first, ...rest]);
+        return made.flat().filter((d) => d.leasedUntil !== null);
       },
       /** Queues `alert` for each of its channels now, on its own (an agent's refusals, M4-08); an event already queued for a channel is left as it is. */
       queue: async (alert: QueuedAlert, now: number): Promise<void> => {
@@ -1742,11 +1753,9 @@ export function scoped(d1: D1Database, orgId: string) {
           // Not expired at its decision's time, nor by the database's own clock as the batch runs: a
           // decision whose batch runs late (a publish that took long) commits nothing past the expiry.
           const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER))`;
-          // Changed since, or past its expiry: either way not the request that was read.
-          const stale = async () => {
-            const row = await publishRequests.get(current.id);
-            return row && row.rowVersion === current.rowVersion && row.expiresAt > Math.max(decision.now, Date.now()) ? undefined : (row?.rowVersion ?? 0);
-          };
+          // Changed since, or past its expiry by either clock: either way not the request that was read. Asked only once the
+          // guard failed, so never "holds again" by the Worker's clock, which may be behind the database's (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
         /**
@@ -1760,12 +1769,8 @@ export function scoped(d1: D1Database, orgId: string) {
           const changed = publishRequests.stage.update(current, { status: 'pending', decidedBy: null, decidedAt: null, publishId: null });
           const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${current.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
           const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.status} = 'declined' AND ${pr.expiresAt} > ${now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER)) AND NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${current.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
-          const stale = async () => {
-            const row = await publishRequests.get(current.id);
-            return row && row.rowVersion === current.rowVersion && row.status === 'declined' && row.expiresAt > Math.max(now, Date.now())
-              ? undefined
-              : (row?.rowVersion ?? 0);
-          };
+          // As `decide`'s: not the request that was read, by the database's clock too (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
           return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
         },
       },

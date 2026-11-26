@@ -167,8 +167,7 @@ export async function runPublish(
   const switches = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.screenId] : [])).sort();
   if (switching !== undefined && switches.join(',') !== [...switching].sort().join(','))
     throw new ToolError('conflict', 'the screens this publish would switch have changed since they were shown: ask again', { screens: switches });
-  // The pins' guards, the brand state's, the default's and the screens' go with the batch whether or not anything else is written.
-  write({ row: undefined, writes: result.pinGuards });
+  // The brand state's, the default's and the screens' guards go with the batch whether or not anything else is written.
   write({ row: undefined, writes: result.keptCleared });
   if (brand !== undefined) write(org.brandKits.stage.unchanged(result.brand));
   if (ifDefault !== undefined) write(org.settings.stage.defaultIs(ifDefault));
@@ -187,8 +186,17 @@ export async function runPublish(
   await manifestsNotSwept(org, stored, since);
   // Deleted entries go in the same batch as the switches; on their own they make no publish.
   write({ row: undefined, writes: result.removals });
-  if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
+  // The guards of pins live as they are go only beside a write: an approval's decision, or this publish's own. A plain
+  // publish of pins that changes nothing writes nothing, no audit row either (#396).
+  const pinGuards = { row: undefined, writes: result.pinGuards };
+  if (!result.drafts.promoted.length && !changed.length) {
+    if (held.exact || result.removals.length || result.keptCleared.length) write(pinGuards);
+    return { publish: null, ...report, removedDataSources: [] };
+  }
   write({ row: undefined, writes: result.writes });
+  // After the revision's guard, which `result.writes` opens with: a batch lost to another publish is told by the first
+  // read of its guards, not after every pin's (#396).
+  write(pinGuards);
   // What the manifests it stores name, for the storage sweep to keep (#235), and held to the commit: a file of an asset
   // deleted while this compiled refuses the batch, and the publish runs again from a fresh read (review of #429).
   const files = [...new Set(changed.flatMap((m) => Object.keys(m.files)))];

@@ -726,6 +726,17 @@ describe('the publish tools (M3-18)', () => {
     expect(await org.auditLog.list()).toHaveLength(audit);
   });
 
+  it('writes nothing, no audit row either, when every pinned draft is live as it is (#396)', async () => {
+    const { org } = await seedSmallOrg('tool-pub-pins-live');
+    const p = publisher(org);
+    await ok(p.call('publish', {}));
+    const audit = (await org.auditLog.list()).length;
+    const deal = (await org.spots.get(x('deal')))!;
+    const again = (await ok(p.call('publish', { drafts: [{ kind: 'spot', id: deal.id, version: deal.rowVersion }] }))) as unknown as Out;
+    expect(again).toMatchObject({ publish: null, promoted: [] });
+    expect(await org.auditLog.list()).toHaveLength(audit);
+  });
+
   it("publishes only the pinned drafts, and refuses a pin whose draft changed since or is another org's", async () => {
     await seedSmallOrg('tool-pub-pins-theirs');
     const theirs = x('deal');
