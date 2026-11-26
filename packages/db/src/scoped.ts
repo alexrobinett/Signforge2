@@ -792,7 +792,8 @@ export function scoped(d1: D1Database, orgId: string) {
         are: (ids: readonly string[]): Staged => {
           const sc = s.screens;
           const want = [...ids].sort().join(',');
-          const now = sql`COALESCE((SELECT group_concat(id, ',') FROM (SELECT ${sc.id} AS id FROM ${sc} WHERE ${sc.orgId} = ${orgId} ORDER BY ${sc.id})), '')`;
+          // Ordered in the aggregate, as `brandState` is: a subquery's ORDER BY does not order group_concat (#408).
+          const now = sql`COALESCE((SELECT group_concat(${sc.id}, ',' ORDER BY ${sc.id}) FROM ${sc} WHERE ${sc.orgId} = ${orgId}), '')`;
           const stale = async () =>
             (await screens.list())
               .map((x) => x.id)
@@ -1084,6 +1085,23 @@ export function scoped(d1: D1Database, orgId: string) {
         addMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
           if (!(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
           return withTouch(group, ifVersion, ...inserts(group.id, await orgScreens(screenIds)));
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `group`) unless the group's screens are exactly
+         * `screenIds`, so a takeover's card plays on the screens it showed, whoever changed them meanwhile (#408).
+         */
+        membersAre: (groupId: string, screenIds: readonly string[]): Staged => {
+          const want = [...screenIds].sort().join(',');
+          const now = sql`COALESCE((SELECT group_concat(${m.screenId}, ',' ORDER BY ${m.screenId}) FROM ${m} WHERE ${m.orgId} = ${orgId} AND ${m.groupId} = ${groupId}), '')`;
+          const stale = async () => {
+            const held = await db
+              .select({ ok: sql<number>`${now} = ${want}` })
+              .from(s.organization)
+              .where(eq(s.organization.id, orgId))
+              .get();
+            return held?.ok ? undefined : 0;
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'group', 0, sql`${now} = ${want}`, stale)] };
         },
         /** Remove screens; ones not in the group are ignored. */
         removeMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
@@ -2073,13 +2091,13 @@ export function scoped(d1: D1Database, orgId: string) {
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
        * A news source's poll also passes `photos` (./feed-photos.ts): its writes and optional photo
        * holds then stand only if the source is still the row the poll read, and a reread is left due
-       * if not. Returns whether the poll's writes stood and the photo URLs held for queueing. Throws
+       * if not. Returns the photo URLs held for queueing. Throws
        * `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
         poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number; photos?: PollPhotos },
-      ): Promise<{ stood: boolean; held: string[] }> => {
+      ): Promise<{ held: string[] }> => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
@@ -2113,9 +2131,8 @@ export function scoped(d1: D1Database, orgId: string) {
         try {
           const [first, ...rest] = queries;
           const results = await db.batch([first!, ...rest]);
-          const stood = ((results[1] as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
           const held = holdAt !== undefined ? (results[holdAt] as { url: string }[]).map((r) => r.url) : [];
-          return { stood, held };
+          return { held };
         } catch (err) {
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
           if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });

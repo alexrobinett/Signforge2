@@ -36,8 +36,10 @@ import {
   MAX_SYNC_SOURCES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
+  isDisplayOutput,
   parseSyncResponse,
   type DeviceCommand,
+  type DisplayOutput,
   type ScreenKind,
   type ScreenManifest,
   type SyncRequest,
@@ -508,6 +510,23 @@ async function setPanel(on: boolean): Promise<boolean> {
   return false;
 }
 
+/**
+ * The panel's video mode as the supervisor last read it (#511), for the heartbeat; undefined from a
+ * browser, without a supervisor, or from one that does not read it.
+ */
+async function displayOutput(): Promise<DisplayOutput | undefined> {
+  if (KIND === 'browser') return undefined;
+  try {
+    const res = await supervisorFetch('/display', {});
+    const reply: unknown = res.ok ? await res.json() : undefined;
+    // Checked as the server checks it, so a reply it would refuse never fails the sync.
+    const output: unknown = typeof reply === 'object' && reply !== null ? Reflect.get(reply, 'output') : undefined;
+    return isDisplayOutput(output) ? { mode: output.mode, resets: output.resets } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** A switch the supervisor did not confirm (restarting, busy) is asked for again this soon. */
 const PANEL_RETRY_MS = 5000;
 
@@ -843,6 +862,7 @@ async function apiSync(): Promise<void> {
   const { manifest } = playback;
   const batch = playBatch(now());
   const heldFeed = await heldBlobs(heldSnapshotHashes());
+  const output = await displayOutput();
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
@@ -853,7 +873,7 @@ async function apiSync(): Promise<void> {
       ...(state.fallback ? { fallbackFrom: state.fallback } : {}),
       ...(state.lastGood ? { lastGood: state.lastGood } : {}),
     },
-    display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride() },
+    display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride(), ...(output ? { output } : {}) },
     deviceTime: new Date().toISOString(),
     clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     playCounts: batch.counts,

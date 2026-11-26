@@ -174,14 +174,37 @@ describe('the look kit (#190)', () => {
         .t-faint { animation: t-faint .5s ${dec} both; }
         @keyframes t-linear-first { from { opacity: 0; transform: translateY(1.5vmin); animation-timing-function: linear; } 50% { opacity: .5; transform: translateY(.75vmin); } }
         .t-linear-first { animation: t-linear-first .5s ${dec} both; }
-        .t-pseudo::before { content: ''; animation: t-nowhere .5s ${dec} both; }`;
+        .t-pseudo::before { content: ''; animation: t-nowhere .5s ${dec} both; }
+        @keyframes t-linear-from { from { opacity: 0; transform: translateY(1.5vmin); animation-timing-function: linear; } }
+        .t-linear-from { animation: t-linear-from .5s ${dec} both; }
+        @keyframes t-flash { 50% { opacity: 0; } }
+        .t-flash { animation: t-flash .1s steps(1, end) infinite; }
+        @keyframes t-late-slide { from { transform: translateX(40vmin); } }
+        .t-late-slide { animation: t-late-slide .5s ${std} 3s both; }
+        @keyframes t-swell { to { transform: scale(1.1); } }
+        .t-swell { animation: t-swell 11s linear both; }
+        .t-story { position: absolute; inset: 0; pointer-events: none; }
+        @keyframes t-gone { to { opacity: 0; } }
+        .t-story .t-late-exit { animation: t-gone .3s cubic-bezier(0.3, 0, 0.8, 0.15) 5.7s forwards; }`;
       document.head.append(style);
       const add = (name: string) => document.body.appendChild(Object.assign(document.createElement('div'), { className: `t ${name}` }));
       for (const name of ['t-centred', 't-steps', 't-clip', 't-mask', 't-over', 't-early', 't-wobble', 't-far', 't-faint', 't-linear-first', 't-pseudo'])
         add(name);
       // Progress: a bar across most of the screen and a ring's half turn, linear over the play.
       add('t-bar').animate([{ transform: 'none' }, { transform: 'translateX(80vmin)' }], { duration: 11_000, fill: 'both' });
-      add('t-ring').animate([{ transform: 'none' }, { transform: 'rotate(180deg)' }], { duration: 8000, fill: 'both' });
+      add('t-ring').animate([{ transform: 'none' }, { transform: 'rotate(360deg)' }], { duration: 8000, fill: 'both' });
+      // Progress that moves along two axes, grows to three times its size and runs back and forth.
+      add('t-wild').animate([{ transform: 'none' }, { transform: 'translate(60vmin, 10vmin) scale(3)' }], {
+        duration: 1000,
+        iterations: 4,
+        direction: 'alternate',
+        fill: 'both',
+      });
+      for (const name of ['t-linear-from', 't-flash', 't-late-slide', 't-swell']) add(name);
+      // A story that hides at 5 s, and a part of it that leaves a second later.
+      const story = add('t-story');
+      story.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 1, delay: 4999, fill: 'forwards' });
+      story.appendChild(Object.assign(document.createElement('div'), { className: 't t-late-exit' }));
       // A list marker's move, row to row through a middle keyframe; then one that passes its row and comes back.
       const move = { duration: 600, delay: 5000, easing: std, fill: 'both' } as const;
       add('t-marker').animate([{ transform: 'none' }, { transform: 'translateY(4vmin)' }, { transform: 'translateY(8vmin)' }], move);
@@ -201,7 +224,11 @@ describe('the look kit (#190)', () => {
       // A kit element with no exit: the shorthand must not turn `none` into an animation named after its fill mode.
       add('t-stays lk-text').style.setProperty('--lk-leave', 'none');
     });
-    const found = await motionContract(f, durationMs, { progress: '.t-bar, .t-ring' });
+    const found = await motionContract(f, durationMs, {
+      progress: '.t-bar, .t-ring, .t-marker, .t-wild',
+      loops: '.lk-crawl, .lk-ping, .t-flash',
+      exits: '.t-story',
+    });
     const of = (c: string) => found.filter((l) => l.startsWith(`div.t.${c} `)).map((l) => l.slice(`div.t.${c} `.length));
     expect(
       Object.fromEntries(
@@ -222,6 +249,12 @@ describe('the look kit (#190)', () => {
           't-far',
           't-faint',
           't-linear-first',
+          't-linear-from',
+          't-wild',
+          't-flash',
+          't-late-slide',
+          't-swell',
+          't-late-exit',
         ].map((c) => [c, of(c)]),
       ),
     ).toEqual({
@@ -233,7 +266,7 @@ describe('the look kit (#190)', () => {
       't-clip': expect.arrayContaining(['t-clip moves clipPath']),
       't-mask': expect.arrayContaining([expect.stringMatching(/^t-mask moves (webkitM|m)askPosition/)]),
       't-over': expect.arrayContaining(['t-over overshoots in sx', 't-over scales to 1.07']),
-      't-bounce': ['script animation overshoots in y'],
+      't-bounce': expect.arrayContaining(['script animation overshoots in y', 'script animation travels 5.9vmin']),
       't-spin': ['script animation rotates'],
       't-slide': ['transition of transform arrives in 2000 ms', 'transition of transform arrives on linear', 'transition of transform travels 2.0vmin'],
       't-early': ['t-early leaves at 10999 ms, not as the spot ends at 11000'],
@@ -241,6 +274,16 @@ describe('the look kit (#190)', () => {
       't-far': expect.arrayContaining(['t-far travels 40.0vmin']),
       't-faint': ['t-faint travels 20.0vmin'],
       't-linear-first': [expect.stringMatching(/^t-linear-first arrives on linear then cubic-bezier/)],
+      't-linear-from': ['t-linear-from arrives on linear'],
+      't-wild': [
+        'script animation runs back and forth',
+        'script animation shows progress along x and y and sx and sy',
+        'script animation shows progress past full size',
+      ],
+      't-flash': ['t-flash loops 10.0 times a second', 't-flash flashes from 0.00 to 1.00 opacity'],
+      't-late-slide': ['t-late-slide travels 40.0vmin'],
+      't-swell': expect.arrayContaining(['t-swell scales to 1.10']),
+      't-late-exit': ['t-gone leaves at 6000 ms, after div.t.t-story hides at 5000'],
     });
     expect(found).toContain('t t-pseudo::before t-nowhere: no such keyframes');
     expect(found.filter((l) => l.startsWith('t t-stays'))).toEqual([]);

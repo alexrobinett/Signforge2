@@ -25,7 +25,6 @@ import {
   permits,
   dryPublish,
   reachesScreens,
-  refusedPress,
   registry,
   saveDataSourceInput,
   sha256Hex,
@@ -52,7 +51,7 @@ interface Confirmable {
   /** The registry tools a press runs, whose rights the member needs. */
   tools: readonly string[];
   /** The model's input, as it is offered and checked before a card is made (a registry tool's, unless the tool is the drawer's own). */
-  input: () => z.ZodType;
+  input: (grant: Grant) => z.ZodType;
   description: () => string;
   /**
    * Whether this call needs the right to publish though its tool's scope is less: the press would be refused without it,
@@ -76,10 +75,11 @@ interface When {
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
-const ofRegistry = (name: string) => () => {
+/** A tool's input as `grant` is listed it: without what only the card fills in (`takeover`'s guards, #408). */
+const ofRegistry = (name: string) => (grant: Grant) => {
   const tool = registry.get(name);
   if (!tool) throw new Error(`no registry tool ${name}`);
-  return tool.input;
+  return tool.listedInput?.(grant) ?? tool.input;
 };
 const describedAs = (name: string) => () => registry.get(name)?.description ?? '';
 const run = (name: string) => (caller: Caller, input: Row) => dispatch(registry, name, input, caller);
@@ -111,10 +111,6 @@ async function reachOf(org: OrgScope, v: Row): Promise<{ words: string; screens:
   const screens = (await org.screens.list()).map((s) => s.id).sort();
   return { words: `on every screen (${screensWord(screens.length)})`, screens };
 }
-
-/** A press refused before it runs anything, as the org is not as the card showed it: audited as a refused press of `tool`. */
-const changedSince = (caller: Caller, tool: string, input: Row, what: string): Promise<DispatchResult> =>
-  refusedPress(registry, tool, input, caller, { ok: false, error: 'conflict', message: `${what} since the card was made: ask again for a new one` });
 
 /** A playlist's spots, each at the version screens have of it (null: never published): published items, or its draft's if never published. */
 async function spotsLive(org: OrgScope, playlist: PlaylistRow): Promise<Record<string, number | null>> {
@@ -266,8 +262,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       const { action: _action, with: _with, ...start } = called;
       const reach = await reachOf(org, called);
       return {
-        // What it plays, on which screens: a press refuses if any changed since (the group's screens, the playlist or a spot of it published again).
-        input: { start, with: also, reach: reach.screens, live: playlist.publishedJson, spots },
+        // What it plays, on which screens: the press holds the tool to them through its commit (#408).
+        input: { start, with: also, reach: reach.screens, plays: { playlist: playlist.publishedVersion, spots } },
         card: {
           title: 'Take over screens',
           lines: [
@@ -283,27 +279,12 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
       };
     },
     async run(caller, input) {
-      if (input.action === 'end') {
-        const call = { action: 'end', scheduleEntryId: str(input.scheduleEntryId) };
-        if ((await caller.org.scheduleEntries.get(call.scheduleEntryId))?.rowVersion !== input.version)
-          return changedSince(caller, 'takeover', call, 'The takeover changed');
-        return dispatch(registry, 'takeover', call, caller);
-      }
+      // The tool checks what the card showed in the batch it writes in, so nothing changed meanwhile slips between (#408).
+      if (input.action === 'end')
+        return dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: input.scheduleEntryId, ifVersion: input.version }, caller);
       const start = typeof input.start === 'object' && input.start !== null ? Object.fromEntries(Object.entries(input.start)) : {};
-      const call = { action: 'publish', ...start, with: input.with };
-      // The screens it reaches, and what its playlist and spots play, as the card showed them: else nothing is done.
-      const reach = await reachOf(caller.org, start).catch((err: unknown) => {
-        if (err instanceof CardProblem) return undefined;
-        throw err;
-      });
-      if (!reach) return changedSince(caller, 'takeover', call, 'Its group or screen was deleted');
-      if (canonical(reach.screens) !== canonical(input.reach)) return changedSince(caller, 'takeover', call, 'The screens it would play on changed');
-      const playlist = await caller.org.playlists.get(str(start.playlistId));
-      if (!playlist || playlist.publishedJson !== input.live) return changedSince(caller, 'takeover', call, 'Its playlist was published again');
-      if (canonical(await spotsLive(caller.org, playlist)) !== canonical(input.spots))
-        return changedSince(caller, 'takeover', call, 'A spot of its playlist was published again');
-      // Made and published in one batch, or not at all (`takeover`).
-      return dispatch(registry, 'takeover', call, caller);
+      // Made and published in one batch, or not at all, on the screens and with the content the card showed (`takeover`).
+      return dispatch(registry, 'takeover', { action: 'publish', ...start, with: input.with, ifReach: input.reach, ifPlays: input.plays }, caller);
     },
   },
   // The drawer deletes a playlist or a schedule entry, as it did before `delete` took every type (#345): no asset or source.
@@ -353,9 +334,8 @@ export const CONFIRMABLE: Readonly<Record<string, Confirmable>> = {
     },
     async run(caller, input) {
       if (input.type === 'schedule_entry') return dispatch(registry, 'delete', input, caller);
-      const call = { type: 'playlist', id: str(input.id) };
-      if ((await caller.org.playlists.get(call.id))?.rowVersion !== input.version) return changedSince(caller, 'delete', call, 'The playlist changed');
-      return dispatch(registry, 'delete', call, caller);
+      // Held to the version the card showed through the commit (#408).
+      return dispatch(registry, 'delete', { type: 'playlist', id: input.id, ifVersion: input.version }, caller);
     },
   },
   // An invitation cancelled cannot be undone by the agent: only a person invites again (#321).

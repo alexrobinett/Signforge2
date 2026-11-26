@@ -830,6 +830,10 @@ export const MOTION = {
   scale: [0.94, 1.04],
   /** A full-bleed photo's push-in over the whole play may go further: photo-promo's, on the approved board. */
   pushScale: 1.12,
+  /** The shortest cycle of a loop that changes opacity: at most 3 a second (WCAG 2.3.1's flash threshold). */
+  loopMs: 334,
+  /** How far a loop may swing opacity in a cycle: a dimmed blink, never a full flash. */
+  loopSwing: 0.75,
 } as const;
 
 /**
@@ -839,16 +843,19 @@ export const MOTION = {
  * - an entrance, to rest from unseen, or from anywhere in the first `INTRO_WINDOW_MS`: the decelerating curve, 400 to
  *   650 ms, at most 1.5vmin from rest;
  * - an exit, from rest to unseen: the accelerating curve, 300 ms, at most 0.6vmin, and not an entrance played
- *   backwards. It ends as the spot does, or, with `exits`, by when its element hides (a story that leaves mid-play);
+ *   backwards. It ends as the spot does, or, inside `exits`, by when that ancestor hides (a story that leaves mid-play);
  * - progress, on an element `progress` selects (a bar or ring that shows time passing, or a marker that moves to the
- *   current item): linear or the standard curve, one way each time it runs, any reach, as often as it needs;
- * - a loop, where `loops` allows one;
+ *   current item): linear or the standard curve, along one axis only (across, down, a turn, or a fill no larger than
+ *   full size), one way each time it runs, any reach, as often as it needs, never back and forth;
+ * - a loop, where `loops` allows one: one that changes opacity has a cycle of at least 334 ms (3 a second at most)
+ *   and swings it by 0.75 at most, so nothing flashes;
  * - ambient motion, over half the play or more: any curve, at most 1.5vmin;
- * - anything else is a move mid-play: the standard curve.
+ * - anything else is a move mid-play: the standard curve, at most 1.5vmin.
  * Each moves only transform and opacity, runs once, goes one way from where it starts to where it ends (no overshoot,
  * through any number of keyframes, on one curve throughout), never rotates but as progress, scales within 0.94 to
- * 1.04 (a reveal along one axis may start from nothing; a push-in over the play to 1.12), and, but for that push-in,
- * never takes an element that rests on screen off it.
+ * 1.04 (a reveal along one axis may start from nothing; a push-in over the play of an element covering the screen, to
+ * 1.12), and, but for that push-in, never takes an element that rests on screen off it. It is read with its element's
+ * ancestors at rest.
  * Keyframe names that no stylesheet defines (`motion`'s `unknown`) are named too.
  */
 export async function motionContract(
@@ -893,35 +900,48 @@ export async function motionContract(
             if (!['offset', 'computedOffset', 'easing', 'composite', 'opacity', 'transform', 'translate', 'scale', 'rotate'].includes(p))
               found.push(`${who} moves ${p}`);
         const timing = effect.getComputedTiming();
-        if (timing.iterations === Number.POSITIVE_INFINITY) {
-          if (!el.matches(loops)) found.push(`${who} loops`);
+        const isLoop = timing.iterations === Number.POSITIVE_INFINITY;
+        if (isLoop && !el.matches(loops)) {
+          found.push(`${who} loops`);
           continue;
         }
         const isProgress = progress !== '' && el.matches(progress);
-        if (Number(timing.iterations) !== 1 && !isProgress) found.push(`${who} runs ${timing.iterations} times`);
+        if (!isLoop && Number(timing.iterations) !== 1 && !isProgress) found.push(`${who} runs ${timing.iterations} times`);
+        if (isProgress && String(timing.direction).includes('alternate')) found.push(`${who} runs back and forth`);
         const start = Number(timing.delay ?? 0);
         const dur = Number(timing.activeDuration);
-        // A cut: a change of state in a millisecond or none (a story shown, a seam lit), not motion.
-        if (dur <= 1) continue;
+        // A cut: a change of state in a millisecond or none (a story shown, a seam lit), not motion. Nor is what would
+        // start only after the play has ended (the last story's exit).
+        if (dur <= 1 || start >= durationMs) continue;
         const end = Math.round(Number(timing.endTime));
         // The curve of each step between keyframes. A script's curve is its timing's, over linear steps. Chrome lists a
-        // CSS rule of one keyframe as that keyframe alone, or as a linear step before one that carries the curve.
+        // CSS rule of one keyframe as that keyframe alone.
         const steps = (frames.length === 1 ? frames : frames.slice(0, -1)).map((k) => String(k.easing));
-        const lone = frames.length === 2 && steps[0] === 'linear' ? [String(frames[1]!.easing)] : steps;
-        const curves = timing.easing !== 'linear' ? [String(timing.easing), ...steps.filter((s) => s !== 'linear')] : lone;
+        const curves = timing.easing !== 'linear' ? [String(timing.easing), ...steps.filter((s) => s !== 'linear')] : steps;
         const curve = [...new Set(curves)].join(' then ');
 
-        // Alone: every other animation of the element taken off, and this one too for its rest.
-        const others = el.getAnimations({ subtree: true }).map((x) => ({ x, effect: x.effect, time: x.currentTime }));
-        for (const { x } of others) if ((x.effect as KeyframeEffect).target === el) x.effect = null;
+        // Alone: every other animation of the element and of its ancestors taken off, and this one too for its rest,
+        // so neither another animation nor the wall clock moves what is read.
+        const others = document
+          .getAnimations()
+          .filter((x) => (x.effect as KeyframeEffect | null)?.target?.contains(el) === true)
+          .map((x) => ({ x, effect: x.effect, time: x.currentTime }));
+        for (const { x } of others) x.effect = null;
         const still = getComputedStyle(el, pseudo);
-        const rest = { m: matrix(still), o: Number(still.opacity), onScreen: onScreen(el.getBoundingClientRect()) };
+        const box = el.getBoundingClientRect();
+        const rest = {
+          m: matrix(still),
+          o: Number(still.opacity),
+          onScreen: onScreen(box),
+          covers: box.left <= 1 && box.top <= 1 && box.right >= innerWidth - 1 && box.bottom >= innerHeight - 1,
+        };
         const undo = rest.m.inverse();
         a.effect = effect;
-        // Progress that runs again (a fill each story) is read over one run.
-        const span = isProgress ? Number(timing.duration) : dur;
+        // A loop, or progress that runs again (a fill each story), is read over one run.
+        const span = isLoop || isProgress ? Number(timing.duration) : dur;
+        const from = isLoop ? Math.max(0, start) : start;
         const samples = Array.from({ length: 25 }, (_, i) => {
-          a.currentTime = start + ((span - 0.01) * i) / 24;
+          a.currentTime = from + ((span - 0.01) * i) / 24;
           const now = getComputedStyle(el, pseudo);
           const x = matrix(now);
           // Against its rest: a resting translate(-50%, -50%) is where it stands, not how far it moves.
@@ -940,6 +960,20 @@ export async function motionContract(
           x.effect = effect;
           x.currentTime = time;
         }
+        // A turn read as an angle wraps at 180 degrees: unwrapped, a full turn is one way.
+        for (let i = 1; i < samples.length; i++) {
+          const s = samples[i]!;
+          while (s.turn - samples[i - 1]!.turn > 180) s.turn -= 360;
+          while (s.turn - samples[i - 1]!.turn < -180) s.turn += 360;
+        }
+        if (isLoop) {
+          // What flashes is a change of light: a loop that changes opacity, not falling rain that only slides.
+          const o = samples.map((s) => s.o);
+          const swing = Math.max(...o) - Math.min(...o);
+          if (swing > 0.001 && span < m.loopMs) found.push(`${who} loops ${(1000 / span).toFixed(1)} times a second`);
+          if (swing > m.loopSwing + 0.001) found.push(`${who} flashes from ${Math.min(...o).toFixed(2)} to ${Math.max(...o).toFixed(2)} opacity`);
+          continue;
+        }
 
         const first = samples[0]!;
         const last = samples.at(-1)!;
@@ -949,6 +983,12 @@ export async function motionContract(
         const travel = Math.max(...samples.map((s) => Math.hypot(s.x, s.y))) / vmin;
         if (isProgress) {
           if (curves.some((c) => c !== 'linear' && c !== m.easeMove)) found.push(`${who} shows progress on ${curve}`);
+          const changes = (['x', 'y', 'sx', 'sy', 'turn'] as const).filter((k) => {
+            const v = samples.map((s) => s[k]);
+            return Math.max(...v) - Math.min(...v) > (k === 'x' || k === 'y' ? 0.05 : 0.001);
+          });
+          if (changes.length > 1) found.push(`${who} shows progress along ${changes.join(' and ')}`);
+          if (samples.some((s) => Math.max(s.sx, s.sy) > 1.001)) found.push(`${who} shows progress past full size`);
         } else if (atRest(last) && !atRest(first) && (unseen(first) || start < window)) {
           if (dur < m.introMs[0] || dur > m.introMs[1]) found.push(`${who} arrives in ${Math.round(dur)} ms`);
           if (curve !== m.easeIn) found.push(`${who} arrives on ${curve}`);
@@ -956,12 +996,24 @@ export async function motionContract(
         } else if (atRest(first) && unseen(last) && dur < durationMs / 2) {
           if (Math.round(dur) !== m.outroMs) found.push(`${who} leaves in ${Math.round(dur)} ms`);
           if (curve !== m.easeOut) found.push(`${who} leaves on ${curve}`);
-          if (end !== durationMs && !(exits !== '' && el.closest(exits))) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
+          const holder = exits === '' ? null : el.closest(exits);
+          if (holder) {
+            // By when its holder hides: the last of the holder's own animations to end, or the spot's end.
+            const ends = holder
+              .getAnimations()
+              .map((x) => Number(x.effect!.getComputedTiming().endTime))
+              .filter(Number.isFinite);
+            const hides = Math.round(Math.min(durationMs, Math.max(0, ...ends)) || durationMs);
+            if (end > hides) found.push(`${who} leaves at ${end} ms, after ${name(holder)} hides at ${hides}`);
+          } else if (end !== durationMs) found.push(`${who} leaves at ${end} ms, not as the spot ends at ${durationMs}`);
           if (travel > m.outVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
           if (String(timing.direction).includes('reverse')) found.push(`${who} leaves by reversing its entrance`);
         } else if (dur >= durationMs / 2) {
           if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
-        } else if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
+        } else {
+          if (curve !== m.easeMove) found.push(`${who} moves mid-play on ${curve}`);
+          if (travel > m.inVmin + 0.01) found.push(`${who} travels ${travel.toFixed(1)}vmin`);
+        }
         // A full-bleed photo's push-in over the play passes the edges by design, and a turning ring's box can; nothing
         // else may.
         if (!isProgress && rest.onScreen && dur < durationMs / 2 && samples.some((s) => !s.onScreen && !unseen(s))) found.push(`${who} goes off the screen`);
@@ -972,7 +1024,7 @@ export async function motionContract(
         }
         if (isProgress) continue;
         if (samples.some((s) => Math.abs(s.turn) > 0.01)) found.push(`${who} rotates`);
-        const top = dur >= durationMs / 2 ? m.pushScale : m.scale[1];
+        const top = dur >= durationMs / 2 && rest.covers ? m.pushScale : m.scale[1];
         for (const s of samples) {
           const uniform = Math.abs(s.sx - s.sy) < 0.001;
           if ((uniform && s.sx < m.scale[0] - 0.001) || Math.max(s.sx, s.sy) > top + 0.001)

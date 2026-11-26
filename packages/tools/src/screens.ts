@@ -119,6 +119,7 @@ export async function screenView(
           filesMissing: hb.manifest.filesMissing,
           fallbackFrom: hb.manifest.fallbackFrom ?? null,
           displayOn: hb.display.on,
+          displayOutput: hb.display.output ?? null,
           clockTrusted: hb.clock.trusted,
           driftMs: hb.driftMs,
         }

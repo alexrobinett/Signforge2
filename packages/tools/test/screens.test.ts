@@ -55,7 +55,8 @@ beforeAll(async () => {
     at: Date.now(),
     player: { version: '1.2.3', manifestSchemas: [2], protocols: [1, 2] },
     manifest: { active: MANIFEST, filesMissing: 0 },
-    display: { on: true },
+    // Back at 4K after a hotplug, and set back once (#511).
+    display: { on: true, output: { mode: '3840x2160@60', resets: 1 } },
     clock: { offsetMs: 12, trusted: true },
     driftMs: 40,
     dataRejected: {},
@@ -71,7 +72,15 @@ describe('list_screens and get_screen', () => {
     expect(screens[0]).toMatchObject({
       id: o.screen,
       state: { kind: 'online', reason: null },
-      heartbeat: { playerVersion: '1.2.3', activeManifestId: MANIFEST, filesMissing: 0, fallbackFrom: null, displayOn: true, clockTrusted: true },
+      heartbeat: {
+        playerVersion: '1.2.3',
+        activeManifestId: MANIFEST,
+        filesMissing: 0,
+        fallbackFrom: null,
+        displayOn: true,
+        displayOutput: { mode: '3840x2160@60', resets: 1 },
+        clockTrusted: true,
+      },
       showing: { asleep: false, playlist: { name: 'Main' }, spot: { name: 'Spring menu', kind: 'image', image: IMAGE }, spots: 1 },
       displayOverride: null,
     });

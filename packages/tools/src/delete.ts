@@ -8,7 +8,7 @@ import { assetTakenUp, deleteAsset } from './assets';
 import { deleteDataSource } from './data-sources';
 import { ID_PATTERN } from '@signforge/contract';
 import { ifVersion } from './fields';
-import { deletePlaylist, playlistInUse } from './playlists';
+import { deletePlaylist, playlistChangedSince, playlistInUse } from './playlists';
 import { deleteScheduleEntry } from './schedule';
 import { defineTool } from './tool';
 import { outputs } from './outputs';
@@ -24,9 +24,12 @@ const deleteTool = defineTool({
     .strictObject({
       type: z.enum(['asset', 'data_source', 'playlist', 'schedule_entry']),
       id: z.string().regex(ID_PATTERN, 'not a valid id').describe("The thing's id"),
-      ifVersion: ifVersion.describe('schedule_entry only: the version you read; a conflict means it changed since: read it again'),
+      ifVersion: ifVersion.describe('playlist or schedule_entry: the version you read; a conflict means it changed since'),
     })
-    .refine((v) => v.ifVersion === undefined || v.type === 'schedule_entry', { message: 'ifVersion is for a schedule entry only', path: ['ifVersion'] }),
+    .refine((v) => v.ifVersion === undefined || v.type === 'schedule_entry' || v.type === 'playlist', {
+      message: 'ifVersion is for a playlist or a schedule entry',
+      path: ['ifVersion'],
+    }),
   output: outputs.delete,
   example: { type: 'playlist', id: 'pls_example' },
   target: (input) => ({ kind: input.type, id: input.id }),
@@ -40,7 +43,7 @@ const deleteTool = defineTool({
         await deleteDataSource(ctx, input.id);
         return { deleted: input.id, version: null };
       case 'playlist':
-        await deletePlaylist(ctx, input.id);
+        await deletePlaylist(ctx, input.id, input.ifVersion);
         return { deleted: input.id, version: null };
       case 'schedule_entry':
         return { deleted: input.id, version: await deleteScheduleEntry(ctx, input.id, input.ifVersion) };
@@ -49,7 +52,11 @@ const deleteTool = defineTool({
   // Taken up meanwhile (an asset by a spot or a brand kit; a playlist made the default or scheduled): the foreign keys or
   // the usage guard fail the batch, said as the check before it says it.
   refuseFailedCommit: async ({ org, input }) =>
-    input.type === 'asset' ? assetTakenUp(org, input.id) : input.type === 'playlist' ? playlistInUse(org, input.id) : undefined,
+    input.type === 'asset'
+      ? assetTakenUp(org, input.id)
+      : input.type === 'playlist'
+        ? ((await playlistInUse(org, input.id)) ?? playlistChangedSince(org, input.id, input.ifVersion))
+        : undefined,
 });
 
 export const deleteTools = [deleteTool];

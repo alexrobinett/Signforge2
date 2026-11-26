@@ -12,6 +12,7 @@ import {
   organizationExists,
   platform,
   scoped,
+  StaleVersionError,
 } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
@@ -333,6 +334,12 @@ describe('rows a scope writes', () => {
     }
     await expect(b.screenGroups.stage.setMembers(bGroup, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
     await expect(b.screenGroups.stage.addMembers(bGroup, [a.screen]), 'stage.addMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    // A guard on A's group's screens, staged in B, reads no members of A's: it holds only for none (#408).
+    const aMembers = await s.a.scope.screenGroups.members(a.group);
+    expect(aMembers.length).toBeGreaterThan(0);
+    await expect(b.commit(b.screenGroups.stage.membersAre(a.group, aMembers).writes), 'stage.membersAre: A group').rejects.toBeInstanceOf(StaleVersionError);
+    await b.commit(b.screenGroups.stage.membersAre(a.group, []).writes);
+    await s.a.scope.commit(s.a.scope.screenGroups.stage.membersAre(a.group, [...aMembers].reverse()).writes);
     await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
       NotInOrgError,
     );
