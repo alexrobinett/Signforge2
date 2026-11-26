@@ -41,15 +41,22 @@ const DAY_MS = 24 * HOUR_MS;
 /** Stories per source with a photo: the first, newest ones. No template shows more of a feed's photos. */
 export const PHOTOS_PER_SOURCE = 10;
 /**
- * Photos new to the org that one source, and the whole org, may queue in a day (owner decision on #339).
- * A story past them plays with no photo until the next day. The org's 60 are a hard ceiling, however
- * many source ids hold photos: 1,800 a month, at ~1 Images transformation each (its thumbnail), about
- * 36% of the 5,000 free ones. They are shared fairly (#481): each source may take its share,
- * `min(NEW_PER_SOURCE_PER_DAY, NEW_PER_ORG_PER_DAY / the org's RSS sources whose photos a screen shows)`,
- * floored, so the sources that poll first never take another's, and every source an org shows gets photos every day.
+ * Photos new to the org that one source, and the whole org, may queue in a day (owner decision on #339), unless the
+ * environment sets its own (`PhotoBudget`; the demo's real-feed test runs with more). A story past them plays with no
+ * photo until the next day. The org's 60 are a hard ceiling, however many source ids hold photos: 1,800 a month, at ~1
+ * Images transformation each (its thumbnail), about 36% of the 5,000 free ones. They are shared fairly (#481): each
+ * source may take its share, `min(perSource, perOrg / the org's RSS sources whose photos a screen shows)`, floored, so
+ * the sources that poll first never take another's, and every source an org shows gets photos every day.
  */
 export const NEW_PER_SOURCE_PER_DAY = 30;
 export const NEW_PER_ORG_PER_DAY = 60;
+
+/** The day's caps a poll's hold applies: today's 60/30 unless the environment sets others (apps/api `photoBudget`). */
+export interface PhotoBudget {
+  perOrg: number;
+  perSource: number;
+}
+export const DEFAULT_PHOTO_BUDGET: PhotoBudget = { perOrg: NEW_PER_ORG_PER_DAY, perSource: NEW_PER_SOURCE_PER_DAY };
 /** How long a queued URL is held: past the consumer's tries, so polls meanwhile do not queue it again. */
 export const HOLD_MS = 15 * MINUTE_MS;
 /** How long a fetched photo is kept as it is before a poll that still names it queues a conditional fetch. */
@@ -156,7 +163,7 @@ function lastSeenOf(raw: string): string[] {
 export interface PollPhotos {
   read: PhotoRead;
   stories?: { version: string; urls: (string | null)[] } | null;
-  hold?: { again: readonly string[]; fresh: readonly string[] };
+  hold?: { again: readonly string[]; fresh: readonly string[]; budget: PhotoBudget };
 }
 
 /** Whether a snapshot's story at `index` names other copies than these. */
@@ -208,7 +215,7 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               WHERE NOT ${alreadyKnown}
               ORDER BY jobs.key
               -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
-              LIMIT (SELECT CAST(MAX(0, MIN(MIN(${NEW_PER_SOURCE_PER_DAY}, ${NEW_PER_ORG_PER_DAY} / MAX(1, sources)) - src_n, ${NEW_PER_ORG_PER_DAY} - org_n)) AS INTEGER) FROM counts)
+              LIMIT (SELECT CAST(MAX(0, MIN(MIN(${hold.budget.perSource}, ${hold.budget.perOrg} / MAX(1, sources)) - src_n, ${hold.budget.perOrg} - org_n)) AS INTEGER) FROM counts)
             )
           ) WHERE ${current}`)
           .onConflictDoUpdate({
@@ -455,7 +462,9 @@ export function feedPhotos(db: Db, orgId: string) {
       const unique = [...new Set(shas)];
       if (!unique.length) return 0;
       const due = and(eq(fid.orgId, orgId), shaIn(unique), deleteDue(now));
-      const rowNames = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
+      // One lookup a column, each on its index: an OR of the two reads every row of the org for every hash.
+      const rowNames = sql`(EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.fileSha256} = ${fid.sha256})
+        OR EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.thumbSha256} = ${fid.sha256}))`;
       const shown = namedBySnapshot(orgId, fid.sha256);
       const [leased] = await db.batch([
         db

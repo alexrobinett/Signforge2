@@ -25,7 +25,8 @@ const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', ...AUTH_TABLE
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
 /** Indexes that deliberately do not lead with org_id. The due deliveries are found across orgs, from pending rows only. */
-const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq', 'alert_deliveries_due_idx']);
+// The feed photos' sweep scans what is due across orgs, as the deliveries' does (`expiredFeedImages`, review of #497).
+const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq', 'alert_deliveries_due_idx', 'feed_images_next_check_idx']);
 /** Foreign keys that deliberately do not include org_id. A grant's user belongs to no org; its membership is checked on every call. */
 const FK_EXCEPTIONS = new Set(['spots.template_version_id', 'agent_grants.user_id']);
 

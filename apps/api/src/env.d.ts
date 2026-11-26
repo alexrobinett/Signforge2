@@ -31,6 +31,10 @@ interface DataSourceSettings {
   GEOCODING_URL?: string;
   /** Dev only: the origin that answers every feed fetch, path and query kept (src/data/fetch.ts `feedGuards`). The CMS e2e points it at its file server. */
   FEED_STUB_URL?: string;
+  /** New feed photos an org may queue in a day (src/data/feed-photos.ts `photoBudget`), 60 when unset. The demo sets more for its real-feed test. */
+  FEED_PHOTOS_ORG_DAILY?: string;
+  /** New feed photos one source may queue in a day, 30 when unset. */
+  FEED_PHOTOS_SOURCE_DAILY?: string;
 }
 /** Connected accounts (src/connectors). */
 interface ConnectorSettings {

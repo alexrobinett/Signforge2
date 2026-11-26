@@ -9,6 +9,7 @@ import {
   FEED_IMAGE_DELETE_GRACE_MS,
   FEED_IMAGE_TTL_MS,
   HOLD_MS,
+  DEFAULT_PHOTO_BUDGET,
   NEW_PER_ORG_PER_DAY,
   NEW_PER_SOURCE_PER_DAY,
   PHOTOS_PER_SOURCE,
@@ -30,6 +31,7 @@ import {
   type FeedImageJob,
   PASS_THROUGH_MAX_BYTES,
   type PhotoBlobs,
+  photoBudget,
   type PhotoDeps,
   type PhotoQueue,
   r2PhotoBlobs,
@@ -43,6 +45,8 @@ import { manifestKey, orgBlobKey } from '../src/r2';
 import { fakeProvider } from './fake-provider';
 
 const DAY_MS = 24 * 3_600_000;
+/** The caps demo's Worker vars set (wrangler.jsonc `env.demo`). */
+const LIFTED = { perOrg: 1800, perSource: 300 };
 const MIN = 60_000;
 let NOW = Date.UTC(2026, 10, 21, 9);
 
@@ -929,6 +933,37 @@ describe('budgets, resilience and cleanup', () => {
     expect(jobs).toHaveLength(NEW_PER_ORG_PER_DAY);
   });
 
+  it("queues every story's photo where the environment lifts the caps, as the demo's does, and refuses a cap that is no number", async () => {
+    const org = await seedOrg(env.DB, `lifted-${++n}`);
+    extraPollOrgs.add(org.orgId);
+    await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const feeds = ['guardian', 'verge', 'nyt'];
+    const ids = new Map<string, string>();
+    for (const f of feeds) ids.set(f, await news(`https://lifted-${f}.test/rss`, { org }));
+    const lifted = { ...env, FEED_PHOTOS_ORG_DAILY: String(LIFTED.perOrg), FEED_PHOTOS_SOURCE_DAILY: String(LIFTED.perSource) };
+    let serial = 0;
+    for (let hour = 0; hour < 4; hour++) {
+      const at = NOW + hour * 60 * MIN;
+      for (const id of ids.values()) await org.scope.dataSources.update(id, { nextPollAt: at, etag: null });
+      await poll(
+        {
+          now: at,
+          guards: web(
+            Object.fromEntries(feeds.map((f) => [`https://lifted-${f}.test/rss`, { body: feedOf(10, () => `https://cdn.lifted-${f}.test/${serial++}.jpg`) }])),
+          ).guards,
+        },
+        lifted,
+      );
+    }
+    const jobs = take();
+    // Ten new stories a poll, four polls: all forty of each feed, where 60 an org would stop at 20 each.
+    for (const [f, id] of ids) expect(jobs.filter((j) => j.sourceId === id).length, f).toBe(40);
+    for (const value of ['', 'lots', '0', '2.5', '1e3', '0x10', ' 60', '060', '1801'])
+      expect(() => photoBudget({ FEED_PHOTOS_ORG_DAILY: value }), value).toThrow(/FEED_PHOTOS_ORG_DAILY must be a whole number from 1 to 1800/);
+    expect(photoBudget({ FEED_PHOTOS_SOURCE_DAILY: '1800' })).toEqual({ ...DEFAULT_PHOTO_BUDGET, perSource: 1800 });
+    expect(photoBudget({})).toEqual(DEFAULT_PHOTO_BUDGET);
+  });
+
   it('resumes a day later: the 24 hours since a photo was held are what count', async () => {
     const s1 = await news('https://b1.test/rss');
     const photos = (tag: string) => feedOf(10, (i) => `https://cdn.b1.test/${tag}-${i}.jpg`);
@@ -1078,29 +1113,31 @@ describe('budgets, resilience and cleanup', () => {
   });
 
   it('forgets expired unreferenced rows, deletes feed blobs after the grace window, and never touches an /admin manifest blob with the same hash', async () => {
-    const id = await news('https://gc.test/rss');
+    // A year before the rest of the file: when its rows are due, no other test's are, so one sweep run reaches them.
+    const T = NOW - 365 * DAY_MS;
+    const id = await news('https://gc.test/rss', { at: T });
     const dropUrl = 'https://cdn.gc.test/drop.jpg';
     const keepUrl = 'https://cdn.gc.test/keep.jpg';
     const dropBytes = jpeg(320, 180, 'drop-shared-with-manifest');
     await poll({
-      now: NOW,
+      now: T,
       guards: web({ 'https://gc.test/rss': { body: feedOf(2, (i) => (i === 0 ? dropUrl : keepUrl)) } }).guards,
     });
     const jobs = take();
     const { images } = imagesStub();
-    await consume(jobs, { guards: web({ [dropUrl]: { body: dropBytes }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, NOW);
+    await consume(jobs, { guards: web({ [dropUrl]: { body: dropBytes }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, T);
     const dropSha = (await row(dropUrl))!.fileSha256!;
     const keepSha = (await row(keepUrl))!.fileSha256!;
     // Simulate a published /admin manifest holding the exact same content hash at orgBlobKey (no assets row).
     photoBlobs.seed(orgBlobKey(o.orgId, dropSha), dropBytes, dropSha);
 
     // Next poll writes a snapshot naming only keepUrl (dropUrl has dropped off the feed).
-    await o.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN, etag: null });
-    await poll({ now: NOW + 5 * MIN, guards: web({ 'https://gc.test/rss': { body: feedOf(1, () => keepUrl) } }).guards });
+    await o.scope.dataSources.update(id, { nextPollAt: T + 5 * MIN, etag: null });
+    await poll({ now: T + 5 * MIN, guards: web({ 'https://gc.test/rss': { body: feedOf(1, () => keepUrl) } }).guards });
     expect((await snapshot(id)).items[0]?.image?.file).toBe(keepSha);
 
     // Phase 1 at cleanupAt: forgets dropUrl and queues dropSha durably in feed_image_deletes (kept during grace window).
-    const cleanupAt = NOW + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
+    const cleanupAt = T + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
     expect(await sweepFeedPhotos(env.DB, photoBlobs, cleanupAt)).toBeGreaterThanOrEqual(1);
     expect(await row(dropUrl)).toBeUndefined();
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).toContain(dropSha);
@@ -1430,7 +1467,8 @@ describe('budgets, resilience and cleanup', () => {
     expect(await orgs[0]!.scope.feedPhotos.get(['https://midnight-gc.test/0.jpg'])).toHaveLength(1);
 
     counter.reset();
-    await runCron('* * * * *', midnight + 60 * MIN);
+    // The feed photos' sweep runs at half past every hour.
+    await runCron('* * * * *', midnight + 30 * MIN);
     expect(counter.counts().apiCalls).toBe(11);
     for (const [i, org] of orgs.slice(0, 3).entries()) {
       expect(await org.scope.feedPhotos.get([`https://midnight-gc.test/${i}.jpg`])).toHaveLength(0);
