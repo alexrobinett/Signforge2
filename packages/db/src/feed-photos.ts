@@ -243,17 +243,19 @@ export function pollSave(db: Db, orgId: string, dataSourceId: string, { read, st
               WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${read.now - DAY_MS}
             )
             SELECT url FROM (
-              SELECT jobs.value AS url FROM json_each(${JSON.stringify([...hold.again, ...hold.fresh])}) AS jobs WHERE ${alreadyKnown}
+              SELECT jobs.value AS url, 0 AS arm, jobs.key AS place FROM json_each(${JSON.stringify([...hold.again, ...hold.fresh])}) AS jobs WHERE ${alreadyKnown}
               UNION ALL
-              SELECT value FROM (
-                SELECT jobs.value FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
+              SELECT value, 1, key FROM (
+                SELECT jobs.value, jobs.key FROM json_each(${JSON.stringify(hold.fresh)}) AS jobs
                 WHERE NOT ${alreadyKnown}
                 ORDER BY jobs.key
                 -- Its fair share of the org's day, and never past the org's ceiling (#481); a whole number, as D1 binds numbers as reals.
                 LIMIT (SELECT CAST(MAX(0, MIN(MIN(${hold.budget.perSource}, ${hold.budget.perOrg} / MAX(1, sources)) - src_n, ${hold.budget.perOrg} - org_n)) AS INTEGER) FROM counts)
               )
             )
-            -- What the environment's day of queue messages has left, rechecks and retries first (#339).
+            -- What the environment's day of queue messages has left, rechecks and retries first (#339): ordered, as a
+            -- UNION ALL's halves come in no order SQLite promises.
+            ORDER BY arm, place
             LIMIT (SELECT CAST(MAX(0, ${hold.budget.queuedPerDay} - coalesce((SELECT ${qu.messages} FROM ${qu} WHERE ${qu.day} = ${queueDay(read.now)}), 0)) AS INTEGER))
           ) AS held`)
               .where(current),

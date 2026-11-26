@@ -199,3 +199,16 @@ describe("the environment's day of queue messages (#339)", () => {
     expect(await hold(s.b, 'q-b', unseen('q-b', 10), noon + DAY, budget)).toHaveLength(10);
   });
 });
+
+describe("the queue messages' UTC day at its edge (#339)", () => {
+  it('counts a minute before midnight in that day, and midnight and a minute after in the next', async () => {
+    const budget = { ...DEFAULT_PHOTO_BUDGET, queuedPerDay: 10 };
+    await fresh(s.a);
+    const midnight = Math.ceil(T / DAY) * DAY + DAY;
+    await add(s.a, 'edge');
+    expect(await hold(s.a, 'edge', unseen('edge', 10), midnight - MIN, budget)).toHaveLength(10);
+    expect(await hold(s.a, 'edge', unseen('edge', 1), midnight - MIN, budget)).toEqual([]);
+    expect(await hold(s.a, 'edge', unseen('edge', 4), midnight, budget)).toHaveLength(4);
+    expect(await hold(s.a, 'edge', unseen('edge', 10), midnight + MIN, budget)).toHaveLength(6);
+  });
+});
