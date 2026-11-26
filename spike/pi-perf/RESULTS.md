@@ -1569,3 +1569,39 @@ Weather 1.6.0's rain was two layers in a field 150% of the screen, rotated 14°.
 | --- | --- | --- | --- |
 | landscape, overall | 0.83, 2.06, 1.78, 1.56% | 1.11, 1.00, 1.61, 0.61% | 0.44, 0.44% |
 | portrait, overall | 3.78, 3.00, 3.49, 2.17% | 2.17, 0.89, 1.89, 0.33% | 0.89, 0.17% |
+
+## Contained bundles kept across page loads (issue #232, 2026-11-26)
+
+The first prepare after a page load re-measured on master `c0d984c2`, every look-kit template in every look: 498 to 671 ms in landscape and 510 to 974 ms in portrait, against 191 to 449 ms for a repeat. Built from the stress example's spots as in "The template set on master" (10 s spots, their own data, Announcement and Info frame over their 4K photos), served beside the deployed player, the supervisor and soak logger stopped, output rotated for portrait.
+
+**Where the first prepare goes.** A measuring build marked each prepare (`performance.mark` at its start and end), and a Chromium trace of a cold page load set the first prepare against a repeat of the same spot, in portrait:
+
+| Spot | First prepare (traced) | Repeat | Bundle read and contained | Template process, its first run | Photo decode |
+| --- | --- | --- | --- | --- | --- |
+| countdown-pop | 679 ms | 256 ms | 238 ms to the wrapper frame's load; 224 ms in the bundle worker, 233 ms of GC and compiling beside it | about 185 ms more than the repeat | - |
+| announcement-pop | 1045 ms | 463 ms | 244 ms to the wrapper frame's load | about 380 ms more | 361 ms decoding, against 159 in the repeat, and 85 ms reading the JPEG's YUV header |
+
+- **The bundle is contained again on every page load.** A repeat finds its frames in the page's cache; a new page has none. `containedFrames` is parse5 over the 385 to 400 kB bundle, most of it the four looks' inline fonts; the scripts it hashes are 12 to 19 kB, so the SHA-256 is under 1 ms of it.
+- **The template's new process** compiles its script and resolves its styles and faces for the first time.
+- **A photo's first decode** costs about twice a later one.
+
+**The fix: each bundle kept as contained** (`storedFrames` and `storeFrames` in `packages/player/src/store.ts`). A screen keeps the frames it made beside its file cache, under the player's version, and the next page load reads them back instead of containing the bundle again. The read-ahead stores them while a spot plays; storing during the prepare added about 20 ms to it.
+
+`reload.py` (scratch): per spot, a page load with the HTTP cache and storage cleared, 12 s to settle, then three page loads keeping storage, as a kiosk restart does; the page's first prepare of each. Master `7ce782c7` (A) against the branch (B), ABBA, Pop:
+
+| Orientation | Template | A, storage kept | B, storage kept | A, cleared | B, cleared |
+| --- | --- | --- | --- | --- | --- |
+| landscape | Announcement | 581-609 ms (median 601) | 409-431 ms (median 422) | 611, 591 | 592, 600 |
+| | Countdown | 563-596 (572) | 388-420 (405) | 553, 552 | 567, 579 |
+| | Info frame | 623-652 (629) | 444-475 (455) | 613, 612 | 622, 632 |
+| | News | 502-525 (509) | 330-348 (341) | 477, 484 | 509, 500 |
+| | Room status | 530-600 (559) | 363-401 (369) | 513, 509 | 533, 531 |
+| portrait | Announcement | 913-950 (938) | 735-770 (759) | 900, 917 | 1207, 915 |
+| | Countdown | 569-620 (596) | 388-414 (412) | 559, 566 | 586, 597 |
+| | Info frame | 700-734 (713) | 520-550 (547) | 670, 691 | 712, 706 |
+| | News | 516-545 (540) | 351-583 (353) | 489, 514 | 517, 547 |
+| | Room status | 545-575 (549) | 368-391 (380) | 524, 539 | 549, 537 |
+
+- **A page load that keeps storage prepares its first spot 160 to 200 ms sooner**, every template in both orientations. All five are under 500 ms in landscape; in portrait Countdown, News and Room status are, Info frame is 520 to 550 ms and Announcement 735 to 770.
+- **A cleared load is about the same, 10 to 30 ms slower in four of five**: it looks for kept frames before it reads the bundle. That is a screen's first load and a load after its storage is wiped.
+- **What is left in portrait** is the template's new process and, over a photo, its first decode: not the bundle.
