@@ -17,3 +17,13 @@ export const getPublishes = createServerFn({ method: 'GET' }).handler(async () =
 export const getPublish = createServerFn({ method: 'GET' })
   .validator((publishId: string | null) => publishId)
   .handler(async ({ data: publishId }) => (await inOrg(() => tool('get_publish', publishId ? { publishId } : {}, { missing: 'null' }), NONE)) ?? NONE);
+
+/**
+ * Whom each group reached at a publish, the latest without an id (#187): read once by the Publishes page, apart from the
+ * rollout it polls, as every group's screen ids are large (review of #620). Null without a record, or a publish.
+ */
+export const getPublishTargets = createServerFn({ method: 'GET' })
+  .validator((publishId: string | null) => publishId)
+  .handler(({ data: publishId }) =>
+    inOrg(async () => (await tool('get_publish', { ...(publishId ? { publishId } : {}), targets: true }, { missing: 'null' }))?.targets ?? null, null),
+  );

@@ -73,7 +73,6 @@ export function UnpublishedChanges({ orgId, counts, folded }: { orgId: string; c
   );
 }
 
-/** The sidebar's question, in the shell: open while the store holds one (`publishing.all`). */
 const screensWord = (n: number) => `${n} ${n === 1 ? 'screen' : 'screens'}`;
 
 /** "3 screens would change · +2 join North drive-thru · 1 leaves Lobby portrait": what a publish would do on screens (#187). */
@@ -109,6 +108,7 @@ function PreviewOf({ preview }: { preview: PublishPreview }) {
   );
 }
 
+/** The sidebar's question, in the shell: open while the store holds one (`publishing.all`). */
 export function PublishAllDialog() {
   const all = useAppStore((s) => s.publishing.all);
   return all ? <OpenPublishAll all={all} /> : null;
@@ -120,8 +120,10 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
   const cancel = useAppStore((s) => s.cancelPublishAll);
   const returnFocus = useOpenerFocus();
   const total = all.pins?.length ?? 0;
-  // No draft waiting, yet screens would change: labels moved a smart group's members since the last publish (#187).
+  // No draft waiting, yet screens would change (#187): labels moved a smart group's members, or a screen was paired, or
+  // something else compiles differently. Said as group changes only when the preview names a group (review of #621).
   const moved = total === 0 && Boolean(all.preview?.screens.length);
+  const groupsMoved = moved && Boolean(all.preview?.groups.length);
   const nothing = total === 0 && !moved;
   return (
     <AlertDialog open onOpenChange={(open) => !open && cancel()}>
@@ -131,7 +133,9 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
             {!all.pins
               ? 'Publish every unpublished change?'
               : moved
-                ? 'Publish the group changes?'
+                ? groupsMoved
+                  ? 'Publish the group changes?'
+                  : `Publish to ${screensWord(all.preview?.screens.length ?? 0)}?`
                 : nothing
                   ? 'Everything is already published'
                   : `Publish ${changes(total)}?`}
@@ -147,7 +151,11 @@ function OpenPublishAll({ all }: { all: PublishAll }) {
                 <span className="block">Every change in this organization is on its screens already. There is nothing to publish.</span>
               ) : moved && all.preview ? (
                 <>
-                  <span className="block">No draft is waiting, but labels moved screens in or out of smart groups since the last publish.</span>
+                  <span className="block">
+                    {groupsMoved
+                      ? 'No draft is waiting, but labels moved screens in or out of smart groups since the last publish.'
+                      : 'No draft is waiting, but these screens would get something new from a publish.'}
+                  </span>
                   <PreviewOf preview={all.preview} />
                 </>
               ) : all.tooMany ? (

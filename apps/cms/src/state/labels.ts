@@ -7,7 +7,7 @@ import { foldValue } from '@signforge/compiler/selector';
 import { toast } from 'sonner';
 import { importPlan, readLabelCsv, type ImportMode, type LabelFile } from '~/lib/label-csv';
 import { labelChange, labelRows, labelsReady, MAX_BULK_SCREENS, type LabelRow } from '~/lib/labels';
-import { orgOnScreen } from '~/lib/live';
+import { orgOnScreen, publishesOnScreen } from '~/lib/live';
 import type { ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
 import { labelKeysQuery, screensQuery } from '~/queries/screens';
@@ -101,7 +101,7 @@ const NONE: LabelRow[] = [];
 
 /**
  * When a label change reaches screens, said once for every label edit (#185): the next publish resolves labels and
- * selectors, so nothing changes on screen until then. #187's preview will say how many screens would change.
+ * selectors, so nothing changes on screen until then.
  */
 export const NEXT_PUBLISH = 'Takes effect at the next publish.';
 /** "Takes effect at the next publish: 3 screens would change", from `preview_publish` (#187). */
@@ -124,10 +124,6 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
   const rows = (target: LabelTarget, change: (r: LabelRow[]) => LabelRow[]) =>
     labels((l) => ({ ...l, rows: { ...l.rows, [keyOf(target)]: change(labelRowsOf(l, target)) } }));
   /**
-   * The one way labels are sent from the Screens page, a bulk edit or an import (#188): the call, then the screens and
-   * the keys read again, and the toast; the refusal's words, or null when it went.
-   */
-  /**
    * A label change said in a toast, which then says how many screens the next publish would change (#187): a smart
    * group's members move with labels, and `preview_publish` works that out as the publish will. Unread, it says less.
    */
@@ -140,12 +136,17 @@ export const createLabelsSlice: SliceCreator<LabelsSlice> = (set, get, { router,
           id,
           description: nextPublishWords(p.screens.length),
           // No draft may be waiting, so the sidebar shows no Publish: this one asks as it does, with the same preview.
-          ...(p.screens.length ? { action: { label: 'Publish…', onClick: () => void get().askPublishAll(orgId) } } : {}),
+          // Only for someone who may publish (review of #621).
+          ...(p.screens.length && publishesOnScreen(router) ? { action: { label: 'Publish…', onClick: () => void get().askPublishAll(orgId) } } : {}),
         }),
       // The toast already says when it takes effect; the count is a help, not the news.
       () => undefined,
     );
   }
+  /**
+   * The one way labels are sent from the Screens page, a bulk edit or an import (#188): the call, then the screens and
+   * the keys read again, and the toast; the refusal's words, or null when it went.
+   */
   async function sendLabels(orgId: string, send: () => Promise<unknown>, done: string): Promise<string | null> {
     try {
       await send();

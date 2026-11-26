@@ -903,7 +903,20 @@ describe("the sidebar's Publish (#361)", () => {
     await store.getState().askPublishAll(ORG);
     expect(store.getState().publishing.all).toMatchObject({ pins: [], preview: moved });
     expect(await store.getState().confirmPublishAll()).toBe(true);
-    expect(sent()).toEqual([['publish', { drafts: [] }, ORG]]);
+    expect(sent()).toEqual([['publish', { drafts: [], ifScreens: ['scr_1'] }, ORG]]);
+  });
+
+  it('with no draft, is refused when the screens it would change are not the ones shown, and says so (review of #621)', async () => {
+    preview = { screens: [{ screenId: 'scr_1', name: 'Till', reasons: ['joined North'] }], unchanged: 0, failed: [], groups: [], samples: [] };
+    drafts([]);
+    const store = sidebarStore();
+    await store.getState().askPublishAll(ORG);
+    vi.mocked(callTool)
+      .mockReset()
+      .mockRejectedValueOnce(new Refusal('conflict', 'changed', { screens: ['scr_1', 'scr_2'] }));
+    expect(await store.getState().confirmPublishAll()).toBe(false);
+    const t = toast.getToasts().findLast((x) => 'title' in x && x.title === 'Not published');
+    expect(t).toMatchObject({ description: 'Which screens it would change has changed since you were shown. Press Publish again to see them.' });
   });
 
   it('refused for sample text, asks as every publish does, and Publish anyway sends the same pins acknowledging exactly what it showed (#360)', async () => {

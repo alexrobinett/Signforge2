@@ -450,7 +450,9 @@ test('the Publish button says which screens would change and why, and a publish 
   await expect(reached.getByRole('listitem').first()).toContainText('North');
   await expect(reached.getByRole('listitem').first()).toContainText('Rule');
   await expect(reached.getByRole('listitem').first()).toContainText('2 screens');
-  await expect(reached.getByRole('listitem').first()).toContainText('North door, Till');
+  await expect(reached.getByRole('listitem').first()).toContainText('North door and Till');
+  // Its history row says which group it was for, as no draft changed.
+  await expect(page.getByRole('region', { name: 'Publish history' }).getByRole('listitem').first()).toContainText('Screens moved in or out of North');
   await axe(page);
   await shotsBoth(page, '187-groups-reached');
 });
