@@ -1,6 +1,7 @@
 {
   "base/agenda@1.5.0": "8075a74bd2bbd37ad9e7f4ff2068a5ae800b2a236be0d9d34fd7564a6e565e62",
   "base/alert@1.3.0": "acb2fbed66cc7a94ec7e74a2f171466b7b49427b203c5af0078428eb5501ea6e",
+  "base/announcement@1.2.0": "59b312fa4208ac88f51ede45302c533f199b28e76de7b237a8bdae6127d020f1",
   "base/clock@1.4.0": "b7601045e0a617acba4d5e9d0b5f2f7f17bdccbc1910d56c6e42d9a6040e88e3",
   "base/countdown@1.1.1": "dd62359a2cabccb78c3a2d559b29df71ce2a64c6adb698dca6e8c4bdf48e37a9",
   "base/cstore-promo@1.4.0": "886ca9e9cf0d767d71f2846b39dbd17926cb683ce9b41a0dba64644ab75a7b79",
