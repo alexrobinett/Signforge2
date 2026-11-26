@@ -54,13 +54,32 @@ describe('screens.setDesiredManifest', () => {
 });
 
 describe('screens.reportManifest', () => {
-  it('lets a report without a time replace one observed later, and counts it at its arrival', async () => {
+  const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
+
+  it('lets a report without a time replace one stored at or before its arrival, and counts it at its arrival', async () => {
     const r = await seedOrg(env.DB, 'org-report');
-    const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
     await r.scope.screens.reportManifest(r.screen, m2, { observedAt: 200, arrivedAt: 300 });
-    // A player before gh-44 (or an untrusted clock): ordered by arrival, so it always replaces.
+    // A player before gh-44 (or an untrusted clock): ordered by arrival.
+    await r.scope.screens.reportManifest(r.screen, m1, { arrivedAt: 250 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 250 });
+    // Two at one arrival time: the later write replaces.
+    await r.scope.screens.reportManifest(r.screen, m2, { arrivedAt: 250 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 250 });
+  });
+
+  it('does not let a report without a time land over one that arrived after it (#519)', async () => {
+    const r = await seedOrg(env.DB, 'org-report-late');
+    // Arrived at 100, but its write hung: one that arrived at 200 was written first.
+    await r.scope.screens.reportManifest(r.screen, m2, { arrivedAt: 200 });
     await r.scope.screens.reportManifest(r.screen, m1, { arrivedAt: 100 });
-    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 100 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 200 });
+    // The same over sync, which shares the rule: an untrusted clock's sync is ordered by arrival too.
+    const untimed = (at: number, active: string) =>
+      r.scope.screens.sync(r.screen, { at, active, playerVersion: '1', heartbeatJson: '{}', fallbackFrom: null, epoch: 'e', seq: 0, counts: [] });
+    await untimed(150, m1);
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 200 });
+    await untimed(300, m1);
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 300 });
   });
 });
 

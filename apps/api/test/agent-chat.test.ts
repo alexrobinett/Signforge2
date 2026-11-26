@@ -1311,6 +1311,32 @@ describe('confirmation cards (#269)', () => {
     });
   });
 
+  it("offers an editor a press for an entry's removal exactly where the tool would run it: a draft, not a published or deleted one, while only owners publish (#523)", async () => {
+    const ask: { called?: Record<string, unknown> } = {};
+    const s = await setup({ role: 'editor', steps: (body) => (body.messages.length === 1 ? { calls: [{ name: 'delete', input: ask.called }] } : ANSWER) });
+    const playlist = await s.scope.playlists.insert({ name: 'Lunch', transitionJson: JSON.stringify({ type: 'cut' }) });
+    const live = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org' });
+    const gone = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: 2 });
+    expect((await s.owner.tool('publish', {})).status).toBe(200);
+    // Published, then marked deleted, waiting for a publish: the tool no longer finds it.
+    expect((await s.owner.tool('delete', { type: 'schedule_entry', id: gone.id })).status).toBe(200);
+    const draft = await s.scope.scheduleEntries.insert({ playlistId: playlist.id, target: 'org', priority: 1 });
+    expect((await s.owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    /** What the card offers for `id`, and what the tool answers the same editor: they must agree. */
+    const both = async (id: string) => {
+      ask.called = { type: 'schedule_entry', id };
+      const all = await raw(await s.ask('q'));
+      const card = all.find((e) => e.name === CHAT_EVENTS.confirm)?.value;
+      const offered = !card ? 'no card' : card.token ? 'press' : 'refused';
+      const tool = (await s.member.tool('delete', { type: 'schedule_entry', id })).status;
+      return { offered, tool };
+    };
+    // The tool's answers last, as the card's must not run it: a draft's removal first would leave nothing to compare.
+    expect(await both(live.id)).toEqual({ offered: 'refused', tool: 403 });
+    expect(await both(gone.id)).toEqual({ offered: 'no card', tool: 404 });
+    expect(await both(draft.id)).toEqual({ offered: 'press', tool: 200 });
+  });
+
   it('offers an editor no press for a data source change while only owners publish: screens follow it with no publish (reviews of #419)', async () => {
     const ask: { name?: string; called?: Record<string, unknown> } = {};
     const s = await setup({

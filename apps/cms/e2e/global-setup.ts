@@ -97,6 +97,9 @@ function drawerStep(messages: { role: string; content: unknown }[]): { name: str
   // The drawer offers no org:manage read, so the question names the invitation.
   const invitation = /cancel the invitation (inv_[\w-]+)/i.exec(first)?.[1];
   if (invitation) return result ? { card: { groups: [], steps: [], ...STUB_CANCELLED } } : { name: 'cancel_invitation', input: { invitationId: invitation } };
+  // The question names the entry, as for the invitation: a removal behind the delete card (#523).
+  const entry = /remove the schedule entry (sch_[\w-]+)/i.exec(first)?.[1];
+  if (entry) return result ? { card: STUB_CARD } : { name: 'delete', input: { type: 'schedule_entry', id: entry } };
   if (!spotId) return result ? { card: STUB_CARD } : { name: 'read', input: { type: 'screen_status' } };
   if (!result) return { name: 'read', input: { type: 'spot', ids: [spotId], detail: 'full' } };
   if (lastCall === 'read') {

@@ -41,7 +41,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     role: c.var.role,
     actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_CLIENT_ID },
     blobs: c.env.BLOBS,
-    services: toolServices(c, { orgId: c.var.org.orgId, member: c.var.session.user.id, email, connectors, auth: c.var.auth }),
+    services: toolServices(c, { orgId: c.var.org.orgId, member: c.var.session.user.id, email, connectors }),
     publishLock: publishLock(c.env, c.var.org.orgId),
     member: c.var.session.user.id,
   };

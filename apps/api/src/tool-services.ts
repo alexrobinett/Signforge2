@@ -5,14 +5,12 @@
  * provider until a tool uses it.
  *
  * `/mcp` (M4-06, src/mcp) is the third adapter: it builds its services here, with the grant's org and
- * member as its `ServiceScope`. It gets no `members`, which needs a Better Auth that acts as the grant's
- * member and an audit hook that records the agent: only a session's request has one (`auth`).
+ * member as its `ServiceScope`.
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
 import { aiProviders } from './agent/provider';
 import { agentCallLog } from './agents/calls';
-import type { Auth } from './auth';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
 import { alertSecretSealer, cursorSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
@@ -44,8 +42,6 @@ export interface ServiceScope {
   email?: EmailSender;
   /** Reaches providers. Tests pass a fake provider's; otherwise `connectorDeps(env)`. */
   connectors?: ConnectorDeps;
-  /** The request's Better Auth, for the member tools, which act as its session's member. Only `/api` has one. */
-  auth?: Auth;
 }
 
 /** Every service, each key present, so a service added to `ToolServices` is a type error here until it is built. */

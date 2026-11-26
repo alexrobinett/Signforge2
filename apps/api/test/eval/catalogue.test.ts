@@ -18,8 +18,8 @@ const hello = (role: Role): Task => ({ id: 'catalogue', prompt: 'Hello', role, s
  */
 const MODEL_FACING: Record<Arm, Record<Role, Size>> = {
   mcp: {
-    owner: { tools: 30, bytes: 57_464, tokens: 13_600 },
-    editor: { tools: 27, bytes: 51_526, tokens: 12_180 },
+    owner: { tools: 30, bytes: 57_445, tokens: 13_598 },
+    editor: { tools: 27, bytes: 51_507, tokens: 12_178 },
     viewer: { tools: 6, bytes: 7477, tokens: 1713 },
   },
   drawer: {
@@ -31,8 +31,8 @@ const MODEL_FACING: Record<Arm, Record<Role, Size>> = {
 
 /** /mcp's tools/list, with PR 1's trims, each tool's title, each type's own read listed as `read` (#345 PR 2), PR 3's screen writes, PR 4's content saves and PR 5's merges. */
 const DISCOVERY: Record<Role, Size> = {
-  owner: { tools: 30, bytes: 60_688, tokens: 14_390 },
-  editor: { tools: 27, bytes: 54_410, tokens: 12_889 },
+  owner: { tools: 30, bytes: 60_669, tokens: 14_388 },
+  editor: { tools: 27, bytes: 54_391, tokens: 12_887 },
   viewer: { tools: 6, bytes: 8105, tokens: 1869 },
 };
 

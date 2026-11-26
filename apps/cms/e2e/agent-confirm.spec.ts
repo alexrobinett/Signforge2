@@ -2,13 +2,35 @@
 // scripted turns (e2e/global-setup.ts): asked about the storm, it takes every screen over, which stops
 // at a card until the person presses it. No test reaches a real model.
 import { readFileSync } from 'node:fs';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { type Browser, expect, type Locator, type Page, test } from '@playwright/test';
 import { axe, createOrg, hydrated, joinAsEditor, shots, signInAs, tool } from './helpers';
 import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, CMS_URL, STUB_CANCELLED, STUB_CARD, STUB_TAKEN } from './servers';
 
 const ADDRESS = '192.0.2.193';
 /** An editor's sign-in, from its own address. */
 const EDITOR_ADDRESS = '192.0.2.194';
+
+/** A new editor of `page`'s org, on the Schedule page, asking the agent `question`: their page, and the drawer. */
+async function editorAsks(page: Page, browser: Browser, email: string, address: string, question: string) {
+  const editor = await (await browser.newContext()).newPage();
+  await joinAsEditor(page, editor, email, address);
+  await editor.goto('/schedule');
+  await hydrated(editor);
+  await editor.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
+  const drawer = editor.getByRole('dialog', { name: 'Agent' });
+  await drawer.getByLabel('Ask about your screens and content').fill(question);
+  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  return { editor, drawer };
+}
+
+/** Checked by axe, then shot at desktop and phone width. */
+async function shotsAtBothWidths(editor: Page, name: string) {
+  await axe(editor);
+  await editor.setViewportSize({ width: 1440, height: 1000 });
+  await shots(editor, name);
+  await editor.setViewportSize({ width: 390, height: 844 });
+  await shots(editor, `${name}-phone`);
+}
 
 /** Keys only: from the question, Shift+Tab back up the drawer until `target` has focus. */
 async function tabTo(page: Page, target: Locator) {
@@ -220,22 +242,42 @@ test("an editor where only owners publish asks for the takeover: the card names 
   await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
   await tool(page, 'save_playlist', { name: 'Storm closure', transition: { type: 'cut' } });
   await tool(page, 'update_org_settings', { editorsPublish: false });
-  const editor = await (await browser.newContext()).newPage();
-  await joinAsEditor(page, editor, `e2e-confirm-takeover-editor-${Date.now()}@example.com`, '192.0.2.196');
-
-  await editor.goto('/schedule');
-  await hydrated(editor);
-  await editor.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Ask the agent' }).click();
-  const drawer = editor.getByRole('dialog', { name: 'Agent' });
-  await drawer.getByLabel('Ask about your screens and content').fill('Bayside closes at 2 for the storm: put the closure up everywhere');
-  await drawer.getByRole('button', { name: 'Ask', exact: true }).click();
+  const { editor, drawer } = await editorAsks(
+    page,
+    browser,
+    `e2e-confirm-takeover-editor-${Date.now()}@example.com`,
+    '192.0.2.196',
+    'Bayside closes at 2 for the storm: put the closure up everywhere',
+  );
   const refused = drawer.getByRole('region', { name: 'Take over screens, or end a takeover' });
   await expect(refused).toContainText('Only owners publish in this organization');
   await expect(refused.getByRole('button', { name: 'Take over' })).toHaveCount(0);
   expect((await tool(editor, 'list_schedule_entries', {})).entries).toEqual([]);
-  await axe(editor);
-  await editor.setViewportSize({ width: 1440, height: 1000 });
-  await shots(editor, '105-takeover-refused-card');
-  await editor.setViewportSize({ width: 390, height: 844 });
-  await shots(editor, '105-takeover-refused-card-phone');
+  await shotsAtBothWidths(editor, '105-takeover-refused-card');
+});
+
+test('an editor where only owners publish asks to remove a published schedule entry: the card says the removal needs the right to publish, and runs nothing (#523)', async ({
+  page,
+  browser,
+}) => {
+  const owner = '192.0.2.197';
+  await signInAs(page, `e2e-confirm-remove-owner-${Date.now()}@example.com`, owner);
+  await createOrg(page, 'Bayside Lunch Rota', owner);
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', apiKey: ANTHROPIC_STUB_KEY, capableModel: ANTHROPIC_STUB_MODELS[1] });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Lunch', transition: { type: 'cut' } });
+  const { entry } = await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'org' });
+  await tool(page, 'publish', {});
+  await tool(page, 'update_org_settings', { editorsPublish: false });
+  const { editor, drawer } = await editorAsks(
+    page,
+    browser,
+    `e2e-confirm-remove-editor-${Date.now()}@example.com`,
+    '192.0.2.198',
+    `Remove the schedule entry ${entry.id}`,
+  );
+  const refused = drawer.getByRole('region', { name: 'Delete playlist, or remove schedule entry' });
+  await expect(refused).toContainText('Only owners publish in this organization, and this change needs the right to publish: ask an owner.');
+  await expect(refused.getByRole('button')).toHaveCount(0);
+  expect((await tool(editor, 'list_schedule_entries', {})).entries).toMatchObject([{ id: entry.id, deleted: false }]);
+  await shotsAtBothWidths(editor, '106-remove-entry-refused-card');
 });
