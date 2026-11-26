@@ -153,18 +153,15 @@ defineTemplate({
 
     const listRows = [...rows.querySelectorAll<HTMLElement>(':scope > .row')];
     listRows.forEach((el, i) => {
-      const { story, row } = listed[i]!;
+      const { row } = listed[i]!;
       bindRow(el, ctx, 'items', row);
       const thumb = el.querySelector('.thumb');
       if (thumb && !rowImage(ctx, 'items', row, 'image', 'thumb')) {
-        // Never an empty frame: the story's source, or the feed's, by its first letter.
+        // Never an empty frame: the story's place in the list, 01 to 05. An initial repeated down the rows (every
+        // Guardian story is "World news") read as a placeholder (owner decision on #476).
         thumb.classList.add('none');
         thumb.querySelector('img')!.remove();
-        // The publisher's (the spot's source), not the story's: a feed's sections ("World news | The Guardian") would give
-        // every row the same wrong letter.
-        const name = [String(data.source), story.source, story.title].map((s) => s.trim()).find(Boolean)!;
-        // The name's own letter: "The Guardian" is G.
-        thumb.querySelector('.initial')!.textContent = [...name.replace(/^the\s+(?=\S)/i, '')][0]!.toUpperCase();
+        thumb.querySelector('.number')!.textContent = String(i + 1).padStart(2, '0');
       }
     });
 

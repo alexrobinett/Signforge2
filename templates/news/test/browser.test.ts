@@ -187,26 +187,25 @@ describe('news 2.0 (#202)', () => {
     expect(await turns({ items: [story(0)], rotationSeconds: 4 }, 16_000)).toBe(1);
   });
 
-  it('shows every photo, some, or none, a story without one as a bigger headline with its initial in the list, and never decodes a photo switched off', async () => {
+  it('shows every photo, some, or none, a story without one as a bigger headline with its place in the list, and never decodes a photo switched off', async () => {
     const r = await frame();
     const read = (f: Frame) =>
       f.evaluate(() => ({
         images: document.documentElement.dataset.images,
         bare: [...document.querySelectorAll('.story')].map((s) => s.classList.contains('no-photo')),
         thumbs: [...document.querySelectorAll('.row')].map((row) =>
-          row.querySelector('.thumb img[src]') ? 'photo' : (row.querySelector('.initial')?.textContent ?? 'none'),
+          row.querySelector('.thumb img[src]') ? 'photo' : (row.querySelector('.number')?.textContent ?? 'none'),
         ),
         srcs: document.querySelectorAll('img[src]').length,
         sizes: [...document.querySelectorAll('.headline')].map((h) => Number.parseFloat(getComputedStyle(h).fontSize)),
       }));
     const items = [story(0), story(1, { image: undefined, source: 'weather desk' }), story(2), story(3, { source: '' })];
     const all = await read(await r.show({ items, rotationSeconds: 8 }, photos(4, [1]), demo, 32_000));
-    expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', 'W', 'photo', 'photo'] });
+    expect(all).toMatchObject({ images: 'on', bare: [false, true, false, false], thumbs: ['photo', '02', 'photo', 'photo'] });
     expect(all.sizes[1]).toBeGreaterThan(all.sizes[0]!);
-    // A photo whose blob never arrived plays as a story without one; with no source, the feed's credit gives the initial.
-    // The publisher's initial (the spot's source) over the story's, which a feed may give a section: "The Guardian" is G.
+    // A photo whose blob never arrived plays as a story without one; each row without a photo is numbered by its place.
     const missing = await read(await r.show({ items, source: 'The Guardian', rotationSeconds: 8 }, photos(4, [1, 3]), demo, 32_000));
-    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', 'G', 'photo', 'G'] });
+    expect(missing).toMatchObject({ bare: [false, true, false, true], thumbs: ['photo', '02', 'photo', '04'] });
     expect(await read(await r.show({ items, rotationSeconds: 8 }, {}, demo, 32_000))).toMatchObject({
       images: 'off',
       bare: [true, true, true, true],
@@ -234,7 +233,7 @@ describe('news 2.0 (#202)', () => {
           bare: lead.classList.contains('no-photo'),
           rows: [...document.querySelectorAll('.row')].map((row) => [
             row.querySelector('.rtitle')!.textContent,
-            row.querySelector('.thumb img') ? 'photo' : row.querySelector('.initial')!.textContent,
+            row.querySelector('.thumb img') ? 'photo' : row.querySelector('.number')!.textContent,
           ]),
         };
       }),
@@ -244,7 +243,7 @@ describe('news 2.0 (#202)', () => {
       src: 'Metro Desk',
       bare: true,
       rows: [
-        [items[1]!.title, 'M'],
+        [items[1]!.title, '01'],
         [items[2]!.title, 'photo'],
       ],
     });

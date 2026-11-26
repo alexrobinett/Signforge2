@@ -20,6 +20,10 @@
       "size": 401879,
       "type": "text/html"
     },
+    "2976bd02739fafb501ccbc648911f8dc373157978e2b2a8a59db7082c8723cab": {
+      "size": 387493,
+      "type": "text/html"
+    },
     "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357": {
       "size": 81112,
       "type": "text/html"
@@ -66,10 +70,6 @@
     },
     "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
       "size": 82306,
-      "type": "text/html"
-    },
-    "a836f9bb480487163e853e64590f6a01b7b4bde1d411d91193905efecf19d8be": {
-      "size": 387554,
       "type": "text/html"
     },
     "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
@@ -1188,7 +1188,7 @@
         },
         "protocol": 2
       },
-      "html": "a836f9bb480487163e853e64590f6a01b7b4bde1d411d91193905efecf19d8be"
+      "html": "2976bd02739fafb501ccbc648911f8dc373157978e2b2a8a59db7082c8723cab"
     },
     "base/photo-promo@1.4.2": {
       "manifest": {
@@ -2205,5 +2205,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "79f8dc26579b4b1343e5be88c3d5b49cd5201dbd34cd1fdc94c617594718c544"
+  "id": "37324b0eba1b5993065293e6c97641df4c9096f71e6103c72ea875cc31d2f064"
 }
