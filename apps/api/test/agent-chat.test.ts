@@ -307,6 +307,27 @@ describe('POST /api/agent/chat', () => {
     }
   });
 
+  it("cards a read by ids as its type's own: one in the get's words, several titled as the list (#345)", async () => {
+    const ids: string[] = [];
+    const s = await setup({
+      steps: (body) =>
+        body.messages.length === 1
+          ? {
+              calls: [
+                { name: 'read', input: { type: 'screen', ids } },
+                { name: 'read', input: { type: 'screen', ids: ids.slice(0, 1) } },
+              ],
+            }
+          : ANSWER,
+    });
+    ids.push(...(await s.scope.screens.list()).slice(0, 2).map((x) => x.id));
+    const lines = await events(await s.ask());
+    expect(lines.filter((e) => e.type === 'call').map((e) => e.type === 'call' && e.card)).toEqual([
+      shown('list_screens', 'Read 2 screens'),
+      shown('get_screen', "Read a screen's details"),
+    ]);
+  });
+
   it('stops a turn the browser abandons: its model call aborted, and no tool runs after it (#335)', async () => {
     const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }, { hang: true }, ANSWER] });
     const before = await s.scope.auditLog.list({ limit: 50 });
