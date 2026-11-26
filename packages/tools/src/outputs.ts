@@ -962,7 +962,9 @@ export const outputs = {
       .array(z.object({ screenId: z.string(), name: z.string(), reasons: z.array(z.string()).describe('Why its content would change, each in words') }))
       .describe('The screens whose content would change, by name'),
     unchanged: z.number().int().describe('Screens that would keep what they have'),
-    failed: z.array(z.object({ screenId: z.string(), name: z.string(), problems: z.array(z.string()) })).describe('Screens that could not be compiled: they keep what they have'),
+    failed: z
+      .array(z.object({ screenId: z.string(), name: z.string(), problems: z.array(z.string()) }))
+      .describe('Screens that could not be compiled: they keep what they have'),
     groups: z
       .array(z.object({ groupId: z.string(), name: z.string(), joined: z.array(z.string()), left: z.array(z.string()) }))
       .describe("Each group whose screens would change since the last publish's record of them; none before the first such record"),

@@ -138,7 +138,8 @@ describe('a takeover of a smart group (owner decision on #179)', () => {
 // What a publish would do (#187): `preview_publish` names the screens the publish then switches, and why, against
 // the last publish's record of whom each group reached (`get_publish`'s targets). On a key of its own, `area`.
 describe('a publish preview and its recorded targets (#187)', () => {
-  const switched = (out: { screens: { screenId: string; outcome: string }[] }) => out.screens.flatMap((s) => (s.outcome === 'updated' ? [s.screenId] : [])).toSorted();
+  const switched = (out: { screens: { screenId: string; outcome: string }[] }) =>
+    out.screens.flatMap((s) => (s.outcome === 'updated' ? [s.screenId] : [])).toSorted();
   const previewed = (out: { screens: { screenId: string }[] }) => out.screens.map((s) => s.screenId).toSorted();
   let a: { id: string };
   let b: { id: string };
@@ -150,7 +151,11 @@ describe('a publish preview and its recorded targets (#187)', () => {
     b = await scope().screens.insert({ name: 'Zone B', timezone: 'Europe/London', orientation: 'landscape' });
     c = await scope().screens.insert({ name: 'Zone C', timezone: 'Europe/London', orientation: 'landscape' });
     await call('update_screen_labels', { screenIds: [a.id, b.id], set: { area: 'n' } });
-    ({ group: zone } = await call('save_group', { name: 'Zone N', selector: { all: [{ key: 'area', op: 'eq', values: ['n'] }] }, idempotencyKey: crypto.randomUUID() }));
+    ({ group: zone } = await call('save_group', {
+      name: 'Zone N',
+      selector: { all: [{ key: 'area', op: 'eq', values: ['n'] }] },
+      idempotencyKey: crypto.randomUUID(),
+    }));
     await call('publish', {});
   });
 
@@ -170,7 +175,7 @@ describe('a publish preview and its recorded targets (#187)', () => {
     expect((await call('list_publishes', {})).publishes.length).toBe(before);
   });
 
-  it("names the screens an entry for a smart group would change, and the publish switches exactly those", async () => {
+  it('names the screens an entry for a smart group would change, and the publish switches exactly those', async () => {
     await call('save_schedule_entry', { playlistId: o.playlist, target: 'group', groupId: zone.id, priority: 1, idempotencyKey: crypto.randomUUID() });
     const preview = await call('preview_publish', {});
     expect(preview.screens.map((s: { name: string; reasons: string[] }) => [s.name, s.reasons])).toEqual([
