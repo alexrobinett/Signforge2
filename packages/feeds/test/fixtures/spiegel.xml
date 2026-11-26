@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+<title>DER SPIEGEL - Schlagzeilen</title>
+<link>https://www.spiegel.de/</link>
+<description>Deutschlands führende Nachrichtenseite. Alles Wichtige aus Politik, Wirtschaft, Sport, Kultur, Wissenschaft, Technik und mehr.</description>
+<language>de</language>
+<pubDate>Thu, 26 Nov 2026 06:40:00 +0100</pubDate>
+<lastBuildDate>Thu, 26 Nov 2026 06:40:00 +0100</lastBuildDate>
+<image>
+<title>DER SPIEGEL</title>
+<link>https://www.spiegel.de/</link>
+<url>https://cdn.prod.www.spiegel.de/public/spon/images/logos/der-spiegel-h60.png</url>
+</image>
+<atom:link href="https://www.spiegel.de/schlagzeilen/index.rss" rel="self" type="application/rss+xml"/>
+<item>
+<title>Ukraine: Jared Kushner berichtet von Versprechen Wladimir Putins, keine Atomwaffen einzusetzen</title>
+<link>https://www.spiegel.de/ausland/ukraine-jared-kushner-berichtet-von-versprechen-wladimir-putins-keine-atomwaffen-einzusetzen-a-dc80f8fa-0f0b-4253-92d4-62657dd2d7ba#ref=rss</link>
+<description>Mit Atomwaffen zu drohen, gehört fest zur russischen Propaganda. US-Unterhändler Kushner will nun wissen, dass es nicht dazu kommt. Kyjiw wehrt sich derweil gegen neue Angriffe – und coacht die Deutsche Bahn in der Drohnenabwehr.</description>
+<content:encoded>Mit Atomwaffen zu drohen, gehört fest zur russischen Propaganda. US-Unterhändler Kushner will nun wissen, dass es nicht dazu kommt. Kyjiw wehrt sich derweil gegen neue Angriffe – und coacht die Deutsche Bahn in der Drohnenabwehr.</content:encoded>
+<category>Ausland</category>
+<enclosure type="image/jpeg" url="https://cdn.prod.www.spiegel.de/images/dfe530bb-2d5c-4016-8869-e1efea6fcba7_w520_r2.08_fpx43.33_fpy45.jpg" length="0"/>
+<guid isPermaLink="false">dc80f8fa-0f0b-4253-92d4-62657dd2d7ba</guid>
+<pubDate>Thu, 26 Nov 2026 06:40:00 +0100</pubDate>
+</item>
+  </channel>
+</rss>
