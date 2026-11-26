@@ -375,14 +375,16 @@ async function deliverFeedPhoto(
     });
   };
   // A CDN's copy at the size the screen needs first (#488); the feed's own when the CDN refuses that size or sends what
-  // does not decode, so a CDN that changes its sizes costs no photo.
+  // does not decode, so a CDN that changes its sizes costs no photo. Not over a copy already held from it: a refusal at
+  // its recheck keeps that copy, as any failure does, rather than the feed's smaller photo.
   const larger = rendition(url);
+  const holdsCopy = !!row.fileSha256 && row.validatedFrom === larger;
   try {
     if (spent) throw new PhotoFailure('images-month-budget');
     if (!larger) await storeFrom(httpsOf(url));
     else
       await storeFrom(larger).catch((e: unknown) => {
-        if (!refusedCopy(e)) throw e;
+        if (holdsCopy || !refusedCopy(e)) throw e;
         console.warn(`[feed images] ${larger} was refused (${e.code}); fetching the feed's ${url}`);
         return storeFrom(httpsOf(url));
       });
