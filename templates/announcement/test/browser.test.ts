@@ -109,7 +109,11 @@ describe('announcement (#197)', () => {
     let drawn = { w: 0, h: 0 };
     for (const look of looks)
       for (const [, data] of variants) {
-        const b = await largestImageBox(await k.play({ look, ...everything, ...data }, demo, undefined, logo), '[data-sf-src="photo"]', manifest.duration.defaultMs);
+        const b = await largestImageBox(
+          await k.play({ look, ...everything, ...data }, demo, undefined, logo),
+          '[data-sf-src="photo"]',
+          manifest.duration.defaultMs,
+        );
         drawn = { w: Math.max(drawn.w, b.w), h: Math.max(drawn.h, b.h) };
       }
     expect(box && drawn.w <= box.w && drawn.h <= box.h, `drawn up to ${drawn.w}x${drawn.h}`).toBe(true);

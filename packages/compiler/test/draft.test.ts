@@ -147,7 +147,10 @@ describe('spotFromDraft', () => {
   });
 
   describe("a portrait screen's rendition, by the box the field declares (#224)", () => {
-    const boxed = (portraitBox: { w: number; h: number }) => ({ ...promo, fields: { ...promo.fields, photo: { type: 'image' as const, label: 'Photo', portraitBox } } });
+    const boxed = (portraitBox: { w: number; h: number }) => ({
+      ...promo,
+      fields: { ...promo.fields, photo: { type: 'image' as const, label: 'Photo', portraitBox } },
+    });
     /** The file a portrait screen gets for the template's photo. */
     const portraitFile = (manifest = promo, asset = photo) => {
       const { spot } = spotFromDraft(
@@ -173,7 +176,7 @@ describe('spotFromDraft', () => {
       expect(portraitFile(boxed({ w: 1080, h: 1351 }))).toBe(sha('c'));
     });
 
-    it("is the portrait one for a tall photo, whose landscape rendition is the larger", () => {
+    it('is the portrait one for a tall photo, whose landscape rendition is the larger', () => {
       const tall: DraftAsset = {
         ...photo,
         renditions: [

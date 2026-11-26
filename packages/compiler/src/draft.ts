@@ -320,7 +320,11 @@ export function assetFile(
   if (!own) return { problem: `asset ${assetId} has no ${orientation} rendition` };
   const wide = a.renditions.find((x) => x.orientation === 'landscape');
   const coversWithFewer =
-    !!wide?.width && !!wide.height && !!own.width && !!own.height && !!portraitBox &&
+    !!wide?.width &&
+    !!wide.height &&
+    !!own.width &&
+    !!own.height &&
+    !!portraitBox &&
     wide.width * PORTRAIT_BOX_UPSCALE >= portraitBox.w &&
     wide.height * PORTRAIT_BOX_UPSCALE >= portraitBox.h &&
     wide.width * wide.height < own.width * own.height;

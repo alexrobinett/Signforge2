@@ -648,19 +648,22 @@ export async function screenFrame(t: { html: string; manifest: TemplateManifest 
  * smaller rendition never draws it larger than it is.
  */
 export const largestImageBox = (f: Frame, selector: string, durationMs: number) =>
-  f.evaluate(([sel, d]) => {
-    let w = 0;
-    let h = 0;
-    for (let at = 0; at <= d; at += 100) {
-      for (const a of document.getAnimations()) a.currentTime = at;
-      for (const img of document.querySelectorAll(sel)) {
-        const r = img.getBoundingClientRect();
-        w = Math.max(w, Math.ceil(r.width));
-        h = Math.max(h, Math.ceil(r.height));
+  f.evaluate(
+    ([sel, d]) => {
+      let w = 0;
+      let h = 0;
+      for (let at = 0; at <= d; at += 100) {
+        for (const a of document.getAnimations()) a.currentTime = at;
+        for (const img of document.querySelectorAll(sel)) {
+          const r = img.getBoundingClientRect();
+          w = Math.max(w, Math.ceil(r.width));
+          h = Math.max(h, Math.ceil(r.height));
+        }
       }
-    }
-    return { w, h };
-  }, [selector, durationMs] as const);
+      return { w, h };
+    },
+    [selector, durationMs] as const,
+  );
 
 /**
  * An entrance starts and ends inside this many ms of its play's start: the last stagger step's delay plus the longest
