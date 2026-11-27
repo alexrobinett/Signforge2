@@ -1632,6 +1632,19 @@ What #635 left of a look-kit template's first prepare after a page load that kee
 - **With storage cleared, the spare takes 19 to 40 ms off the first prepare** in every spec (the means of the two loads).
 - **With storage kept, Info frame gains about 20 to 50 ms** (median 28 ms in landscape, 45 in portrait), the ranges apart. Announcement in landscape gains a little (median 22 ms, the ranges overlapping), and the rest are within the spread. Info frame in portrait stays at about 500 to 535 ms and Announcement in portrait does not move.
 - Starting a renderer costs the same for any template; what differs is what each one's own document costs after.
+
+**With the spare sandboxed with no allowances** (`sandbox=""`, review of #641, 2026-11-27, the branch at `f565a7ab`): the spare's frame is still out of process, in the template's renderer. Burning CPU in each frame moved one process.
+
+**Playback with the spare.** `isolate.py 30 fade announcement-pop+info-frame-pop+countdown-pop` was run twice per orientation. Master at `7c509ff7` was run after it, the same way:
+
+| | Overall | Playing | Loading next | Transition | Worst frame | Prepares |
+| --- | --- | --- | --- | --- | --- | --- |
+| branch, landscape | 0.33, 0.39% | 0.00, 0.00% | 9.1, 10.3% | 1.1, 1.1% | 50, 67 ms | 283-359 ms |
+| master, landscape | 0.44, 0.44 | 0.00, 0.00 | 12.3, 12.5 | 1.1, 1.1 | 67, 67 | 293-341 |
+| branch, portrait | 0.44, 0.44 | 0.06, 0.06 | 6.4, 7.6 | 3.3, 2.3 | 50, 50 | 258-429 |
+| master, portrait | 0.50, 0.44 | 0.06, 0.06 | 9.1, 4.4 | 2.2, 4.4 | 50, 33 | 251-443 |
+
+The spare costs playback nothing measurable: the branch is within master's spread throughout.
 - **The rest of the first run belongs to the template's own document.** A spare that also laid out text, ran a script and decoded a small JPEG (a third build, C) did no better than B: 379 to 451 ms in landscape, and in portrait 736 to 769 for Announcement and 495 to 556 for Info frame. Compiling the template's script, resolving its styles and decoding its faces are each paid by its own document. So is a photo's first decode: Chromium does not share decoded images across documents or processes. Only preparing the template pays them, and at a page load nothing plays before its first prepare to hide that behind.
 - **Why a photo costs more in portrait.** A 16:9 4K photo covering a 1080x1920 screen is drawn about 3413x1920, so it decodes near full size. In landscape it is drawn 1920x1080, where a JPEG decodes at half scale, a quarter of the pixels. A photo sized for the screen would cost less. That is a change to the media, not to the player.
 
