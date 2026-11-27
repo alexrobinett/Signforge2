@@ -344,7 +344,7 @@ Video-pan's prepare, loading-next drops and the first prepare after a restart di
 - **Timers and services.** `apt-daily` ran in 3.8 s with no effect on frames (table above). man-db already runs at idle I/O priority and nice 19. Not changed.
 - **zram.** 30 MB of the 2 GB swap is in use, so it is not changed.
 - **I/O scheduler** (mq-deadline) and **ozone/Wayland against cage**: not tried. Nothing measured pointed at them.
-- **Overclock**: not tried. It could not be left in place, and no measurement showed the ARM clock to be the limit. Performance pins the ARM at 1.8 GHz and the hot spots are GPU and process start.
+- **Overclock**: not tried here. Measured on 2026-11-22: the ARM at 2.0 GHz is a small gain and an option of `tune.sh`, and the GPU at 750 MHz hung the display driver ("Overclock and a quiet console", below).
 - **NetworkManager's netplan rewrites** cost about 5 s of boot and are the biggest remaining delay. They were not touched: the network configuration is how the rig is reached, and a mistake there leaves a Pi off the network.
 
 ### Still over budget
@@ -1250,6 +1250,7 @@ The same bench with every photo 700x560, as The Guardian's feed sends them, so e
 - Within the budget in landscape. Night's first run dropped 1.30% to two long frames while playing; two more runs of it dropped 0.11 and 0.17%, so it is not the layout.
 - Portrait prepares, 496 to 547 ms, are where 2.0.0's were with large photos (478 to 530): a small photo decodes faster and the wait for its load costs about as much. Over the budget by up to 47 ms in 7 of 8, as accepted for 2.0.0.
 
+<<<<<<< Updated upstream
 
 ## The bundle cache, with and without (issue #213, 2026-11-26)
 
@@ -1675,3 +1676,53 @@ Master's player, content built from master `9c09d376` (A) and from the branch (B
 - **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
 
 **Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.
+=======
+## Overclock and a quiet console (2026-11-22 and 2026-11-27)
+
+The Pi 400 as `tune.sh` left it on 2026-11-18, changed one setting at a time. Kept changes are in `device/pi/tune.sh`.
+
+### Overclock
+
+Master's player (`7efa7b85`) and the 21-spot stress playlist, `device/pi/bench.sh` with 4 playlist runs (2 cut, 2 fade 600 ms, 290 s each) and 5 kiosk restarts per round, each round after a reboot into its `config.txt`. Order: stock, ARM, stock, ARM. Both ARM rounds ran at `arm_freq=2000` and `over_voltage=6` (1.00 V at the core against 0.92 V; `vcgencmd` reported 2000 MHz throughout).
+
+| Measure | Stock, 1.8 GHz (2 rounds) | ARM 2.0 GHz (2 rounds) |
+| --- | --- | --- |
+| Overall, cut | 0.70, 0.56, 0.67, 0.67% | 0.68, 0.62, 0.51, 0.59% |
+| Overall, fade | 0.81, 0.83, 0.69, 0.71% | 0.66, 0.65, 0.65, 0.67% |
+| Fade window | 2.31, 1.98, 1.37, 1.46% | 1.63, 1.29, 1.72, 1.46% |
+| Loading next | 15.3-17.7% | 14.2-18.7% |
+| Prepare median | 250-271 ms | 238-261 ms |
+| Prepares over 500 ms, per run | 5, 4, 3, 3, 2, 3, 2, 1 | 1, 1, 1, 2, 1, 2, 0, 2 |
+| Worst frame | 150-300 ms | 117-283 ms |
+| Chromium launch after a restart | 2.02-2.19 s | 1.92-2.03 s |
+| First prepare after a restart, median per round | 888, 737 ms | 746, 781 ms |
+| Kernel start to first spot (1 boot each) | 21.9 s | 22.3 s |
+| Temperature max | 59.4 C | 62.8 C |
+
+Never throttled in any run (`get_throttled` 0x0), and no kernel error.
+
+- **The ARM overclock is a small gain.** Prepares come 5 to 8% sooner and fewer run over 500 ms, Chromium launches 0.1 s sooner, and fade runs drop slightly fewer frames, for 3.4 C.
+- **It does not move what is over budget.** Frames dropped while the next spot loads, the first prepare after a restart and boot time are where they were: those are GPU work, process start and SD reads.
+- **It is an option, not the default** (`sh tune.sh --overclock`). It was measured on one Pi 400, whose keyboard plate is its heat sink. A bare Pi 4 in an enclosure has to be checked for temperature and stability before it is left on, and 2.0 GHz is as far as this went.
+- **The GPU overclock is rejected.** With `v3d_freq=750` and `over_voltage=6` the Pi booted, then the display driver hung in a firmware call (`vc4` blocked in `rpi_firmware_property`): the screen went dark, `vcgencmd` hung and the shutdown took about eight minutes. Stock clocks came back with the setting removed. Nothing was measured at that clock, and the two together were not tried.
+
+One run of the first stock round was lost to a DevTools socket that timed out on the read at the end of its 290 s; `bench.py` now opens a new socket for that read, and the 16 runs after it all completed.
+
+### Boot
+
+Kernel start to the first spot, from `signforge-bootprobe.service`, 3 reboots per variant, on the cloud config. Measured twice, because the rig's player changed in between: on 2026-11-22 with master's player and its cached stress content, and on 2026-11-27 with player release 4.
+
+| Variant | Kiosk unit starts | Navigation | First spot | Kept |
+| --- | --- | --- | --- | --- |
+| 11-22: as `tune.sh` left it | 7.75-8.28 s | 18.69-19.11 s | 21.88-22.29 s | |
+| 11-22: `quiet`, no serial console, four services off | 7.06-7.23 s | 17.75-17.88 s | 21.20-21.39 s | |
+| 11-27: as `tune.sh` left it | 7.85-8.06 s | 18.90-19.03 s | 23.20-23.78 s | |
+| 11-27: `quiet`, no serial console | 7.17-7.31 s | 18.21-18.40 s | 22.37-22.83 s | **yes** |
+| 11-27: the same, four services off (2 boots) | 7.14, 7.20 s | 17.95, 18.07 s | 22.23, 22.82 s | no |
+
+- **A quiet kernel console without the serial port is kept** (`quiet` in `cmdline.txt`, `console=serial0,115200` removed): the kiosk unit starts 0.7 s sooner and the first spot comes 0.8 to 0.9 s sooner. The two were not measured apart. Errors still reach the screen and the journal has everything; a serial cable shows nothing until `tune.sh --undo`.
+- **Turning off `e2scrub_reap`, `rpi-eeprom-update`, `udisks2` and `bluetooth` is rejected**: with the quiet console already on, it changed nothing beyond the spread between boots.
+- Settings that act before the kernel starts (`disable_splash`, `boot_delay`, the camera and display auto-detect) were not tried: `/proc/uptime` cannot see that time, so they could not be measured.
+
+Raw files are on the rig in `~/signforge/tuning-logs-20261122/`.
+>>>>>>> Stashed changes

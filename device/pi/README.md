@@ -41,8 +41,11 @@ None of them waits for the network. The player is offline-first and plays its ca
    - CPU governor `performance` instead of `ondemand`, through a udev rule. Frames dropped during a 600 ms fade halved, for about 2 C.
    - `systemd-user-sessions.service` no longer waits for `network.target`. logind holds every login session, the kiosk's included, until that unit has run.
    - cloud-init off after the first boot (`cloud-init=disabled` in `cmdline.txt`).
+   - A quiet kernel console, and none on the serial port (`quiet`, no `console=serial0`). The first spot after boot comes 0.8 to 0.9 s sooner. A serial cable shows nothing until it is undone.
 
-   Together with the unit ordering, the first spot after boot comes 21 to 22 s after the kernel starts, against 37 to 46 s before.
+   Together with the unit ordering, the first spot after boot comes 22 to 23 s after the kernel starts, against 37 to 46 s before.
+
+   `sh tune.sh --overclock` also runs the ARM at 2.0 GHz instead of 1.8 (`arm_freq=2000`, `over_voltage=6`). Prepares come 5 to 8% sooner for 3.4 C more; frames dropped while the next spot loads and boot time do not change. It is not the default: it was measured on one Pi 400, so check temperature (`vcgencmd measure_temp`, `get_throttled`) on a bare Pi 4 in its enclosure before leaving it on. Do not overclock the GPU: `v3d_freq=750` hung the display driver.
 
 Left as Raspberry Pi OS ships them, each for a measured reason given in RESULTS.md: `hdmi_enable_4kp60=1` (it also runs the GPU at 550 MHz rather than 500), the 512 MB CMA pool, zram swap, the persistent journal and the apt and man-db timers.
 

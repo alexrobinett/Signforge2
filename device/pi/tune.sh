@@ -2,14 +2,16 @@
 # Linux-side tuning of a Pi 4 player. Run once on a provisioned Pi (Raspberry Pi OS Lite 64-bit,
 # Trixie), as the kiosk user with sudo, after scripts/deploy-pi.sh has installed the units:
 #
-#   sh tune.sh           apply (idempotent), then reboot
-#   sh tune.sh --undo    put every setting back to the Raspberry Pi OS default, then reboot
+#   sh tune.sh              apply (idempotent), then reboot
+#   sh tune.sh --overclock  the same, with the ARM at 2.0 GHz (setting 5)
+#   sh tune.sh --undo       put every setting back to the Raspberry Pi OS default, then reboot
 #
 # Each change below was kept because it measured better beyond run-to-run noise on the Pi 400,
 # 1080p 60 Hz; the numbers are in spike/pi-perf/RESULTS.md, "Linux tuning". Changes tried and
 # rejected are listed there too, with why.
 set -eu
 undo=false; [ "${1:-}" = "--undo" ] && undo=true
+overclock=false; [ "${1:-}" = "--overclock" ] && overclock=true
 
 # 1. CPU governor: performance. Raspberry Pi OS sets ondemand from a udev rule in
 #    raspberrypi-sys-mods (60-ondemand-governor.rules); a rule of the same name in /etc/udev/rules.d
@@ -53,6 +55,33 @@ if $undo; then
   sudo sed -i 's/ cloud-init=disabled//' "$boot/cmdline.txt"
 elif ! grep -q 'cloud-init=disabled' "$boot/cmdline.txt"; then
   sudo sed -i '1s/$/ cloud-init=disabled/' "$boot/cmdline.txt"  # cmdline.txt is one line
+fi
+
+# 4. A quiet kernel console, and none on the serial port. Every kernel line is otherwise written out
+#    at 115200 baud and to the screen while the system starts. Kiosk unit 0.7 s sooner, first spot
+#    after boot 22.4-22.8 s instead of 23.2-23.8 s. Errors still reach the screen and everything is
+#    in the journal; a serial cable shows nothing until this is undone. Turning off unused services
+#    as well (e2scrub_reap, rpi-eeprom-update, udisks2, bluetooth) added nothing.
+if $undo; then
+  sudo sed -i 's/ quiet$//' "$boot/cmdline.txt"
+  grep -q 'console=serial0' "$boot/cmdline.txt" || sudo sed -i 's/console=tty1/console=serial0,115200 console=tty1/' "$boot/cmdline.txt"
+else
+  sudo sed -i 's/console=serial0,115200 //' "$boot/cmdline.txt"
+  grep -q ' quiet$' "$boot/cmdline.txt" || sudo sed -i '1s/$/ quiet/' "$boot/cmdline.txt"
+fi
+
+# 5. ARM overclock, only when asked for: 2.0 GHz instead of 1.8, at over_voltage=6 (1.00 V instead
+#    of 0.92 V). Prepares came 5 to 8% sooner (median 238-261 ms against 250-271), Chromium launched
+#    0.1 s sooner and fewer prepares ran over 500 ms, for 3.4 C more (max 62.8 C, never throttled).
+#    Frames dropped while the next spot loads, the first prepare after a start and boot time did not
+#    move. Not the default: it was measured on one Pi 400, whose keyboard is its heat sink, and a
+#    bare Pi 4 in an enclosure has to be checked for temperature and stability before it is left on.
+#    The GPU is left alone: v3d_freq=750 hung the display driver in a firmware call (screen dark,
+#    vcgencmd hung, eight minutes to shut down). A run without --overclock takes the block out.
+sudo sed -i '/^# >>> signforge overclock/,/^# <<< signforge overclock/d' "$boot/config.txt"
+if $overclock; then
+  printf '%s\n' '# >>> signforge overclock (device/pi/tune.sh --overclock)' 'arm_freq=2000' 'over_voltage=6' '# <<< signforge overclock' \
+    | sudo tee -a "$boot/config.txt" > /dev/null
 fi
 
 sudo systemctl daemon-reload
