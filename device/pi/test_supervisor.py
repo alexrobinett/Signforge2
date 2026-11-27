@@ -20,7 +20,7 @@ class Panel:
     def __init__(self, mode, takes=True):
         self.mode, self.takes, self.sets = mode, takes, 0
 
-    def run(self, *cmd, timeout=10):
+    def run(self, *cmd, timeout=10, env=None):
         if cmd == ("wlr-randr",):
             if self.mode is None:
                 return 0, 'HDMI-A-1 "Panel"\n  Enabled: yes\n  Modes:\n'
@@ -47,7 +47,7 @@ class ModeWatch(unittest.TestCase):
             mock.patch.dict(supervisor.env, {"XDG_RUNTIME_DIR": runtime}),
             mock.patch.dict(supervisor.state, {"on": True}),
             mock.patch.dict(supervisor.mode_watch, {"resets": 0, "failed": 0, "next_try": 0.0, "stuck_at": None}),
-            mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None}),
+            mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None, "quiet": 0}),
             mock.patch.dict(supervisor.mode_errors, {"count": 0, "next_log": 0.0}),
         ]
         for p in self.patches:
@@ -129,10 +129,10 @@ class ModeWatch(unittest.TestCase):
                 raise Stop()
             broken_now["on"] = step == "fail"
 
-        def run(*cmd, timeout=10):
+        def run(*cmd, timeout=10, env=None):
             if broken_now["on"]:
                 raise RuntimeError("wlr-randr went away")
-            return panel.run(*cmd, timeout=timeout)
+            return panel.run(*cmd, timeout=timeout, env=env)
 
         with (
             mock.patch.object(supervisor, "run", run),
@@ -166,7 +166,7 @@ class ModeWatch(unittest.TestCase):
             raise RuntimeError("systemctl went away")
 
         with (
-            mock.patch.object(supervisor, "last_beat", -10_000.0),
+            mock.patch.object(supervisor, "beat_due", -10_000.0),
             mock.patch.object(supervisor, "run", broken),
             mock.patch.object(supervisor.time, "sleep", sleep),
             contextlib.redirect_stdout(self.log),
@@ -177,10 +177,15 @@ class ModeWatch(unittest.TestCase):
 
 
 class PlayerWatch(unittest.TestCase):
-    """A kiosk restart that fails, tried again a bounded number of times (review of #560), at times passed in."""
+    """The watchdog at times passed in: a kiosk restart that fails, tried again a bounded number of times (review of
+    #560), and a kiosk that hangs as it starts, before its first beat."""
 
     def setUp(self):
-        self.patches = [mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None}), mock.patch.object(supervisor, "last_beat", 0.0)]
+        # A beat at 0.
+        self.patches = [
+            mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None, "quiet": 0}),
+            mock.patch.object(supervisor, "beat_due", float(supervisor.STALE_S)),
+        ]
         for p in self.patches:
             p.start()
         self.addCleanup(lambda: [p.stop() for p in self.patches])
@@ -204,7 +209,8 @@ class PlayerWatch(unittest.TestCase):
         self.assertEqual(self.check(answers, stale), 1)
         self.assertEqual(self.check(answers, stale + supervisor.RESTART_RETRY_S - 1), 0)
         self.assertEqual(self.check(answers, stale + supervisor.RESTART_RETRY_S), 1)
-        self.assertEqual(self.check(answers, stale + 10 * supervisor.RESTART_RETRY_S), 0)
+        # The restart that took has its start's grace for a first beat.
+        self.assertEqual(self.check(answers, stale + supervisor.RESTART_RETRY_S + supervisor.START_GRACE_S), 0)
         self.assertIn(f"kiosk restart failed (1 of {supervisor.RESTART_TRIES}): Failed to restart: busy; next try in", self.log.getvalue())
         self.assertIn("kiosk restart queued", self.log.getvalue())
 
@@ -217,6 +223,21 @@ class PlayerWatch(unittest.TestCase):
             at += supervisor.RESTART_RETRY_S
         self.assertEqual(tries, supervisor.RESTART_TRIES)
         self.assertIn("no more tries until the player beats", self.log.getvalue())
+
+    def test_restarts_a_kiosk_that_hangs_as_it_starts_then_waits_for_a_beat(self):
+        # The supervisor starts at 0; Chromium hangs before the player's first beat, every time.
+        supervisor.arm(0.0)
+        answers = [(0, "")] * supervisor.QUIET_RESTARTS
+        self.assertEqual(self.check(answers, supervisor.START_GRACE_S), 0)
+        at, tries = supervisor.START_GRACE_S + 1, 0
+        for _ in range(supervisor.QUIET_RESTARTS + 2):
+            tries += self.check(answers, at)
+            at += supervisor.START_GRACE_S + 1
+        # Restarted QUIET_RESTARTS times, each with its grace, then left for a beat: never in a loop.
+        self.assertEqual(tries, supervisor.QUIET_RESTARTS)
+        self.assertIn(f"{supervisor.QUIET_RESTARTS} in a row with no beat: no more until the player beats", self.log.getvalue())
+        self.assertIsNone(supervisor.beat_due)
+
 
 class Alive(unittest.TestCase):
     """POST /alive through the supervisor's own server, on a free port: the beat's release reaches the update channel (#628)."""
@@ -235,6 +256,23 @@ class Alive(unittest.TestCase):
         self.server = supervisor.ThreadingHTTPServer(("127.0.0.1", 0), supervisor.Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.shutdown)
+        self.addCleanup(self.server.server_close)
+        p = mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None, "quiet": 0})
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(supervisor, "beat_due", None)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def raw(self, path, length):
+        """`path` POSTed with this Content-Length and no body, the connection left open: the reply's status line. A
+        server that waits for a body the length does not promise never answers, and the read times out."""
+        import socket
+
+        with socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5) as conn:
+            conn.sendall(f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{supervisor.PORT}\r\nx-sf-token: {supervisor.TOKEN}\r\nContent-Length: {length}\r\n\r\n".encode())
+            with conn.makefile("rb") as reply:
+                return reply.readline().decode().strip()
 
     def alive(self, body):
         import http.client
@@ -255,6 +293,37 @@ class Alive(unittest.TestCase):
             self.assertEqual(self.alive(json.dumps({"version": "0.1.0+abc", "release": "42"})), (200, {"failedRelease": {"version": 42, "reason": "stopped"}}))
         # A beat with no release, or one not a whole number, reaches the gate as None: an older build, still beating.
         self.assertEqual(updates.beats, [42, None, None, None])
+
+    def test_refuses_a_negative_content_length_rather_than_read_until_the_client_closes(self):
+        updates = self.Updates()
+        with mock.patch.object(supervisor, "updates", updates):
+            # Still a beat, for no release's gate.
+            self.assertEqual(self.raw("/alive", -1), "HTTP/1.0 200 OK")
+        self.assertEqual(updates.beats, [None])
+        self.assertIsNotNone(supervisor.beat_due)
+        stored = os.path.join(HOME, "neg.credential")
+        with mock.patch.object(supervisor, "CREDENTIAL_FILE", stored):
+            self.assertEqual(self.raw("/credential", -1), "HTTP/1.0 400 Bad Request")
+            self.assertEqual(self.raw("/credential", 4097), "HTTP/1.0 400 Bad Request")
+        self.assertFalse(os.path.exists(stored))
+
+    def test_a_beat_starts_the_count_of_quiet_restarts_again(self):
+        supervisor.restarts["quiet"] = supervisor.QUIET_RESTARTS - 1
+        with mock.patch.object(supervisor, "updates", None):
+            self.alive(None)
+        with mock.patch.object(supervisor, "run", return_value=(0, "")) as run, contextlib.redirect_stdout(io.StringIO()):
+            supervisor.check_player(supervisor.beat_due + 1)
+        # The player beat, then hung: its restart is the first in a row, so it is armed again.
+        self.assertEqual(run.call_count, 1)
+        self.assertIsNotNone(supervisor.beat_due)
+
+    def test_drops_a_client_that_stalls_mid_request(self):
+        import socket
+
+        with mock.patch.object(supervisor.Handler, "timeout", 0.2), socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5) as conn:
+            conn.sendall(b"POST /alive HTTP/1.1\r\nHost: 127.0.0.1")
+            # The server closes it; a handler that waited on forever would leave this read to time out.
+            self.assertEqual(conn.recv(1024), b"")
 
     def test_answers_nothing_more_without_the_update_channel(self):
         with mock.patch.object(supervisor, "updates", None):
@@ -380,13 +449,70 @@ class Updates(unittest.TestCase):
             self.assertIsNone(supervisor.load_updater())
         self.assertIn("player updates off", out.getvalue())
 
-    def test_an_update_s_kiosk_restart_disarms_the_watchdog_until_the_player_beats(self):
-        with mock.patch.object(supervisor, "last_beat", 100.0), mock.patch.object(supervisor, "run", return_value=(0, "")) as run:
+    def watchdog(self):
+        """The watchdog's state as a supervisor starts it, for one test."""
+        for p in (mock.patch.dict(supervisor.restarts, {"failed": 0, "retry_at": None, "quiet": 0}), mock.patch.object(supervisor, "beat_due", None)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_an_update_s_kiosk_restart_gives_the_new_player_a_start_s_grace(self):
+        self.watchdog()
+        with (
+            mock.patch.object(supervisor, "run", return_value=(0, "")) as run,
+            mock.patch.object(supervisor.time, "monotonic", return_value=100.0),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             supervisor.kiosk_restart()
-            self.assertIsNone(supervisor.last_beat)
-            # Long after, with no beat: the watchdog does not restart it again on its own.
-            supervisor.check_player(10_000.0)
-        self.assertEqual(run.call_count, 1)
+            # Its start is not a hang; a start that hangs is.
+            supervisor.check_player(100.0 + supervisor.START_GRACE_S)
+            self.assertEqual(run.call_count, 1)
+            supervisor.check_player(100.0 + supervisor.START_GRACE_S + 1)
+        self.assertEqual(run.call_count, 2)
+
+    def test_the_gate_is_checked_on_every_watch_beside_restarts_of_a_new_player_that_hangs(self):
+        import updater
+
+        self.watchdog()
+        switched = 1000.0
+        clock = {"now": switched}
+        restarted = []
+
+        def run(*cmd, timeout=10, env=None):
+            restarted.append(clock["now"])
+            return 0, ""
+
+        class Gate:
+            """The update's gate: it rolls the release back once its window for a first beat has passed, as updater does."""
+
+            checks, rolled = [], False
+
+            def check_gate(self):
+                Gate.checks.append(clock["now"])
+                if not Gate.rolled and clock["now"] - switched > updater.GATE_FIRST_S:
+                    Gate.rolled = True
+                    supervisor.kiosk_restart()
+
+        def sleep(_):
+            clock["now"] += 5
+            if clock["now"] > switched + 600:
+                raise Stop()
+
+        with (
+            mock.patch.object(supervisor, "run", run),
+            mock.patch.object(supervisor, "updates", Gate()),
+            mock.patch.object(supervisor.time, "sleep", sleep),
+            mock.patch.object(supervisor.time, "monotonic", lambda: clock["now"]),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            # The switch to a new release, whose player hangs as it starts, and so does the one rolled back to.
+            supervisor.kiosk_restart()
+            with self.assertRaises(Stop):
+                supervisor.watch_player()
+        grace = supervisor.START_GRACE_S
+        # The switch; the watchdog's restarts, each a grace after the last; the gate's rollback, at its own time and
+        # with its own grace; then QUIET_RESTARTS in a row with no beat, and no more.
+        self.assertEqual(restarted, [switched, switched + grace + 5, switched + 2 * grace + 10, switched + 305, switched + 305 + grace + 5])
+        self.assertEqual(Gate.checks, [switched + 5 * i for i in range(1, 121)])
 
     def test_the_gate_check_waits_for_no_poll_holding_the_lock(self):
         class Gate:
