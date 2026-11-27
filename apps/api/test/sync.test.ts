@@ -1,7 +1,7 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
 import { MANIFEST_SCHEMA, MAX_SYNC_BLOBS, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_RESPONSE_BLOBS, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { registerRelease, seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mintCredential } from '../src/device/credential';
@@ -174,6 +174,61 @@ describe('the heartbeat', () => {
     });
     // The device clock is an hour slow: the drift the server saw is an hour.
     expect(beat!.driftMs).toBe(3_600_000);
+  });
+
+  it('keeps each player release the device supervisor rolled back, one a version, until the screen runs a newer one (#628)', async () => {
+    const s = await setUp('sync-failed-release');
+    await registerRelease(env.DB, { version: 40, sha256: '4'.repeat(64) }, 'stable');
+    await registerRelease(env.DB, { version: 42, sha256: '2'.repeat(64) }, 'stable');
+    await registerRelease(env.DB, { version: 43, sha256: '3'.repeat(64) }, 'canary');
+    await registerRelease(env.DB, { version: 44, sha256: '6'.repeat(64) }, 'stable');
+    const beat = async () => parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson)!.failedReleases;
+    const player = (release: number) => ({ ...syncBody().player, release });
+    // Running 39: 40 fails, then 42; each kept, newest first, and kept after the report stops.
+    await sync(s, syncBody({ player: player(39), failedRelease: { version: 40, reason: 'not-alive' } }));
+    await sync(s, syncBody({ seq: 1, player: player(39), failedRelease: { version: 42, reason: 'stopped' } }));
+    await sync(s, syncBody({ seq: 2, player: player(39) }));
+    expect(await beat()).toEqual([
+      { version: 42, reason: 'stopped' },
+      { version: 40, reason: 'not-alive' },
+    ]);
+    // Reported again on each beat: still one entry for the version.
+    await sync(s, syncBody({ seq: 3, player: player(39), failedRelease: { version: 42, reason: 'stopped' } }));
+    expect((await beat())!.map((f) => f.version)).toEqual([42, 40]);
+    // A canary release on a stable screen, and a version no release has: never offered to it, so not kept.
+    await sync(s, syncBody({ seq: 4, player: player(39), failedRelease: { version: 43, reason: 'stopped' } }));
+    await sync(s, syncBody({ seq: 5, player: player(39), failedRelease: { version: 99, reason: 'stopped' } }));
+    expect((await beat())!.map((f) => f.version)).toEqual([42, 40]);
+    // It runs 41, which passed: 40 goes, 42 stays. Then 44: both go.
+    await sync(s, syncBody({ seq: 6, player: player(41) }));
+    expect((await beat())!.map((f) => f.version)).toEqual([42]);
+    await sync(s, syncBody({ seq: 7, player: player(44) }));
+    expect(await beat()).toBeUndefined();
+    // A browser screen has no supervisor to roll anything back: its kind is its own word, so this is a soft check.
+    await s.seed.scope.screens.update(s.seed.screen, { kind: 'browser' });
+    await sync(s, syncBody({ seq: 8, player: player(39), failedRelease: { version: 42, reason: 'not-alive' } }));
+    expect(await beat()).toBeUndefined();
+  });
+
+  it('says since when a screen has run its player release, set when the release changes and carried on while it does not (#628)', async () => {
+    const s = await setUp('sync-release-since');
+    const since = async () => parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson)!.releaseSince;
+    const player = (release?: number) => ({ ...syncBody().player, ...(release === undefined ? {} : { release }) });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.setSystemTime(Date.UTC(2026, 10, 26, 12));
+    await sync(s, syncBody({ player: player(41) }));
+    expect(await since()).toBe(Date.UTC(2026, 10, 26, 12));
+    vi.setSystemTime(Date.UTC(2026, 10, 26, 13));
+    await sync(s, syncBody({ seq: 1, player: player(41) }));
+    expect(await since()).toBe(Date.UTC(2026, 10, 26, 12));
+    await sync(s, syncBody({ seq: 2, player: player(42) }));
+    expect(await since()).toBe(Date.UTC(2026, 10, 26, 13));
+    // A build with no release number: nothing to time.
+    await sync(s, syncBody({ seq: 3, player: player() }));
+    expect(await since()).toBeUndefined();
   });
 
   it('takes a heartbeat from a player that reports every source it has seen, and stores at most MAX_SYNC_SOURCES', async () => {

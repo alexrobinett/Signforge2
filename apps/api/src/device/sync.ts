@@ -20,7 +20,7 @@ import {
   type DisplayOverride,
   type SyncResponse,
 } from '@signforge/contract';
-import { scoped, type DeviceScreen } from '@signforge/db';
+import { platform, scoped, type DeviceScreen } from '@signforge/db';
 import { boundImageHashes, hasBoundListImage, snapshotFit, staleAge } from '@signforge/player-core';
 import { liveOverride, type ScreenHeartbeat, sha256Hex } from '@signforge/tools';
 import type { Context } from 'hono';
@@ -38,6 +38,9 @@ const SYNC_INTERVAL_S = 300;
  * (the pace rule in `syncRoute`).
  */
 const MORE_PHOTOS_SYNC_S = 15;
+/** The most player releases a screen's heartbeat keeps as rolled back (#628): one a version, the newest. */
+const MAX_FAILED_RELEASES = 10;
+
 /** How much of each asked photo's hash the heartbeat keeps, its end, to tell whether the next sync holds it: 64 bits. */
 const ASK_KEPT = 16;
 /** Counts for an hour this far past the server's are not believed: the screen's clock is wrong. */
@@ -221,6 +224,23 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const more = missing > asked.length;
   const soon = more && (fetched || fresh > asked.length || retry);
 
+  // A player release the supervisor rolled back (#628): only from a device, which has a supervisor (a screen's kind is
+  // its own word at pairing, so this is a soft check), and only for a release its own channel was offered, so a screen
+  // cannot report on builds it never had. Read only when one is reported: a supervisor reports after a rollback, on
+  // each beat until it installs a newer release.
+  const reported =
+    req.failedRelease && screen.kind === 'device' && (await platform(c.env.DB).playerReleases.offers(screen.playerChannel, req.failedRelease.version))
+      ? req.failedRelease
+      : undefined;
+  // One a version, kept until the screen runs a newer release, which then passed; carried on from the last heartbeat,
+  // which this sync writes anyway. When the screen reports no release (a build from before #628) none is dropped.
+  const running = req.player.release;
+  const failedReleases = [...(reported ? [reported] : []), ...screen.release.failed.filter((f) => f.version !== reported?.version)]
+    .filter((f) => running === undefined || f.version > running)
+    .slice(0, MAX_FAILED_RELEASES);
+  // Since when it has run this release: carried on while the release is the one the last heartbeat had.
+  const releaseSince = running === undefined ? undefined : running === screen.release.running && screen.release.since !== null ? screen.release.since : now;
+
   // The parser gives back only the contract's fields (#156): the device lookup reads this row with json_extract, which
   // a deeply nested unknown key would break.
   const heartbeat: ScreenHeartbeat = {
@@ -241,6 +261,8 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
       sent,
       repeat,
     },
+    ...(releaseSince !== undefined && { releaseSince }),
+    ...(failedReleases.length && { failedReleases }),
   };
   const counts = req.playCounts
     .map((p) => ({ hour: Date.parse(p.hour), spotId: p.spot, plays: p.plays, ms: Math.round(p.ms) }))

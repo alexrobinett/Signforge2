@@ -141,9 +141,10 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   const { spot } = await tool(owner, 'save_spot', { name: 'Break room agenda', kind: 'url', url: 'https://example.com/agenda' });
   await d1(`UPDATE spots SET bindings_json = '{"events":{"source":"${calendar}","path":"events"}}' WHERE org_id = '${orgId}' AND id = '${spot.id}'`);
 
-  // The feed is fine; the calendar was good two hours ago and its last 2 polls failed.
+  // The feed is fine; the calendar was good ten minutes ago and its last 2 polls failed. A calendar's copy is kept for
+  // minutes, about 25 (#624, `staleAge`), so the screens still show it: the 2 hours this read before #630 are past that.
   await pollFound(orgId, blog);
-  await pollFound(orgId, calendar, 120 * MINUTE);
+  await pollFound(orgId, calendar, 10 * MINUTE);
   await pollsFailed(orgId, calendar, 2);
   await owner.reload();
   await hydrated(owner);
@@ -165,6 +166,15 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await expect(owner.getByText('1 feed', { exact: true })).toBeVisible();
   await axe(owner);
   await shots(owner, '60-integrations');
+
+  // Its last good copy two hours old: past what a calendar is kept for, so its spots show their fallback values.
+  await pollFound(orgId, calendar, 120 * MINUTE);
+  await pollsFailed(orgId, calendar, 2);
+  await owner.reload();
+  await hydrated(owner);
+  await expect(failing).toContainText(
+    /The Break room calendar answers with an error: its last 2 checks failed\. Its spots show their fallback values: the last good copy, from (?:\w{3} )?\d+:\d\d [AP]M, is more than \d+ min old\. It feeds the spot Break room agenda\./,
+  );
 
   // Two failing: the first fix is filled, the other outlined.
   await pollsFailed(orgId, blog, 1);

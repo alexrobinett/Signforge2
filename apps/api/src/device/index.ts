@@ -3,13 +3,13 @@
  * device API section of `packages/contract`; routes are in docs/backend-plan.md#screens.
  */
 import { isCatalogueFontFile } from '@signforge/compiler';
-import { isId, type DataSnapshot } from '@signforge/contract';
-import { scoped } from '@signforge/db';
+import { isId, MANIFEST_SCHEMA, type DataSnapshot, type PlayerReleaseOffer } from '@signforge/contract';
+import { platform, scoped } from '@signforge/db';
 import { boundImageHashes, hasBoundListImage, snapshotFit, staleAge } from '@signforge/player-core';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { feedBlobKey } from '../data/feed-photos';
-import { baseBlobKey, blobHeaders, manifestKey, matches, orgBlobKey } from '../r2';
+import { baseBlobKey, blobHeaders, manifestKey, matches, orgBlobKey, playerReleaseKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { fileManifests, screenManifests } from './manifests';
 import { pairPoll, pairStart } from './pairing';
@@ -43,6 +43,33 @@ device.post('/pair/poll', pairPoll);
 device.use('*', deviceAuth);
 
 device.post('/sync', syncRoute);
+
+// A player build for the device supervisor (#628): the newest release the screen's own channel is offered, as CI
+// signed it, and the schema this server compiles. The channel is the screen's, read with its credential: a request
+// cannot name another. The supervisor verifies the signature before it trusts any of it.
+device.get('/player-release', async (c) => {
+  const { playerChannel: channel } = c.get('screen');
+  const release = await platform(c.env.DB).playerReleases.offered(channel);
+  const offer: PlayerReleaseOffer = {
+    manifestSchema: MANIFEST_SCHEMA,
+    channel,
+    release: release ? { manifest: release.manifest, signature: release.signature } : null,
+  };
+  return c.json(offer, 200, { 'cache-control': 'no-store' });
+});
+
+// A release's tarball, by the hash its manifest names: only a registered release the screen's channel is offered,
+// and only from the release prefix (`sys/player/`), so no hash reaches any other key.
+device.get('/player-release/:sha256', async (c) => {
+  const sha = c.req.param('sha256');
+  if (!SHA256.test(sha)) return notFound('release not found');
+  if (!(await platform(c.env.DB).playerReleases.bySha256(c.get('screen').playerChannel, sha))) return notFound('release not found');
+  const obj = await c.env.BLOBS.get(playerReleaseKey(sha));
+  if (!obj) return notFound('release not found');
+  return new Response(obj.body, {
+    headers: blobHeaders(sha, obj.httpMetadata?.contentType || 'application/gzip', obj.size, 'private, max-age=31536000, immutable'),
+  });
+});
 
 device.get('/manifest.json', async (c) => {
   const screen = c.get('screen');

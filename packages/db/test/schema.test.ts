@@ -21,7 +21,7 @@ const AUTH_TABLES = [
   'user',
   'verification',
 ];
-const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', 'images_usage', 'feed_photo_queue_usage', ...AUTH_TABLES]);
+const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', 'images_usage', 'feed_photo_queue_usage', 'player_releases', ...AUTH_TABLES]);
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
 /** Indexes that deliberately do not lead with org_id. The due deliveries are found across orgs, from pending rows only. */
