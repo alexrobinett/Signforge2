@@ -36,9 +36,11 @@ import {
   MAX_SYNC_SOURCES,
   THIS_PLAYER,
   isDisplayOutput,
+  parseSupervisorAliveResponse,
   parseSyncResponse,
   type DeviceCommand,
   type DisplayOutput,
+  type FailedPlayerRelease,
   type ScreenKind,
   type ScreenManifest,
   type SyncRequest,
@@ -88,6 +90,9 @@ import {
 } from './store';
 
 declare const __SF_PLAYER_VERSION__: string;
+declare const __SF_PLAYER_RELEASE__: number;
+/** The player release this build is (#628), which the supervisor's health gate waits for; none for a hand-made build. */
+const RELEASE = __SF_PLAYER_RELEASE__ ? { release: __SF_PLAYER_RELEASE__ } : {};
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -102,6 +107,26 @@ const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
 /** How often the player tells the supervisor it is alive. Its `STALE_S` must allow for a few missed. */
 const ALIVE_MS = 5000;
 const KIND: ScreenKind = query.get('kind') === 'browser' ? 'browser' : 'device';
+/** The player release the supervisor last rolled back, as its `/alive` reply says, sent on each sync (#628). */
+let failedRelease: FailedPlayerRelease | undefined;
+
+/** Beat the supervisor's `/alive` with this build's version and release, which its health gate after an update waits for (#628). */
+async function beat(): Promise<void> {
+  const res = await supervisorFetch('/alive', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ version: __SF_PLAYER_VERSION__, ...RELEASE }),
+  });
+  if (!res.ok) return;
+  const raw: unknown = await res.json();
+  // A reason this build does not know, from a newer supervisor, is `other`, the contract's open value: the report still
+  // reaches the server, which would refuse a sync carrying an unknown one. A reply it cannot read otherwise is dropped.
+  const failed = typeof raw === 'object' && raw !== null && 'failedRelease' in raw ? raw.failedRelease : undefined;
+  let reply = parseSupervisorAliveResponse(raw);
+  if (!reply.ok && typeof failed === 'object' && failed !== null) reply = parseSupervisorAliveResponse({ failedRelease: { ...failed, reason: 'other' } });
+  if (!reply.ok) console.warn("[sf] the supervisor's /alive reply is not one this player reads:", reply.problems.join('; '));
+  failedRelease = reply.ok ? reply.value.failedRelease : undefined;
+}
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
 
@@ -870,7 +895,7 @@ async function apiSync(): Promise<void> {
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
-    player: { version: __SF_PLAYER_VERSION__, ...THIS_PLAYER },
+    player: { version: __SF_PLAYER_VERSION__, ...RELEASE, ...THIS_PLAYER },
     manifest: {
       ...(manifest ? { active: manifest.id } : {}),
       filesMissing: filesMissing(),
@@ -884,6 +909,7 @@ async function apiSync(): Promise<void> {
     snapshots: ofHeldSources(heldVersions()),
     dataRejected: ofHeldSources(dataRejections()),
     ...(heldFeed.length ? { blobs: heldFeed.slice(0, MAX_SYNC_BLOBS) } : {}),
+    ...(failedRelease ? { failedRelease } : {}),
   };
   const sentAt = Date.now();
   const res = await fetch(`${BASE}/sync`, {
@@ -1093,7 +1119,7 @@ async function boot(): Promise<void> {
   }, 10_000);
   // That watchdog runs in the renderer it watches. The supervisor restarts the kiosk when these
   // beats stop (device/pi/supervisor.py). Without a supervisor (the demo in a browser) nobody hears them.
-  if (KIND === 'device') setInterval(() => void supervisorFetch('/alive', { method: 'POST' }).catch(() => undefined), ALIVE_MS);
+  if (KIND === 'device') setInterval(() => void beat().catch(() => undefined), ALIVE_MS);
 
   void syncLoop();
   if (API) void contentLoop();

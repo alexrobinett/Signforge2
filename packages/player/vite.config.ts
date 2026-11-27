@@ -15,6 +15,14 @@ function playerVersion(): string {
   }
 }
 
+/** The player release this build is, set by the release workflow (#628); 0 for a build made any other way. */
+function playerRelease(): number {
+  const raw = process.env.SF_PLAYER_RELEASE;
+  if (!raw) return 0;
+  if (!/^[1-9][0-9]{0,14}$/.test(raw)) throw new Error(`SF_PLAYER_RELEASE must be a whole number from 1, not ${raw}`);
+  return Number(raw);
+}
+
 export default defineConfig({
   base: './',
   build: { outDir: '../../dist/player', emptyOutDir: true, target: 'chrome120' },
@@ -24,6 +32,7 @@ export default defineConfig({
     // is the CMS's when the CMS serves the player build on its hostname.
     __SF_CMS_ORIGIN__: JSON.stringify(process.env.CMS_ORIGIN ?? ''),
     __SF_PLAYER_VERSION__: JSON.stringify(playerVersion()),
+    __SF_PLAYER_RELEASE__: JSON.stringify(playerRelease()),
     // No real time is earlier than the build: a clock reading before it is not trusted (src/clock.ts).
     __SF_BUILD_TIME__: JSON.stringify(Date.now()),
   },
