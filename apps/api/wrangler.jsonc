@@ -109,7 +109,10 @@
         "PLAYER_RELEASE_PUBLIC_KEY": "MCowBQYDK2VwAyEAwCkrMWF7x/CTowuvNj/Nf1gY+pzpogvDKvv1JMlgfks=",
         "ENVIRONMENT": "demo",
         "BUILD_VERSION": "dev",
-        "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
+        "EMAIL_FROM": "SignForge <no-reply@alexrobinett.dev>",
+        "CMS_ORIGIN": "https://demo.signforge.alexrobinett.dev",
+        "R2_S3_ENDPOINT": "https://30e327dbb4fcf68bf6605f549d9b6198.r2.cloudflarestorage.com",
+        "R2_BUCKET_NAME": "signforge-demo",
         "AGENT_CALLS_DATASET": "signforge_agent_calls_demo",
         // The demo's real-feed test: every shown story gets its photo. Past what six feeds polling hourly can bring in a
         // day (250 each, at ten a poll); unset elsewhere, which keeps 60 an org and 30 a source (docs/backend-plan.md).

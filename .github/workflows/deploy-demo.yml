@@ -1,0 +1,79 @@
+# Deploy the demo environment to Cloudflare after CI passes on master, or on manual dispatch.
+# Order matters: template-check first (the API binds to it), then D1 migrations, then the API
+# Worker, then the CMS (with the player build), then base templates (docs/ci.md, "Deploying").
+name: Deploy demo
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Only a push to master deploys: the nightly and manual CI runs (#254) re-test the same commit, and should not redeploy it.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # No `environment:`: environments in a private repository need GitHub Pro (see "Required status check"); the secrets are repository secrets.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore pnpm store
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy template-check
+        run: pnpm --filter @signforge/template-check exec wrangler deploy --env=""
+
+      - name: Apply D1 migrations (demo)
+        run: pnpm --filter @signforge/api exec wrangler d1 migrations apply DB --remote --env demo --yes
+
+      - name: Deploy API (demo)
+        run: pnpm --filter @signforge/api exec wrangler deploy --env demo --var "BUILD_VERSION:$(git rev-parse --short HEAD)"
+
+      - name: Build player
+        run: pnpm build:player
+
+      - name: Build CMS (demo)
+        env:
+          CLOUDFLARE_ENV: demo
+        run: pnpm --filter @signforge/cms build
+
+      - name: Deploy CMS (demo)
+        run: pnpm --filter @signforge/cms exec wrangler deploy --config dist/server/wrangler.json
+
+      - name: Seed base templates (demo)
+        env:
+          SF_ADMIN_TOKEN: ${{ secrets.SF_DEMO_ADMIN_TOKEN }}
+        run: |
+          if [ -n "$SF_ADMIN_TOKEN" ]; then
+            pnpm seed:templates --api https://signforge-api-demo.signforge-spike-m3-platform.workers.dev
+          else
+            echo "SF_DEMO_ADMIN_TOKEN not set; skipping template seed."
+          fi

@@ -183,4 +183,4 @@ To add a slice:
 
 ## Deploying
 
-Nothing is deployed yet. `wrangler.jsonc` has no default environment, as apps/api has none: `dev` is local only, and `demo` and `prod` each bind `API` to that environment's API Worker. Build with `CLOUDFLARE_ENV=<env>`; the build writes the deployable config for that environment. Routes are added when hostnames exist (M3-24): the API Worker gets `<host>/api/*` (and `/v1/*`, `/health`), this Worker gets `<host>/*`.
+`wrangler.jsonc` has no default environment, as apps/api has none: `dev` is local only, and `demo` and `prod` each bind `API` to that environment's API Worker. Build with `CLOUDFLARE_ENV=<env>`; the build writes `dist/server/wrangler.json` for that environment. `demo` is deployed at `https://demo.signforge.alexrobinett.dev` (custom domain on `signforge-cms-demo`, which forwards `/api/*` and `/v1/device/*` over the `API` service binding) by `.github/workflows/deploy-demo.yml`. `prod` routes are added when its hostname is ready.

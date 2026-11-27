@@ -25,6 +25,7 @@
       "name": "signforge-cms-demo",
       "main": "@tanstack/react-start/server-entry",
       "vars": { "ENVIRONMENT": "demo" },
+      "routes": [{ "pattern": "demo.signforge.alexrobinett.dev", "custom_domain": true }],
       "services": [{ "binding": "API", "service": "signforge-api-demo" }]
     },
     "prod": {

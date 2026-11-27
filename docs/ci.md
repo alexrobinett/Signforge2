@@ -182,6 +182,15 @@ Before, `packages/player/browser/templates.test.ts` played every template inside
 
 A change to `templates/clock` alone now runs `template-clock:test` (5 s) beside the cli's, the API's, the tools', the runtime check's and the CMS unit tests, and no longer `player:test`. The template tasks have more tests than templates.test.ts had (283, from 138) because the brand-colour checks that played six templates in one test now run per template.
 
+## Deploying
+
+`.github/workflows/deploy-demo.yml` deploys the `demo` environment to Cloudflare (`https://demo.signforge.alexrobinett.dev`) after `CI` succeeds on `master`, or on manual dispatch. It runs in dependency order: `signforge-template-check` (container image + Worker), D1 migrations on `signforge-demo`, `signforge-api-demo`, the player and CMS builds, `signforge-cms-demo`, and `pnpm seed:templates` when `SF_DEMO_ADMIN_TOKEN` is configured.
+
+Required GitHub Actions repository secrets (environments need GitHub Pro on a private repository):
+- `CLOUDFLARE_API_TOKEN` (Workers Scripts, Containers, D1, R2 and Queues edit permissions)
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SF_DEMO_ADMIN_TOKEN` (optional: seeds base templates after deploy)
+
 ## Required status check
 
 `master` requires no check today. The repository was private on a plan without branch protection; it is public now, so rulesets work, but none is set yet. Nothing waits on `check`: a docs-only pull request, which starts no run, merges as any other.
