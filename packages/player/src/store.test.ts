@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
 import { FEED_IMAGE_MAX_BYTES } from './download';
-import { PinSet, UnauthorisedError, heldBlobs, loadActiveManifest, storeFrames, storedFrames, sync, syncFeedImages } from './store';
+import { PinSet, UnauthorisedError, heldBlobs, loadActiveManifest, storeFrames, storedFrames, sync, syncFeedImages, wipeContent } from './store';
 
 // ---------------------------------------------------------------- fakes
 /** Cache Storage in memory: enough of it for the store. */
@@ -87,7 +87,7 @@ beforeEach(() => {
   stores = new Map();
   api.manifest = manifest('m1');
   api.requests = [];
-  vi.stubGlobal('caches', { open: async (name: string) => open(name) });
+  vi.stubGlobal('caches', { open: async (name: string) => open(name), delete: async (name: string) => stores.delete(name) });
   vi.stubGlobal('fetch', vi.fn(handle));
 });
 
@@ -214,7 +214,32 @@ describe('file cleanup and pins', () => {
     await sync(BASE, { currentId: 'm1', headers: auth });
     expect(await storedFrames(A)).toEqual({ wrapper: 'wrapper a', template: 'template a' });
     expect(await storedFrames(B)).toBeUndefined();
-    expect((await open('sf-frames-v1').keys()).map((k) => new URL(k.url).pathname)).toEqual([`/_sf/frames/0.0.0%2Btest/${A}`]);
+    expect((await open('sf-frames-v1').keys()).map((k) => new URL(k.url).pathname)).toEqual([`/_sf/frames/0.0.0%2Btest%2B0/${A}`]);
+  });
+
+  it('never fails a sync for a frames cache it cannot list: it drops the cache instead (#232)', async () => {
+    await storeFrames(A, { wrapper: 'w', template: 't' });
+    open('sf-frames-v1').keys = async () => {
+      throw new Error('quota');
+    };
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await expect(sync(BASE, { headers: auth })).resolves.toMatchObject({ changed: true });
+    expect((await loadActiveManifest())?.id).toBe('m1');
+    expect(stores.has('sf-frames-v1')).toBe(false);
+  });
+
+  it('wipes kept frames with the rest of the content (#232)', async () => {
+    await storeFrames(A, { wrapper: 'w', template: 't' });
+    await wipeContent();
+    expect(await storedFrames(A)).toBeUndefined();
+  });
+
+  it('reads no frames from an entry that is not what it keeps, so the bundle is contained again (#232)', async () => {
+    const at = `/_sf/frames/0.0.0%2Btest%2B0/${A}`;
+    await open('sf-frames-v1').put(at, Response.json({ wrapper: 1, template: 'only one' }));
+    expect(await storedFrames(A)).toBeUndefined();
+    await open('sf-frames-v1').put(at, new Response('not json'));
+    await expect(storedFrames(A)).rejects.toThrow();
   });
 
   it('pins from several holders add up, and a holder replaces its own pins', () => {

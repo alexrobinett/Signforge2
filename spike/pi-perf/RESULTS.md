@@ -1587,7 +1587,7 @@ The first prepare after a page load re-measured on master `c0d984c2`, every look
 
 **The fix: each bundle kept as contained** (`storedFrames` and `storeFrames` in `packages/player/src/store.ts`). A screen keeps the frames it made beside its file cache, under the player's version, and the next page load reads them back instead of containing the bundle again. The read-ahead stores them while a spot plays; storing during the prepare added about 20 ms to it.
 
-`reload.py` (scratch): per spot, a page load with the HTTP cache and storage cleared, 12 s to settle, then three page loads keeping storage, as a kiosk restart does; the page's first prepare of each. Master `7ce782c7` (A) against the branch (B), ABBA, Pop:
+Per spot, through DevTools as `isolate.py` drives it: a page load with the HTTP cache and storage cleared, 12 s to settle, then three page loads keeping storage, as a kiosk restart does; the page's first prepare of each. Master `7ce782c7` (A) against the branch (B), ABBA, Pop:
 
 | Orientation | Template | A, storage kept | B, storage kept | A, cleared | B, cleared |
 | --- | --- | --- | --- | --- | --- |
