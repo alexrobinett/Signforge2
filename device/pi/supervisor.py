@@ -66,7 +66,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8091
-MODE = "1920x1080@60"
+# The mode the output is held at: a Pi 4 at 1080p 60 Hz; the N100 rig sets its own (device/n100, SF_MODE).
+MODE = os.environ.get("SF_MODE", "1920x1080@60")
 CEC_DEV = "/dev/cec0"  # HDMI 0, the port next to the power socket
 PLAYER_ORIGINS = set(os.environ.get("SF_PLAYER_ORIGINS", "http://127.0.0.1:8090").split())
 TOKEN_FILE = os.path.expanduser("~/signforge/supervisor.token")
@@ -413,6 +414,10 @@ def load_updater():
         return updater.Updater(
             os.path.expanduser("~/signforge"), key, api_get, api_download, kiosk_restart, lambda: state["on"], time.time, time.monotonic, random.random
         )
+    except FileNotFoundError as e:
+        # The release key is deployed only once there is one (deploy-pi.sh): until then, this is the usual reason.
+        print(f"player updates off: no {e.filename}", flush=True)
+        return None
     except Exception as e:
         print(f"player updates off: {e!r}", flush=True)
         return None

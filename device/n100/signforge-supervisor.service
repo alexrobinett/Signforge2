@@ -1,0 +1,15 @@
+[Unit]
+Description=SignForge device supervisor on the N100 rig (display power, kiosk watchdog)
+# As device/pi's, for the rig's user, its Wayland runtime directory and its mode: 4K60 (kiosk-drm.env).
+Before=signforge-kiosk.service
+
+[Service]
+User=signforge
+Environment=XDG_RUNTIME_DIR=/tmp/signforge-runtime
+Environment=SF_MODE=3840x2160@60
+ExecStart=/usr/bin/python3 /home/signforge/signforge/supervisor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
