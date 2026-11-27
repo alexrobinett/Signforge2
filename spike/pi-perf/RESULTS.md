@@ -1607,3 +1607,31 @@ Per spot, through DevTools as `isolate.py` drives it: a page load with the HTTP 
 - **What is left in portrait** is the template's new process and, over a photo, its first decode: not the bundle.
 
 **While the read-ahead keeps them** (review of #635). The first 12 s of plays after a cleared page load, when the read-ahead reads the bundles still to come and, on the branch, stores their frames: `room-status+announcement+countdown+info-frame`, cut, landscape, master `12f1f88b` (A) against the branch (B), ABBA, three loads a pass. Frames dropped while playing: A 0.00 to 0.15% (0 or 1 of about 675 a load), B the same, no stall over 50 ms in either; B had kept all five of the manifest's bundles by the end of each load.
+
+## Info frame's photo panel (issue #239, 2026-11-26)
+
+Info frame's portrait fades dropped 1.06 to 1.33% of frames in every look on master `c0d984c2`, 14 to 16% of the fade's own frames; landscape fades 0.44 to 0.72%, and the other look-kit templates' portrait fades 0.17 to 0.56%. Cuts and later prepares were within budget.
+
+**Where it goes.** A trace of a portrait fade puts it on the GPU process's main thread: 316 to 334 ms of a 500 ms fade, against 179 to 206 ms in landscape, most of it `SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass` (173 to 194 ms against 89 to 102). A `viz.quads` trace counts about one more render pass a frame with the caption than without (107 to 112 in a fade, against 85 to 87).
+
+**What makes it.** Scratch variants of Pop, faded in portrait, two runs each: off, the ticker, the rail, the logo, the clock and weather or the forecast, a 1080 photo, a photo frame not rounded, the caption without animations, without `overflow: hidden` or on a `will-change` layer, the price tag not animated, all left 0.94 to 1.39% dropped; the caption off took it to 0.50%, the photo panel off to 0.28 to 0.33%. Chromium's layer tree (CDP `LayerTree`, mid-intro, portrait) showed why: the photo panel (`.panel`, 1016x1356) is a layer whose intro animates its opacity, and the caption and its price tag, inside it, are layers of their own (they animate, and the kit gives them `will-change`). A layer whose opacity animates with layers of its own inside is drawn to an offscreen surface each frame. Without the caption the panel holds none, so the photo is drawn once.
+
+**The fix.** The caption, chip and logo sit beside the panel in a positioned `.photo-area`, at the same place; the panel holds only the photo. Night's caption rounds its own bottom corners, as the panel's clip did. Screenshots before and after match at 1920x1080 (at most 7 levels, anti-aliasing) and at 390 px (the caption a sub-pixel apart).
+
+Master's player, content built from master `9c09d376` (A) and from the branch (B), `isolate.py`'s method (30 s, fade 500 ms), ABBA, overall dropped:
+
+| Orientation | Look | A | B |
+| --- | --- | --- | --- |
+| portrait | Pop | 1.17, 1.06% | 0.61, 0.50% |
+| | Poster | 1.28, 1.11% | 0.67, 0.56% |
+| | Night | 1.33, 1.28% | 0.83, 0.72% |
+| | Corporate | 1.11, 1.22% | 0.72, 0.78% |
+| landscape | Pop | 0.39, 0.50% | 0.39, 0.44% |
+| | Poster | 1.17 (one 200 ms stall), 0.61% | 0.56, 0.56% |
+| | Night | 0.67, 0.83% | 0.78, 0.61% |
+| | Corporate | 0.50, 0.50% | 0.50, 0.44% |
+
+- **Every portrait fade is under 1% now**: the fade's own frames drop 2 to 9%, against 11 to 16%.
+- **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
+
+**Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.

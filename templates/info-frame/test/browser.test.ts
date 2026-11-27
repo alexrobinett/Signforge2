@@ -320,6 +320,29 @@ describe('info frame (#201)', () => {
     }
   });
 
+  // The photo panel's intro and outro fade it: anything animated inside it is on a layer of its own (the caption, the
+  // chip and the logo were), which made Chromium draw the whole panel off screen every frame, over 1% of a portrait fade
+  // on the Pi. The photo's own drift (landscape) is the one exception.
+  it("animates nothing inside the photo panel's fade but the photo, with the caption, chip and logo beside it (#239)", async () => {
+    for (const orientation of ['landscape', 'portrait'] as const) {
+      const at = await frame(orientation);
+      for (const look of looks) {
+        const f = await at.show({ look, ...news, rail: 'off' });
+        const seen = await f.evaluate(() => {
+          const photo = document.querySelector('.photo')!;
+          const panel = photo.closest('.lk-photo')!;
+          const opacity = (a: Animation) => a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'opacity' in k);
+          const animated = document.getAnimations().flatMap((a) => (a.effect instanceof KeyframeEffect && a.effect.target ? [{ a, el: a.effect.target }] : []));
+          return {
+            fades: animated.some(({ a, el }) => el === panel && opacity(a)),
+            inside: [...new Set(animated.filter(({ el }) => el !== panel && el !== photo && panel.contains(el)).map(({ el }) => el.className))],
+          };
+        });
+        expect(seen, `${look}, ${orientation}`).toEqual({ fades: true, inside: [] });
+      }
+    }
+  });
+
   it('shows the time and date from the screen clock, in 12 or 24 hours, and the next three days from its zone', async () => {
     const r = await frame();
     const read = (f: Frame) =>
