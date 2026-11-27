@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { expect, test, type Page } from '@playwright/test';
 import { axe, createOrg, hydrated, publishImage, shots, signInAs } from './helpers';
 
@@ -102,3 +103,39 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play;
   expect(await player(tab)).toMatchObject({ manifestId: '', played: 0 });
   expect(await kept(tab)).toEqual({ credential: false, files: 0 });
 });
+
+// The player takes its content base and its supervisor from its address, which on the CMS's hostname anyone can
+// write into a link. The other site is what such a link's author would run: a supervisor handing over a
+// credential for its own device API.
+for (const mount of ['/test-screen/', '/player/']) {
+  test(`the player at ${mount} reaches no other site its address names`, async ({ page }) => {
+    const reached: string[] = [];
+    const other = createServer((req, res) => {
+      reached.push(`${req.method} ${req.url}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' });
+      res.end(JSON.stringify({ credential: `sfd_scr_other.${'a'.repeat(43)}`, api: `http://${req.headers.host}/v1/device`, token: 'other' }));
+    });
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve));
+    const address = other.address();
+    if (typeof address !== 'object' || !address) throw new Error('the other site is not listening');
+    const site = `http://127.0.0.1:${address.port}`;
+    try {
+      // Each request the browser refuses under the page's policy, by its address.
+      await page.addInitScript(() => {
+        document.addEventListener('securitypolicyviolation', (e) =>
+          Reflect.set(window, 'sfRefused', [...(Reflect.get(window, 'sfRefused') ?? []), e.blockedURI]),
+        );
+      });
+      await page.goto(`${mount}?content=${site}/v1/device&supervisor=${site}/supervisor`);
+      // The player asked for the other site and the browser refused it there: a refusal comes before any request leaves.
+      await expect
+        .poll(async () => {
+          const refused: string[] = (await page.evaluate(() => Reflect.get(window, 'sfRefused'))) ?? [];
+          return { refused: refused.some((url) => url.startsWith(site)), reached };
+        })
+        .toEqual({ refused: true, reached: [] });
+    } finally {
+      other.close();
+    }
+  });
+}
