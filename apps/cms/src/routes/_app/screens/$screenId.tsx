@@ -455,11 +455,42 @@ function ScreenPage() {
               <dt className="text-muted-foreground">Player</dt>
               <dd className="text-meta">
                 {(screen.heartbeat?.playerVersion ?? screen.playerVersion) ? (
-                  <span className="font-mono">{screen.heartbeat?.playerVersion ?? screen.playerVersion}</span>
+                  <>
+                    <span className="font-mono">{screen.heartbeat?.playerVersion ?? screen.playerVersion}</span>
+                    {/* The release number its updates go by (#628), for a build the release workflow made. */}
+                    {screen.heartbeat?.playerRelease != null && (
+                      <>
+                        {' '}
+                        · release <span className="font-mono">{screen.heartbeat.playerRelease}</span>
+                      </>
+                    )}
+                  </>
                 ) : (
                   'none'
                 )}
               </dd>
+              {/* Which player releases its device installs (#628), and those its supervisor rolled back: a device's only, as
+                  a browser screen has no supervisor to install one. */}
+              {screen.kind === 'device' && (
+                <>
+                  <dt className="text-muted-foreground">Updates</dt>
+                  <dd>{screen.playerChannel === 'canary' ? 'Canary: each player release first' : 'Stable: player releases once promoted'}</dd>
+                </>
+              )}
+              {!!screen.heartbeat?.failedReleases.length && (
+                <>
+                  <dt className="text-muted-foreground">Rolled back</dt>
+                  <dd>
+                    {screen.heartbeat.failedReleases.map((f, i) => (
+                      <span key={f.version} className="block">
+                        Release <span className="font-mono">{f.version}</span>:{' '}
+                        {f.reason === 'not-alive' ? 'it never came up' : f.reason === 'stopped' ? 'it stopped running' : 'it failed'}
+                        {i === 0 && ', so the screen kept the one before'}
+                      </span>
+                    ))}
+                  </dd>
+                </>
+              )}
               <dt className="text-muted-foreground">Clock</dt>
               <dd>
                 {screen.heartbeat

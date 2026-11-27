@@ -209,7 +209,7 @@ function TableValues({
   const rows = readPath(data, 'rows');
   // Read when it was added, not yet polled: what screens get after the first check.
   const firstRead = !snapshot && justRead !== undefined;
-  const fresh = firstRead || isFresh(snapshot, now);
+  const fresh = firstRead || isFresh(dataSource, snapshot, now);
   const unbind = () => onChange((d) => ({ ...d, bindings: Object.fromEntries(Object.entries(d.bindings).filter(([f]) => !(f in live.fields))) }));
   return (
     <LiveCard fresh={fresh} instead="typed items" className="gap-3">

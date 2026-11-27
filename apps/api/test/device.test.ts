@@ -1,14 +1,16 @@
 // The device tree against local D1 and R2: credentials, the three content routes, and what a
 // screen may not reach.
-import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, parsePlayerReleaseOffer, type ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { registerRelease, seedOrg, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential, parseCredential } from '../src/device/credential';
 import { feedBlobKey } from '../src/data/feed-photos';
-import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
+import { baseBlobKey, manifestKey, orgBlobKey, playerReleaseKey } from '../src/r2';
+import { device } from '../src/device';
+import { counted } from './counting';
 
 const BASE = 'https://api.test/v1/device';
 const sha = (c: string) => c.repeat(64);
@@ -489,5 +491,86 @@ describe('GET /v1/device/data/:id.json', () => {
     expect((await get('/data/dev-b-source.json', a.credential)).status).toBe(404);
     expect((await get('/data/nope.json', a.credential)).status).toBe(404);
     expect((await get('/data/dev-a-source', a.credential)).status).toBe(404);
+  });
+});
+
+// #628: a device supervisor asks for its screen's channel's release, and fetches its tarball by hash. The channel is
+// the screen's own, read with its credential; a tarball comes only from the release prefix, and only for a release
+// the channel is offered.
+describe('player releases (#628)', () => {
+  const STABLE = sha('5');
+  const CANARY = sha('7');
+  const UNREGISTERED = sha('9');
+  const offerFor = async (credential: string) => {
+    const res = await get('/player-release', credential);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body: unknown = await res.json();
+    // What a supervisor reads: the contract's own parser takes it.
+    const read = parsePlayerReleaseOffer(body);
+    expect(read.ok, JSON.stringify(read)).toBe(true);
+    return body;
+  };
+
+  it('offers nothing before any release, with the schema the server compiles', async () => {
+    expect(await offerFor(a.credential)).toEqual({ manifestSchema: MANIFEST_SCHEMA, channel: 'stable', release: null });
+  });
+
+  it('offers a stable screen the newest promoted release, and a canary screen the newest of all, as CI signed it', async () => {
+    const stable = await registerRelease(env.DB, { version: 5, sha256: STABLE }, 'stable');
+    const canary = await registerRelease(env.DB, { version: 7, sha256: CANARY }, 'canary');
+    // The release prefix only: a tarball's hash names no other key.
+    await env.BLOBS.put(playerReleaseKey(STABLE), 'tar5', { httpMetadata: { contentType: 'application/gzip' } });
+    await env.BLOBS.put(playerReleaseKey(CANARY), 'tar7');
+    await env.BLOBS.put(playerReleaseKey(UNREGISTERED), 'tar9');
+    await testScope(env.DB, b.seed.orgId).screens.update(b.seed.screen, { playerChannel: 'canary' });
+    // The text and signature exactly as CI registered them, byte for byte.
+    expect(await offerFor(a.credential)).toEqual({
+      manifestSchema: MANIFEST_SCHEMA,
+      channel: 'stable',
+      release: { manifest: stable.manifest, signature: stable.signature },
+    });
+    expect(await offerFor(b.credential)).toEqual({
+      manifestSchema: MANIFEST_SCHEMA,
+      channel: 'canary',
+      release: { manifest: canary.manifest, signature: canary.signature },
+    });
+  });
+
+  it("streams a release's tarball to a screen whose channel is offered it, and nothing else", async () => {
+    const fetched = async (credential: string, hash: string) => {
+      const res = await get(`/player-release/${hash}`, credential);
+      return res.status === 200 ? `200 ${await res.text()} ${res.headers.get('content-type')}` : String(res.status);
+    };
+    expect(await fetched(a.credential, STABLE)).toBe('200 tar5 application/gzip');
+    expect(await fetched(b.credential, STABLE)).toBe('200 tar5 application/gzip');
+    expect(await fetched(b.credential, CANARY)).toBe('200 tar7 application/gzip');
+    // A canary build is never a stable screen's, though the screen knows its hash.
+    expect(await fetched(a.credential, CANARY)).toBe('404');
+    // In R2 under the prefix, but no release names it; another prefix's object; not a hash at all.
+    expect(await fetched(b.credential, UNREGISTERED)).toBe('404');
+    expect(await fetched(a.credential, BLOB2)).toBe('404');
+    expect(await fetched(a.credential, '..%2Fb%2Fx')).toBe('404');
+  });
+
+  it('asks for the credential, as every device route does', async () => {
+    expect((await get('/player-release')).status).toBe(401);
+    expect((await get(`/player-release/${STABLE}`)).status).toBe(401);
+  });
+
+  it('costs one D1 query more than the credential check, and writes nothing, polled every 15 minutes', async () => {
+    const cost = async (path: string) => {
+      const { result, bindings } = counted();
+      await device.request(path, { headers: { authorization: `Bearer ${a.credential}` } }, bindings);
+      return result();
+    };
+    // A credential's first use is marked once, ever (`markUsed`): spent here, so what is pinned is every later poll.
+    await get('/player-release', a.credential);
+    // Measured, as the most each may take: the credential's screen, its channel with it, then the release. No write, so
+    // a fleet's polls cost the Free plan's 100,000 daily writes nothing.
+    expect({ offer: await cost('/player-release'), tarball: await cost(`/player-release/${STABLE}`) }).toEqual({
+      offer: { statements: 2, queries: 2, rpcs: [] },
+      tarball: { statements: 2, queries: 2, rpcs: [] },
+    });
   });
 });

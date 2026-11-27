@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import {
+  MIN_REFRESH_S,
   SCREEN_BOX,
   coverSize,
   parseBrandKit,
@@ -68,6 +69,7 @@ import {
   type TargetedEntry,
 } from '@signforge/compiler';
 import { imageSample } from '@signforge/media/sample';
+import { staleAge } from '@signforge/player-core';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
 import { checkVideoFile } from './video';
@@ -373,16 +375,21 @@ async function readBrand(
  * Fetch every data source a project lists, convert it the way the server will, and write the
  * snapshots the player reads (`<out>/<id>.json`), for static content and for testing templates
  * against live data without the API's poller (apps/api/src/data). A screen falls back to static
- * values a day after `checkedAt`, so static content needs this rerun. Failures are reported per
+ * values a day after `checkedAt`, a calendar after its minutes (`staleAge`, #624), so static content needs this rerun at the
+ * source's `refreshS`. Failures are reported per
  * source; the others still write.
  */
 async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
-  const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(join(projectDir, 'data-sources.json'));
+  const sources = readJson<Record<string, { url: string; refreshS: number; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(
+    join(projectDir, 'data-sources.json'),
+  );
   mkdirSync(outDir, { recursive: true });
   const now = new Date();
   let failed = 0;
   for (const [id, src] of Object.entries(sources)) {
     try {
+      // The project's own file: a refreshS that is not whole seconds would make a stale age no screen accepts.
+      if (!Number.isSafeInteger(src.refreshS) || src.refreshS < MIN_REFRESH_S) throw new Error(`refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
       const res = await fetch(src.url, { headers: { 'user-agent': 'signforge-dev' }, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.text();
@@ -392,7 +399,8 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
           : src.format === 'rss'
             ? normaliseFeed('rss', body)
             : JSON.parse(body);
-      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), checkedAt: now.toISOString(), data };
+      const age = staleAge({ format: src.format ?? 'json', refreshS: src.refreshS });
+      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), checkedAt: now.toISOString(), ...age, data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count =
         src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';

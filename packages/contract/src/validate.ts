@@ -21,6 +21,17 @@ import {
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
+  SNAPSHOT_STALE_MS,
+  FAILED_RELEASE_REASONS,
+  MAX_RELEASE_BYTES,
+  MAX_RELEASE_FILES,
+  MAX_RELEASE_MANIFEST_BYTES,
+  MAX_RELEASE_PATH_LENGTH,
+  PLAYER_RELEASE_FORMAT,
+  RELEASE_PATH_SEGMENT,
+  RELEASE_SIGNATURE,
+  RESERVED_RELEASE_PATH,
+  PLAYER_CHANNELS,
   MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
   MAX_SYNC_RESPONSE_BLOBS,
@@ -39,6 +50,12 @@ import {
   type DisplayOutput,
   type SyncResponse,
   type SyncRequest,
+  type FailedPlayerRelease,
+  type PlayerReleaseManifest,
+  type PlayerReleaseFile,
+  type PlayerReleaseOffer,
+  type PlayerChannel,
+  type SupervisorAliveResponse,
   type Sha256,
   type ServerSocketMessage,
   type ScreenKind,
@@ -111,6 +128,8 @@ const wholeNumbers = (v: unknown): v is number[] => Array.isArray(v) && Array.fr
 const versions: (v: unknown) => v is readonly number[] = wholeNumbers;
 /** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
 export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
+/** A snapshot's stale age: whole seconds from a minute to SNAPSHOT_STALE_MS. */
+const isStaleS = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= MIN_REFRESH_S && (v as number) * 1000 <= SNAPSHOT_STALE_MS;
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
@@ -1153,7 +1172,8 @@ function manifestRules(m: unknown): string[] {
     if (own(d, 'id') !== key) errors.push(`data source "${key}" is listed under a different id ("${show(own(d, 'id'))}")`);
     if (!isIdValue(key)) errors.push(`data source id "${key}" is not a valid id`);
     const r = own(d, 'refreshS');
-    if (!(isNum(r) && r >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
+    if (!(Number.isSafeInteger(r) && (r as number) >= MIN_REFRESH_S))
+      errors.push(`data source "${key}": refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
   }
   return errors;
 }
@@ -1313,6 +1333,7 @@ export const dataSnapshotShape = object(
     version: is(isCount, 'snapshot version must be a whole number, 0 or more'),
     fetchedAt: is(isInstant, 'snapshot fetchedAt must be an ISO 8601 time'),
     checkedAt: is(isInstant, 'snapshot checkedAt must be an ISO 8601 time'),
+    staleS: optional(is(isStaleS, `snapshot staleS must be a whole number from ${MIN_REFRESH_S} to ${SNAPSHOT_STALE_MS / 1000}`)),
     data: custom((v) =>
       v === undefined
         ? refused(['snapshot has no data'])
@@ -1453,6 +1474,83 @@ const blobList = (max: number) =>
     return accepted([...v]);
   });
 
+// ------------------------------------------------------------ player releases (#628)
+
+const isReleaseVersion = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
+const isFailedReason = (v: unknown): v is FailedPlayerRelease['reason'] => FAILED_RELEASE_REASONS.some((r) => r === v);
+const isReleasePath = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= MAX_RELEASE_PATH_LENGTH && v.split('/').every((seg) => RELEASE_PATH_SEGMENT.test(seg) && seg !== '.' && seg !== '..');
+
+const failedReleaseShape = said(
+  `failedRelease needs a version (a whole number from 1) and a reason (${FAILED_RELEASE_REASONS.join(', ')})`,
+  object({ version: is(isReleaseVersion, ''), reason: is(isFailedReason, '') }, ''),
+);
+
+/** A release's files: at most MAX_RELEASE_FILES, each at a path of its own that is no directory of another's. */
+const releaseFiles = custom<PlayerReleaseFile[]>((v) => {
+  if (!Array.isArray(v)) return refused(['files must be a list']);
+  if (v.length > MAX_RELEASE_FILES) return refused([`files holds at most ${MAX_RELEASE_FILES} files`]);
+  const files: PlayerReleaseFile[] = [];
+  for (const f of v) {
+    const path = own(f, 'path');
+    const sha256 = own(f, 'sha256');
+    if (!isReleasePath(path))
+      return refused([`a file's path must be relative, of segments ${RELEASE_PATH_SEGMENT.source}, at most ${MAX_RELEASE_PATH_LENGTH} long`]);
+    if (path.split('/')[0] === RESERVED_RELEASE_PATH)
+      return refused([`file "${path}": ${RESERVED_RELEASE_PATH}/ is reserved for the content a player is sent`]);
+    if (!isSha256(sha256)) return refused([`file "${path}": sha256 must be a lowercase hex sha256`]);
+    files.push({ path, sha256 });
+  }
+  const paths = new Set(files.map((f) => f.path));
+  if (paths.size !== files.length) return refused(['files lists a path twice']);
+  for (const { path } of files) {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++)
+      if (paths.has(parts.slice(0, i).join('/'))) return refused([`file "${parts.slice(0, i).join('/')}" is also a directory of "${path}"`]);
+  }
+  return accepted(files);
+});
+
+export const playerReleaseManifestShape = object(
+  {
+    format: is((v): v is typeof PLAYER_RELEASE_FORMAT => v === PLAYER_RELEASE_FORMAT, `format must be ${PLAYER_RELEASE_FORMAT}`),
+    minSupervisor: is(isReleaseVersion, 'minSupervisor must be a whole number from 1'),
+    version: is(isReleaseVersion, 'version must be a whole number from 1'),
+    sha256: is(isSha256, 'sha256 must be a lowercase hex sha256'),
+    size: is(
+      (v): v is number => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= MAX_RELEASE_BYTES,
+      `size must be a whole number from 1 to ${MAX_RELEASE_BYTES}`,
+    ),
+    files: releaseFiles,
+    manifestSchemas: is(versions, 'manifestSchemas must list the schemas it plays'),
+    protocols: is(versions, 'protocols must list the protocols it plays'),
+    createdAt: is(isInstant, 'createdAt must be an ISO 8601 time'),
+  },
+  'release manifest is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseManifestShape>, PlayerReleaseManifest>>();
+
+export const playerReleaseOfferShape = object(
+  {
+    manifestSchema: is(isReleaseVersion, 'manifestSchema must be a whole number from 1'),
+    channel: is((v): v is PlayerChannel => PLAYER_CHANNELS.some((c) => c === v), `channel must be one of ${PLAYER_CHANNELS.join(', ')}`),
+    release: custom<PlayerReleaseOffer['release']>((r) => {
+      if (r === null) return accepted(null);
+      const manifest = own(r, 'manifest');
+      const signature = own(r, 'signature');
+      if (!isText(manifest) || new TextEncoder().encode(manifest).length > MAX_RELEASE_MANIFEST_BYTES)
+        return refused([`release needs the manifest text, at most ${MAX_RELEASE_MANIFEST_BYTES} bytes, or is null`]);
+      if (typeof signature !== 'string' || !RELEASE_SIGNATURE.test(signature)) return refused(['release needs an Ed25519 signature in base64, 88 characters']);
+      return accepted({ manifest, signature });
+    }),
+  },
+  'offer is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseOfferShape>, PlayerReleaseOffer>>();
+
+export const supervisorAliveResponseShape = object({ failedRelease: optional(failedReleaseShape) }, 'reply is not an object');
+assertSame<Same<Infer<typeof supervisorAliveResponseShape>, SupervisorAliveResponse>>();
+
 /** `POST /v1/device/sync`, as the server receives it. */
 export const syncRequestShape = object(
   {
@@ -1460,7 +1558,7 @@ export const syncRequestShape = object(
     epoch: is(isIdValue, 'epoch must be a valid id'),
     player: said(
       'player needs a version and the manifest schemas and protocols it supports',
-      object({ version: is(isText, ''), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
+      object({ version: is(isText, ''), release: optional(is(isReleaseVersion, '')), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
     ),
     manifest: said(
       'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
@@ -1482,21 +1580,24 @@ export const syncRequestShape = object(
     snapshots: sourceMap('snapshots', 'snapshots must map source ids to versions', 'a version number'),
     dataRejected: optional(sourceMap('dataRejected', 'dataRejected must map source ids to counts', 'a count')),
     blobs: optional(blobList(MAX_SYNC_BLOBS)),
+    failedRelease: optional(failedReleaseShape),
   },
   'request is not an object',
 );
 assertSame<Same<Infer<typeof syncRequestShape>, SyncRequest>>();
 export const validateSyncRequest = (r: unknown) => problemsOf(syncRequestShape, r);
 
-const checkedShape = custom<Record<string, { version: number; checkedAt: string }>>((c) => {
+const checkedShape = custom<Record<string, { version: number; checkedAt: string; staleS?: number }>>((c) => {
   if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);
   const errors: string[] = [];
-  const entries: [string, { version: number; checkedAt: string }][] = [];
+  const entries: [string, { version: number; checkedAt: string; staleS?: number }][] = [];
   for (const [k, v] of Object.entries(c)) {
     const version = own(v, 'version');
     const checkedAt = own(v, 'checkedAt');
-    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt)) errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
-    else entries.push([k, { version, checkedAt }]);
+    const staleS = own(v, 'staleS');
+    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt) || !(staleS === undefined || isStaleS(staleS)))
+      errors.push(`checked: "${k}" must be a source id with a version, checkedAt and, at most, a staleS`);
+    else entries.push([k, { version, checkedAt, ...(staleS === undefined ? {} : { staleS }) }]);
   }
   // fromEntries defines each key as its own, so a `__proto__` key could never set a prototype, whatever an id may be.
   return errors.length ? refused(errors) : accepted(Object.fromEntries(entries));

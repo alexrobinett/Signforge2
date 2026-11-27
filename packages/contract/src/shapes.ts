@@ -573,7 +573,7 @@ export interface InitPayload {
   theme?: FrameTheme;
   /**
    * Protocol 2: the bound fields playing their static fallback in `data` (#225), because their source is missing, its
-   * snapshot is older than `SNAPSHOT_STALE_MS`, or its value did not fit. A bound field not named here plays live data;
+   * snapshot is stale (`DataSnapshot.staleS`), or its value did not fit. A bound field not named here plays live data;
    * a field with no binding is never named. Absent from players before #225: read it as none. It holds for the whole
    * play: `data` is resolved once, at `init`, so a source that goes stale mid-play changes nothing until the next one.
    */
@@ -625,7 +625,7 @@ export interface BrandKit {
 // A data source is a feed the server polls. Screens never call the feed themselves: from
 // the API they get snapshots on each sync (`SyncResponse.snapshots`); static content has them at
 // `data/<id>.json` beside the manifest. A screen keeps the last good one on disk and reads bound
-// fields from it each time a spot starts, while it is fresher than `SNAPSHOT_STALE_MS`.
+// fields from it each time a spot starts, while it is fresher than its `staleS`.
 
 export interface DataSource {
   id: string;
@@ -641,9 +641,12 @@ export interface DataSource {
 export const MAX_SNAPSHOT_BYTES = 65_536;
 
 /**
- * A snapshot the server has not confirmed (`checkedAt`) for this long is stale: a screen plays the
- * spot's static fallback rather than old data. The poller backs off to 6 hours on failure, so a
- * source gets several tries before its screens fall back.
+ * A snapshot the server has not confirmed (`checkedAt`) for this long is stale, unless it says sooner
+ * (`DataSnapshot.staleS`): a screen plays the spot's static fallback rather than old data. The poller backs off to 6
+ * hours on failure, so a source gets several tries before its screens fall back. A snapshot with no `checkedAt` a
+ * screen can read is stale. A screen whose clock it does not trust (its corrected time before the player's build or its
+ * last sync, such as a reboot that lost the time: docs/architecture.md, Player, Clock) cannot tell a snapshot's age: one with a shorter `staleS` is stale then, and any other is judged by
+ * this day as before, so a screen restarted with no network keeps its menu.
  */
 export const SNAPSHOT_STALE_MS = 24 * 3_600_000;
 
@@ -661,6 +664,13 @@ export interface DataSnapshot {
   /** When the server last saw the feed still say this. Staleness counts from it. */
   checkedAt: string;
   data: unknown;
+  /**
+   * How long, in seconds, this snapshot stays current on a screen with no newer `checkedAt` (#624): past it, the screen
+   * plays the spots' fallback, which they can say is not current (`InitPayload.fallback`). The server sets it from the
+   * source as it is now, its kind and its poll interval, so a change to either reaches screens on their next sync with
+   * no publish: a calendar's is minutes. Absent, `SNAPSHOT_STALE_MS`; at most that, at least a minute.
+   */
+  staleS?: number;
 }
 
 /**
@@ -1036,7 +1046,11 @@ export interface SyncRequest {
    * is never ignored as a repeat. Never derived from the clock, which may be wrong.
    */
   epoch: string;
-  player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
+  /**
+   * `release`: the player release this build is (`PlayerReleaseManifest.version`, #628), which the build's own
+   * `version` string does not say. Absent from a build before #628, or one not made by the release workflow.
+   */
+  player: { version: string; release?: number; manifestSchemas: readonly number[]; protocols: readonly number[] };
   /**
    * `active`: the manifest playing. `filesMissing`: files not yet held, of the manifest being synced and, while
    * falling back, of the last good one.
@@ -1058,6 +1072,11 @@ export interface SyncRequest {
   dataRejected?: Record<string, number>;
   /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
   blobs?: Sha256[];
+  /**
+   * The player release the device supervisor last rolled back (#628), as its `/alive` reply says: sent on each sync
+   * until a newer release passes.
+   */
+  failedRelease?: FailedPlayerRelease;
 }
 
 export interface SyncResponse {
@@ -1080,7 +1099,7 @@ export interface SyncResponse {
    * screen moves its copy's `checkedAt` on only if it holds that `version`, so an unchanged feed
    * does not go stale and the data is not sent again.
    */
-  checked?: Record<string, { version: number; checkedAt: string }>;
+  checked?: Record<string, { version: number; checkedAt: string; staleS?: number }>;
   /**
    * Feed image blob hashes referenced by the screen's snapshots that it did not report holding in
    * `SyncRequest.blobs`, at most `MAX_SYNC_RESPONSE_BLOBS`. Fetched from `/v1/device/blobs/:sha256`.
@@ -1103,6 +1122,128 @@ export type DeviceCommand =
 
 /** The longest an `identify` command shows the screen's name. */
 export const MAX_IDENTIFY_SECONDS = 60;
+
+// ------------------------------------------------------------ player releases
+// A player build reaches a screen through its device supervisor (#628): CI packs `dist/player` as a
+// tarball, writes a release manifest and signs it with Ed25519, and registers it on the `canary`
+// channel; a person promotes it to `stable`. The supervisor asks the API for its screen's channel's
+// release (`GET /v1/device/player-release`), and installs it only when the signature verifies
+// against the public key it ships with, the version is above the one installed, the release plays
+// the schema the server compiles, the tarball's hash matches and every file's does. It switches to
+// it, and rolls back when the new player does not beat `/alive` with its release.
+//
+// The signature is Ed25519 over the UTF-8 bytes of `PlayerReleaseOffer.release.manifest` exactly, with no trailing
+// newline, in standard base64 with padding. A fixed test vector, with a key pair for tests only, is in
+// packages/contract/test/player-release/, with a real tarball the manifest describes.
+//
+// The tarball is a gzip-compressed tar (ustar, pax or GNU; their extended headers are not members). Its members are only
+// regular files and directories, each named by a release path with at most one leading `./`, and `./` itself as a
+// directory. Every regular file is listed in `files` once, with its hash, and every listed file is there; a directory is
+// a parent of a listed file. The supervisor refuses the whole release for anything else: a link, a device or FIFO, an
+// absolute path, a `..`, a member named twice, a file not listed, or a directory no listed file is in. A path whose
+// first segment is `content` (`RESERVED_RELEASE_PATH`) is reserved: the supervisor links the content the player is sent
+// there, so no release carries it.
+//
+// The channel is server state and is not signed: a compromised API could offer a canary release to a stable screen. The
+// owner accepted that risk (#628, Security).
+
+/** A release's channel: canary screens (the demo Pi, the N100) get it first; every other screen follows `stable`. */
+export const PLAYER_CHANNELS = ['canary', 'stable'] as const;
+export type PlayerChannel = (typeof PLAYER_CHANNELS)[number];
+
+/** The release manifest's format. A supervisor refuses a format it does not know. */
+export const PLAYER_RELEASE_FORMAT = 1;
+/** The most bytes a release manifest's text may be, as UTF-8. */
+export const MAX_RELEASE_MANIFEST_BYTES = 1_048_576;
+/** The most files a release may hold. */
+export const MAX_RELEASE_FILES = 1000;
+/** The most bytes a release's tarball may be, and the most its files may add up to. */
+export const MAX_RELEASE_BYTES = 64 * 1_048_576;
+/** The longest a path inside a release may be. */
+export const MAX_RELEASE_PATH_LENGTH = 1024;
+/** One segment of a path inside a release: letters, digits, `.`, `_` and `-`, never `.` or `..` alone. */
+export const RELEASE_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
+/** The first path segment no release may use: where the supervisor links the content the player is sent. */
+export const RESERVED_RELEASE_PATH = 'content';
+/** An Ed25519 signature, 64 bytes, in standard base64 with padding: 88 characters. */
+export const RELEASE_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
+
+/**
+ * One file of a release: its path inside the tarball, relative, `/`-separated `RELEASE_PATH_SEGMENT`s, at most
+ * `MAX_RELEASE_PATH_LENGTH` long, not under `RESERVED_RELEASE_PATH`; and its sha256. No two files share a path, and no
+ * file's path is a directory of another's (`a` beside `a/b`).
+ */
+export interface PlayerReleaseFile {
+  path: string;
+  sha256: Sha256;
+}
+
+/**
+ * A player release, as CI writes and signs it. Its fields `manifestSchemas` and `protocols` are what the build plays,
+ * as a player reports them (`PlayerPlays`), so `canPlay` reads a release as it reads a player.
+ */
+export interface PlayerReleaseManifest {
+  /** `PLAYER_RELEASE_FORMAT`. */
+  format: typeof PLAYER_RELEASE_FORMAT;
+  /**
+   * The least supervisor that may install it: each supervisor knows its own level (a whole number, from 1), and refuses
+   * a release that asks for more. Supervisors update by hand, so a release that needs a newer one says so here.
+   */
+  minSupervisor: number;
+  /** A build number that only goes up: a screen never installs one at or below the one it runs. */
+  version: number;
+  /** The tarball's sha256, which `GET /v1/device/player-release/:sha256` serves. */
+  sha256: Sha256;
+  /** The tarball's size in bytes, from 1 to `MAX_RELEASE_BYTES`. */
+  size: number;
+  files: PlayerReleaseFile[];
+  manifestSchemas: readonly number[];
+  protocols: readonly number[];
+  createdAt: string;
+}
+
+/**
+ * `GET /v1/device/player-release`: the release on the screen's channel, or none. `manifest` is the exact JSON text CI
+ * signed, at most `MAX_RELEASE_MANIFEST_BYTES`; `signature` its Ed25519 signature (`RELEASE_SIGNATURE`): the
+ * supervisor verifies those bytes before it parses them.
+ */
+export interface PlayerReleaseOffer {
+  /** The manifest schema this server compiles (`MANIFEST_SCHEMA`): a release that does not play it is not installed. */
+  manifestSchema: number;
+  /** The screen's channel: a canary installs a release at once, a stable screen while its panel is off or an hour on. */
+  channel: PlayerChannel;
+  release: { manifest: string; signature: string } | null;
+}
+
+/**
+ * `POST /alive` on the device supervisor: the player's beat, with its version and, from a build the release workflow
+ * made, its release number, which the health gate after an install waits for. A build rolled back to may predate it.
+ */
+export interface SupervisorAliveRequest {
+  version: string;
+  release?: number;
+}
+
+/**
+ * Why the supervisor rolled a release back: its player never beat `/alive` with its release within the gate's first
+ * window (`not-alive`), stopped beating before the gate closed (`stopped`), or a reason a later supervisor gives
+ * (`other`). The list is open: a player maps a reason it does not know to `other`, rather than drop the report.
+ */
+export const FAILED_RELEASE_REASONS = ['not-alive', 'stopped', 'other'] as const;
+
+/** A release the supervisor rolled back and will not install again. */
+export interface FailedPlayerRelease {
+  version: number;
+  reason: (typeof FAILED_RELEASE_REASONS)[number];
+}
+
+/**
+ * The supervisor's answer to `/alive`: the last release it rolled back, on every beat until a newer one passes its gate.
+ * The player sends it on each sync (`SyncRequest.failedRelease`); the server keeps one per version.
+ */
+export interface SupervisorAliveResponse {
+  failedRelease?: FailedPlayerRelease;
+}
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
 export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };
