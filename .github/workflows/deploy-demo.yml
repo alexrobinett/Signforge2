@@ -52,7 +52,7 @@ jobs:
         run: pnpm --filter @signforge/template-check exec wrangler deploy --env=""
 
       - name: Apply D1 migrations (demo)
-        run: pnpm --filter @signforge/api exec wrangler d1 migrations apply DB --remote --env demo --yes
+        run: pnpm --filter @signforge/api exec wrangler d1 migrations apply DB --remote --env demo
 
       - name: Deploy API (demo)
         run: pnpm --filter @signforge/api exec wrangler deploy --env demo --var "BUILD_VERSION:$(git rev-parse --short HEAD)"
