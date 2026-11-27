@@ -2,8 +2,8 @@
 // one run, and the log is kept 7 days.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { claimDueAlertDeliveries, expireAlertDeliveries, scoped } from '../src/index';
-import { seedTwoOrgs, type Seeded } from '../src/testing';
+import { alertChannelsOf, claimDueAlertDeliveries, expireAlertDeliveries, scoped } from '../src/index';
+import { seedOrg, seedTwoOrgs, type Seeded } from '../src/testing';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -47,6 +47,35 @@ describe('alert deliveries', () => {
     expect(await a.incidents.clear(incident!, now + MIN, alert(`evt_${incident}_back`))).toBe(true);
     expect(await a.incidents.clear(incident!, now + 2 * MIN, alert(`evt_${incident}_back`))).toBe(false);
     expect(await mine(s.a.orgId, `evt_${incident}_back`)).toHaveLength(2);
+  });
+
+  it("queues no alert for an incident or publish that is missing or another org's", async () => {
+    const a = scoped(env.DB, s.a.orgId);
+    const b = scoped(env.DB, s.b.orgId);
+    const alert = (id: string) => ({ event: event(id), channels: ['slack', 'webhook'] as const, giveUpAt: now + DAY });
+    const theirs = await a.incidents.open(s.a.screen, now - DAY, now + 3 * DAY);
+    expect(theirs).toBeDefined();
+
+    expect(await b.incidents.clear('inc_missing', now + 3 * DAY, alert('evt_clear_missing'))).toBe(false);
+    expect(await b.incidents.clear(theirs!, now + 3 * DAY, alert('evt_clear_theirs'))).toBe(false);
+    expect(await b.publishes.finish('pub_missing', now + 3 * DAY, 0, alert('evt_finish_missing'))).toBe(false);
+    expect(await b.publishes.finish(s.a.publish, now + 3 * DAY, 0, alert('evt_finish_theirs'))).toBe(false);
+
+    for (const id of ['evt_clear_missing', 'evt_clear_theirs', 'evt_finish_missing', 'evt_finish_theirs'])
+      for (const org of [s.a.orgId, s.b.orgId]) expect(await mine(org, id), `${org}: ${id}`).toEqual([]);
+    expect(await a.incidents.clear(theirs!, now + 3 * DAY)).toBe(true);
+  });
+
+  it('reads the channels of more deliveries than D1 binds in one statement, each channel once', async () => {
+    const { orgId } = await seedOrg(env.DB, 'org-many-channels');
+    const o = scoped(env.DB, orgId);
+    const channel = { host: 'hooks.slack.test', urlEncrypted: 'sealed:url', secretEncrypted: null, secretSetAt: null, connectedBy: 'u' };
+    await o.commit((await o.alertChannels.stage.put('slack', channel)).writes);
+    const slack = { orgId, channel: 'slack' as const };
+    const elsewhere = Array.from({ length: 120 }, (_, i) => ({ orgId: `org-without-${i}`, channel: 'webhook' as const }));
+
+    const found = await alertChannelsOf(env.DB, [slack, ...elsewhere, slack]);
+    expect(found.map((c) => [c.orgId, c.kind])).toEqual([[orgId, 'slack']]);
   });
 
   it('lets one run claim each due attempt, in every org, and none before its time', async () => {

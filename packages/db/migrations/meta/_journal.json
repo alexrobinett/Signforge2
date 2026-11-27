@@ -386,6 +386,13 @@
       "when": 1795731786235,
       "tag": "0054_player_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1795813840360,
+      "tag": "0055_feed_image_deletes_claim_owner",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `feed_image_deletes` ADD `claim_owner` text;

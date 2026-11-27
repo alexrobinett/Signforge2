@@ -92,6 +92,18 @@ describe('a poll saved', () => {
   });
 });
 
+describe('reading many sources', () => {
+  it('reads snapshots and checked times for more sources than D1 binds in one statement', async () => {
+    const o = a.scope;
+    const { id } = await o.dataSources.insert({ id: 'many-sources', name: 'Many', format: 'json', urlEncrypted: 'enc:m', refreshS: 300, nextPollAt: NOW });
+    await o.dataSources.putSnapshot(id, { version: 'm1', fetchedAt: NOW, checkedAt: NOW, dataJson: '{}' });
+    const ids = [...Array.from({ length: 150 }, (_, i) => `missing-${i}`), id];
+
+    expect((await o.dataSources.snapshots(ids)).map((r) => [r.dataSourceId, r.version])).toEqual([[id, 'm1']]);
+    expect(await o.dataSources.checkedTimes(ids)).toEqual([{ dataSourceId: id, checkedAt: NOW }]);
+  });
+});
+
 describe('storing a feed photo', () => {
   it("drops the source's validators in its own org only, leaving its schedule, failures and version", async () => {
     const url = 'https://photo.example/test.jpg';

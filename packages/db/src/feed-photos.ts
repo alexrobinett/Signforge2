@@ -414,7 +414,7 @@ export function feedPhotos(db: Db, orgId: string) {
     const queueDisplaced = replacesHashes
       ? db
           .insert(fid)
-          .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
+          .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0, NULL
             FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS old
             WHERE ${mine} AND old.value IS NOT NULL AND old.value IS NOT ${file} AND old.value IS NOT ${thumb}`)
           .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` } })
@@ -512,7 +512,7 @@ export function feedPhotos(db: Db, orgId: string) {
       const [, gone] = await db.batch([
         db
           .insert(fid)
-          .select(sql`SELECT DISTINCT ${orgId}, copy.value, ${now}, 0
+          .select(sql`SELECT DISTINCT ${orgId}, copy.value, ${now}, 0, NULL
             FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS copy
             WHERE ${expired} AND copy.value IS NOT NULL`)
           .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` } }),
@@ -524,9 +524,10 @@ export function feedPhotos(db: Db, orgId: string) {
     /**
      * Sweep: delete these queued blobs with `remove`, if they still may go. In one batch, a hash a
      * row names again leaves the queue; one a snapshot names waits again from `now`; the rest past
-     * their grace are leased for DELETE_LEASE_MS. Only the leased go to `remove`, and leave the
-     * queue once it succeeds; a failure throws, and the lease runs out for a later sweep.
-     * Returns how many were deleted.
+     * their grace are leased for DELETE_LEASE_MS, in this sweep's name. Only the leased go to
+     * `remove`, and leave the queue once it succeeds while still this sweep's: a hash queued again
+     * or leased by another sweep after the lease ran out stays. A failure throws, and the lease
+     * runs out for a later sweep. Returns how many were deleted.
      */
     deleteBlobs: async (shas: readonly string[], now: number, remove: (shas: string[]) => Promise<void>): Promise<number> => {
       const unique = [...new Set(shas)];
@@ -536,21 +537,22 @@ export function feedPhotos(db: Db, orgId: string) {
       const rowNames = sql`(EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.fileSha256} = ${fid.sha256})
         OR EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.thumbSha256} = ${fid.sha256}))`;
       const shown = namedBySnapshot(orgId, fid.sha256);
+      const owner = crypto.randomUUID();
       const [leased] = await db.batch([
         db
           .update(fid)
-          .set({ deletingUntil: now + DELETE_LEASE_MS })
+          .set({ deletingUntil: now + DELETE_LEASE_MS, claimOwner: owner })
           .where(and(due, sql`NOT ${rowNames}`, sql`NOT ${shown}`))
           .returning({ sha256: fid.sha256 }),
         db.delete(fid).where(and(due, rowNames)),
-        db.update(fid).set({ queuedAt: now, deletingUntil: 0 }).where(and(due, shown)),
+        db.update(fid).set({ queuedAt: now, deletingUntil: 0, claimOwner: null }).where(and(due, shown)),
       ]);
       const claimed = leased.map((r) => r.sha256);
       if (!claimed.length) return 0;
       await remove(claimed);
       await db
         .delete(fid)
-        .where(and(eq(fid.orgId, orgId), shaIn(claimed)))
+        .where(and(eq(fid.orgId, orgId), shaIn(claimed), eq(fid.claimOwner, owner)))
         .run();
       return claimed.length;
     },

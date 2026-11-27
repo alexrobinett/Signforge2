@@ -1295,8 +1295,8 @@ export const feedImages = sqliteTable(
 /**
  * Feed photo blobs (`o/<org>/f/<sha256>`) queued for R2 deletion when a `feed_images` row expires
  * or replaces its hashes at the same URL. Kept until R2 delete succeeds so failures retry on the
- * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease keep
- * cleanup from racing a concurrent consumer putting or reusing the same hash.
+ * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease (held by its sweep's
+ * `claim_owner`) keep cleanup from racing a concurrent consumer putting or reusing the same hash.
  */
 export const feedImageDeletes = sqliteTable(
   'feed_image_deletes',
@@ -1305,6 +1305,7 @@ export const feedImageDeletes = sqliteTable(
     sha256: text('sha256').notNull(),
     queuedAt: integer('queued_at').notNull(),
     deletingUntil: integer('deleting_until').notNull().default(0),
+    claimOwner: text('claim_owner'),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );

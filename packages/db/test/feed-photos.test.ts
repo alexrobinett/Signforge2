@@ -403,6 +403,30 @@ describe('the sweep and a delivery at once', () => {
     expect(blobs.has(sha('k'))).toBe(true);
     expect((await o.scope.feedPhotos.deletes()).map((d) => d.sha256)).not.toContain(sha('k'));
   });
+
+  it('keeps a hash queued again after its lease ran out during a slow delete, so the copy written since is not orphaned', async () => {
+    const id = await news();
+    const gone = 'https://slow-delete.test/gone.jpg';
+    const again = 'https://slow-delete.test/again.jpg';
+    blobs.add(sha('z'));
+    await o.scope.feedPhotos.put({ url: gone, sourceId: id, fileSha256: sha('z'), thumbSha256: sha('z'), nextCheckAt: NOW - FEED_IMAGE_TTL_MS - 1 });
+    await o.scope.feedPhotos.put({ url: again, sourceId: id, nextCheckAt: NOW });
+    await o.scope.feedPhotos.expire([gone], NOW);
+    const at = NOW + FEED_IMAGE_DELETE_GRACE_MS;
+    const later = at + DELETE_LEASE_MS;
+
+    expect(
+      await o.scope.feedPhotos.deleteBlobs([sha('z')], at, async (leased) => {
+        for (const h of leased) blobs.delete(h);
+        // The lease runs out before the sweep comes back: a delivery stores the copy again, then displaces it.
+        await stored(again, id, 'z', later);
+        await stored(again, id, 'x', later + 1);
+      }),
+    ).toBe(1);
+
+    expect(blobs.has(sha('z'))).toBe(true);
+    expect(await o.scope.feedPhotos.deletes()).toContainEqual(expect.objectContaining({ sha256: sha('z'), queuedAt: later + 1 }));
+  });
 });
 
 describe("the sweep's lookups (review of #497)", () => {
