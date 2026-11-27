@@ -303,7 +303,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       const { name, ...fields } = draft.edit;
       const change = changeOf(fields, settings);
       // The versioned write first: a stale save changes nothing, the name included.
-      if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version }, draft.orgId)).settings.version);
+      if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version! }, draft.orgId)).settings.version);
       // Against the name this tab last gave it, until the page reads another than the one it renamed over: a name put back
       // while its rename is on its way is a rename (#466), and so is one put back after someone else's (#479).
       const sent = renamed && renamedTo.get(renamed.id);

@@ -9,9 +9,9 @@ import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { drawerReadTypes, drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
+import { drawerReadTypes, drawerTools, MAX_CALLS, MODEL_FETCHES, NEVER_OFFERED, TOOL_CARDS, TOOL_STATEMENTS, TURN_MS } from '../src/agent/chat';
 import { CLIENT_SAYS, plant, reads, SAYS } from './planted';
-import { draftTools, SAVE_STATEMENTS, saveStatements } from '../src/agent/drafts';
+import { DRAFT_MS, draftTools, SAVE_STATEMENTS, saveStatements, signDraft } from '../src/agent/drafts';
 import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ConfirmCard, type ToolCard } from '../src/agent/chat-shapes';
 import { CONFIRM_MS, CONFIRMABLE } from '../src/agent/confirm';
 import type { FetchGuards } from '../src/data/fetch';
@@ -450,26 +450,26 @@ describe('POST /api/agent/chat', () => {
       const s = await setup({ steps: [{ calls: Array.from({ length: MAX_CALLS + 1 }, () => ({ name: 'read', input: { type: 'screen' } })) }] });
       const lines = await events(await s.ask());
       expect(lines.filter((e) => e.type === 'call')).toHaveLength(MAX_CALLS);
-      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
+      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`more than ${MAX_CALLS} lookups`) });
       // Stopped there: no model call after the one that asked too many.
       expect(s.model.asked).toHaveLength(1);
     });
 
-    it('at 25 seconds, on the clock it is given', async () => {
+    it(`at ${TURN_MS / 1000} seconds, on the clock it is given`, async () => {
       let t = NOON;
-      // Each reading of the clock is 10 seconds on: the third model call would start past 25.
-      const s = await setup({ now: () => (t += 10_000), steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }] });
+      // Each reading of the clock is 40 seconds on: the third model call would start past 90.
+      const s = await setup({ now: () => (t += 40_000), steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }] });
       const lines = await events(await s.ask());
-      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('longer than 25 seconds') });
+      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`longer than ${TURN_MS / 1000} seconds`) });
     });
 
-    it("at more D1 statements than its tools' 40: reading every template's versions", async () => {
-      const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'template' } }] }, ANSWER] });
-      for (let i = 0; i < 45; i++) await s.scope.templates.insert({ key: `t${i}`, name: `T${i}` });
+    it(`at more D1 statements than its tools' ${TOOL_STATEMENTS}: reading every template's versions`, async () => {
+      const s = await setup({ steps: [{ calls: Array.from({ length: 10 }, () => ({ name: 'read', input: { type: 'template' } })) }, ANSWER] });
+      for (let i = 0; i < 30; i++) await s.scope.templates.insert({ key: `t${i}`, name: `T${i}` });
       expect((await events(await s.ask())).at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more reading') });
     });
 
-    it('at more than 40 fetches for the model: an endpoint whose every call is redirected three times', async () => {
+    it(`at more than ${MODEL_FETCHES} fetches for the model: an endpoint whose every call is redirected three times`, async () => {
       const base = 'https://models.example.com/v1';
       let n = 0;
       const guards: FetchGuards = {
@@ -495,11 +495,11 @@ describe('POST /api/agent/chat', () => {
         },
       });
       expect((await events(await s.ask())).at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more reading') });
-      // Each call is 4 hops of 2 lookups and a request: the fourth would pass 40.
-      expect(n).toBe(3);
+      // Each call is 4 hops of 2 lookups and a request (12): the 13th would pass 150.
+      expect(n).toBe(Math.floor(MODEL_FETCHES / 12));
     });
 
-    it("counting find_places' lookups with the model's: three redirected model calls (36) and 8 places pass 40, which the model's alone would not (review of #402)", async () => {
+    it(`counting find_places' lookups with the model's: 12 redirected model calls (144) and 8 places pass ${MODEL_FETCHES}, which the model's alone would not (review of #402)`, async () => {
       const base = 'https://models.example.com/v1';
       let n = 0;
       const places = (call: number) =>
@@ -512,7 +512,9 @@ describe('POST /api/agent/chat', () => {
           if (url.endsWith('/r1')) return Response.redirect(`${base}/r2`, 307);
           if (url.endsWith('/r2')) return Response.redirect(`${base}/r3`, 307);
           n++;
-          return n < 3 ? completionStream({ toolCalls: places(n) }, 'tool_calls') : completionStream({ content: JSON.stringify(CARD) }, 'stop');
+          if (n <= 2) return completionStream({ toolCalls: places(n) }, 'tool_calls');
+          if (n < 12) return completionStream({ toolCalls: [{ id: `r${n}`, name: 'read', arguments: '{"type":"screen"}' }] }, 'tool_calls');
+          return completionStream({ content: JSON.stringify(CARD) }, 'stop');
         },
       };
       const s = await setup({ guards, save: ENDPOINT });
@@ -845,9 +847,9 @@ describe('confirmation cards (#269)', () => {
     ask.called = { action: 'publish', playlistId: playlist.id, target: 'org', endsAt: new Date(NOON + 3_600_000).toISOString() };
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     const lines = await events(await s.member.post('/api/agent/chat', body));
-    // The press itself runs, the eighth call; the read after it would be the ninth, and the turn stops there.
+    // The press itself runs, the last allowed call; the read after it would pass MAX_CALLS, and the turn stops there.
     expect(lines.filter((e) => e.type === 'call').map((e) => (e.type === 'call' ? e.card.tool : ''))).toEqual(['takeover']);
-    expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
+    expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`more than ${MAX_CALLS} lookups`) });
   });
 
   it('ends a takeover, and deletes a playlist or removes a schedule entry, each behind its own card, saying what each did (#345)', async () => {
@@ -1518,11 +1520,16 @@ async function drafting(options: Parameters<typeof setup>[0] & { script: (ids: {
   const web = await s.scope.spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' });
   steps.push(...options.script({ spot: spot.id, web: web.id }));
   const apply = (calls: unknown, who = s.member) => who.post('/api/agent/apply', { calls });
+  /** Calls as a turn of `who`'s in this org would have proposed them at `at`, each with its token: for what a turn cannot draft. */
+  const signed = async (calls: { tool: string; input: Record<string, unknown> }[], who = s.member, at = NOON) => {
+    const userId: string = (await who.session()).body.user.id;
+    return Promise.all(calls.map(async (call) => ({ ...call, token: await signDraft(env, { orgId: s.org.id, userId }, call, at) })));
+  };
   const stored = async () => {
     const row = await s.scope.spots.get(spot.id);
     return { version: row?.rowVersion, data: JSON.parse(row?.dataJson ?? '{}') };
   };
-  return { ...s, spot, web, apply, stored, steps };
+  return { ...s, spot, web, apply, signed, stored, steps };
 }
 
 const CUT = JSON.stringify({ type: 'cut' });
@@ -1600,6 +1607,7 @@ describe('the drawer drafting changes (#268)', () => {
         input: { spotId: d.spot.id, data: { headline: 'Hot breakfast, fast', theme: 'night', qr: 'https://order.example/menu' }, ifVersion: before.version },
         target: { kind: 'spot', id: d.spot.id },
         before: expect.objectContaining({ id: d.spot.id, data: { headline: 'Breakfast served', theme: 'day' }, version: before.version }),
+        token: expect.any(String),
       },
     ]);
     expect(card.trace).toEqual([shown('get_spot', 'Read a spot'), shown('save_spot', 'Drafted a change to a spot')]);
@@ -1608,7 +1616,7 @@ describe('the drawer drafting changes (#268)', () => {
     expect(await d.scope.auditLog.list({ limit: 50 })).toEqual(auditBefore);
 
     // Saved: through the dispatcher as the member via cms-agent, audited.
-    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    const res = await d.apply(card.drafts.map(({ tool, input, token }) => ({ tool, input, token })));
     const body = await res.json<any>();
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(body.results).toEqual([
@@ -1679,9 +1687,9 @@ describe('the drawer drafting changes (#268)', () => {
     expect(Object.keys(z.toJSONSchema(offered!.input).properties ?? {})).toEqual(['screenId', 'name']);
     const d = await drafting({ script: () => [ANSWER] });
     const [screen] = await d.scope.screens.list();
-    const res = await d.apply([
-      { tool: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo', ifVersion: screen!.rowVersion } },
-    ]);
+    const res = await d.apply(
+      await d.signed([{ tool: 'update_screen', input: { screenId: screen!.id, name: 'Door', timezone: 'Asia/Tokyo', ifVersion: screen!.rowVersion } }]),
+    );
     expect(res.status).toBe(403);
     expect((await res.json<any>()).results.at(-1)).toMatchObject({
       ok: false,
@@ -1700,7 +1708,7 @@ describe('the drawer drafting changes (#268)', () => {
       [{ tool: 'publish', input: {} }],
       [{ tool: 'delete', input: { type: 'schedule_entry', id: 'sch_x' } }],
     ]) {
-      const res = await d.apply(calls);
+      const res = await d.apply(await d.signed(calls));
       expect(res.status, JSON.stringify(calls)).toBe(403);
       expect((await res.json<any>()).results.at(-1)).toMatchObject({ ok: false, error: 'forbidden' });
     }
@@ -1716,7 +1724,7 @@ describe('the drawer drafting changes (#268)', () => {
     expect((await d.owner.tool('save_spot', { spotId: d.spot.id, data: { headline: 'Their headline', theme: 'day' }, ifVersion: was.version })).status).toBe(
       200,
     );
-    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    const res = await d.apply(card.drafts.map(({ tool, input, token }) => ({ tool, input, token })));
     expect(res.status).toBe(409);
     expect((await res.json<any>()).results).toEqual([{ tool: 'save_spot', ok: false, error: 'conflict', message: expect.any(String) }]);
     expect((await d.stored()).data).toEqual({ headline: 'Their headline', theme: 'day' });
@@ -1730,7 +1738,7 @@ describe('the drawer drafting changes (#268)', () => {
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts).toHaveLength(1);
     expect(d.model.asked[0].messages[0].content[0].text).toContain('Their role: viewer, who may not save changes');
-    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    const res = await d.apply(card.drafts.map(({ tool, input, token }) => ({ tool, input, token })));
     expect(res.status).toBe(403);
     expect((await d.stored()).data).toEqual({ headline: 'Breakfast served', theme: 'day' });
   });
@@ -1738,7 +1746,7 @@ describe('the drawer drafting changes (#268)', () => {
   it('saves an update only at the version it was drafted on: one without ifVersion is refused, writing nothing', async () => {
     const d = await drafting({ script: () => [ANSWER] });
     const before = await d.stored();
-    const res = await d.apply([{ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Unguarded' } }]);
+    const res = await d.apply(await d.signed([{ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Unguarded' } }]));
     expect(res.status).toBe(400);
     expect((await res.json<any>()).results).toEqual([{ tool: 'save_spot', ok: false, error: 'invalid_input', message: expect.stringMatching(/ifVersion/) }]);
     expect(await d.stored()).toEqual(before);
@@ -1762,7 +1770,7 @@ describe('the drawer drafting changes (#268)', () => {
       expect.objectContaining({ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Breakfast', durationMs: 12_000, ifVersion: was.version } }),
     ]);
     expect(d.model.asked[1].messages.at(-1).content[1].content).toMatch(/with your earlier change to the same thing/);
-    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    const res = await d.apply(card.drafts.map(({ tool, input, token }) => ({ tool, input, token })));
     expect(res.status, await res.clone().text()).toBe(200);
     const row = await d.scope.spots.get(d.spot.id);
     expect(row).toMatchObject({ name: 'Breakfast', durationMs: 12_000, rowVersion: was.version! + 1 });
@@ -1780,7 +1788,7 @@ describe('the drawer drafting changes (#268)', () => {
     );
     const card = answerOf(await events(await d.ask()));
     expect(card.drafts.map((c) => c.input)).toEqual([{ scheduleEntryId: entry.id, priority: 2, target: 'org', ifVersion: entry.rowVersion }]);
-    const res = await d.apply(card.drafts.map(({ tool, input }) => ({ tool, input })));
+    const res = await d.apply(card.drafts.map(({ tool, input, token }) => ({ tool, input, token })));
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await d.scope.scheduleEntries.get(entry.id)).toMatchObject({ target: 'org', groupId: null, priority: 2 });
   });
@@ -1818,7 +1826,7 @@ describe('the drawer drafting changes (#268)', () => {
       });
       const member = new Client(d.member.t, d.member.ip, { ...env, DB: counting });
       for (const [k, v] of d.member.jar) member.jar.set(k, v);
-      const res = await member.post('/api/agent/apply', { calls });
+      const res = await member.post('/api/agent/apply', { calls: await d.signed(calls) });
       return { status: res.status, body: await res.text(), statements };
     }
     async function content(d: Awaited<ReturnType<typeof drafting>>, spots: number) {
@@ -1854,25 +1862,24 @@ describe('the drawer drafting changes (#268)', () => {
       }
     });
 
-    it(`the costliest save it allows, two screens renamed and a playlist's order, in at most ${SAVE_STATEMENTS}`, async () => {
+    it(`the costliest save it allows, 15 playlist orders at ${SAVE_STATEMENTS} statements, in at most ${SAVE_STATEMENTS}`, async () => {
       const d = await drafting({ role: 'editor', script: () => [ANSWER] });
-      const { playlist, screen } = await content(d, 0);
-      const other = await d.scope.screens.insert({ name: 'Drive-thru', timezone: 'UTC', orientation: 'landscape' });
-      const calls = [
-        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
-        { tool: 'update_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
-        { tool: 'save_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
-      ];
+      const playlists = [];
+      for (let i = 0; i < 15; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
+      const calls = playlists.map((p, i) => ({
+        tool: 'save_playlist',
+        input: { playlistId: p.id, spotIds: Array(i === 14 ? 48 : 72).fill(d.spot.id), ifVersion: p.rowVersion },
+      }));
       expect(saveStatements(calls)).toBe(SAVE_STATEMENTS);
       const { status, body, statements } = await measured(d, calls);
       expect(status, body).toBe(200);
       expect(statements).toBeLessThanOrEqual(SAVE_STATEMENTS);
     });
 
-    it('refuses a save over it before writing anything: five orders of 200 spots', async () => {
+    it('refuses a save over it before writing anything: ten orders of 200 spots', async () => {
       const d = await drafting({ role: 'editor', script: () => [ANSWER] });
       const playlists = [];
-      for (let i = 0; i < 5; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
+      for (let i = 0; i < 10; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
       const calls = playlists.map((p) => ({
         tool: 'save_playlist',
         input: { playlistId: p.id, spotIds: Array(200).fill(d.spot.id), ifVersion: p.rowVersion },
@@ -1883,6 +1890,92 @@ describe('the drawer drafting changes (#268)', () => {
       expect(statements).toBeLessThanOrEqual(2);
       for (const p of playlists) expect((await d.scope.playlists.get(p.id))?.rowVersion).toBe(p.rowVersion);
     });
+  });
+});
+
+describe('a save takes only the drafts a turn proposed, to its member in its org, before they run out (#269)', () => {
+  /** A turn of an editor's that proposes a spot's new name and a screen's, and what the spot and screen were before it. */
+  async function proposed() {
+    const d = await drafting({ role: 'editor', script: () => [] });
+    const [screen] = await d.scope.screens.list();
+    d.steps.push(
+      {
+        calls: [
+          { name: 'save_spot', input: { spotId: d.spot.id, name: 'Brunch' } },
+          { name: 'update_screen', input: { screenId: screen!.id, name: 'Front door' } },
+        ],
+      },
+      ANSWER,
+    );
+    const card = answerOf(await events(await d.ask()));
+    expect(card.drafts.map((c) => c.tool)).toEqual(['save_spot', 'update_screen']);
+    const sent = card.drafts.map(({ tool, input, token }) => ({ tool, input, token }));
+    const unchanged = async () => {
+      expect(await d.stored()).toEqual(was);
+      expect((await d.scope.spots.get(d.spot.id))?.name).toBe('Breakfast');
+      expect((await d.scope.screens.get(screen!.id))?.name).toBe(screen!.name);
+    };
+    const was = await d.stored();
+    /** Refused as not proposed, nothing written. */
+    const refused = async (res: Response) => {
+      expect(res.status).toBe(403);
+      expect((await res.json<any>()).results).toEqual([
+        { tool: expect.any(String), ok: false, error: 'forbidden', message: expect.stringMatching(/not a change the agent proposed to you here/) },
+      ]);
+      await unchanged();
+    };
+    return { ...d, screen: screen!, sent, refused, unchanged };
+  }
+
+  it('saves what it proposed, both drafts in one save', async () => {
+    const d = await proposed();
+    const res = await d.apply(d.sent);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await d.scope.spots.get(d.spot.id))?.name).toBe('Brunch');
+    expect((await d.scope.screens.get(d.screen.id))?.name).toBe('Front door');
+  });
+
+  it('refuses a call without its token', async () => {
+    const d = await proposed();
+    const res = await d.apply(d.sent.map(({ tool, input }) => ({ tool, input })));
+    expect(res.status).toBe(400);
+    await d.unchanged();
+  });
+
+  it('refuses a draft whose input was changed since, or another token, writing none of the batch', async () => {
+    const d = await proposed();
+    const [spot, screen] = d.sent;
+    await d.refused(await d.apply([spot, { ...screen!, input: { ...screen!.input, name: 'Forged' } }]));
+    await d.refused(await d.apply([{ ...spot!, token: screen!.token }]));
+    await d.refused(await d.apply([{ ...spot!, tool: 'update_screen' }]));
+    await d.refused(await d.apply([{ ...spot!, token: spot!.token.replace(/.$/, (c) => (c === '0' ? '1' : '0')) }]));
+  });
+
+  it("refuses another member's save of them, though in the same org", async () => {
+    const d = await proposed();
+    await d.refused(await d.apply(d.sent, d.owner));
+  });
+
+  it("refuses a token another org's turn signed", async () => {
+    const d = await proposed();
+    const userId: string = (await d.member.session()).body.user.id;
+    const elsewhere = await Promise.all(
+      d.sent.map(async ({ tool, input }) => ({ tool, input, token: await signDraft(env, { orgId: 'org_elsewhere', userId }, { tool, input }, NOON) })),
+    );
+    await d.refused(await d.apply(elsewhere));
+  });
+
+  it(`refuses a token once it has run out, ${DRAFT_MS / 60_000} minutes after its turn`, async () => {
+    const d = await proposed();
+    const calls = d.sent.map(({ tool, input }) => ({ tool, input }));
+    await d.refused(await d.apply(await d.signed(calls, d.member, NOON - DRAFT_MS)));
+    const res = await d.apply(await d.signed(calls, d.member, NOON - DRAFT_MS + 1));
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it('refuses a call no turn proposed', async () => {
+    const d = await proposed();
+    await d.refused(await d.apply([{ tool: 'save_spot', input: { spotId: d.spot.id, name: 'Never proposed', ifVersion: 1 }, token: d.sent[0]!.token }]));
   });
 });
 

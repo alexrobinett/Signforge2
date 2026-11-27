@@ -131,4 +131,4 @@ export default {
 // Durable Object classes are exported from the Worker's entry point.
 export { ScreenObject } from './device/screen-object';
 export { AgentGrantObject } from './agents/grant-object';
-export { OrgObject } from './publish';
+export { OrgObject } from './org-object';

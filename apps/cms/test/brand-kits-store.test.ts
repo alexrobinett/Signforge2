@@ -510,7 +510,9 @@ describe('an edit still waiting when the member leaves the org (review of #461)'
       dropSampleCheck: () => {},
       forgetOrgSettings: () => {},
     }));
+    let atSwitch: string | undefined;
     vi.mocked(switchOrganization).mockImplementation(async () => {
+      atSwitch = store.getState().brandKits.drafts.bk_a?.status;
       router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_2' } } }];
     });
     store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
@@ -521,7 +523,8 @@ describe('an edit still waiting when the member leaves the org (review of #461)'
     expect(switchOrganization).not.toHaveBeenCalled();
     calls[0]!.answer();
     await switching;
-    expect(switchOrganization).toHaveBeenCalled();
-    expect(store.getState().brandKits.drafts.bk_a?.status).toBe('saved');
+    expect(atSwitch).toBe('saved');
+    // Then it goes with the org it was made in.
+    expect(store.getState().brandKits.drafts).toEqual({});
   });
 });

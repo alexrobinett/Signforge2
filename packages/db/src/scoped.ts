@@ -1589,13 +1589,15 @@ export function scoped(d1: D1Database, orgId: string) {
        * (by a check that queued the same event, which is queued once). Without `alert`, as `open`.
        */
       clear: async (incidentId: string, now: number, alert?: QueuedAlert): Promise<boolean> => {
+        // Read after the update in the batch: an id missing or another org's queues nothing.
+        const closed = sql`EXISTS (SELECT 1 FROM ${inc} WHERE ${inc.orgId} = ${orgId} AND ${inc.id} = ${incidentId} AND ${inc.clearedAt} = ${now})`;
         const [cleared] = await db.batch([
           db
             .update(inc)
             .set({ clearedAt: now })
             .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
             .returning({ id: inc.id }),
-          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+          ...(alert ? queueAlert(alert, now, closed) : []),
         ]);
         return cleared.length === 1;
       },
@@ -1973,13 +1975,15 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       finish: async (publishId: string, now: number, reached: number, alert?: QueuedAlert): Promise<boolean> => {
         const p = s.publishes;
+        // Read after the update in the batch: an id missing or another org's queues nothing.
+        const finished = sql`EXISTS (SELECT 1 FROM ${p} WHERE ${p.orgId} = ${orgId} AND ${p.id} = ${publishId} AND ${p.finishedAt} = ${now})`;
         const [marked] = await db.batch([
           db
             .update(p)
             .set({ finishedAt: now, reached })
             .where(and(eq(p.orgId, orgId), eq(p.id, publishId), isNull(p.finishedAt)))
             .returning({ id: p.id }),
-          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+          ...(alert ? queueAlert(alert, now, finished) : []),
         ]);
         return marked.length === 1;
       },
@@ -2195,23 +2199,31 @@ export function scoped(d1: D1Database, orgId: string) {
           .get(),
       /** Latest snapshots of several sources, each with its source's format and poll interval as they are now, for its stale age. */
       snapshots: async (dataSourceIds: readonly string[]) =>
-        dataSourceIds.length
-          ? db
-              .select(snapshotColumns)
-              .from(snap)
-              .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
-              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
-              .all()
-          : [],
+        (
+          await Promise.all(
+            chunk([...dataSourceIds], 1).map((part) =>
+              db
+                .select(snapshotColumns)
+                .from(snap)
+                .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
+                .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, part)))
+                .all(),
+            ),
+          )
+        ).flat(),
       /** When each source's latest snapshot was last confirmed, without its data (up to 64 kB each). */
       checkedTimes: async (dataSourceIds: readonly string[]) =>
-        dataSourceIds.length
-          ? db
-              .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
-              .from(snap)
-              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
-              .all()
-          : [],
+        (
+          await Promise.all(
+            chunk([...dataSourceIds], 1).map((part) =>
+              db
+                .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
+                .from(snap)
+                .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, part)))
+                .all(),
+            ),
+          )
+        ).flat(),
       putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         const fields = snapshotFields(v);

@@ -9,12 +9,11 @@
  * 7 days. Which alerts go to which channel is each alert rule's (./settings.ts).
  */
 import { type AlertChannelRow, type AlertDeliveryRow, newId } from '@signforge/db';
-import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
-import { z } from 'zod';
-import { id, ifVersion } from './fields';
-import { keysetPage, pageInput } from './paging';
+import type { z } from 'zod';
+import { keysetPage } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
-import { ALERT_CHANNEL_KINDS, ALERT_CHANNELS, type channelView, type deliveryView, outputs } from './outputs';
+import { type channelView, type deliveryView, outputs } from './outputs';
+import { inputs } from './inputs';
 
 /** How long an alert is retried before it is given up on. */
 export const ALERT_RETRY_MS = 24 * 60 * 60_000;
@@ -72,40 +71,6 @@ export type AlertEvent = { id: string; occurredAt: string; org: { id: string; na
   | { type: 'test'; data: { message: string } }
 );
 
-/** Slack's incoming-webhook URL (docs.slack.dev, Sending messages using incoming webhooks, read 2026-11-18). */
-const SLACK_WEBHOOK = /^https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]+\/[A-Z0-9]+\/[A-Za-z0-9]+$/;
-
-const slackWebhookUrl = z
-  .string()
-  .max(2048)
-  .regex(SLACK_WEBHOOK, 'a Slack incoming-webhook URL, https://hooks.slack.com/services/T…/B…/…')
-  .describe("The incoming webhook's URL from Slack, https://hooks.slack.com/services/T…/B…/…. Stored encrypted and never shown again");
-
-const URL_PROBLEMS: Record<FeedUrlProblem, string> = {
-  'bad-url': 'not a URL',
-  'not-https': 'webhooks must be https',
-  port: 'webhooks must use the default https port',
-  'ip-literal': 'webhooks must name a host, not an IP address',
-  'private-address': 'the host is a local name',
-};
-
-/** The fetch-safety rules of feed URLs (`@signforge/feeds`); the delivery run checks the address it resolves to as well. */
-const outgoingUrl = z
-  .string()
-  .max(2048)
-  .superRefine((url, ctx) => {
-    const problem = feedUrlProblem(url);
-    if (problem) ctx.addIssue({ code: 'custom', message: URL_PROBLEMS[problem] });
-  })
-  .describe('Where to POST alerts: https, on the default port, naming a public host. Stored encrypted and never shown again');
-
-const signingSecret = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{32,128}$/, '32 to 128 characters of A-Z, a-z, 0-9, _ and -')
-  .describe(
-    'The secret each POST is signed with, which you make and keep: 32 to 128 random characters of A-Z, a-z, 0-9, _ and -, such as whsec_ and 32 random bytes in base64url. Stored encrypted and never shown again',
-  );
-
 const viewOf = (c: AlertChannelRow): z.infer<typeof channelView> => ({
   kind: c.kind,
   host: c.host,
@@ -139,7 +104,7 @@ const getAlertChannels = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: inputs.get_alert_channels,
   output: outputs.get_alert_channels,
   example: {},
   handler: async ({ org }) => {
@@ -158,24 +123,7 @@ const setAlertChannel = defineTool({
   // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
   people: true,
   needs: ['alertSecrets'],
-  input: z
-    .strictObject({
-      kind: z.enum(ALERT_CHANNEL_KINDS),
-      webhookUrl: z.string().max(2048).optional().describe("slack: the incoming webhook's URL; webhook: the URL alerts are POSTed to"),
-      signingSecret: signingSecret.optional(),
-      ifVersion,
-    })
-    .superRefine((v, ctx) => {
-      if (v.kind === 'slack' && v.signingSecret !== undefined)
-        ctx.addIssue({ code: 'custom', path: ['signingSecret'], message: 'a Slack channel takes no signing secret' });
-      if (v.kind === 'slack' && v.webhookUrl === undefined)
-        ctx.addIssue({ code: 'custom', path: ['webhookUrl'], message: 'a Slack channel needs its webhookUrl' });
-      if (v.kind === 'webhook' && v.webhookUrl === undefined && v.signingSecret === undefined) ctx.addIssue({ code: 'custom', message: 'nothing to change' });
-      if (v.webhookUrl === undefined) return;
-      // Each kind's own rules for its URL: Slack's host, or a public https address.
-      const checked = (v.kind === 'slack' ? slackWebhookUrl : outgoingUrl).safeParse(v.webhookUrl);
-      for (const issue of checked.error?.issues ?? []) ctx.addIssue({ code: 'custom', path: ['webhookUrl'], message: issue.message });
-    }),
+  input: inputs.set_alert_channel,
   output: outputs.set_alert_channel,
   example: { kind: 'webhook', webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
   target: (input) => channelTarget(input.kind),
@@ -217,7 +165,7 @@ const removeAlertChannel = defineTool({
   mutates: true,
   // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
   people: true,
-  input: z.object({ channel: z.enum(ALERT_CHANNEL_KINDS) }),
+  input: inputs.remove_alert_channel,
   output: outputs.remove_alert_channel,
   example: { channel: 'slack' },
   target: (input) => channelTarget(input.channel),
@@ -237,7 +185,7 @@ const testAlertChannel = defineTool({
   mutates: true,
   // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
   people: true,
-  input: z.object({ channel: z.enum(ALERT_CHANNELS).describe('email goes to the member who asks') }),
+  input: inputs.test_alert_channel,
   output: outputs.test_alert_channel,
   example: { channel: 'email' },
   target: (input) => channelTarget(input.channel),
@@ -277,7 +225,7 @@ const listAlertDeliveries = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_alert_deliveries,
   output: outputs.list_alert_deliveries,
   example: {},
   handler: async ({ org, input }) => {
@@ -299,7 +247,7 @@ const retryAlertDelivery = defineTool({
   mutates: true,
   // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
   people: true,
-  input: z.object({ alertDeliveryId: id('alert delivery') }),
+  input: inputs.retry_alert_delivery,
   output: outputs.retry_alert_delivery,
   example: { alertDeliveryId: 'dlv_0123456789' },
   target: (input) => ({ kind: 'alert_delivery', id: input.alertDeliveryId }),

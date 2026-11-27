@@ -1,7 +1,7 @@
 /** Switching the active organization, and the create-organization forms. */
 import { createOrganization, switchOrganization } from '~/lib/orgs';
 import type { SliceCreator } from './store';
-import { saveWaiting } from './versioned-draft';
+import { forgetDrafts, saveWaiting } from './versioned-draft';
 
 /**
  * Where a create-organization form sits. Each has its own draft, since both can be on screen:
@@ -87,8 +87,9 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
         // An edit still waiting out its autosave delay saves only in its own org: it goes before the tab leaves it.
         await saveWaiting();
         await switchOrganization(router, org.id);
-        // Edits and confirmations belong to the org they were made in.
+        // Edits and confirmations belong to the org they were made in: every editor's drafts go too.
         get().forgetOrgSettings();
+        forgetDrafts();
         if (announce) set((s) => ({ orgs: { ...s.orgs, status: `Switched to ${org.name}.` } }));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not switch organization.';
@@ -116,6 +117,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
         await saveWaiting();
         await createOrganization(router, name);
         get().forgetOrgSettings();
+        forgetDrafts();
         draft(form, emptyDraft);
         if (form === 'dialog') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
       } catch (err) {

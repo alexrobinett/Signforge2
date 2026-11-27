@@ -9,11 +9,10 @@
  * SignForge, so only a person sets it.
  */
 import { type AiProviderRow, StaleVersionError } from '@signforge/db';
-import { z } from 'zod';
-import { ifVersion } from './fields';
-import { AI_PROVIDERS, type aiProviderView, outputs } from './outputs';
-import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
+import type { z } from 'zod';
+import { type aiProviderView, outputs } from './outputs';
 import { defineTool, ToolError } from './tool';
+import { inputs } from './inputs';
 
 const viewOf = (p: AiProviderRow): z.infer<typeof aiProviderView> => ({
   provider: p.provider,
@@ -31,51 +30,6 @@ const viewOf = (p: AiProviderRow): z.infer<typeof aiProviderView> => ({
 
 const target = (provider: string) => ({ kind: 'ai_provider', id: provider });
 
-const apiKey = z
-  .string()
-  .trim()
-  .min(20, 'that is too short to be an API key')
-  .max(512, 'that is too long to be an API key')
-  .regex(/^\S+$/, 'an API key has no spaces')
-  .describe("The provider's API key. Stored encrypted and never shown again");
-
-const modelId = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/, 'not a model id')
-  .nullable()
-  .describe("An exact model id from the provider's list (test_ai_provider), never an alias; null to unset");
-
-const URL_PROBLEMS: Record<FeedUrlProblem, string> = {
-  'bad-url': 'not a URL',
-  'not-https': 'the endpoint must be https',
-  port: 'the endpoint must use the default https port',
-  'ip-literal': 'the endpoint must name a host, not an IP address',
-  'private-address': 'the host is a local name',
-};
-
-/** An endpoint's base address: printable ASCII, the fetch-safety rules of feed URLs, no user name or password, no query or fragment, kept as parsed without a trailing slash. */
-const baseUrl = z
-  .string()
-  .trim()
-  .max(2048)
-  .superRefine((url, ctx) => {
-    const problem = feedUrlProblem(url);
-    // Only printable ASCII, so what the page shows is where the key goes: a look-alike such as the fraction
-    // slash in `https://api.openai.com⁄v1.evil.example` reads as OpenAI and resolves to another host.
-    if (/[^\x21-\x7e]/.test(url))
-      ctx.addIssue({ code: 'custom', message: "the endpoint's address is plain ASCII: write an international host in its xn-- form" });
-    else if (problem) ctx.addIssue({ code: 'custom', message: URL_PROBLEMS[problem] });
-    // A user name makes `https://api.openai.com@evil.example/v1` read as one host and go to another, and a
-    // password would be kept in clear, shown to every member and in the audit log.
-    else if (new URL(url).username || new URL(url).password) ctx.addIssue({ code: 'custom', message: "the endpoint's address has no user name or password" });
-    else if (/[?#]/.test(url)) ctx.addIssue({ code: 'custom', message: 'the endpoint is a base address, with no query or fragment' });
-  })
-  // Kept as the URL parser writes it (`https://@host` becomes `https://host`), so the stored address is the one fetched.
-  .transform((url) => new URL(url).href.replace(/\/+$/, ''))
-  .describe(
-    "An OpenAI-compatible endpoint's base address, such as https://api.openai.com/v1 or https://generativelanguage.googleapis.com/v1beta/openai: https, the default port, a public host. Its models are at <base>/models",
-  );
-
 const getAiProvider = defineTool({
   name: 'get_ai_provider',
   description:
@@ -83,7 +37,7 @@ const getAiProvider = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: inputs.get_ai_provider,
   output: outputs.get_ai_provider,
   example: {},
   handler: async ({ org }) => {
@@ -102,17 +56,7 @@ const saveAiProvider = defineTool({
   // Who pays, and what data leaves SignForge: a person's.
   people: true,
   needs: ['aiProviders'],
-  input: z.object({
-    provider: z.enum(AI_PROVIDERS),
-    apiKey: apiKey.optional(),
-    fastModel: modelId.optional(),
-    capableModel: modelId.optional(),
-    dailyTurnCeiling: z.number().int().min(1).max(100_000).nullable().optional().describe('Agent turns a day across the org; null for none'),
-    baseUrl: baseUrl.optional(),
-    acceptsImages: z.boolean().optional().describe('An endpoint: whether its models take images (Fill from a flyer needs it)'),
-    jsonSchemaOutput: z.boolean().optional().describe('An endpoint: whether it returns output to a JSON schema (response_format json_schema; Fill needs it)'),
-    ifVersion,
-  }),
+  input: inputs.save_ai_provider,
   output: outputs.save_ai_provider,
   example: { provider: 'anthropic', apiKey: 'sk-ant-api03-example-key-0000000000000000' },
   target: (input) => target(input.provider),
@@ -169,10 +113,10 @@ const testAiProvider = defineTool({
   // Who pays, and what data leaves SignForge: a person's.
   people: true,
   needs: ['aiProviders'],
-  input: z.object({}),
+  input: inputs.test_ai_provider,
   output: outputs.test_ai_provider,
   example: {},
-  target: (_input, output) => target(output.provider.provider),
+  target: (_input, output) => (output ? target(output.provider.provider) : undefined),
   handler: async ({ org, write, services: { aiProviders } }) => {
     const current = await org.aiProvider.get();
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
@@ -203,10 +147,10 @@ const removeAiProvider = defineTool({
   mutates: true,
   // Who pays, and what data leaves SignForge: a person's.
   people: true,
-  input: z.object({}),
+  input: inputs.remove_ai_provider,
   output: outputs.remove_ai_provider,
   example: {},
-  target: (_input, output) => (output.provider ? target(output.provider) : undefined),
+  target: (_input, output) => (output?.provider ? target(output.provider) : undefined),
   handler: async ({ org, write }) => {
     const current = await org.aiProvider.get();
     if (!current) return { removed: false, provider: null };

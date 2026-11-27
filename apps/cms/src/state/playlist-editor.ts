@@ -128,7 +128,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     state: { read: () => get().playlistEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
     async save({ key: playlistId, draft: { orgId, edit, version } }) {
       const saved = (
-        await callTool('save_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version })
+        await callTool('save_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version! })
       ).playlist;
       const key = playlistKeys.one(orgId, playlistId);
       // A playlist deleted meanwhile has left the cache: it is not written back.

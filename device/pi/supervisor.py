@@ -23,6 +23,11 @@ Listens on 127.0.0.1 only, and acts only on requests that carry the device's sec
 answers only the player's own origin: browsers always send Origin on a cross-origin request and a
 page cannot forge it, so a template (origin "null") or a web page cannot obtain it. Keeping it out
 of the kiosk URL matters because a template frame can read its parent's URL.
+The boundary, exactly: the token and the credential go to a document of a PLAYER_ORIGINS origin in
+the kiosk's browser, and to a process on this machine, which can forge Origin. That is no more than
+the files' mode gives: every process here runs as the one user that owns them. So nothing a player
+origin serves may run unsandboxed (templates run in opaque-origin frames, URL spots on their own
+origin), and this listener stays on loopback.
 A plain POST from any page would otherwise reach it without a CORS preflight: the token header
 forces one, the preflight is granted only to the player's origin, and a request whose Host is not
 this address (DNS rebinding) is refused.
@@ -43,9 +48,10 @@ for a development API, with no user, query or fragment.
 The player's own watchdog runs in the renderer it watches, so a wedged renderer would leave a
 frozen panel. The player beats POST /alive with the token instead; with no beat for STALE_S the
 supervisor restarts the kiosk unit (allowed by signforge-supervisor.rules, a polkit rule for that
-one unit and verb). Only a beat arms the check, and a restart disarms it until the next beat, so a
-player that never beats (an older build, a kiosk URL without the player) is never restarted in a loop. A restart
-that fails is tried again RESTART_RETRY_S later, at most RESTART_TRIES times in all, then not until the next beat.
+one unit and verb). The check is armed at start and after each restart with START_GRACE_S for the first beat, so a
+kiosk that hangs as it starts, before it ever beats, is restarted too. A player that never beats (an older build, a
+kiosk URL without the player) is restarted QUIET_RESTARTS times in a row, then not until it beats: never in a loop. A
+restart that fails is tried again RESTART_RETRY_S later, at most RESTART_TRIES times in all, then not until the next beat.
 
 The output's mode (#511). kiosk.sh sets 1920x1080 at 60 Hz before the browser starts (a Pi 4 cannot
 animate at 4K), but a panel can bring its own mode back during play: a hotplug, an input switch. So
@@ -74,6 +80,14 @@ TOKEN_FILE = os.path.expanduser("~/signforge/supervisor.token")
 KIOSK_UNIT = "signforge-kiosk.service"
 # Six missed beats: a page reload, or a busy moment in a slow prepare, is not a hang.
 STALE_S = 30
+# The first beat after a start or a restart: a cold boot reaches its first spot about 22 s after the kernel starts.
+START_GRACE_S = 120
+# Restarts in a row with no beat between before the watchdog waits for one: a player that never beats is not looped.
+QUIET_RESTARTS = 3
+# A request that stalls this long is dropped, so a client that sends half of one cannot hold a handler thread.
+REQUEST_TIMEOUT_S = 10
+# cec-ctl answers in under a second; one stuck on the bus must not hold a display switch for long.
+CEC_TIMEOUT_S = 5
 CREDENTIAL_FILE = os.path.expanduser("~/signforge/device.credential")
 MODE_CHECK_S = 60
 # Sets in a row that leave the panel off MODE before the supervisor stops setting it every check: a panel that
@@ -147,14 +161,17 @@ def delete_credential():
         pass
 
 
+# The output and `state`: held while wlr-randr runs, never across CEC, so the mode watch waits for no panel's CEC.
 lock = threading.Lock()
+# One display switch at a time, its CEC included.
+switch_lock = threading.Lock()
 state = {"on": True, "cec": "unknown", "signal": "unknown"}
 
 env = dict(os.environ)
 env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 
 
-def run(*cmd, timeout=10):
+def run(*cmd, timeout=10, env=env):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
         return p.returncode, p.stdout + p.stderr
@@ -163,27 +180,29 @@ def run(*cmd, timeout=10):
 
 
 def wayland():
-    """The compositor's socket and its single output, or None if the kiosk is not running."""
+    """The compositor's single output and the environment that reaches it, or None if the kiosk is not running."""
     rd = env["XDG_RUNTIME_DIR"]
     sockets = sorted(f for f in os.listdir(rd) if f.startswith("wayland-") and not f.endswith(".lock")) if os.path.isdir(rd) else []
     if not sockets:
         return None
-    env["WAYLAND_DISPLAY"] = sockets[0]
-    rc, out = run("wlr-randr")
-    return out.split()[0] if rc == 0 and out else None
+    # A copy: another thread's run() may be reading the shared env.
+    wenv = {**env, "WAYLAND_DISPLAY": sockets[0]}
+    rc, out = run("wlr-randr", env=wenv)
+    return (out.split()[0], wenv) if rc == 0 and out else None
 
 
 def signal(on):
-    out = wayland()
-    if not out:
+    found = wayland()
+    if not found:
         return "no compositor"
+    out, wenv = found
     args = ["--on", "--mode", MODE] if on else ["--off"]
-    rc, msg = run("wlr-randr", "--output", out, *args)
+    rc, msg = run("wlr-randr", "--output", out, *args, env=wenv)
     return "ok" if rc == 0 else msg.strip()[:120]
 
 
 def cec(*args):
-    rc, out = run("cec-ctl", "-d", CEC_DEV, *args)
+    rc, out = run("cec-ctl", "-d", CEC_DEV, *args, timeout=CEC_TIMEOUT_S)
     return rc == 0 and "Not Acknowledged" not in out and "Error" not in out
 
 
@@ -194,7 +213,7 @@ def cec_power(on):
     if on:
         acked = cec("--to", "0", "--image-view-on")
         # Become the active source so the TV switches to this input.
-        rc, out = run("cec-ctl", "-d", CEC_DEV)
+        rc, out = run("cec-ctl", "-d", CEC_DEV, timeout=CEC_TIMEOUT_S)
         phys = next((l.split(":")[1].strip() for l in out.splitlines() if "Physical Address" in l), "")
         if phys and phys != "f.f.f.f":
             cec("--to", "15", "--active-source", f"phys-addr={phys}")
@@ -204,16 +223,21 @@ def cec_power(on):
 
 
 def set_display(on):
-    with lock:
+    with switch_lock:
         if on:
-            state["signal"] = signal(True)  # the TV needs a signal to switch to
-            state["cec"] = cec_power(True)
+            with lock:
+                state["signal"] = signal(True)  # the TV needs a signal to switch to
+                state["on"] = True
+            got = cec_power(True)
         else:
-            state["cec"] = cec_power(False)
-            state["signal"] = signal(False)
-        state["on"] = on
-        print(f"display {'on' if on else 'off'}: signal {state['signal']}, cec {state['cec']}", flush=True)
-        return dict(state)
+            got = cec_power(False)
+            with lock:
+                state["signal"] = signal(False)
+                state["on"] = False
+        with lock:
+            state["cec"] = got
+            print(f"display {'on' if on else 'off'}: signal {state['signal']}, cec {state['cec']}", flush=True)
+            return dict(state)
 
 
 def output_mode(randr):
@@ -225,13 +249,15 @@ def output_mode(randr):
 
 
 def read_mode():
-    """The output's name and current mode, or None while there is no compositor or the output is off."""
-    out = wayland()
-    if not out:
+    """The output's name, current mode and the environment that reaches it, or None while there is no compositor or the
+    output is off."""
+    found = wayland()
+    if not found:
         return None
-    rc, randr = run("wlr-randr")
+    out, wenv = found
+    rc, randr = run("wlr-randr", env=wenv)
     mode = output_mode(randr) if rc == 0 else None
-    return (out, mode) if mode else None
+    return (out, mode, wenv) if mode else None
 
 
 # The mode watch's own counts: sets that took, failed sets in a row, the monotonic time before which none is tried,
@@ -251,12 +277,12 @@ def check_mode(now):
             # Unplugged, or its input switched away: whatever comes back is set at once (review of #560).
             mode_watch.update(failed=0, next_try=0.0, stuck_at=None)
             return
-        out, mode = found
+        out, mode, wenv = found
         if mode == MODE or mode_watch["stuck_at"] not in (None, mode):
             # Back at MODE, or stuck and now at another mode (a hotplug, an input switch): no wait.
             mode_watch.update(failed=0, next_try=0.0, stuck_at=None)
         if mode != MODE and now >= mode_watch["next_try"]:
-            rc, msg = run("wlr-randr", "--output", out, "--mode", MODE)
+            rc, msg = run("wlr-randr", "--output", out, "--mode", MODE, env=wenv)
             after = read_mode()
             was, mode = mode, after[1] if after else mode
             why = "" if rc == 0 else " (" + msg.strip()[:120] + ")"
@@ -294,32 +320,44 @@ def watch_mode():
             mode_errors.update(count=0, next_log=0.0)
 
 
-# time.monotonic() of the player's last beat; None until a beat after a start or a restart.
-last_beat = None
+# The monotonic time by which the player must beat, or the kiosk is restarted; None while the watchdog is disarmed.
+beat_due = None
 
 
 # Restarts that failed in a row, and the monotonic time the next is tried; None while none is due (review of #560).
-restarts = {"failed": 0, "retry_at": None}
+# `quiet`: restarts that took with no beat since.
+restarts = {"failed": 0, "retry_at": None, "quiet": 0}
+
+
+def arm(now):
+    """A kiosk (re)started at `now`, on the monotonic clock: it has START_GRACE_S to beat, so one that hangs as it starts is restarted."""
+    global beat_due
+    beat_due = now + START_GRACE_S
 
 
 def check_player(now):
     """One check of the player's beat, at `now` on the monotonic clock: restart the kiosk when it has gone quiet."""
-    global last_beat
-    stale = last_beat is not None and now - last_beat > STALE_S
+    global beat_due
+    stale = beat_due is not None and now > beat_due
     retry = restarts["retry_at"] is not None and now >= restarts["retry_at"]
     if not (stale or retry):
         return
-    last_beat = None
+    beat_due = None
     restarts["retry_at"] = None
     rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
     if rc == 0:
-        restarts["failed"] = 0
-        print(f"no beat from the player for {STALE_S} s: kiosk restart queued", flush=True)
+        restarts.update(failed=0, quiet=restarts["quiet"] + 1)
+        if restarts["quiet"] < QUIET_RESTARTS:
+            arm(now)
+            then = f"a beat expected within {START_GRACE_S} s"
+        else:
+            then = f"{QUIET_RESTARTS} in a row with no beat: no more until the player beats"
+        print(f"no beat from the player: kiosk restart queued; {then}", flush=True)
         return
     restarts["failed"] += 1
     again = restarts["failed"] < RESTART_TRIES
     then = f"next try in {RESTART_RETRY_S} s" if again else "no more tries until the player beats"
-    print(f"no beat from the player for {STALE_S} s: kiosk restart failed ({restarts['failed']} of {RESTART_TRIES}): {out.strip()[:120]}; {then}", flush=True)
+    print(f"no beat from the player: kiosk restart failed ({restarts['failed']} of {RESTART_TRIES}): {out.strip()[:120]}; {then}", flush=True)
     if again:
         restarts["retry_at"] = now + RESTART_RETRY_S
     else:
@@ -396,9 +434,9 @@ def api_download(path, dest, limit):
 
 
 def kiosk_restart():
-    global last_beat
-    # Disarmed until the restarted player beats: its start is not a hang. The update's gate watches it meanwhile.
-    last_beat = None
+    # Its start is not a hang: the restarted player has the grace a start has. The update's gate judges the release
+    # meanwhile on its own clock, and is checked on every watch, a watchdog restart or not.
+    arm(time.monotonic())
     rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
     if rc != 0:
         print(f"kiosk restart for a player update failed: {out.strip()[:120]}", flush=True)
@@ -444,6 +482,8 @@ def watch_updates():
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = REQUEST_TIMEOUT_S
+
     def origin_ok(self):
         return self.headers.get("Origin") in PLAYER_ORIGINS
 
@@ -451,7 +491,16 @@ class Handler(BaseHTTPRequestHandler):
         return self.headers.get("Host") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
 
     def authorised(self):
-        return self.host_ok() and hmac.compare_digest(self.headers.get("x-sf-token", ""), TOKEN)
+        # As bytes: compare_digest refuses a str with a character past ASCII, which a header may carry.
+        return self.host_ok() and hmac.compare_digest(self.headers.get("x-sf-token", "").encode(), TOKEN.encode())
+
+    def body(self, limit):
+        """The request's JSON body, at most `limit` bytes; ValueError for a length that is not 0 to `limit`. A negative
+        one would read until the client closes."""
+        length = int(self.headers.get("content-length") or 0)
+        if not 0 <= length <= limit:
+            raise ValueError(f"content-length {length}")
+        return json.loads(self.rfile.read(length) or b"{}")
 
     def reply(self, code, body):
         data = json.dumps(body).encode()
@@ -493,17 +542,16 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, state) if self.path == "/display" else self.reply(404, {"error": "not found"})
 
     def do_POST(self):
-        global last_beat
+        global beat_due
         if not self.authorised():
             return self.reply(403, {"error": "forbidden"})
         if self.path == "/alive":
-            last_beat = time.monotonic()
-            restarts.update(failed=0, retry_at=None)
+            beat_due = time.monotonic() + STALE_S
+            restarts.update(failed=0, retry_at=None, quiet=0)
             # A player before #628, or a build not made by the release workflow, sends no release: its beat still counts
             # for the watchdog, and for no release's gate.
             try:
-                length = int(self.headers.get("content-length") or 0)
-                release = json.loads(self.rfile.read(min(length, 1024)) or b"{}").get("release")
+                release = self.body(1024).get("release")
             except (ValueError, AttributeError):
                 release = None
             if not updates:
@@ -520,8 +568,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, set_display(self.path.endswith("/on")))
         elif self.path == "/credential":
             try:
-                length = int(self.headers.get("content-length") or 0)
-                body = json.loads(self.rfile.read(min(length, 4096)) or b"{}")
+                body = self.body(4096)
                 cred, api = body.get("credential"), device_api(body.get("api"))
             except (ValueError, AttributeError):
                 cred = api = None
@@ -548,6 +595,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     updates = load_updater()
+    arm(time.monotonic())
     threading.Thread(target=watch_player, daemon=True).start()
     threading.Thread(target=watch_mode, daemon=True).start()
     if updates:

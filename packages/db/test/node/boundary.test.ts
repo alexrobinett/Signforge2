@@ -110,6 +110,30 @@ describe('import boundary', () => {
   });
 });
 
+describe('raw D1 in the API', () => {
+  // The API reaches D1 through packages/db's repositories. Two files wrap the binding in a Proxy for
+  // others to call through (Better Auth's adapter, the agent's statement budget) and may name its methods.
+  const WRAPPERS = new Set(['apps/api/src/auth/index.ts', 'apps/api/src/agent/chat.ts']);
+  const RAW_D1 = /\.\s*(?:prepare|batch)\s*\(/g;
+  const rawD1 = (source: string) => [...source.matchAll(RAW_D1)].map((m) => m[0]);
+
+  it('catches the ways in', () => {
+    expect(rawD1("await env.DB.prepare('SELECT 1').all();")).toHaveLength(1);
+    expect(rawD1('await c.env.DB.batch([a, b]);')).toHaveLength(1);
+    expect(rawD1('const db = env.DB;\nawait db\n  .prepare(sql)\n  .run();')).toHaveLength(1);
+    expect(rawD1('await scoped(env.DB, orgId).screens.get(id);')).toEqual([]);
+  });
+
+  it('holds across apps/api/src', () => {
+    const offenders: string[] = [];
+    for (const file of codeFiles(join(ROOT, 'apps/api/src'))) {
+      const path = relative(ROOT, file).split(sep).join('/');
+      if (!WRAPPERS.has(path)) for (const call of rawD1(readFileSync(file, 'utf8'))) offenders.push(`${path}: ${call}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('guarded fields', () => {
   // `scoped` and `platform` must drop the same fields from a caller's values: one `strip`.
   it('are stripped by one function, in src/writes.ts', () => {

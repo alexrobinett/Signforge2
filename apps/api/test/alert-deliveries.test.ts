@@ -9,7 +9,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { alertAgentRefused, checkScreenAlerts, finishRollouts } from '../src/alerts';
 import type { FetchGuards } from '../src/data/fetch';
-import { deliverAlert, deliverAlerts } from '../src/deliveries';
+import { CONCURRENT_LANES, deliverAlert, deliverAlerts, DELIVERIES_PER_RUN } from '../src/deliveries';
 import { emailSenderFor, RecordingEmailSender } from '../src/email';
 import worker from '../src/index';
 import { Client, email, testApp } from './client';
@@ -554,35 +554,100 @@ describe('alerts to Slack and webhooks', () => {
   });
 });
 
+/** `count` webhook deliveries due at `now` in a new org, and the receiver's URL. */
+async function queuedWebhooks(count: number, now: number, tag: string) {
+  const { org, webhookUrl } = await orgWithChannels();
+  const o = testScope(env.DB, org.id);
+  const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
+  await o.commit(
+    Array.from({ length: count }, (_, n) => n).flatMap(
+      (n) =>
+        o.alertDeliveries.stage.insert({
+          channel: 'webhook',
+          eventId: `evt_${tag}_${n}`,
+          eventType: 'test',
+          eventJson: JSON.stringify({ ...event, id: `evt_${tag}_${n}` }),
+          nextAttemptAt: now,
+          giveUpAt: now,
+        }).writes,
+    ),
+  );
+  return webhookUrl;
+}
+
 describe("a delivery run's D1 queries", () => {
-  it("stay a handful however many it sends, well under the Free plan's 50 an invocation", async () => {
+  it("stay a handful however many it sends, well under a Paid plan's 1,000 an invocation", async () => {
     const now = Date.now();
     const answers: Record<string, number[]> = {};
-    for (let i = 0; i < 3; i++) {
-      const { org, webhookUrl } = await orgWithChannels();
-      answers[webhookUrl] = [200];
-      const o = testScope(env.DB, org.id);
-      const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
-      await o.commit(
-        [0, 1, 2, 3].flatMap(
-          (n) =>
-            o.alertDeliveries.stage.insert({
-              channel: 'webhook',
-              eventId: `evt_budget_${n}`,
-              eventType: 'test',
-              eventJson: JSON.stringify({ ...event, id: `evt_budget_${n}` }),
-              nextAttemptAt: now,
-              giveUpAt: now,
-            }).writes,
-        ),
-      );
-    }
+    // DELIVERIES_PER_RUN in all: the claim's limit, and the most the channels' query can bind (two values each, 100 a statement).
+    for (let i = 0; i < DELIVERIES_PER_RUN / 4; i++) answers[await queuedWebhooks(4, now, `budget${i}`)] = [200];
     const { guards, to } = receivers(answers);
     const watched = watchedD1(env.DB);
 
     await deliverAlerts({ ...env, DB: watched.db }, new RecordingEmailSender(), { now, guards });
-    expect(Object.keys(answers).flatMap((url) => to(url))).toHaveLength(12);
+    expect(Object.keys(answers).flatMap((url) => to(url))).toHaveLength(DELIVERIES_PER_RUN);
     expect(watched.seen.queries).toBeLessThanOrEqual(3);
+    expect(DELIVERIES_PER_RUN * 2).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('a delivery run sends concurrently', () => {
+  /** Guards that hold each request until the test lets it go, and say how many are held. */
+  function gated(answers: string[]) {
+    const held: { url: string; go: () => void }[] = [];
+    const arrived: (() => void)[] = [];
+    const sent: string[] = [];
+    const guards: FetchGuards = {
+      resolve: async () => ['93.184.216.34'],
+      fetch: async (input, init) => {
+        const { url } = new Request(input, init);
+        if (!answers.includes(url)) throw new TypeError(`no receiver at ${url}`);
+        await new Promise<void>((go) => {
+          held.push({ url, go });
+          for (const wake of arrived.splice(0)) wake();
+        });
+        sent.push(url);
+        return new Response('ok');
+      },
+    };
+    const heldAtLeast = async (n: number) => {
+      while (held.length < n) await new Promise<void>((r) => arrived.push(r));
+    };
+    return { guards, held, sent, heldAtLeast };
+  }
+
+  it("sends one org's deliveries one at a time, and different orgs' at once", async () => {
+    const now = Date.now();
+    const urls = [await queuedWebhooks(2, now, 'lane0'), await queuedWebhooks(2, now, 'lane1'), await queuedWebhooks(2, now, 'lane2')];
+    const g = gated(urls);
+    const run = deliverAlerts(env, new RecordingEmailSender(), { now, guards: g.guards });
+    // Each org's first is in flight together; none of the seconds, whose turn comes after.
+    await g.heldAtLeast(3);
+    await env.DB.prepare('SELECT 1').first();
+    expect(g.held.map((h) => h.url).toSorted()).toEqual(urls.toSorted());
+    for (const h of g.held.splice(0)) h.go();
+    await g.heldAtLeast(3);
+    expect(g.held.map((h) => h.url).toSorted()).toEqual(urls.toSorted());
+    for (const h of g.held.splice(0)) h.go();
+    await run;
+    expect(g.sent).toHaveLength(6);
+  });
+
+  it('runs at most CONCURRENT_LANES at once, and sends them all', async () => {
+    const now = Date.now();
+    const urls: string[] = [];
+    for (let i = 0; i < CONCURRENT_LANES + 2; i++) urls.push(await queuedWebhooks(1, now, `cap${i}`));
+    const g = gated(urls);
+    const run = deliverAlerts(env, new RecordingEmailSender(), { now, guards: g.guards });
+    await g.heldAtLeast(CONCURRENT_LANES);
+    await env.DB.prepare('SELECT 1').first();
+    expect(g.held).toHaveLength(CONCURRENT_LANES);
+    // As each is answered, the next lane starts.
+    for (const h of g.held.splice(0)) h.go();
+    await g.heldAtLeast(2);
+    for (const h of g.held.splice(0)) h.go();
+    await run;
+    expect(g.sent.toSorted()).toEqual(urls.toSorted());
   });
 });
 

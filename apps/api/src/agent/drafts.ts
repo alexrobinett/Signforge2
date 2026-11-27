@@ -13,17 +13,31 @@
  *  - no takeover: an entry that cuts in at once is #269's to confirm.
  * A viewer's drawer drafts too, as a request to copy for someone who may save it: the dispatcher
  * refuses a viewer's save, as it refuses any of theirs.
+ *
+ * A save takes only what a turn proposed (#269): the turn signs each draft it sends, as the drawer
+ * shows it, for its member and org (`signDraft`), and the save refuses a call whose token is not the
+ * one signed for that call, member and org, or has run out. The token is an HMAC under the server's
+ * secret, not a record in the org's Durable Object as a confirmation card is: a draft can change
+ * until the turn ends (`join`), so the turn signs the drafts it answers with, however many, at no
+ * storage write or Durable Object call, and the save checks them at none either. A token is not
+ * spent by a save, and need not be: an update saves only at the version it was drafted on, so a
+ * second save of it is a conflict, and a creation carries the idempotency key the turn gave it.
  */
 import { CMS_AGENT_CLIENT_ID, type Caller, dispatch, entryView, type Grant, permits, registry } from '@signforge/tools';
 import type { Hono } from 'hono';
 import { z } from 'zod';
 import type { ApiEnv } from '../api';
 import { cmsCaller, STATUS } from '../api/tools';
+import { authSecret } from '../auth';
 import type { ConnectorDeps } from '../connectors';
 import type { ApplyAnswer, ProposedCall } from './chat-shapes';
-import { readBody } from './inline';
+import { canonical } from './confirm';
+import { type AgentDeps, readBody } from './inline';
 
 type ApplyResult = ApplyAnswer['results'][number];
+
+/** A draft as the turn makes it, before it is signed for the answer. */
+export type Proposal = Omit<ProposedCall, 'token'>;
 
 type Row = Record<string, unknown>;
 const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -60,14 +74,56 @@ const DRAFTS: Record<string, Target> = {
 };
 
 /** At most this many drafts in a turn, and in one save. */
-export const MAX_DRAFTS = 5;
+export const MAX_DRAFTS = 15;
+
+/** How long after its turn a draft may be saved: later, the person asks the agent again. */
+export const DRAFT_MS = 30 * 60_000;
+
+/** Whom a turn proposed its drafts to. */
+export interface Proposer {
+  orgId: string;
+  userId: string;
+}
+
+/** Domain separation: the same secret signs Better Auth's cookies and screens' socket tickets. */
+const SIGNED = 'sf-agent-draft.v1.';
+const encoder = new TextEncoder();
+
+/** The HMAC-SHA256, in hex, of a draft for `who` until `expires`: its tool and input exactly, keys in any order. */
+async function mac(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>, who: Proposer, call: { tool: string; input: Row }, expires: number): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(authSecret(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signed = canonical({ orgId: who.orgId, userId: who.userId, tool: call.tool, input: call.input, expires });
+  const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(SIGNED + signed)));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** A draft's token, `<expires>.<mac>`: what a save of exactly this call by `who` carries, until `DRAFT_MS` after `now`. */
+export async function signDraft(
+  env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>,
+  who: Proposer,
+  call: { tool: string; input: Row },
+  now: number,
+): Promise<string> {
+  const expires = now + DRAFT_MS;
+  return `${expires}.${await mac(env, who, call, expires)}`;
+}
+
+/** Whether a turn proposed exactly this call to `who`, and it has not run out by `now`. */
+async function proposedTo(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>, who: Proposer, call: ApplyCall, now: number): Promise<boolean> {
+  const dot = call.token.indexOf('.');
+  const expires = Number(call.token.slice(0, dot));
+  if (expires <= now) return false;
+  const x = encoder.encode(await mac(env, who, call, expires));
+  const y = encoder.encode(call.token.slice(dot + 1));
+  return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
+}
 
 /**
- * The most D1 statements a save prepares, the session's reads with its drafts', inside the Free
- * plan's 50 a request. A save's drafts are costed before any is written (`saveStatements`), and
+ * The most D1 statements a save prepares, the session's reads with its drafts', well inside Workers
+ * Paid's 1,000 a request. A save's drafts are costed before any is written (`saveStatements`), and
  * the turn drafts no more than one save holds.
  */
-export const SAVE_STATEMENTS = 48;
+export const SAVE_STATEMENTS = 300;
 
 /**
  * Each draft's D1 statements, saved by an editor (whose role check reads the org's settings): its
@@ -155,7 +211,7 @@ function draftRefusal(name: string, input: Row, target: Row | null): string | un
  * input and the rules above, its target read, and its `ifVersion` the version read, so a save made
  * since refuses it rather than being overwritten. Or why not, for the model to read.
  */
-export async function propose(caller: Caller, name: string, raw: unknown): Promise<{ call: ProposedCall } | { problem: string }> {
+export async function propose(caller: Caller, name: string, raw: unknown): Promise<{ call: Proposal } | { problem: string }> {
   const tool = registry.get(name);
   if (!tool || !Object.hasOwn(DRAFTS, name)) return { problem: `${name} is not a tool you may draft with` };
   // A change must change something. Said before the tool's own check, whose refusal lists what the drawer may not draft (#503).
@@ -189,19 +245,20 @@ const AIM = new Set(['target', 'groupId', 'screenId']);
  * at save, after the drafts before it were written (#344). Each change passed alone, and aim is the
  * only rule across fields, so the joined one passes too.
  */
-export function join(earlier: ProposedCall, made: ProposedCall): ProposedCall {
+export function join(earlier: Proposal, made: Proposal): Proposal {
   const kept = made.input.target === undefined ? earlier.input : Object.fromEntries(Object.entries(earlier.input).filter(([k]) => !AIM.has(k)));
   return { ...earlier, input: { ...kept, ...made.input, ifVersion: earlier.input.ifVersion } };
 }
 
-const applyRequest = z
+const applyCall = z
   .object({
-    calls: z
-      .array(z.object({ tool: z.string().max(60), input: z.record(z.string(), z.unknown()) }).strict())
-      .min(1)
-      .max(MAX_DRAFTS),
+    tool: z.string().max(60),
+    input: z.record(z.string(), z.unknown()),
+    token: z.string().regex(/^\d{1,16}\.[0-9a-f]{64}$/, 'the token the agent signed this change with'),
   })
   .strict();
+type ApplyCall = z.output<typeof applyCall>;
+const applyRequest = z.object({ calls: z.array(applyCall).min(1).max(MAX_DRAFTS) }).strict();
 
 /**
  * `POST /api/agent/apply` (#268): the drafts the person saved, written in order through the
@@ -210,17 +267,24 @@ const applyRequest = z
  * audited by the dispatcher in its batch. Budget: at most 5 drafts and `SAVE_STATEMENTS` D1
  * statements, costed before anything is written (test).
  *
- * Each update must carry its `ifVersion`, so a save never overwrites a change made since. The audit
- * says a save came "via agent" (`cms-agent`) because the CMS says so: until the turn signs what it
- * proposed (#269), it is the client's claim that the agent proposed it, made by a signed-in member,
- * who may write the same through the tool route anyway.
+ * Each call must carry the token its turn signed it with, for this member in this org, before it ran
+ * out (`signDraft`): all are checked before any is written, so the audit's "via agent" (`cms-agent`)
+ * is the turn's word, never the browser's (#269). Each update must carry its `ifVersion`, so a save
+ * never overwrites a change made since.
  */
-export function mountApply(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined) {
+export function mountApply(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, deps: AgentDeps = {}) {
   api.post('/agent/apply', async (c) => {
     const request = await readBody(c, applyRequest);
     if (request instanceof Response) return request;
     if (saveStatements(request.calls) > SAVE_STATEMENTS)
       return c.json({ error: 'invalid_input', message: 'these changes are too large to save at once: save fewer, or a shorter play order' }, 400);
+    const who = { orgId: c.var.org.orgId, userId: c.var.session.user.id };
+    const now = (deps.now ?? Date.now)();
+    for (const call of request.calls)
+      if (!(await proposedTo(c.env, who, call, now))) {
+        const message = 'this is not a change the agent proposed to you here, or it has run out: ask the agent again';
+        return c.json({ results: [{ tool: call.tool, ok: false, error: 'forbidden', message }] } satisfies ApplyAnswer, 403);
+      }
     const caller: Caller = { ...cmsCaller(c, connectors), actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID } };
     const results: ApplyResult[] = [];
     for (const { tool, input } of request.calls) {

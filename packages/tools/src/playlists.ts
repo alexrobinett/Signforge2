@@ -10,18 +10,15 @@
  */
 import type { Transition } from '@signforge/contract';
 import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type PlaylistRow } from '@signforge/db';
-import { z } from 'zod';
-import { DECIDING, decidedMeanwhile, keptFor, playlistContent, shownVersion } from './agent-drafts';
-import { id, idempotencyKey, ifVersion, name } from './fields';
-import { page, pageInput } from './paging';
+import { DECIDING, decidedMeanwhile, keptFor, playlistContent } from './agent-drafts';
+import { page } from './paging';
 import { ended } from './schedule';
 import { defineTool, invalidFields, isAgent, notFound, ToolError, type ToolContext } from './tool';
-import { outputs, transition, type PlaylistView } from './outputs';
+import { outputs, type PlaylistView } from './outputs';
+import { inputs } from './inputs';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
 const DEFAULT_TRANSITION: Transition = { type: 'fade', ms: 500 };
-
-const spotIds = z.array(id('spot')).max(500).describe("The spots in play order: the whole list, replacing the draft's. A spot may appear more than once");
 
 const playlistView = (row: PlaylistRow, items: string[], defaultId: string | null | undefined): PlaylistView => ({
   id: row.id,
@@ -60,11 +57,7 @@ const listPlaylists = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    ...pageInput,
-    isDefault: z.boolean().optional().describe('true: only the default playlist (none while there is none)'),
-    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
-  }),
+  input: inputs.list_playlists,
   output: outputs.list_playlists,
   example: {},
   handler: async ({ org, input }) => {
@@ -86,7 +79,7 @@ const getPlaylist = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ playlistId: id('playlist') }),
+  input: inputs.get_playlist,
   output: outputs.get_playlist,
   example: { playlistId: 'pls_example' },
   handler: async ({ org, input }) => {
@@ -105,17 +98,13 @@ const savePlaylist = defineTool({
   idempotent: true,
   partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
   // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-  input: z.strictObject({
-    playlistId: id('playlist').optional().describe('The playlist to change; omit to create one'),
-    name: name('playlist').optional(),
-    transition: transition.optional(),
-    spotIds: spotIds.optional(),
-    ifVersion,
-    idempotencyKey,
-  }),
+  input: inputs.save_playlist,
   output: outputs.save_playlist,
   example: { name: 'Weekend promos', transition: { type: 'fade', ms: 600 }, spotIds: ['spt_example'] },
-  target: (input, output) => ({ kind: 'playlist', id: input.playlistId ?? output.playlist.id }),
+  target: (input, output) => {
+    const id = input.playlistId ?? output?.playlist.id;
+    return id === undefined ? undefined : { kind: 'playlist', id };
+  },
   handler: async ({ org, actor, input, write }) => {
     const { playlistId, name } = input;
     if (playlistId === undefined) {
@@ -147,15 +136,12 @@ async function playlistAt(org: OrgScope, playlistId: string, version: number) {
   return row;
 }
 
-/** Reject's and Keep's input: the playlist, at the version shown. */
-const decidePlaylistInput = z.object({ playlistId: id('playlist'), ifVersion: shownVersion });
-
 const revertPlaylistDraft = defineTool({
   name: 'revert_playlist_draft',
   description:
     "Reject an agent's draft of a playlist (#116): its name, transition and play order go back to the draft the agent wrote over (the person's, or as published), and the agent's is kept beside it; the same call again puts the agent's back (its Undo). Refused with a conflict if neither is kept, and if the playlist changed since ifVersion. People only. Returns { playlist, rejected }.",
   ...DECIDING,
-  input: decidePlaylistInput,
+  input: inputs.revert_playlist_draft,
   output: outputs.revert_playlist_draft,
   example: { playlistId: 'pls_example', ifVersion: 3 },
   target,
@@ -182,7 +168,7 @@ const keepPlaylistDraft = defineTool({
   description:
     "Keep an agent's draft of a playlist as the draft (#116): it is no longer a proposal, and the draft it was written over is let go. The draft is not changed and not published. Refused with a conflict if it is not an agent's proposal, or the playlist changed since ifVersion. People only. Returns { playlist }.",
   ...DECIDING,
-  input: decidePlaylistInput,
+  input: inputs.keep_playlist_draft,
   output: outputs.keep_playlist_draft,
   example: { playlistId: 'pls_example', ifVersion: 3 },
   target,
@@ -271,14 +257,7 @@ const setDefaultPlaylist = defineTool({
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
-  input: z.object({
-    playlistId: id('playlist'),
-    ifVersion: ifVersion.optional().describe("The organization settings' version you read (get_org_settings): refused with a conflict if they changed since"),
-    ifDefault: id('playlist')
-      .nullable()
-      .optional()
-      .describe('Set it only if the default is still this playlist; null: only if there is none. Refused with a conflict otherwise'),
-  }),
+  input: inputs.set_default_playlist,
   output: outputs.set_default_playlist,
   example: { playlistId: 'pls_example' },
   target,

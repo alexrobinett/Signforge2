@@ -455,11 +455,11 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   /** A valid input, shown to agents and used by the generated tests. Id fields name their kind (`screenId`, `groupIds`). */
   example: z.input<S>;
   /**
-   * What the change was made to, for the audit log. A refusal that changed something (`ToolError`'s
-   * `changed`) has no output: a tool that refuses so either names its target from the input, or
-   * takes the output as possibly undefined and returns undefined for no target.
+   * What the change was made to, for the audit log. A refused call has no output (`undefined`): a refusal that changed
+   * something (`ToolError`'s `changed`), and a person's press of a card refused (`refusedPress`). A tool then names its
+   * target from the input, or returns undefined for no target.
    */
-  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string } | undefined;
+  target?: (input: z.output<S>, output: NoInfer<z.output<R>> | undefined) => { kind: string; id: string } | undefined;
   /**
    * What the call's audit row records beyond its input: a change its input does not name
    * (`publish`'s new default). Recorded under `detail`, redacted as the input is.

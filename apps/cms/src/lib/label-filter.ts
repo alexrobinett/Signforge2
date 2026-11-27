@@ -40,7 +40,12 @@ export function termsOf(l: unknown): LabelTerm[] {
 }
 
 /** The chips as a selector: one value `eq`, several `in`. */
-export const selectorOf = (terms: readonly LabelTerm[]): Selector => ({
+/** A `Selector` whose arrays are its own: what a tool's input takes (`save_group`'s rule), and `matches` reads. */
+export interface SelectorInput {
+  all: { key: string; op: Selector['all'][number]['op']; values: string[] }[];
+}
+
+export const selectorOf = (terms: readonly LabelTerm[]): SelectorInput => ({
   all: terms.map(({ key, values }) => ({ key, op: values.length === 1 ? 'eq' : 'in', values })),
 });
 

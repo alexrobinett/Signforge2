@@ -173,9 +173,11 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     unsavedHere.add(d.id);
     unsaved.set(d.id, () => options.currentOrg() === d.orgId);
   };
+  const forget = () => state.write(() => ({}));
   const state = {
     read: options.state.read,
     write: (change: (drafts: Drafts<E>) => Drafts<E>) => {
+      stores.add(forget);
       options.state.write(change);
       const ids = new Set(Object.values(options.state.read()).map((d) => d.id));
       for (const id of unsavedHere)
@@ -353,7 +355,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
 
     drop: (key) => state.write((drafts) => Object.fromEntries(Object.entries(drafts).filter(([k]) => k !== key))),
 
-    forget: () => state.write(() => ({})),
+    forget,
   };
 }
 
@@ -369,6 +371,21 @@ let sending = 0;
  * has left cannot, so it does not make the tab ask before closing (#479).
  */
 const unsaved = new Map<string, () => boolean>();
+
+/**
+ * Each store with drafts, by its `forget`, for `forgetDrafts`: added at its first write, which only the browser makes, so
+ * the server, which makes a store per request, keeps none.
+ */
+const stores = new Set<() => void>();
+
+/**
+ * Drops every store's drafts, and every edit counted as not saved: the tab has left the org they were made in (a switch, a
+ * create). Kept, they would come back with the tab to that org, shown and counted as unsaved, on a read long gone.
+ */
+export function forgetDrafts() {
+  for (const forget of stores) forget();
+  unsaved.clear();
+}
 
 /** An edit outside these drafts that is not saved (an AI choice that got no answer, #479): counted as theirs are. */
 export const noteUnsaved = (id: string, saveable: () => boolean) => void unsaved.set(id, saveable);

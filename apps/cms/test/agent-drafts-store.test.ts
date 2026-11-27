@@ -80,12 +80,19 @@ const CARD: AnswerCard = {
   trace: [],
   drafts: [
     {
+      token: 'tok_spot',
       tool: 'save_spot',
       input: { spotId: 'spt_1', data: { headline: 'Hot breakfast, fast' }, ifVersion: 3 },
       target: { kind: 'spot', id: 'spt_1' },
       before: BEFORE,
     },
-    { tool: 'save_schedule_entry', input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' }, target: null, before: null },
+    {
+      token: 'tok_entry',
+      tool: 'save_schedule_entry',
+      input: { playlistId: 'pls_b', target: 'group', groupId: 'grp_dt', idempotencyKey: 'k' },
+      target: null,
+      before: null,
+    },
   ],
 };
 /** A turn answered with `card`, as the API streams it (#350): the run, the card, its end. */
@@ -226,7 +233,11 @@ describe("the drawer's drafts, in the store", () => {
 
     answers.push(savedBoth());
     await store.getState().saveDrafts(1);
-    expect(sent.at(-1)).toEqual({ path: '/api/agent/apply', body: { calls: CARD.drafts.map(({ tool, input }) => ({ tool, input })) }, org: 'org_1' });
+    expect(sent.at(-1)).toEqual({
+      path: '/api/agent/apply',
+      body: { calls: CARD.drafts.map(({ tool, input, token }) => ({ tool, input, token })) },
+      org: 'org_1',
+    });
     expect(at().drafts).toMatchObject({ status: 'saved', error: null });
     expect(reloaded).toEqual(['spt_1']);
     expect(store.getState().agent.filled.spt_1).toMatchObject({
@@ -363,6 +374,7 @@ describe("the drawer's drafts, in the store", () => {
     const toGroup = await saved(
       [
         {
+          token: 'tok',
           tool: 'save_schedule_entry',
           input: { scheduleEntryId: 'sch_1', target: 'group', groupId: 'grp_dt', ifVersion: 4 },
           target: { kind: 'schedule_entry', id: 'sch_1' },
@@ -395,6 +407,7 @@ describe("the drawer's drafts, in the store", () => {
     const toOrg = await saved(
       [
         {
+          token: 'tok',
           tool: 'save_schedule_entry',
           input: { scheduleEntryId: 'sch_1', target: 'org', ifVersion: 4 },
           target: { kind: 'schedule_entry', id: 'sch_1' },
@@ -427,14 +440,21 @@ describe("the drawer's drafts, in the store", () => {
   it('carries on an Undo that stopped from where it did, each draft at the version its target is at now: two playlist changes and an entry made', async () => {
     const PLAYLIST = { id: 'pls_a', name: 'Breakfast', transition: { type: 'cut' }, spotIds: ['spt_1'], version: 5 };
     const drafts: AnswerCard['drafts'] = [
-      { tool: 'save_playlist', input: { playlistId: 'pls_a', name: 'Morning', ifVersion: 5 }, target: { kind: 'playlist', id: 'pls_a' }, before: PLAYLIST },
       {
+        token: 'tok',
+        tool: 'save_playlist',
+        input: { playlistId: 'pls_a', name: 'Morning', ifVersion: 5 },
+        target: { kind: 'playlist', id: 'pls_a' },
+        before: PLAYLIST,
+      },
+      {
+        token: 'tok',
         tool: 'save_playlist',
         input: { playlistId: 'pls_a', spotIds: [], ifVersion: 6 },
         target: { kind: 'playlist', id: 'pls_a' },
         before: { ...PLAYLIST, name: 'Morning', version: 6 },
       },
-      { tool: 'save_schedule_entry', input: { playlistId: 'pls_a', target: 'org', idempotencyKey: 'k' }, target: null, before: null },
+      { token: 'tok', tool: 'save_schedule_entry', input: { playlistId: 'pls_a', target: 'org', idempotencyKey: 'k' }, target: null, before: null },
     ];
     const { store, at } = await saved(drafts, [
       { tool: 'save_playlist', ok: true, output: { playlist: { ...PLAYLIST, name: 'Morning', version: 6 } } },

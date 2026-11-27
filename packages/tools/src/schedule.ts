@@ -20,39 +20,16 @@
  */
 import { scheduleEntryProblems, type ScheduleEntry } from '@signforge/contract';
 import { draftChanged, published, StaleVersionError, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
-import { z } from 'zod';
-import { id, idempotencyKey, ifVersion } from './fields';
-import { page, pageInput } from './paging';
+import type { z } from 'zod';
+import { page } from './paging';
 import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
-import { type entryOutput, type fieldsOutput, outputs, scheduleTarget } from './outputs';
+import { type entryOutput, type fieldsOutput, outputs } from './outputs';
+import { inputs, type takeoverFields } from './inputs';
 
 /** The longest takeover: past a day it is a schedule, and a screen that misses its end would run it too long. */
 const TAKEOVER_MAX_MS = 24 * 3_600_000;
 /** A takeover's priority: above every schedule entry's (at most 99). */
 const TAKEOVER_PRIORITY = 100;
-
-const aim = {
-  target: scheduleTarget,
-  groupId: id('group').optional().describe('For a group entry: the group'),
-  screenId: id('screen').optional().describe('For a screen entry: the screen'),
-};
-export const aimed = (v: { target?: string; groupId?: string; screenId?: string }) =>
-  v.target === undefined
-    ? v.groupId === undefined && v.screenId === undefined
-    : (v.target === 'group') === (v.groupId !== undefined) && (v.target === 'screen') === (v.screenId !== undefined);
-export const AIMED = 'give groupId for a group entry and screenId for a screen entry, nothing for org';
-
-const priority = z.number().int().min(0).max(99).describe('Higher wins where entries overlap; 0 to 99, default 0. Takeovers are above all of them');
-const date = (what: string) => z.string().describe(`${what}, YYYY-MM-DD in each screen's time zone`);
-const time = (what: string) => z.string().describe(`${what}, HH:MM in each screen's time zone`);
-const when = {
-  startDate: date('First date, inclusive').nullable().optional(),
-  endDate: date('Last date, inclusive').nullable().optional(),
-  days: z.array(z.number().int()).min(1).max(7).nullable().optional().describe('Weekdays it plays, 0 = Sunday; omit for every day'),
-  from: time('Daily start, inclusive').nullable().optional(),
-  to: time('Daily end, exclusive; at or before from, the window crosses midnight').nullable().optional(),
-};
-const instant = (what: string) => z.string().describe(`${what}, an ISO 8601 time`);
 
 type EntryView = z.infer<typeof entryOutput>;
 
@@ -151,14 +128,6 @@ async function requireAim(org: OrgScope, e: { playlistId: string; target: 'org' 
   return { target: e.target, groupId: e.target === 'group' ? (e.groupId ?? null) : null, screenId: e.target === 'screen' ? (e.screenId ?? null) : null };
 }
 
-/** A takeover's fields as its tools take them: the playlist, whom it plays on, and when (`start_takeover`, `takeover`). */
-export const takeoverFields = {
-  playlistId: id('playlist'),
-  ...aim,
-  startsAt: instant('When it starts; default now').optional(),
-  endsAt: instant('When it ends, at most 24 hours after it starts'),
-};
-
 /** A new takeover as stored, checked: the playlist and whom it plays on exist, its bounds hold, and a screen would take it. */
 export async function takeoverOf(org: OrgScope, input: z.output<z.ZodObject<typeof takeoverFields>>, now: number): Promise<Stored> {
   const aimedAt = await requireAim(org, input);
@@ -202,10 +171,7 @@ const listEntries = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    ...pageInput,
-    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
-  }),
+  input: inputs.list_schedule_entries,
   output: outputs.list_schedule_entries,
   example: {},
   handler: async ({ org, input }) => {
@@ -223,10 +189,10 @@ const startTakeover = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z.object({ ...takeoverFields, idempotencyKey }).refine(aimed, AIMED),
+  input: inputs.start_takeover,
   output: outputs.start_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
-  target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
+  target: (_input, output) => (output ? { kind: 'schedule_entry', id: output.entry.id } : undefined),
   handler: async ({ org, input, write }) => ({ entry: entryView(write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())))) }),
   refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
 });
@@ -243,24 +209,13 @@ const saveEntry = defineTool({
   mutates: true,
   idempotent: true,
   // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-  input: z
-    .strictObject({
-      scheduleEntryId: id('schedule entry').optional().describe('The entry to change; omit to create one'),
-      playlistId: id('playlist').optional(),
-      target: scheduleTarget.optional(),
-      groupId: aim.groupId,
-      screenId: aim.screenId,
-      priority: priority.optional(),
-      ...when,
-      startsAt: instant("A takeover's start").optional(),
-      endsAt: instant("A takeover's end").optional(),
-      ifVersion,
-      idempotencyKey,
-    })
-    .refine(aimed, AIMED),
+  input: inputs.save_schedule_entry,
   output: outputs.save_schedule_entry,
   example: { playlistId: 'pls_example', target: 'group', groupId: 'grp_example', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' },
-  target: (input, output) => ({ kind: 'schedule_entry', id: input.scheduleEntryId ?? output.entry.id }),
+  target: (input, output) => {
+    const id = input.scheduleEntryId ?? output?.entry.id;
+    return id === undefined ? undefined : { kind: 'schedule_entry', id };
+  },
   handler: async ({ org, input, write }) => {
     const { scheduleEntryId } = input;
     if (scheduleEntryId === undefined) {

@@ -271,7 +271,10 @@ Object.assign(window, { __sf: state });
 let lastFrame = 0;
 let interval = 0;
 const warmup: number[] = [];
+/** `performance.now()` at the last animation frame: the supervisor's beat waits on it (see boot). */
+let drewAt = performance.now();
 function monitor(t: number): void {
+  drewAt = performance.now();
   // Asleep, the panel may have no signal and the browser stops producing frames: nothing to measure.
   if (!state.displayOn) {
     lastFrame = 0;
@@ -891,7 +894,7 @@ function ofHeldSources(values: Record<string, number>): Record<string, number> {
 /** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
 async function apiSync(): Promise<void> {
   const { manifest } = playback;
-  const batch = playBatch(now());
+  const batch = await playBatch(now());
   const heldFeed = await heldBlobs(heldSnapshotHashes());
   const output = await displayOutput();
   const req: SyncRequest = {
@@ -1123,7 +1126,14 @@ async function boot(): Promise<void> {
   }, 10_000);
   // That watchdog runs in the renderer it watches. The supervisor restarts the kiosk when these
   // beats stop (device/pi/supervisor.py). Without a supervisor (the demo in a browser) nobody hears them.
-  if (KIND === 'device') setInterval(() => void beat().catch(() => undefined), ALIVE_MS);
+  // A page whose timers run but that draws no frames is a frozen panel: while it should be drawing
+  // (panel on, page visible) it beats only after a frame. Asleep or hidden, the browser may stop
+  // producing frames by design, so it beats on.
+  if (KIND === 'device')
+    setInterval(() => {
+      if (state.displayOn && document.visibilityState === 'visible' && performance.now() - drewAt > ALIVE_MS) return;
+      void beat().catch(() => undefined);
+    }, ALIVE_MS);
 
   void syncLoop();
   if (API) void contentLoop();

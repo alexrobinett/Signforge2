@@ -41,6 +41,7 @@ describe('summarize', () => {
   it("says a spot's changes, before → after, its QR link in full and marked to check, and the screens its playlists reach", () => {
     const s = summarize(
       {
+        token: 'tok',
         tool: 'save_spot',
         input: { spotId: 'spt_promo', data: { headline: 'Hot breakfast, fast', look: 'night', qrUrl: 'https://order.example/menu?from=screen' }, ifVersion: 3 },
         target: { kind: 'spot', id: 'spt_promo' },
@@ -69,6 +70,7 @@ describe('summarize', () => {
   it('says where a new entry wins: breakfast weekdays 6-11 on the drive-thrus, above their entry', () => {
     const s = summarize(
       {
+        token: 'tok',
         tool: 'save_schedule_entry',
         input: {
           playlistId: 'pls_breakfast',
@@ -90,7 +92,13 @@ describe('summarize', () => {
     expect(s.reach).toBe('Wins on 2 of 2 screens at the next publish');
     // Below the drive-thru entry's priority, it would not play there.
     const lower = summarize(
-      { tool: 'save_schedule_entry', input: { playlistId: 'pls_breakfast', target: 'group', groupId: 'grp_dt', priority: 1 }, target: null, before: null },
+      {
+        token: 'tok',
+        tool: 'save_schedule_entry',
+        input: { playlistId: 'pls_breakfast', target: 'group', groupId: 'grp_dt', priority: 1 },
+        target: null,
+        before: null,
+      },
       CONTEXT,
     );
     expect(lower.reach).toBe('Wins on 0 of 2 screens at the next publish');
@@ -100,6 +108,7 @@ describe('summarize', () => {
     expect(
       summarize(
         {
+          token: 'tok',
           tool: 'update_screen',
           input: { screenId: 'scr_dt1', name: 'DT 1' },
           target: { kind: 'screen', id: 'scr_dt1' },
@@ -115,6 +124,7 @@ describe('summarize', () => {
     expect(
       summarize(
         {
+          token: 'tok',
           tool: 'save_playlist',
           input: { playlistId: 'pls_main', name: 'Everyday' },
           target: { kind: 'playlist', id: 'pls_main' },
@@ -125,6 +135,7 @@ describe('summarize', () => {
     ).toBe('Reaches 3 screens at the next publish');
   });
   const promo = (templateVersionId: string, data: Record<string, unknown>): ProposedCall => ({
+    token: 'tok',
     tool: 'save_spot',
     input: { spotId: 'spt_promo', data, ifVersion: 3 },
     target: { kind: 'spot', id: 'spt_promo' },

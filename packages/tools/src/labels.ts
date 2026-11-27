@@ -5,12 +5,11 @@
  */
 import { foldValue, systemLabels } from '@signforge/compiler/selector';
 import { LABEL_LIMITS } from '@signforge/db';
-import { z } from 'zod';
-import { id, labelKey, labels } from './fields';
 import { labelsByScreen, ruleOf } from './memberships';
 import { outputs } from './outputs';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { defineTool, ToolError } from './tool';
+import { inputs } from './inputs';
 
 type LabelRow = { screenId: string; key: string; value: string };
 
@@ -46,22 +45,13 @@ export function overLimit(rows: readonly LabelRow[], changes: readonly Change[])
 const forEach = (screenIds: readonly string[], change: { set: Readonly<Record<string, string>>; remove: readonly string[] }) =>
   screenIds.map((screenId) => ({ screenId, ...change }));
 
-const change = z
-  .object({
-    screenIds: z.array(id('screen')).min(1).max(1000).describe('The screens to change, up to 1000'),
-    set: labels.default({}).describe('Labels to set, by key: a key a screen has takes the new value'),
-    remove: z.array(labelKey).default([]).describe('Keys to remove; a key a screen does not have is ignored'),
-  })
-  .refine((v) => Object.keys(v.set).length > 0 || v.remove.length > 0, 'give labels to set or keys to remove')
-  .refine((v) => !v.remove.some((k) => Object.hasOwn(v.set, k)), 'a key cannot be both set and removed');
-
 const updateScreenLabels = defineTool({
   name: 'update_screen_labels',
   description: `Set and remove labels on screens, as a merge: each key in set takes its value on every screen given, each in remove goes, the others stay. Values are stored as typed and matched case-insensitively. At most ${LABEL_LIMITS.perScreen} labels a screen and ${LABEL_LIMITS.keys} keys an organization (conflict past either). orientation, kind, timezone and locale are system labels, from the screen's settings. Screens get a change at the next publish. Returns { screens: [{ id, labels }], groupsUsingRemoved }: the smart groups whose rule names a removed key.`,
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: change,
+  input: inputs.update_screen_labels,
   output: outputs.update_screen_labels,
   example: { screenIds: ['scr_example'], set: { region: 'north', type: 'drive-thru' }, remove: ['legacy'] },
   target: (input) => (new Set(input.screenIds).size === 1 ? { kind: 'screen', id: input.screenIds[0]! } : undefined),
@@ -93,17 +83,7 @@ const importScreenLabels = defineTool({
   mutates: true,
   // A file of a fleet's labels is a person's to send: an agent labels with update_screen_labels.
   people: true,
-  input: z.object({
-    screens: z
-      .array(
-        z
-          .object({ screenId: id('screen'), set: labels.default({}), remove: z.array(labelKey).default([]) })
-          .refine((c) => !c.remove.some((k) => Object.hasOwn(c.set, k)), 'a key cannot be both set and removed'),
-      )
-      .min(1)
-      .max(1000)
-      .refine((all) => new Set(all.map((c) => c.screenId)).size === all.length, 'each screen once'),
-  }),
+  input: inputs.import_screen_labels,
   output: outputs.import_screen_labels,
   example: { screens: [{ screenId: 'scr_example', set: { region: 'north' }, remove: ['legacy'] }] },
   // As update_screen_labels: one screen's import is in its events (review of #612).
@@ -138,7 +118,7 @@ const listLabelKeys = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_label_keys,
   output: outputs.list_label_keys,
   example: {},
   handler: async ({ org, input }) => {

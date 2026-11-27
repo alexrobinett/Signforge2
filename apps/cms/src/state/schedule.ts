@@ -166,7 +166,8 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
       const out =
         record === null
           ? await callTool('save_schedule_entry', { ...fields, idempotencyKey })
-          : await callTool('save_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version });
+          : // A held entry: its version is known.
+            await callTool('save_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version! });
       await refresh(orgId);
       return { record: out.entry.id };
     },

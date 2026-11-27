@@ -48,7 +48,8 @@
       "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
     },
     {
-      "includes": ["packages/tools/src/**"],
+      // Any tool, whatever its output and data scope (`AnyTool`), and what takes one.
+      "includes": ["packages/tools/src/dispatch.ts", "packages/tools/src/output.ts", "packages/tools/src/read.ts", "packages/tools/src/tool.ts"],
       "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
     },
     {

@@ -10,8 +10,9 @@ import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
-import { pollDataSources } from '../src/data/poller';
+import { pollDataSources, POLLS_PER_RUN } from '../src/data/poller';
 import worker from '../src/index';
+import { counted } from './counting';
 
 const NOW = Date.UTC(2026, 10, 17, 14);
 const MIN = 60_000;
@@ -284,6 +285,31 @@ describe('pollDataSources', () => {
     while (held.length) held.shift()?.();
     await run;
     expect(feed.requests).toHaveLength(5);
+  });
+
+  it('polls POLLS_PER_RUN sources a run, within a Paid invocation: 1,000 D1 queries and 1,000 calls to services', async () => {
+    const ids: string[] = [];
+    const feeds: Record<string, Answer> = {};
+    // One host each: the per-host limit is no part of what is measured here.
+    for (let i = 0; i < POLLS_PER_RUN + 5; i++) {
+      const url = `https://host${i}.test/feed`;
+      ids.push(await source('json', url));
+      feeds[url] = { body: `{"i":${i}}` };
+    }
+    const feed = feedsAt(feeds);
+    const measured = counted();
+    await pollDataSources(measured.bindings, { now: NOW, guards: feed.guards, photoQueue: { enqueue: async () => {} } });
+    expect(feed.requests).toHaveLength(POLLS_PER_RUN);
+    expect((await o.scope.dataSources.snapshots(ids)).length).toBe(POLLS_PER_RUN);
+    // The five over the cap wait for the next run.
+    expect(await o.scope.dataSources.get(ids[POLLS_PER_RUN]!)).toMatchObject({ failures: 0, lastError: null });
+    expect(measured.result().queries).toBeLessThanOrEqual(1 + POLLS_PER_RUN * 7);
+    // The worst a source costs, with the budget in poller.ts: seven D1 queries; four hops of a redirect chain, each its
+    // request and two DNS lookups, and one queue send.
+    expect(1 + POLLS_PER_RUN * 7).toBeLessThanOrEqual(1000);
+    expect(POLLS_PER_RUN * (4 * 3 + 1)).toBeLessThanOrEqual(1000);
+    // Past what 1,000 screens in 100 orgs need of a minute (an hourly RSS source and a five-minute other: 54 a minute at 500 sources).
+    expect(POLLS_PER_RUN * 60).toBeGreaterThanOrEqual(3_600);
   });
 
   it("calls the Worker's own fetch as workerd requires, unbound from any object", async () => {

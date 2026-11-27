@@ -58,13 +58,21 @@ import {
 } from './feed-photos';
 
 /**
- * Free D1 allows 50 queries per invocation. Allow one claim and at most seven calls per source:
- * an org load, a connection read, a grant save, two calls for a refused second refresh, a poll
- * save and its error-path lookup. An RSS source with photos needs at most five.
+ * Sources polled a run, sized for the Workers Paid plan (which Queues and Containers already need): 1,000 D1 queries and
+ * 1,000 calls to Cloudflare services an invocation. Per source, at most seven D1 queries: an org load, a connection read,
+ * a grant save, two calls for a refused second refresh, a poll save and its error-path lookup (an RSS source with photos
+ * needs at most five); plus the one claim. 1 + 60 * 7 = 421 queries. Fetches, at most 12 a source: four hops of a
+ * redirect chain, each its request and two DNS lookups; a provider source's refresh and two reads are fewer. 60 * 12 = 720,
+ * and one queue send each makes 780, under 1,000 with room for the manifests an org's load reads. The one-minute cron
+ * then polls 3,600 an hour, which 1,000 screens in 100 orgs need (an RSS source hourly, any other every 5 minutes).
  */
-const POLLS_PER_RUN = 6;
-/** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
-const LEASE_MS = 2 * 60_000;
+export const POLLS_PER_RUN = 60;
+/**
+ * How long a claimed source is held for its run at least: PER_HOST at a time, a host's sources go in turns of one fetch's
+ * 5 seconds, so even a run whose every source is on one host (POLLS_PER_RUN / PER_HOST * 5 s = 150 s) ends within it. The
+ * claim holds it for its next backoff when that is longer.
+ */
+const LEASE_MS = 3 * 60_000;
 /** Fetches in flight to one host at once (docs/backend-plan.md, Limits), or through one connection. */
 const PER_HOST = 2;
 /** A grant running out sooner than this is refreshed before it is used: past the poll's own lease. */

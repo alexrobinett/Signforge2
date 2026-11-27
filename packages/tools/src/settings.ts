@@ -1,9 +1,8 @@
 import { DEFAULT_AUDIT_RETENTION_DAYS, type OrgScope, type OrgSettings } from '@signforge/db';
-import { z } from 'zod';
-import { displayHours, ifVersion, locale, timezone } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool, isAgent, ToolError } from './tool';
-import { auditRetentionDays, editorsPublish, outputs, rule, type AlertKind, type AlertRule, type SettingsView } from './outputs';
+import { outputs, type AlertKind, type AlertRule, type SettingsView } from './outputs';
+import { inputs } from './inputs';
 
 const DEFAULT_ALERTS: Record<AlertKind, AlertRule> = {
   screen_offline: { who: 'editors', email: true, slack: false, webhook: false },
@@ -25,15 +24,6 @@ const mergeRules = (base: Record<AlertKind, AlertRule>, change: Partial<Record<A
 });
 
 const DEFAULT_UPDATE_WINDOW = { from: '02:00', to: '04:00' };
-
-const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM, 00:00 to 23:59');
-const updateWindow = z
-  .object({ from: hhmm, to: hhmm })
-  .refine((w) => w.from !== w.to, 'the window must not start and end at the same time')
-  .describe("When player and system updates may run, in each screen's local time; a window whose end is before its start crosses midnight");
-
-/** A screen syncs every 5 minutes, so less than that would alert on a sync that is merely due. */
-const unreachableAfterMinutes = z.number().int().min(5).max(1440).describe('Minutes without a heartbeat before a screen alerts, 5 to 1440');
 
 /** The org's settings with every default filled in. */
 export async function orgSettings(org: OrgScope): Promise<SettingsView> {
@@ -68,7 +58,7 @@ const getOrgSettings = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: inputs.get_org_settings,
   output: outputs.get_org_settings,
   example: {},
   handler: async ({ org }) => ({ settings: await orgSettings(org) }),
@@ -82,27 +72,7 @@ const updateOrgSettings = defineTool({
   minRole: 'owner',
   mutates: true,
   partialAgents: "editorsPublish, auditRetentionDays and the agent_refused alert are a person's; the rest an agent may change",
-  input: z
-    .object({
-      timezone: timezone.nullable().optional(),
-      locale: locale.nullable().optional(),
-      displayHours: displayHours.nullable().optional(),
-      updateWindow: updateWindow.optional(),
-      unreachableAfterMinutes: unreachableAfterMinutes.optional(),
-      editorsPublish: editorsPublish.optional(),
-      auditRetentionDays: auditRetentionDays.optional(),
-      alerts: z
-        .object({
-          screen_offline: rule.partial().optional(),
-          publish_finished: rule.partial().optional(),
-          agent_refused: rule.partial().optional(),
-          publish_requested: rule.partial().optional(),
-        })
-        .optional()
-        .describe('Per kind, the fields of its rule to change; the rest stay'),
-      ifVersion,
-    })
-    .refine((v) => Object.keys(v).some((k) => k !== 'ifVersion'), 'nothing to change'),
+  input: inputs.update_org_settings,
   output: outputs.update_org_settings,
   example: { unreachableAfterMinutes: 15 },
   target: () => ({ kind: 'org', id: 'settings' }),

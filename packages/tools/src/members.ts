@@ -10,10 +10,10 @@
  */
 import type { OrgScope } from '@signforge/db';
 import { z } from 'zod';
-import { id } from './fields';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { defineTool, notFound, ROLES, type Role, ToolError } from './tool';
 import { outputs } from './outputs';
+import { inputs } from './inputs';
 
 const roleOf = (role: string | null): Role => z.enum(ROLES).parse(role);
 
@@ -37,7 +37,7 @@ const listMembers = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_members,
   output: outputs.list_members,
   example: {},
   handler: async ({ org, input }) => {
@@ -52,7 +52,7 @@ const listInvitations = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_invitations,
   output: outputs.list_invitations,
   example: {},
   handler: async ({ org, input }) => {
@@ -68,7 +68,7 @@ const cancelInvitation = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ invitationId: id('invitation') }),
+  input: inputs.cancel_invitation,
   output: outputs.cancel_invitation,
   example: { invitationId: 'inv_0123456789abcdef' },
   target: (input) => ({ kind: 'invitation', id: input.invitationId }),

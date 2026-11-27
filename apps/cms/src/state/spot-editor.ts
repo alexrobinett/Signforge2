@@ -39,6 +39,7 @@ import { problemWords } from '~/lib/field-words';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { newSpotAsked, orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
+import type { ToolInput } from '@signforge/tools/inputs';
 import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
@@ -349,7 +350,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
           : spot.kind === 'url'
             ? { url: d.url }
             : { fit: d.fit, ...(d.assetId ? { assetId: d.assetId } : {}) };
-      const saved = (await callTool('save_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version })).spot;
+      const saved = (await callTool('save_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version! })).spot;
       queryClient.setQueryData(spotKeys.one(orgId, spotId), saved);
       void dropUnbound(orgId, spot, saved);
       void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
@@ -443,12 +444,12 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       const key = get().spotEditor.newSpot.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newSpot: { ...e.newSpot, key, pending: true, error: null } }));
       const d = get().spotEditor.newSpot;
-      const kind =
-        d.kind === 'template'
-          ? { kind: 'template', templateVersionId: d.templateVersionId, ...(sample && { sample }) }
-          : d.kind === 'url'
-            ? { kind: 'url', url: d.url.trim() }
-            : { kind: 'image', assetId: d.assetId };
+      // The dialog creates only once its template or image is chosen (new-spot-dialog.tsx's ready).
+      const kind: Pick<ToolInput<'save_spot'>, 'kind' | 'templateVersionId' | 'sample' | 'url' | 'assetId'> = d.kind === 'template'
+        ? { kind: 'template', templateVersionId: d.templateVersionId!, ...(sample && { sample }) }
+        : d.kind === 'url'
+          ? { kind: 'url', url: d.url.trim() }
+          : { kind: 'image', assetId: d.assetId! };
       try {
         const spot = (await callTool('save_spot', { name: name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);

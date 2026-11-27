@@ -198,7 +198,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     async save({ draft: { edit, version, idempotencyKey }, context: { screen, groups }, moved }) {
       const screenId = screen.id;
       if (edit.kind === 'hours') {
-        const saved = (await callTool('update_screen', { screenId, displayHours: edit.hours, ifVersion: version })).screen.version;
+        const saved = (await callTool('update_screen', { screenId, displayHours: edit.hours, ifVersion: version! })).screen.version;
         await router.invalidate();
         return { version: saved };
       }
@@ -211,7 +211,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
         ...(d.timezone !== screen.timezone ? { timezone: d.timezone } : {}),
         ...(d.orientation !== screen.orientation ? { orientation: d.orientation } : {}),
       };
-      if (Object.keys(changed).length) moved((await callTool('update_screen', { screenId, ...changed, ifVersion: version })).screen.version);
+      if (Object.keys(changed).length) moved((await callTool('update_screen', { screenId, ...changed, ifVersion: version! })).screen.version);
       // Membership is added or removed, never replaced, so a screen someone else put in a group stays.
       for (const g of groups) {
         const was = g.screenIds.includes(screenId);

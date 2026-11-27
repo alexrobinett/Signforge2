@@ -20,25 +20,22 @@
  */
 import { reaches, targetIdOf } from '@signforge/compiler/schedule';
 import { brandStateOf, contentJson, type OrgScope, published, type PublishRequestRow } from '@signforge/db';
-import { z } from 'zod';
 import { grantClient } from './agent-grants';
 import { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
-import { id, idempotencyKey } from './fields';
-import { AUDIENCE_ROLES, draftPin, outputs, type PublishRequestView } from './outputs';
-import { keysetPage, pageInput } from './paging';
+import { AUDIENCE_ROLES, outputs, type PublishRequestView } from './outputs';
+import { keysetPage } from './paging';
 import { sha256Hex } from './dispatch';
-import { peopleAllowSample, runPublish, sampleAcks } from './publish';
+import { peopleAllowSample, runPublish } from './publish';
 import { type DraftPin, dryPublish, loadOrg, type OrgGraph } from './publishing';
 import { ended } from './schedule';
 import { orgSettings } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
+import { inputs } from './inputs';
 
 /** How long a request waits for a decision. */
 export const PUBLISH_REQUEST_TTL_MS = 7 * 24 * 60 * 60_000;
 /** The most requests one asker has waiting at once. */
 export const MAX_PENDING = 10;
-/** Controls, format and bidi characters, line and paragraph breaks, and invisible code points: as a client's name refuses them. */
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
 
 /** Its status at `now`: a pending request past its expiry is expired. */
 const statusOf = (row: PublishRequestRow, now: number) => (row.status === 'pending' && row.expiresAt <= now ? 'expired' : row.status);
@@ -172,26 +169,10 @@ const requestPublish = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z.object({
-    drafts: z
-      .array(draftPin)
-      .min(1)
-      .max(100)
-      .refine((pins) => new Set(pins.map((p) => `${p.kind}:${p.id}`)).size === pins.length, 'each draft once')
-      .describe('The drafts to publish, each at the version you read'),
-    reason: z
-      .string()
-      .trim()
-      .min(1)
-      .max(500)
-      // One line of plain text: nothing that breaks it, hides text or reorders it on the page or alert around it.
-      .refine((v) => !HIDDEN.test(v), 'one line of text, with no control, format, bidirectional or invisible characters')
-      .describe('What it is and why, for the person deciding: one line, 500 characters at most'),
-    idempotencyKey,
-  }),
+  input: inputs.request_publish,
   output: outputs.request_publish,
   example: { drafts: [{ kind: 'spot', id: 'spt_example', version: 1 }], reason: 'Weekend opening hours on the lobby screens' },
-  target: (_input, output) => ({ kind: 'publish_request', id: output.request.id }),
+  target: (_input, output) => (output ? { kind: 'publish_request', id: output.request.id } : undefined),
   // Its batch refused as it ran: another call of the asker's, made at the same moment, got there first.
   refuseFailedCommit: async ({ org, input, actor }) => {
     const waiting = await org.publishRequests.pendingBy(actor.id, Date.now());
@@ -237,7 +218,7 @@ const listPublishRequests = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ pending: z.boolean().optional().describe('Only those still waiting: not decided, and not expired'), ...pageInput }),
+  input: inputs.list_publish_requests,
   output: outputs.list_publish_requests,
   example: { pending: true },
   handler: async ({ org, input }) => {
@@ -259,7 +240,7 @@ const getPublishRequest = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ publishRequestId: id('publish request') }),
+  input: inputs.get_publish_request,
   output: outputs.get_publish_request,
   example: { publishRequestId: 'prq_example' },
   handler: async ({ org, input }) => {
@@ -287,25 +268,7 @@ const approvePublishRequest = defineTool({
   mutates: true,
   publishes: true,
   people: true,
-  input: z.object({
-    publishRequestId: id('publish request'),
-    allowSample: sampleAcks
-      .optional()
-      .describe(
-        "The spots a sample_text refusal named, { spotId, version, fields } as named: publish them with their template's sample text anyway, once you have seen them",
-      ),
-    ifScreens: z
-      .array(id('screen'))
-      .max(5000)
-      .optional()
-      .describe("check_publish_request's screens, by id: approve only if it switches exactly these. Refused with a conflict, details { screens }, otherwise"),
-    ifDefault: id('playlist')
-      .nullable()
-      .optional()
-      .describe(
-        "check_publish_request's defaultPlaylistId: approve only while it is the default (null: while there is none). Refused with a conflict otherwise",
-      ),
-  }),
+  input: inputs.approve_publish_request,
   output: outputs.approve_publish_request,
   example: { publishRequestId: 'prq_example' },
   target: (input) => ({ kind: 'publish_request', id: input.publishRequestId }),
@@ -365,7 +328,7 @@ const declinePublishRequest = defineTool({
   minRole: 'editor',
   mutates: true,
   people: true,
-  input: z.object({ publishRequestId: id('publish request') }),
+  input: inputs.decline_publish_request,
   output: outputs.decline_publish_request,
   example: { publishRequestId: 'prq_example' },
   target: (input) => ({ kind: 'publish_request', id: input.publishRequestId }),
@@ -401,7 +364,7 @@ const reopenPublishRequest = defineTool({
   minRole: 'editor',
   mutates: true,
   people: true,
-  input: z.object({ publishRequestId: id('publish request') }),
+  input: inputs.reopen_publish_request,
   output: outputs.reopen_publish_request,
   example: { publishRequestId: 'prq_example' },
   target: (input) => ({ kind: 'publish_request', id: input.publishRequestId }),
@@ -482,7 +445,7 @@ const checkPublishRequest = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ publishRequestId: id('publish request') }),
+  input: inputs.check_publish_request,
   output: outputs.check_publish_request,
   example: { publishRequestId: 'prq_example' },
   handler: async ({ org, input }) => {

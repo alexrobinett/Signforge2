@@ -422,7 +422,8 @@ export const createAgentDrawerSlice: SliceCreator<AgentDrawerSlice> = (set, get,
       try {
         // The org the card was answered in, named, not the tab's when it sends: it may have changed by then (review of #472).
         const headers = { 'content-type': 'application/json', [TAB_ORG_HEADER]: orgId };
-        const calls = at.card.drafts.map(({ tool, input }) => ({ tool, input }));
+        // Each with the token its turn signed it with: the API saves only what the agent proposed (#269).
+        const calls = at.card.drafts.map(({ tool, input, token }) => ({ tool, input, token }));
         const res = await fetch('/api/agent/apply', { method: 'POST', headers, body: JSON.stringify({ calls }) }).catch((cause: unknown) => {
           throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
         });
