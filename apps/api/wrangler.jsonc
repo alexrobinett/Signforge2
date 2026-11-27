@@ -176,10 +176,7 @@
         }
       ],
       // PLAYER_RELEASES: player release tarballs (#628), apart from org data: only /v1/player-releases writes them (src/releases).
-      "r2_buckets": [
-        { "binding": "BLOBS", "bucket_name": "signforge-demo" },
-        { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-demo" }
-      ]
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-demo" }]
     },
     "prod": {
       "name": "signforge-api-prod",
@@ -252,10 +249,7 @@
         }
       ],
       // PLAYER_RELEASES: player release tarballs (#628), apart from org data. Create the bucket before prod's first deploy.
-      "r2_buckets": [
-        { "binding": "BLOBS", "bucket_name": "signforge-prod" },
-        { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-prod" }
-      ]
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-prod" }]
     }
   }
 }

@@ -3,11 +3,12 @@
  * `templates` and `template_versions` with a null org, which every org may read and none may
  * change), the platform audit log that records each change, and the player releases a device may install (#628).
  *
- * Only the deploy-secret tree (`/admin` in apps/api) writes through it, by the tool dispatcher; the device tree
- * reads the player release a screen's channel is offered. Its
- * `templates` has the same shape as `scoped(db, orgId).templates`, so one tool serves both: on
- * an org scope it writes the org's templates, on this one base templates. It never reads or
- * writes an org's rows.
+ * The deploy-secret tree (`/admin` in apps/api) writes templates through it, by the tool dispatcher; the release
+ * tree (`/v1/player-releases`) registers and promotes player releases; the device tree reads the player release a
+ * screen's channel is offered. Its `templates` has the same shape as `scoped(db, orgId).templates`, so one tool serves
+ * both: on an org scope it writes the org's templates, on this one base templates. It writes no org's rows. It reads
+ * one: `playerReleases.canaries()` reads `screens` across every org (each canary's id, last sight and heartbeat
+ * release), for the person promoting a release, and returns no org id or name.
  */
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';

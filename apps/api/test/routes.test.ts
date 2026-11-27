@@ -44,7 +44,7 @@ const WRITERS: Record<string, string> = {
   'POST /v1/device/sync':
     'a screen reporting about itself: its heartbeat, last-seen time and play counts, on its own screen row (not audited: the screen is the actor, every few minutes)',
   'POST /v1/player-releases/register':
-    'the player release workflow (#628): a player_releases row, platform-wide and no org\'s, behind its own secret (releases.test.ts); not audited: CI is the actor, and the row is the record',
+    "the player release workflow (#628): a player_releases row, platform-wide and no org's, behind its own secret (releases.test.ts); not audited: CI is the actor, and the row is the record",
   'POST /v1/player-releases/promote':
     'the player promote workflow (#628): moves a player_releases row to stable, or with dryRun reads only (releases.test.ts); not audited, as register',
 };

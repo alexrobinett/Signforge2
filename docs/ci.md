@@ -194,10 +194,11 @@ Two workflows put a player build on demo's screens through the device supervisor
 
 - **Player release** (`player-release.yml`) has two jobs.
   - `build` has no environment and no secret. It builds `dist/player` with the run's number as its release number (`SF_PLAYER_RELEASE`), packs the tarball as the contract states it (`packages/cli/src/player-release.ts`), and writes the manifest.
-  - `publish` signs the manifest's exact bytes with Ed25519 (`openssl pkeyutl -sign -rawin`). It then sends the manifest, the signature and the tarball to `POST /v1/player-releases/register`. The API checks the signature against demo's release key and the tarball against the manifest. It stores the tarball in the `signforge-releases-demo` bucket and registers the release on `canary`. Re-running `publish` after a failure finishes the job.
-  - The run number only goes up and needs no secret. Renaming the workflow file starts it again at 1, and every later release would then be refused.
+  - `publish` first checks the artifact. Its manifest must name this run's number and format 1, and its tarball must be the size and hash the manifest says, at most 8 MiB (the most the API stores on the Free plan). It then signs the manifest's exact bytes with Ed25519 (`openssl pkeyutl -sign -rawin`). It then sends the manifest, the signature and the tarball to `POST /v1/player-releases/register`. The API checks the number again, the signature against demo's release key, and the tarball against the manifest. It stores the tarball in the `signforge-releases-demo` bucket and registers the release on `canary`. Re-running `publish` after a failure finishes the job.
+  - The run number only goes up and needs no secret. The API takes only a number above the newest registered, so renaming the workflow file, which starts the count again at 1, would leave every later release refused.
+  - **What the approval does not cover.** The reviewer approves the run, not the bytes. A poisoned dependency in `build` could still get one malicious player signed, as it could in any build it ran in. It cannot choose that player's release number: both `publish` and the API check it against the run's. A canary installs it first, and promotion needs a person.
 - **Player promote** (`player-promote.yml`; input: the release number) also has two jobs, each approved on its own.
-  - The first lists every canary screen by a short hash of its id: the release it runs and for how long, the releases it rolled back, and its last sync. It fails when no screen is a canary, no canary runs the release (or a newer one), or a canary rolled it back. The API refuses the promote for the same reasons.
+  - The first lists every canary screen by a short hash of its id: the release it runs and for how long, the releases it rolled back, and its last sync. It fails when a newer release is registered (promote that one instead: a canary is offered only the newest, so it may skip one), when no screen is a canary, when no canary has run exactly this release through the supervisor's 15-minute health gate, or when a canary rolled it back. The API refuses the promote for the same reasons.
   - The second moves the release to `stable`. Approve it only after reading the first job's summary.
 
 Only demo is set up. When prod is, sign one release once and register it in both, so the release numbers stay one line.
@@ -218,7 +219,7 @@ Only demo is set up. When prod is, sign one release once and register it in both
      rm player-release.key
      ```
 
-     Its public key goes in two places. One is `PLAYER_RELEASE_PUBLIC_KEY` in `apps/api/wrangler.jsonc`: the PEM's body on one line. The other is `device/pi/player-release.pub`. Committing the `.pub` turns updates on, because `scripts/deploy-pi.sh` copies it to each screen. A lost or leaked key needs a new pair in all three places, then `deploy-pi.sh` on each screen.
+     Its public key goes in two places. One is `PLAYER_RELEASE_PUBLIC_KEY` in `apps/api/wrangler.jsonc`: the PEM's body on one line. The other is `device/pi/player-release.pub`; the API's tests fail if the two differ. Committing the `.pub` turns updates on, because `scripts/deploy-pi.sh` copies it to each screen. A lost or leaked key needs a new pair in all three places, then `deploy-pi.sh` on each screen.
    - `PLAYER_RELEASE_ADMIN_SECRET` is a random value, also set as the demo Worker's secret of the same name. Set it on both at once, without printing it, from `apps/api`:
 
      ```sh
@@ -227,7 +228,7 @@ Only demo is set up. When prod is, sign one release once and register it in both
      printf %s "$s" | gh secret set PLAYER_RELEASE_ADMIN_SECRET --env player-release
      unset s
      ```
-3. **The environment variable `PLAYER_RELEASE_API`.** This is the demo API's origin, with no trailing slash: `gh variable set PLAYER_RELEASE_API --env player-release --body https://<demo API host>`.
+3. **The environment variable `PLAYER_RELEASE_API`** (set). This is the demo API's origin, with no trailing slash: `gh variable set PLAYER_RELEASE_API --env player-release --body https://<demo API host>`.
 4. **The bucket and a deploy.** `signforge-releases-demo` must exist (`pnpm exec wrangler r2 bucket create signforge-releases-demo` in `apps/api`) before the API is deployed with its `PLAYER_RELEASES` binding.
 
 A run's log and summary are public, like the repository. The workflows print release numbers, hashes and short screen hashes, never a screen's id, an org's name or the account id.

@@ -1,11 +1,11 @@
 // `/v1/player-releases` (#628): the release workflows' register and promote, behind their own secret, and nothing else.
-import { MAX_RELEASE_BYTES, MAX_RELEASE_MANIFEST_BYTES } from '@signforge/contract';
+import { MAX_RELEASE_MANIFEST_BYTES } from '@signforge/contract';
 import { platform } from '@signforge/db';
 import { seedOrg, signedRelease, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { playerReleaseKey } from '../src/r2';
-import { releases } from '../src/releases';
+import { MAX_REGISTERED_TARBALL_BYTES, releases } from '../src/releases';
 
 const SECRET = 'test-release-secret'; // vitest.config.ts
 const API = 'https://api.test/v1/player-releases';
@@ -24,12 +24,26 @@ const call = (path: string, init: RequestInit & { ip?: string; secret?: string |
 const encoder = new TextEncoder();
 const bytesOf = (x: string | Uint8Array) => (typeof x === 'string' ? encoder.encode(x) : x);
 /** A register request as the workflow sends it: the manifest's bytes, then the tarball's, and where one ends. */
-const register = (manifest: string | Uint8Array, signature: string, tarball: Uint8Array, split = bytesOf(manifest).byteLength) => {
+/** The release number a manifest names, as the workflow sends it beside the manifest: '' when there is none. */
+const versionOf = (manifest: string | Uint8Array) => {
+  try {
+    return String(JSON.parse(new TextDecoder().decode(bytesOf(manifest))).version ?? '');
+  } catch {
+    return '';
+  }
+};
+const register = (
+  manifest: string | Uint8Array,
+  signature: string,
+  tarball: Uint8Array,
+  split = bytesOf(manifest).byteLength,
+  version = versionOf(manifest),
+) => {
   const m = bytesOf(manifest);
   const body = new Uint8Array(m.byteLength + tarball.byteLength);
   body.set(m);
   body.set(tarball, m.byteLength);
-  return call('/register', { body, headers: { 'x-release-signature': signature, 'x-release-manifest-bytes': String(split) } });
+  return call('/register', { body, headers: { 'x-release-signature': signature, 'x-release-manifest-bytes': String(split), 'x-release-version': version } });
 };
 const promote = (body: unknown) => call('/promote', { body: JSON.stringify(body) });
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -52,7 +66,11 @@ describe('the gate', () => {
     expect((await call('/promote', { secret: null, body: '{}' })).status).toBe(401);
     expect((await call('/promote', { secret: 'wrong', body: '{}' })).status).toBe(401);
     expect((await call('/promote', { secret: `${SECRET}x`, body: '{}' })).status).toBe(401);
-    const unset = await releases.request('/promote', { method: 'POST', headers: { authorization: `Bearer ${SECRET}` } }, { ...env, PLAYER_RELEASE_ADMIN_SECRET: '' });
+    const unset = await releases.request(
+      '/promote',
+      { method: 'POST', headers: { authorization: `Bearer ${SECRET}` } },
+      { ...env, PLAYER_RELEASE_ADMIN_SECRET: '' },
+    );
     expect(unset.status).toBe(404);
   });
 
@@ -101,6 +119,20 @@ describe('POST /register', () => {
     expect((await register(other.manifest, other.signature, other.tarball)).status).toBe(409);
   });
 
+  it('takes only the number the workflow sent, and only above the newest registered', async () => {
+    const r = await release(22);
+    const res = await register(r.manifest, r.signature, r.tarball, undefined, '9007199254740991');
+    expect([res.status, (await res.json<{ error: string }>()).error]).toEqual([
+      400,
+      'the manifest is release 22, not the x-release-version "9007199254740991" the workflow sent',
+    ]);
+    expect((await register(r.manifest, r.signature, r.tarball, undefined, '')).status).toBe(400);
+    const lower = await release(19);
+    const below = await register(lower.manifest, lower.signature, lower.tarball);
+    expect([below.status, (await below.json<{ error: string }>()).error]).toEqual([409, 'release 19 is not above the newest registered, 20']);
+    expect(await platform(env.DB).playerReleases.offers('canary', 19)).toBe(false);
+  });
+
   it('finishes a release whose tarball was stored but not registered', async () => {
     const r = await release(21);
     await env.PLAYER_RELEASES.put(playerReleaseKey(JSON.parse(r.manifest).sha256), r.tarball);
@@ -116,7 +148,10 @@ describe('POST /register', () => {
     };
     const tampered = good.tarball.slice();
     tampered[0] = 0x79;
-    expect(await refused(good.manifest, good.signature, tampered)).toMatchObject({ status: 400, error: expect.stringMatching(/^the tarball is not the 1024-byte/) });
+    expect(await refused(good.manifest, good.signature, tampered)).toMatchObject({
+      status: 400,
+      error: expect.stringMatching(/^the tarball is not the 1024-byte/),
+    });
     expect(await refused(good.manifest, good.signature, good.tarball.subarray(1))).toMatchObject({ status: 400 });
     // Signed by the test key, then changed: the text no longer verifies.
     const resigned = good.manifest.replace('"minSupervisor":1', '"minSupervisor":2');
@@ -124,13 +159,20 @@ describe('POST /register', () => {
     expect(await refused(good.manifest, 'c2ln')).toMatchObject({ status: 400, problems: ['the signature is not an Ed25519 signature in base64'] });
     expect(await refused('not json')).toMatchObject({ status: 400, problems: ['the manifest text is not JSON'] });
     expect(await refused(new Uint8Array([0x7b, 0xff, 0x7d]))).toMatchObject({ status: 400, error: 'the manifest is not UTF-8' });
-    expect(await refused(good.manifest, good.signature, new Uint8Array())).toMatchObject({ status: 400, error: 'the body holds no tarball after the manifest' });
+    expect(await refused(good.manifest, good.signature, new Uint8Array())).toMatchObject({
+      status: 400,
+      error: 'the body holds no tarball after the manifest',
+    });
     expect(await refused(good.manifest, good.signature, good.tarball, 0)).toMatchObject({ status: 400 });
     // Where the manifest ends, moved: its text is no longer what was signed.
     expect((await refused(good.manifest, good.signature, good.tarball, encoder.encode(good.manifest).byteLength - 1)).status).toBe(400);
     const tooBig = await call('/register', {
       body: new Uint8Array(1),
-      headers: { 'x-release-signature': good.signature, 'x-release-manifest-bytes': '1', 'content-length': String(MAX_RELEASE_MANIFEST_BYTES + MAX_RELEASE_BYTES + 1) },
+      headers: {
+        'x-release-signature': good.signature,
+        'x-release-manifest-bytes': '1',
+        'content-length': String(MAX_RELEASE_MANIFEST_BYTES + MAX_REGISTERED_TARBALL_BYTES + 1),
+      },
     });
     expect(tooBig.status).toBe(413);
     expect(await platform(env.DB).playerReleases.offers('canary', 24)).toBe(false);
@@ -146,21 +188,25 @@ describe('POST /register', () => {
 });
 
 describe('POST /promote', () => {
-  const heartbeat = (release: number, failed: { version: number; reason: string }[] = []) =>
-    JSON.stringify({ player: { release }, releaseSince: 1_000, failedReleases: failed });
+  const heartbeat = (release: number, failed: { version: number; reason: string }[] = [], releaseSince = 1_000) =>
+    JSON.stringify({ player: { release }, releaseSince, failedReleases: failed });
+  const GATE = (v: number) => `no canary has run release ${v} through the supervisor's health gate (15 min)`;
+  const problems = async (body: unknown) => {
+    const res = await promote(body);
+    return { status: res.status, ...(await res.json<{ problems?: string[] }>()) };
+  };
 
-  it('refuses a release with no canary, none running it, or one that rolled it back; promotes it once none is in the way', async () => {
+  it('refuses a release with no canary, none through the gate on it, or one that rolled it back; promotes it once none is in the way', async () => {
     const r = await release(30);
     expect((await register(r.manifest, r.signature, r.tarball)).status).toBe(201);
     expect((await promote({ version: 99, dryRun: true })).status).toBe(404);
-    const problems = async (body: unknown) => {
-      const res = await promote(body);
-      return { status: res.status, ...(await res.json<{ problems?: string[] }>()) };
-    };
     expect(await problems({ version: 30, dryRun: true })).toMatchObject({ status: 409, problems: ['no screen is on the canary channel'] });
 
     await a.scope.screens.update(a.screen, { playerChannel: 'canary', heartbeatJson: heartbeat(20), lastSeenAt: 2_000 });
-    expect(await problems({ version: 30, dryRun: true })).toMatchObject({ status: 409, problems: ['no canary runs release 30'] });
+    expect(await problems({ version: 30, dryRun: true })).toMatchObject({ status: 409, problems: [GATE(30)] });
+    // On it, but for less than the supervisor's gate takes: it may yet roll back.
+    await a.scope.screens.update(a.screen, { heartbeatJson: heartbeat(30, [], Date.now() - 60_000) });
+    expect(await problems({ version: 30, dryRun: true })).toMatchObject({ status: 409, problems: [GATE(30)] });
 
     await a.scope.screens.update(a.screen, { heartbeatJson: heartbeat(30) });
     await b.scope.screens.update(b.screen, { playerChannel: 'canary', heartbeatJson: heartbeat(20, [{ version: 30, reason: 'not-alive' }]) });
@@ -185,6 +231,24 @@ describe('POST /promote', () => {
     expect(await problems({ version: 30, dryRun: false })).toMatchObject({ status: 200, promoted: true });
     expect(await platform(env.DB).playerReleases.offers('stable', 30)).toBe(true);
     expect(await problems({ version: 30, dryRun: false })).toMatchObject({ status: 409, error: 'release 30 is stable already' });
+  });
+
+  it('refuses a release a canary rolled back though it runs a newer one, and one a newer release has passed by', async () => {
+    const r31 = await release(31);
+    const r32 = await release(32);
+    expect((await register(r31.manifest, r31.signature, r31.tarball)).status).toBe(201);
+    expect((await register(r32.manifest, r32.signature, r32.tarball)).status).toBe(201);
+    // The canary rolled 31 back, then took 32 and passed it: 31 is still not promotable.
+    await a.scope.screens.update(a.screen, { playerChannel: 'canary', heartbeatJson: heartbeat(32, [{ version: 31, reason: 'stopped' }]) });
+    expect((await problems({ version: 31, dryRun: true })).problems).toEqual([
+      'release 32 is newer: promote that one',
+      GATE(31),
+      expect.stringMatching(/^canary [0-9a-f]{8} rolled release 31 back \(stopped\)$/),
+    ]);
+    // A canary skipped 31 for 32: no canary ever ran it.
+    await a.scope.screens.update(a.screen, { heartbeatJson: heartbeat(32) });
+    expect((await problems({ version: 31, dryRun: true })).problems).toEqual(['release 32 is newer: promote that one', GATE(31)]);
+    expect(await problems({ version: 32, dryRun: true })).toMatchObject({ status: 200, problems: [] });
   });
 
   it('reads only a version and a flag', async () => {
