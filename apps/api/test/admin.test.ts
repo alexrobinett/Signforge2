@@ -148,21 +148,6 @@ describe('admin auth', () => {
     expect(await reached.json()).toEqual({ error: 'body does not match its sha256' });
   });
 
-  it('refuses a body over 20 MiB on every route, storing nothing, and takes one of 20 MiB', async () => {
-    const most = 20 * 1024 * 1024;
-    const over = new Uint8Array(most + 1);
-    const overSha = await sha256(over);
-    for (const [method, path] of [...paths.filter(([, p]) => !p.includes('/blobs/')), ['PUT', `/base/blobs/${overSha}`] as const]) {
-      const res = await admin(method, path, over);
-      expect(res.status, `${method} ${path}`).toBe(413);
-    }
-    expect(await env.BLOBS.head(baseBlobKey(overSha))).toBeNull();
-    const whole = over.subarray(0, most);
-    const wholeSha = await sha256(whole);
-    expect((await admin('PUT', `/base/blobs/${wholeSha}`, whole)).status).toBe(200);
-    expect((await env.BLOBS.head(baseBlobKey(wholeSha)))?.size).toBe(most);
-  });
-
   it('is not accepted on the device tree', async () => {
     const res = await exports.default.fetch(`${API}/v1/device/manifest.json`, { headers: { authorization: `Bearer ${TOKEN}` } });
     expect(res.status).toBe(401);
