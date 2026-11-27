@@ -8,11 +8,11 @@ import type * as s from './schema';
 
 export { brandStateOf, scoped, LABEL_LIMITS, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
 export { imagesMonth, imagesTransformsUsed, takeImagesTransforms } from './images-usage';
-export { platform, type PlatformScope } from './platform';
+export { platform, PlayerReleaseRefused, releaseRow, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';
 export { published, draftChanged, contentJson, type DraftRow, type PublishedPlaylist } from './drafts';
-export { findDeviceScreen, type DeviceScreen } from './device';
+export { findDeviceScreen, type DeviceScreen, type ScreenRelease } from './device';
 export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, isLastOwnerRefusal, memberOrgNames, memberships, organizationExists, orgMembers, startingOrg } from './members';

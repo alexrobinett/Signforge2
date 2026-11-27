@@ -1,28 +1,20 @@
 #!/usr/bin/env tsx
 /**
- * The player release workflows' steps (#628), each a command, so a run with the contract's test key on a laptop
- * (scripts/player-release-proof.sh) does what `.github/workflows/player-release.yml` does with the real one:
+ * The player release workflow's build steps (#628), which need no secret: the job that runs them holds none, and the
+ * job that signs, uploads and registers runs none of this repository's code (`.github/workflows/player-release.yml`).
  *
  *   player-release.ts pack <dist-dir> <out-dir> --version <n>
  *       <out>/release.tar.gz, the tarball as the contract states it, and <out>/manifest.json, the exact text to sign
- *   player-release.ts sign <out-dir>
- *       <out>/signature: Ed25519 over manifest.json's bytes, by the PKCS#8 PEM key in $PLAYER_RELEASE_KEY
  *   player-release.ts verify <out-dir> <public-key.pem>
- *       checks <out>/signature with WebCrypto, as the contract's test does
- *   player-release.ts register-sql <out-dir>
- *       the INSERT that registers it on canary, refused as `register` refuses (`@signforge/db/player-release`)
- *   player-release.ts sql next | canaries | promote <version>
- *       the workflows' other SQL: the next release number, the canary screens, a canary release moved to stable
- *   player-release.ts canaries <version>
- *       reads `wrangler d1 execute --json`'s answer to CANARY_SCREENS_SQL on stdin; prints it as Markdown
+ *       checks <out>/signature (base64) with WebCrypto, as the contract's test does (scripts/player-release-proof.sh)
  *
- * The tarball is the same bytes for the same build: ustar, entries in path order with each directory before its first
- * file, mtime 0, no owner, gzip with mtime 0, so a release can be packed again and compared.
+ * The tar is the same bytes for the same build: ustar, entries in path order with each directory before its first
+ * file, mtime 0, no owner. The gzip around it has mtime 0 and no OS, but its deflate stream is zlib's, which may differ
+ * between zlib builds: the same build packed on two machines may differ in its gzip bytes, never in what it unpacks to.
  */
-import { createPrivateKey, createHash, sign } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { text } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
 import {
   MAX_RELEASE_BYTES,
@@ -36,7 +28,6 @@ import {
   type PlayerPlays,
   type PlayerReleaseManifest,
 } from '@signforge/contract';
-import { CANARY_SCREENS_SQL, NEXT_RELEASE_SQL, promoteReleaseSql, registerReleaseSql } from '@signforge/db/player-release';
 
 /**
  * The supervisor level this player needs (`minSupervisor`). Supervisors are updated by hand, so raise it in the change
@@ -106,7 +97,7 @@ export function tarball(files: readonly ReleaseFile[]): Uint8Array {
     at += p.byteLength;
   }
   const gz = gzipSync(tar, { level: 6 });
-  // The gzip header's OS byte, which zlib sets to the machine it ran on: "unknown", so every machine packs the same bytes.
+  // The gzip header's OS byte, which zlib sets to the machine it ran on: "unknown", as the contract's test vector has it.
   gz[9] = 0xff;
   return gz;
 }
@@ -159,10 +150,6 @@ export async function releaseFiles(dir: string): Promise<ReleaseFile[]> {
   return files;
 }
 
-/** Ed25519 over the text's UTF-8 bytes, in standard base64 with padding, as the contract states a release signature. */
-export const signManifest = (text: string, privateKeyPem: string) =>
-  sign(null, new TextEncoder().encode(text), createPrivateKey(privateKeyPem)).toString('base64');
-
 /** The contract's check of a release signature, by WebCrypto, against a PEM SPKI public key. */
 export async function verifyManifest(text: string, signature: string, publicKeyPem: string): Promise<boolean> {
   const der = Buffer.from(publicKeyPem.replace(/-----[A-Z ]+-----/g, '').replace(/\s/g, ''), 'base64');
@@ -170,48 +157,7 @@ export async function verifyManifest(text: string, signature: string, publicKeyP
   return crypto.subtle.verify('Ed25519', key, Buffer.from(signature, 'base64'), new TextEncoder().encode(text));
 }
 
-interface CanaryRow {
-  id: string;
-  lastSeenAt: number | null;
-  release: number | null;
-  releaseSince: number | null;
-  failedReleases: string | null;
-}
-
-/** How long ago `then` (ms) was, in the largest whole unit. */
-function ago(now: number, then: number): string {
-  const minutes = Math.floor((now - then) / 60_000);
-  if (minutes < 60) return `${minutes} min`;
-  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h`;
-  return `${Math.floor(minutes / 1440)} d`;
-}
-
-/** The canaries as a Markdown table, by screen id, saying of each whether it runs `version` and whether it rolled it back. */
-export function canaryReport(rows: readonly CanaryRow[], version: number, now: number): string {
-  if (!rows.length) return `No screen is on the canary channel: release ${version} has run nowhere yet.\n`;
-  const lines = rows.map((r) => {
-    const failed: { version: number; reason: string }[] = r.failedReleases ? JSON.parse(r.failedReleases) : [];
-    const rolled = failed.find((f) => f.version === version);
-    const runs = r.release === null ? 'unknown' : r.release === version ? `**${r.release}**` : String(r.release);
-    const cells = [
-      r.id,
-      runs,
-      r.releaseSince === null ? '' : ago(now, r.releaseSince),
-      rolled ? `**rolled ${version} back (${rolled.reason})**` : failed.map((f) => `${f.version} (${f.reason})`).join(', '),
-      r.lastSeenAt === null ? 'never' : `${ago(now, r.lastSeenAt)} ago`,
-    ];
-    return `| ${cells.join(' | ')} |`;
-  });
-  return [
-    `Canary screens, for release ${version}:\n`,
-    '| Screen | Runs release | For | Rolled back | Last sync |',
-    '| --- | --- | --- | --- | --- |',
-    ...lines,
-    '',
-  ].join('\n');
-}
-
-/** A release version from the command line or a workflow input: the one value here no one has checked yet. */
+/** A release version from the command line: the workflow's run number. */
 function versionOf(text: string | undefined): number {
   const n = Number(text);
   if (!text || !/^[1-9][0-9]*$/.test(text) || !Number.isSafeInteger(n)) throw new Error(`not a release version: ${text}`);
@@ -233,12 +179,6 @@ async function main([command, ...args]: string[]) {
       await writeFile(at(out, 'manifest.json'), manifestText(files, tar, versionOf(version), new Date().toISOString()));
       return;
     }
-    case 'sign': {
-      const key = process.env.PLAYER_RELEASE_KEY;
-      if (!key) throw new Error('sign: set PLAYER_RELEASE_KEY to the PEM private key');
-      await writeFile(at(args[0], 'signature'), signManifest(await readFile(at(args[0], 'manifest.json'), 'utf8'), key));
-      return;
-    }
     case 'verify': {
       const [dir, pub] = args;
       if (!pub) throw new Error('verify <out-dir> <public-key.pem>');
@@ -250,38 +190,8 @@ async function main([command, ...args]: string[]) {
       if (!ok) throw new Error(`the signature does not verify against ${pub}`);
       return;
     }
-    case 'register-sql': {
-      const [manifest, signature] = await Promise.all([readFile(at(args[0], 'manifest.json'), 'utf8'), readFile(at(args[0], 'signature'), 'utf8')]);
-      process.stdout.write(`${registerReleaseSql(manifest, signature, Date.now())};\n`);
-      return;
-    }
-    case 'sql': {
-      const [which, version] = args;
-      const sql =
-        which === 'next'
-          ? NEXT_RELEASE_SQL
-          : which === 'canaries'
-            ? CANARY_SCREENS_SQL
-            : which === 'promote'
-              ? promoteReleaseSql(versionOf(version), Date.now())
-              : undefined;
-      if (!sql) throw new Error('sql next | canaries | promote <version>');
-      process.stdout.write(sql);
-      return;
-    }
-    case 'canaries': {
-      const answer: { results: CanaryRow[] }[] = JSON.parse(await text(process.stdin));
-      process.stdout.write(
-        canaryReport(
-          answer.flatMap((a) => a.results),
-          versionOf(args[0]),
-          Date.now(),
-        ),
-      );
-      return;
-    }
     default:
-      throw new Error(`unknown command ${command}: pack, sign, verify, register-sql, sql or canaries`);
+      throw new Error(`unknown command ${command}: pack or verify`);
   }
 }
 

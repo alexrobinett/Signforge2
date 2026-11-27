@@ -18,7 +18,6 @@
   "dependencies": {
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
-    "@signforge/db": "workspace:*",
     "@signforge/feeds": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/media-check": "workspace:*",

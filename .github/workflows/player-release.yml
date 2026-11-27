@@ -1,37 +1,39 @@
-# A player release (#628): builds the player with its release number, packs and signs it as the contract states,
-# uploads the tarball to R2 and registers it on the canary channel. Run by hand only, never on a pull request, in the
-# protected `player-release` environment: its reviewer approves each run before any secret is read. Set-up is in
-# docs/ci.md ("Player releases"); scripts/player-release-proof.sh runs the same pack and sign with the contract's test key.
+# A player release (#628), for demo. Run by hand only, never on a pull request. Two jobs:
+# - `build` holds no secret: it installs, builds the player with its release number, packs the tarball as the contract
+#   states it and writes the manifest, and hands both on as an artifact.
+# - `publish` runs in the protected `player-release` environment, whose reviewer approves it before any secret is read,
+#   and runs none of this repository's code or dependencies, only openssl and curl. openssl signs the manifest's exact
+#   bytes; curl sends the manifest, the signature and the tarball to the API (`POST /v1/player-releases/register`,
+#   apps/api/src/releases), which checks the signature against demo's release key and the tarball against the
+#   manifest, stores the tarball in the releases bucket and registers the release on canary. CI holds no Cloudflare
+#   credential. Re-running `publish` after a failure sends the same request, which finishes what is left.
+# The release number is the run's number: it only goes up and needs no secret. Re-running every job builds again
+# under the same number, which the API refuses once a release has it. Renaming this file starts the count again at 1,
+# so don't. Set-up is in docs/ci.md ("Player releases"); scripts/player-release-proof.sh runs the same pack and sign
+# with the contract's test key.
 name: Player release
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: The deployment whose screens are offered it
-        type: choice
-        options: [demo, prod]
-        default: demo
 
-# One release at a time per deployment: two would take the same number, and the second would fail to register.
 concurrency:
-  group: player-release-${{ inputs.target }}
+  group: player-release
   cancel-in-progress: false
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+env:
+  VERSION: ${{ github.run_number }}
+
 jobs:
-  release:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment: player-release
-    env:
-      TARGET: ${{ inputs.target }}
-      # The D1 database and the R2 bucket of the deployment are both named so (apps/api/wrangler.jsonc).
-      STORE: signforge-${{ inputs.target }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -41,52 +43,56 @@ jobs:
         with:
           node-version: 26
       - run: pnpm install --frozen-lockfile
-
-      - name: Release number
-        id: next
-        working-directory: apps/api
-        run: |
-          sql=$(pnpm exec tsx ../../packages/cli/src/player-release.ts sql next)
-          next=$(pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --json --command "$sql" | jq -er '.[0].results[0].next')
-          echo "version=$next" >> "$GITHUB_OUTPUT"
-
       - name: Build
         env:
-          SF_PLAYER_RELEASE: ${{ steps.next.outputs.version }}
+          SF_PLAYER_RELEASE: ${{ github.run_number }}
         run: pnpm build:player
-
       - name: Pack
-        env:
-          VERSION: ${{ steps.next.outputs.version }}
         run: |
-          echo "OUT=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/release"
           pnpm exec tsx packages/cli/src/player-release.ts pack dist/player "$RUNNER_TEMP/release" --version "$VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 7
 
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: player-release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+
+      # Ed25519 over the file's bytes exactly (-rawin). The key is written only to the runner's temp, and removed.
       - name: Sign
+        working-directory: ${{ runner.temp }}/release
         env:
-          PLAYER_RELEASE_KEY: ${{ secrets.PLAYER_RELEASE_SIGNING_KEY }}
-        run: pnpm exec tsx packages/cli/src/player-release.ts sign "$OUT"
-
-      # The key screens ship with: a secret that is not its pair stops the run here, before anything is uploaded.
-      - name: Verify against device/pi/player-release.pub
-        run: pnpm exec tsx packages/cli/src/player-release.ts verify "$OUT" device/pi/player-release.pub
-
-      # R2's S3 API, with a key that may write this deployment's bucket and no other.
-      - name: Upload the tarball
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+          PLAYER_RELEASE_SIGNING_KEY: ${{ secrets.PLAYER_RELEASE_SIGNING_KEY }}
         run: |
-          sha=$(jq -er .sha256 "$OUT/manifest.json")
-          aws s3 cp "$OUT/release.tar.gz" "s3://$STORE/sys/player/$sha" \
-            --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" --content-type application/gzip --no-progress
+          key="$RUNNER_TEMP/signing.pem"
+          (umask 077 && printf '%s\n' "$PLAYER_RELEASE_SIGNING_KEY" > "$key")
+          openssl pkeyutl -sign -rawin -inkey "$key" -in manifest.json -out signature.bin
+          rm -f "$key"
+          openssl base64 -A -in signature.bin > signature
 
-      # The checks `platform(db).playerReleases.register` makes, then one INSERT (@signforge/db/player-release).
+      # The body is the manifest's bytes, then the tarball's; the header says where the manifest ends.
       - name: Register on canary
-        working-directory: apps/api
+        working-directory: ${{ runner.temp }}/release
+        env:
+          API: ${{ vars.PLAYER_RELEASE_API }}
+          SECRET: ${{ secrets.PLAYER_RELEASE_ADMIN_SECRET }}
         run: |
-          pnpm exec tsx ../../packages/cli/src/player-release.ts register-sql "$OUT" > "$RUNNER_TEMP/register.sql"
-          pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --file "$RUNNER_TEMP/register.sql"
-          jq -r '"Release \(.version) is on canary for '"$TARGET"': \(.size) bytes, \(.files | length) files, sha256 \(.sha256). Promote it with the Player promote workflow."' "$OUT/manifest.json" >> "$GITHUB_STEP_SUMMARY"
+          cat manifest.json release.tar.gz > body
+          curl --fail-with-body --silent --show-error --proto '=https' --max-time 300 -o answer.json \
+            -X POST "$API/v1/player-releases/register" \
+            -H "authorization: Bearer $SECRET" -H "x-release-signature: $(cat signature)" \
+            -H "x-release-manifest-bytes: $(stat -c %s manifest.json)" -H 'content-type: application/octet-stream' \
+            --data-binary @body || { cat answer.json; exit 1; }
+          cat answer.json
+          echo "Release $VERSION is on canary for demo: $(cat answer.json). Promote it with the Player promote workflow." >> "$GITHUB_STEP_SUMMARY"

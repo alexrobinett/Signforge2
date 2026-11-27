@@ -97,10 +97,11 @@ Before the first deploy that has M3-18, create the environment's publish queue: 
 o/<org>/b/<sha256>                    assets, template bundles and `/admin` manifest files
 o/<org>/f/<sha256>                    feed photos (owned and collected by `feed_images`, #195)
 sys/b/<sha256>                        base templates
-sys/player/<sha256>                   player release tarballs (#628), which CI uploads
 o/<org>/m/<screen>/<manifestId>.json  manifests
 up/<org>/<asset>/<sha256>             asset uploads until finalize checks them
 ```
+
+Player release tarballs (#628) are in a bucket of their own, `signforge-releases-<env>` (binding `PLAYER_RELEASES`), at `sys/player/<sha256>`, apart from every org's data. Only `POST /v1/player-releases/register` writes them, and CI holds no R2 credential. Create `signforge-releases-prod` before prod's first deploy.
 
 The per-org prefix keeps one org from probing whether another holds a file, and makes cleanup simple.
 
@@ -153,10 +154,17 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Serves files the screen's desired, previous or last good manifest lists from its own org's prefix (or `sys/b/` for a base template or catalogue font), and feed photos from `o/<org>/f/` when referenced by a fit snapshot of a list-image source in the screen's desired or previous manifest (#196). |
 | `GET /v1/device/player-release` | For the device supervisor (#628): the newest player release the screen's own channel is offered (`player_channel`; a `canary` screen every release, a `stable` one only promoted ones), as the exact manifest text CI signed and its Ed25519 signature, with the manifest schema this server compiles (`PlayerReleaseOffer`), or `release: null`. `no-store`. Two D1 queries, the credential's screen and the release, and no write: a poll every 15 minutes costs the Free plan's 100,000 daily writes nothing (`device.test.ts` pins it). |
-| `GET /v1/device/player-release/:sha256` | That release's tarball, streamed from `sys/player/<sha256>`: only a release registered in `player_releases` that the screen's channel is offered (a stable screen never gets a canary build), only from that prefix, so a hash reaches no other key. Cached forever but `private`, as blobs are. The supervisor checks the signature, the hash and every file's before it installs anything: a compromised API or R2 can offer a build, never get one installed. |
+| `GET /v1/device/player-release/:sha256` | That release's tarball, streamed from the releases bucket's `sys/player/<sha256>`: only a release registered in `player_releases` that the screen's channel is offered (a stable screen never gets a canary build), only from that prefix, so a hash reaches no other key. Cached forever but `private`, as blobs are. The supervisor checks the signature, the hash and every file's before it installs anything: a compromised API or R2 can offer a build, never get one installed. |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes, and a player release the device supervisor rolled back (`failedRelease`, #628), kept in the heartbeat the sync writes anyway, so it costs no write of its own. A body over `MAX_SYNC_REQUEST_BYTES` (1 MiB) is a 413, refused before it is parsed. |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
+
+The player release workflows (#628, docs/ci.md "Player releases") reach the API through a tree of their own, `/v1/player-releases` (apps/api/src/releases). It takes `Authorization: Bearer` with the `PLAYER_RELEASE_ADMIN_SECRET` Worker secret, compared in constant time; unset, the tree answers 404. It reads no cookie and refuses a request carrying a session. Each address gets 10 tries a minute (`PLAYER_RELEASE_LIMIT`), counted before the secret is checked. CI holds no Cloudflare credential. The tree also answers 404 while the deployment has no release key (`PLAYER_RELEASE_PUBLIC_KEY`, base64 SPKI DER in `wrangler.jsonc`; empty on prod). That key must be the one in `device/pi/player-release.pub`, which screens check, and `test/releases.test.ts` fails if demo's is not, once that file is committed.
+
+| Route | Purpose |
+| --- | --- |
+| `POST /v1/player-releases/register` | The body is the manifest's bytes exactly as signed, then the tarball's; `x-release-manifest-bytes` says where the manifest ends, and `x-release-signature` carries the signature. At most `MAX_RELEASE_MANIFEST_BYTES` plus `MAX_RELEASE_BYTES` (65 MiB), under Workers' 100 MB request limit. Nothing is written until every check passes, in this order: `releaseRow`'s checks, as `register` makes them; the signature against the release key; the tarball's size and sha256 against the manifest. Then the tarball goes into `PLAYER_RELEASES` and the release is registered on `canary`. If either write failed, the same request sent again finishes the job, and once registered it answers 200 as before. 409 when another build has the version or the tarball. |
+| `POST /v1/player-releases/promote` | `{ version, dryRun }`: every canary screen, by a short hash of its id, with its release, since when, its rollbacks and last sync, and what keeps the release from `stable`: no canary, none on it or a newer one, or one that rolled it back (409). Without `dryRun`, and with nothing in the way, it moves the release to `stable`. |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
 - Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`, sent only when the supervisor says it is bound to that same base.

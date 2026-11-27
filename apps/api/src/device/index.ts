@@ -59,12 +59,12 @@ device.get('/player-release', async (c) => {
 });
 
 // A release's tarball, by the hash its manifest names: only a registered release the screen's channel is offered,
-// and only from the release prefix (`sys/player/`), so no hash reaches any other key.
+// and only from the releases bucket, which holds nothing else, so no hash reaches an org's data.
 device.get('/player-release/:sha256', async (c) => {
   const sha = c.req.param('sha256');
   if (!SHA256.test(sha)) return notFound('release not found');
   if (!(await platform(c.env.DB).playerReleases.bySha256(c.get('screen').playerChannel, sha))) return notFound('release not found');
-  const obj = await c.env.BLOBS.get(playerReleaseKey(sha));
+  const obj = await c.env.PLAYER_RELEASES.get(playerReleaseKey(sha));
   if (!obj) return notFound('release not found');
   return new Response(obj.body, {
     headers: blobHeaders(sha, obj.httpMetadata?.contentType || 'application/gzip', obj.size, 'private, max-age=31536000, immutable'),

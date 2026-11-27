@@ -1,12 +1,13 @@
 #!/bin/sh
-# The player release workflow's pack and sign, run on this machine with the contract's test-only key (#628), and the
-# result checked by every reader a screen has: the contract's WebCrypto check, Python `cryptography` as the supervisor
-# loads it, and the supervisor's own `read_manifest` and `extract`. No secret, no Cloudflare: it uploads and registers
-# nothing, and prints the SQL the workflow would register with.
+# The player release workflow's build and sign (#628), run on this machine with the contract's test-only key: the pack
+# its `build` job runs and the openssl commands its `publish` job runs. The result is checked by every reader a screen
+# has: the contract's WebCrypto check, Python `cryptography` as the supervisor loads it, and the supervisor's own
+# `read_manifest` and `extract`. No secret, no Cloudflare: it uploads and registers nothing.
 #
 #   sh scripts/player-release-proof.sh [updater.py]
 #
-# `updater.py` is the supervisor's (device/pi/updater.py by default). It needs uv, for Python `cryptography`.
+# `updater.py` is the supervisor's (device/pi/updater.py by default). It needs OpenSSL 3 or later, and uv, for Python
+# `cryptography`.
 set -eu
 cd "$(dirname "$0")/.."
 updater=${1:-device/pi/updater.py}
@@ -16,9 +17,16 @@ out=$(mktemp -d)
 release="pnpm exec tsx packages/cli/src/player-release.ts"
 version=1
 
+# Ed25519 is deterministic: the workflow's openssl command signs the contract's vector to the vector's own signature.
+jq -j .manifest $vector/vector.json > "$out/vector-manifest"
+[ "$(openssl pkeyutl -sign -rawin -inkey $vector/test-only.key.pem -in "$out/vector-manifest" | openssl base64 -A)" = "$(jq -r .signature $vector/vector.json)" ]
+echo "openssl: signs the contract's test vector to its signature"
+
 SF_PLAYER_RELEASE=$version pnpm build:player >/dev/null
 $release pack dist/player "$out" --version $version
-PLAYER_RELEASE_KEY=$(cat $vector/test-only.key.pem) $release sign "$out"
+openssl pkeyutl -sign -rawin -inkey $vector/test-only.key.pem -in "$out/manifest.json" -out "$out/signature.bin"
+openssl base64 -A -in "$out/signature.bin" > "$out/signature"
+openssl pkeyutl -verify -pubin -inkey $vector/test-only.pub.pem -rawin -in "$out/manifest.json" -sigfile "$out/signature.bin"
 $release verify "$out" $vector/test-only.pub.pem
 echo "WebCrypto: the signature verifies"
 
@@ -44,5 +52,4 @@ updater.extract(tarball, dest, {f["path"]: f["sha256"] for f in m["files"]})
 print(f"supervisor: read_manifest and extract accept release {m['version']}, {len(m['files'])} files, {m['size']} bytes")
 EOF
 
-$release register-sql "$out" | cut -c1-160
 echo "release in $out"

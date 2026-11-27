@@ -1,8 +1,7 @@
 // The tenancy guard's other half: nothing outside packages/db may reach the table objects.
 // Code elsewhere imports `@signforge/db` (repositories and row types), and nothing else from this
 // package, except that tests in a package's own test/ or e2e/ directory (a spike's too) and the local
-// dev-screen script may import `@signforge/db/testing`, whose direct writes production code must never reach, and
-// anything may import `@signforge/db/player-release`: the release workflows' SQL, loadable in Node, with no table (#628).
+// dev-screen script may import `@signforge/db/testing`, whose direct writes production code must never reach.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +13,6 @@ const ROOT = resolve(PKG, '../..');
 const SKIP = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', '.wrangler', 'vendor']);
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const TESTING = '@signforge/db/testing';
-const PLAYER_RELEASE = '@signforge/db/player-release';
 
 /** A workspace package's own `test` or `e2e` directory (pnpm-workspace.yaml), not such a folder deeper in its source. */
 const TEST_DIR = /^(?:apps|packages|templates|spike)\/[^/]+\/(?:test|e2e)\//;
@@ -43,7 +41,7 @@ function forbiddenImports(file: string, source: string): string[] {
   for (const m of source.matchAll(SPECIFIER)) {
     const spec = (m[1] ?? m[2] ?? m[3] ?? m[4])!;
     if (spec.startsWith('@signforge/db')) {
-      if (spec === TESTING ? !mayUseTesting(file) : spec !== '@signforge/db' && spec !== PLAYER_RELEASE) bad.push(spec);
+      if (spec === TESTING ? !mayUseTesting(file) : spec !== '@signforge/db') bad.push(spec);
     } else if (spec.startsWith('.') || spec.startsWith('/')) {
       const target = resolve(dirname(file), spec);
       if (target === PKG || target.startsWith(PKG + sep)) bad.push(spec);
@@ -99,13 +97,13 @@ describe('import boundary', () => {
 
   it('exports only the public entry points', () => {
     const pkg = JSON.parse(readFileSync(join(PKG, 'package.json'), 'utf8')) as { exports: Record<string, string> };
-    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './player-release', './testing']);
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './testing']);
   });
 
   // Importing the whole source the first time is the slow part: 5.1 s on CI's runner (run 44918053355), past the default.
   it('exports no table objects', { timeout: 60_000 }, async () => {
     // Imported by path so this Node-typed file does not type-check the Workers-typed source.
-    for (const path of ['../../src/index.ts', '../../src/testing.ts', '../../src/player-release.ts']) {
+    for (const path of ['../../src/index.ts', '../../src/testing.ts']) {
       const mod = (await import(path)) as Record<string, unknown>;
       for (const [name, value] of Object.entries(mod)) expect(is(value, Table), `${path}: ${name}`).toBe(false);
     }
@@ -121,10 +119,9 @@ describe('guarded fields', () => {
 });
 
 describe('tenant writes', () => {
-  // Pairing used to insert the screen's credential with raw SQL in src/pairing.ts (review fix 8). `player_releases` is
-  // platform-wide, not a tenant table: the release workflows write it with SQL from src/player-release.ts (#628).
+  // Pairing used to insert the screen's credential with raw SQL in src/pairing.ts (review fix 8).
   it('are written in scoped.ts, never in raw SQL elsewhere in the package', () => {
-    const TENANT_WRITE = /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+[`"]?(?!pairing_codes\b|platform_audit_log\b|player_releases\b)[a-z_]+/;
+    const TENANT_WRITE = /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+[`"]?(?!pairing_codes\b|platform_audit_log\b)[a-z_]+/;
     const outside = readdirSync(join(PKG, 'src')).filter(
       (f) => !['scoped.ts', 'schema.ts'].includes(f) && TENANT_WRITE.test(readFileSync(join(PKG, 'src', f), 'utf8')),
     );
