@@ -43,9 +43,13 @@ const WRITERS: Record<string, string> = {
   'DELETE /mcp': 'answers 405: no sessions to end',
   'POST /v1/device/sync':
     'a screen reporting about itself: its heartbeat, last-seen time and play counts, on its own screen row (not audited: the screen is the actor, every few minutes)',
+  'POST /v1/player-releases/register':
+    "the player release workflow (#628): a player_releases row, platform-wide and no org's, behind its own secret (releases.test.ts); not audited: CI is the actor, and the row is the record",
+  'POST /v1/player-releases/promote':
+    'the player promote workflow (#628): moves a player_releases row to stable, or with dryRun reads only (releases.test.ts); not audited, as register',
 };
 /** Middleware each tree mounts on its whole prefix. A wildcard on any other path is a route and fails. */
-const MIDDLEWARE = new Set(['ALL /api/*', 'ALL /v1/device/*', 'ALL /admin/*']);
+const MIDDLEWARE = new Set(['ALL /api/*', 'ALL /v1/device/*', 'ALL /admin/*', 'ALL /v1/player-releases/*']);
 /** Better Auth's own GETs may write its tables (OAuth callbacks, sign-out links). */
 const AUTH_GET = 'GET /api/auth/*';
 /**

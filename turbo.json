@@ -4,7 +4,16 @@
   // (docs/ci.md). Tests read fonts/, which belongs to no package, and the stress media that
   // scripts/stress-media.sh puts in examples/; --affected goes by the package graph, so a file
   // outside every package counts only when it is listed here.
-  "globalDependencies": ["tsconfig.base.json", "biome.jsonc", "pnpm-workspace.yaml", ".github/workflows/ci.yml", "fonts/**", "scripts/stress-media.sh"],
+  // device/pi/player-release.pub: the API's tests check demo's release key against it (apps/api/test/releases.test.ts).
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "biome.jsonc",
+    "pnpm-workspace.yaml",
+    ".github/workflows/ci.yml",
+    "fonts/**",
+    "scripts/stress-media.sh",
+    "device/pi/player-release.pub"
+  ],
   // Artifacts are signed with TURBO_REMOTE_CACHE_SIGNATURE_KEY, so an entry swapped on the cache
   // server fails to verify and the task runs instead (docs/ci.md, "Remote cache").
   "remoteCache": { "signature": true },

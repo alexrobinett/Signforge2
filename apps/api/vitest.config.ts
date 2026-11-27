@@ -7,7 +7,7 @@ import { defineConfig } from 'vitest/config';
 import { experimental_readRawConfig, unstable_readConfig } from 'wrangler';
 
 // Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
-// ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
+// ADMIN_TOKEN and PLAYER_RELEASE_ADMIN_SECRET are fixed test values here, so a local .dev.vars never changes what the tests see.
 // `test/setup.ts` applies packages/db's migrations, the same ones `wrangler d1 migrations apply` runs.
 // TEMPLATE_BUILDS holds every template in templates/, built here in Node as `sf template push`
 // builds them (esbuild cannot run in workerd), for test/templates.test.ts to push.
@@ -68,6 +68,8 @@ function rateLimits() {
   return JSON.stringify(Object.fromEntries(ratelimits.map((r: { name: string; simple: { limit: number; period: number } }) => [r.name, r.simple])));
 }
 
+const PUB_FILE = new URL('../../device/pi/player-release.pub', import.meta.url).pathname;
+
 // DEPLOYED_VARS: each environment's Worker vars, by environment, so a test parses them as the Worker does and a
 // malformed one fails CI, not every queue batch once deployed (#508).
 function deployedVars() {
@@ -91,6 +93,9 @@ export const workers = (extra: Record<string, string> = {}) =>
     miniflare: {
       bindings: {
         ADMIN_TOKEN: 'test-admin-token',
+        PLAYER_RELEASE_ADMIN_SECRET: 'test-release-secret',
+        // The release key screens check, once it is committed: demo's PLAYER_RELEASE_PUBLIC_KEY must be it (releases.test.ts).
+        RELEASE_PUB_FILE: existsSync(PUB_FILE) ? readFileSync(PUB_FILE, 'utf8') : '',
         // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
         GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
         // Every feed fetch (the poller's default guards, read_table): a closed port too.
