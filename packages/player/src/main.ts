@@ -47,6 +47,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import { displayOn, localTime, manifestSnapshotFiles, spotSnapshotFiles } from '@signforge/player-core';
+import { openSpareFrame } from '@signforge/player-core/frame-host';
 import { clock, now, synced } from './clock';
 import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
@@ -1094,6 +1095,8 @@ async function boot(): Promise<void> {
     void loopRestartingOnError('playback', () => playback.pass());
     return;
   }
+  // Before anything else: the template renderer starts while the player reads its storage (#232).
+  openSpareFrame(document.body);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
   state.persistent = await requestPersistence();
   await loadPlays();
