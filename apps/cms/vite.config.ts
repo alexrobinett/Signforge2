@@ -58,7 +58,8 @@ function playerBuild(): Plugin {
       for (const mount of MOUNTS) {
         cpSync(PLAYER, join(options.dir, mount.slice(1)), { recursive: true });
         // Every file under the mount: the player's workers take their policy from their own script's response.
-        appendFileSync(join(options.dir, '_headers'), `${mount}/*\n  Content-Security-Policy: ${PLAYER_POLICY}\n`);
+        // On a line of its own, whatever a `_headers` in public/ ends with.
+        appendFileSync(join(options.dir, '_headers'), `\n${mount}/*\n  Content-Security-Policy: ${PLAYER_POLICY}\n`);
       }
     },
   };

@@ -104,11 +104,11 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play;
   expect(await kept(tab)).toEqual({ credential: false, files: 0 });
 });
 
-// The player takes its content base and its supervisor from its address, which on the CMS's hostname anyone can
-// write into a link. The other site is what such a link's author would run: a supervisor handing over a
-// credential for its own device API.
-for (const mount of ['/test-screen/', '/player/']) {
-  test(`the player at ${mount} reaches no other site its address names`, async ({ page }) => {
+// The player takes its content base and supervisor from its address, which on the CMS's hostname anyone can
+// write into a link. The other site hands over a credential for its own device API, as a supervisor would; a
+// browser screen asks no supervisor and pairs with that API.
+for (const player of ['/test-screen/?', '/player/?', '/test-screen/?kind=browser&']) {
+  test(`the player at ${player} reaches no other site its address names`, async ({ page }) => {
     const reached: string[] = [];
     const other = createServer((req, res) => {
       reached.push(`${req.method} ${req.url}`);
@@ -126,7 +126,7 @@ for (const mount of ['/test-screen/', '/player/']) {
           Reflect.set(window, 'sfRefused', [...(Reflect.get(window, 'sfRefused') ?? []), e.blockedURI]),
         );
       });
-      await page.goto(`${mount}?content=${site}/v1/device&supervisor=${site}/supervisor`);
+      await page.goto(`${player}content=${site}/v1/device&supervisor=${site}/supervisor`);
       // The player asked for the other site and the browser refused it there: a refusal comes before any request leaves.
       await expect
         .poll(async () => {
