@@ -320,6 +320,17 @@ describe('info frame (#201)', () => {
     }
   });
 
+  // The photo panel's intro and outro fade it: anything in it on a layer of its own (the caption, the chip and the logo,
+  // which animate) made Chromium draw the whole panel off screen every frame, over 1% of a portrait fade on the Pi.
+  it('holds only the photo in the photo panel, with the caption, chip and logo beside it (#239)', async () => {
+    const r = await frame();
+    for (const look of looks) {
+      const f = await r.show({ look, ...news, rail: 'off' });
+      const inPanel = await f.evaluate(() => [...document.querySelectorAll('.panel *')].filter((el) => !el.closest('.photo-drift')).map((el) => el.className));
+      expect(inPanel, look).toEqual([]);
+    }
+  });
+
   it('shows the time and date from the screen clock, in 12 or 24 hours, and the next three days from its zone', async () => {
     const r = await frame();
     const read = (f: Frame) =>

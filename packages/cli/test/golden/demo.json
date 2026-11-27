@@ -109,8 +109,8 @@
       "size": 393933,
       "type": "text/html"
     },
-    "2be4a60728e5d0501b7e812ccd392db1fce844c7e8a1d5c7a6bd074b3bebda5a": {
-      "size": 399671,
+    "96d1ae7444aecce86938b2afece237d8fcc5698165cbbc5da614fb667306738a": {
+      "size": 399819,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -617,10 +617,10 @@
       },
       "html": "4ffbf3c61194060f103b63a6a8c7c2b310c949dc87bce1d3ba9697d9acb9978e"
     },
-    "base/info-frame@1.3.1": {
+    "base/info-frame@1.4.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.3.1",
+        "version": "1.4.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -905,7 +905,7 @@
           }
         }
       },
-      "html": "2be4a60728e5d0501b7e812ccd392db1fce844c7e8a1d5c7a6bd074b3bebda5a"
+      "html": "96d1ae7444aecce86938b2afece237d8fcc5698165cbbc5da614fb667306738a"
     },
     "base/news@2.2.0": {
       "manifest": {
@@ -1262,7 +1262,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.3.1",
+      "template": "base/info-frame@1.4.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1540,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "e3a9868581e0ed01f5ca353817566b245bd11214a9156daaafaa6f5599b3dcca"
+  "id": "1850f29ced2e2ca26ffa93edf5d969391757dd13019a899af61b1a4164bb2c25"
 }

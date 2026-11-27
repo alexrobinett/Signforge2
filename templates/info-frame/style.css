@@ -56,12 +56,18 @@ h1 {
   color: var(--card-text, var(--ink));
 }
 
-/* The photo panel, and what sits on the photo: the caption, and without a rail the chip and the logo. */
-.panel {
+/* The photo panel, and what sits on the photo: the caption, and without a rail the chip and the logo. Those sit beside
+   the panel, not in it: in a layer whose opacity animates, layers of their own made Chromium draw the whole panel off
+   screen every frame of its intro and outro, which dropped portrait fades over 1% on the Pi (#239). */
+.photo-area {
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+.panel {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   border-radius: var(--if-panel-radius, 0);
   background: var(--lk-surface);
@@ -658,6 +664,8 @@ h1 {
   right: 0;
   bottom: 0;
   max-width: none;
+  /* The panel's own corners: it sits beside the panel, which no longer clips it (#239). */
+  border-radius: 0 0 var(--if-panel-radius) var(--if-panel-radius);
   background: var(--lk-primary);
   --ink: var(--lk-on-primary);
   --ink-muted: var(--lk-on-primary);
