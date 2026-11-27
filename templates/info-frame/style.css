@@ -659,13 +659,17 @@ h1 {
   color: var(--card-primary, var(--ink-primary));
   font: 700 4.07vmin / 1.1 var(--lk-font-display);
 }
+/* Night's caption sits on the photo's bottom edge, and its intro rises from below it: the area clips it to the panel's
+   rounded edge, as the panel did when the caption was inside it. The area itself never animates (#239). */
+[data-look='night'] .photo-area {
+  overflow: hidden;
+  border-radius: var(--if-panel-radius, 0);
+}
 [data-look='night'] .caption {
   left: 0;
   right: 0;
   bottom: 0;
   max-width: none;
-  /* The panel's own corners: it sits beside the panel, which no longer clips it (#239). */
-  border-radius: 0 0 var(--if-panel-radius) var(--if-panel-radius);
   background: var(--lk-primary);
   --ink: var(--lk-on-primary);
   --ink-muted: var(--lk-on-primary);

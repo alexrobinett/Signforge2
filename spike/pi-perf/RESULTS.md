@@ -1595,3 +1595,5 @@ Master's player, content built from master `9c09d376` (A) and from the branch (B
 
 - **Every portrait fade is under 1% now**: the fade's own frames drop 2 to 9%, against 11 to 16%.
 - **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
+
+**Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.
