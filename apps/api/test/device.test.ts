@@ -520,9 +520,9 @@ describe('player releases (#628)', () => {
     const stable = await registerRelease(env.DB, { version: 5, sha256: STABLE }, 'stable');
     const canary = await registerRelease(env.DB, { version: 7, sha256: CANARY }, 'canary');
     // The release prefix only: a tarball's hash names no other key.
-    await env.BLOBS.put(playerReleaseKey(STABLE), 'tar5', { httpMetadata: { contentType: 'application/gzip' } });
-    await env.BLOBS.put(playerReleaseKey(CANARY), 'tar7');
-    await env.BLOBS.put(playerReleaseKey(UNREGISTERED), 'tar9');
+    await env.PLAYER_RELEASES.put(playerReleaseKey(STABLE), 'tar5', { httpMetadata: { contentType: 'application/gzip' } });
+    await env.PLAYER_RELEASES.put(playerReleaseKey(CANARY), 'tar7');
+    await env.PLAYER_RELEASES.put(playerReleaseKey(UNREGISTERED), 'tar9');
     await testScope(env.DB, b.seed.orgId).screens.update(b.seed.screen, { playerChannel: 'canary' });
     // The text and signature exactly as CI registered them, byte for byte.
     expect(await offerFor(a.credential)).toEqual({

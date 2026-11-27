@@ -17,7 +17,9 @@
         "ENVIRONMENT": "dev",
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
-        "AGENT_CALLS_DATASET": "signforge_agent_calls_dev"
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_dev",
+        // The contract's test-only release key (packages/contract/test/player-release), which signs nothing real.
+        "PLAYER_RELEASE_PUBLIC_KEY": "MCowBQYDK2VwAyEAE2z9q2IHuZImrWNK3+j95fk1Ed8+M9JHiCvuMpgShSI="
       },
       // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
       // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
@@ -26,6 +28,7 @@
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
       // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       // Template checks (src/template-check.ts): per org, which has one check container. Also counted per
       // location, so an org pushing through two gets two allowances; its container's queue (4) is the exact bound.
       "ratelimits": [
@@ -37,7 +40,8 @@
         { "name": "TABLE_READ_LIMIT", "namespace_id": "806", "simple": { "limit": 30, "period": 60 } },
         { "name": "PAGE_READ_LIMIT", "namespace_id": "808", "simple": { "limit": 30, "period": 60 } },
         { "name": "CHAT_TURN_LIMIT", "namespace_id": "809", "simple": { "limit": 10, "period": 60 } },
-        { "name": "AGENT_CALL_LIMIT", "namespace_id": "807", "simple": { "limit": 120, "period": 60 } }
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "807", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "800", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
       // Agents' calls over /mcp, one data point each (src/agents/calls.ts); read back through the SQL API.
@@ -91,13 +95,18 @@
           "binding": "BLOBS",
           "bucket_name": "signforge-dev",
           "local_dev": { "experimental_s3_credentials": { "accessKeyId": "signforge-local", "secretAccessKey": "signforge-local-only" } }
-        }
+        },
+        // Player release tarballs (#628), apart from org data: only /v1/player-releases writes them (src/releases).
+        { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-dev" }
       ]
     },
     "demo": {
       "name": "signforge-api-demo",
       "main": "src/index.ts",
       "vars": {
+        // The Ed25519 key (base64 SPKI DER) player releases are signed with (#628): `/v1/player-releases/register` takes only a
+        // release that verifies against it. It must be the key in device/pi/player-release.pub, which screens check (test/releases.test.ts).
+        "PLAYER_RELEASE_PUBLIC_KEY": "MCowBQYDK2VwAyEAwCkrMWF7x/CTowuvNj/Nf1gY+pzpogvDKvv1JMlgfks=",
         "ENVIRONMENT": "demo",
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
@@ -118,6 +127,7 @@
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
       // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       "ratelimits": [
         { "name": "PAIR_START_LIMIT", "namespace_id": "811", "simple": { "limit": 10, "period": 60 } },
         { "name": "PAIR_POLL_LIMIT", "namespace_id": "812", "simple": { "limit": 600, "period": 60 } },
@@ -127,7 +137,8 @@
         { "name": "TABLE_READ_LIMIT", "namespace_id": "816", "simple": { "limit": 30, "period": 60 } },
         { "name": "PAGE_READ_LIMIT", "namespace_id": "818", "simple": { "limit": 30, "period": 60 } },
         { "name": "CHAT_TURN_LIMIT", "namespace_id": "819", "simple": { "limit": 10, "period": 60 } },
-        { "name": "AGENT_CALL_LIMIT", "namespace_id": "817", "simple": { "limit": 120, "period": 60 } }
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "817", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "810", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
       "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_demo" }],
@@ -164,7 +175,8 @@
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
-      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
+      // PLAYER_RELEASES: player release tarballs (#628), apart from org data: only /v1/player-releases writes them (src/releases).
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-demo" }]
     },
     "prod": {
       "name": "signforge-api-prod",
@@ -174,6 +186,8 @@
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
         "AGENT_CALLS_DATASET": "signforge_agent_calls_prod",
+        // No release key yet: prod takes no player release until it has one (`/v1/player-releases` answers 404).
+        "PLAYER_RELEASE_PUBLIC_KEY": "",
         // Its share of the account's 10,000 Queues operations a day (Free plan, #339): with demo's 2,000, 7,500 operations
         // together, leaving 2,500 for publish notices.
         "FEED_PHOTOS_QUEUE_DAILY": "500",
@@ -186,6 +200,7 @@
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
       // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       "ratelimits": [
         { "name": "PAIR_START_LIMIT", "namespace_id": "821", "simple": { "limit": 10, "period": 60 } },
         { "name": "PAIR_POLL_LIMIT", "namespace_id": "822", "simple": { "limit": 600, "period": 60 } },
@@ -195,7 +210,8 @@
         { "name": "TABLE_READ_LIMIT", "namespace_id": "826", "simple": { "limit": 30, "period": 60 } },
         { "name": "PAGE_READ_LIMIT", "namespace_id": "828", "simple": { "limit": 30, "period": 60 } },
         { "name": "CHAT_TURN_LIMIT", "namespace_id": "829", "simple": { "limit": 10, "period": 60 } },
-        { "name": "AGENT_CALL_LIMIT", "namespace_id": "827", "simple": { "limit": 120, "period": 60 } }
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "827", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "820", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
       "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_prod" }],
@@ -232,7 +248,8 @@
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
-      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }]
+      // PLAYER_RELEASES: player release tarballs (#628), apart from org data. Create the bucket before prod's first deploy.
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-prod" }]
     }
   }
 }

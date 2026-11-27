@@ -1,6 +1,6 @@
 # CI
 
-One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
+One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. (The player release workflows, run by hand only, are in [Player releases](#player-releases).) It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
 
 - **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
 - **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
@@ -184,6 +184,51 @@ A change to `templates/clock` alone now runs `template-clock:test` (5 s) beside 
 
 ## Required status check
 
-`master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". So nothing waits on `check`: a docs-only pull request, which starts no run, merges as any other.
+`master` requires no check today. The repository was private on a plan without branch protection; it is public now, so rulesets work, but none is set yet. Nothing waits on `check`: a docs-only pull request, which starts no run, merges as any other.
 
-On a plan that has them, requiring `check` needs one change first. A draft's skipped job counts as passed, but a docs-only pull request starts no run at all, so a required `check` would sit pending on it forever. Either drop the workflow's `paths:` filter (the run then only installs and runs the repo-wide checks, about 50 s, billed as a minute) or add a second workflow with the same job name that runs on exactly those paths and passes.
+A `master` ruleset should block force pushes and deletion and require a pull request. The player releases depend on it: their environment trusts `master` only (see [Player releases](#player-releases)). To require `check` as well, change one thing first. A draft's skipped job counts as passed, but a docs-only pull request starts no run at all, so a required `check` would sit pending on it forever. Either drop the workflow's `paths:` filter (the run then only installs and runs the repo-wide checks, about 50 s, billed as a minute) or add a second workflow with the same job name that runs on exactly those paths and passes.
+
+## Player releases
+
+Two workflows put a player build on demo's screens through the device supervisor (#628). Both run by hand only (Actions, then the workflow, then "Run workflow"), never on a pull request. Every job that holds a secret runs in the protected `player-release` environment, so no secret is read until its reviewer approves that job. Those jobs run none of this repository's code or dependencies, only tools on the runner: openssl and curl, plus jq for the canary table. CI holds no Cloudflare credential. The API stores and registers releases (`/v1/player-releases`, docs/backend-plan.md).
+
+- **Player release** (`player-release.yml`) has two jobs.
+  - `build` has no environment and no secret. It builds `dist/player` with the run's number as its release number (`SF_PLAYER_RELEASE`), packs the tarball as the contract states it (`packages/cli/src/player-release.ts`), and writes the manifest.
+  - `publish` first checks the artifact. Its manifest must name this run's number and format 1, and its tarball must be the size and hash the manifest says, at most 8 MiB (the most the API stores on the Free plan). It then signs the manifest's exact bytes with Ed25519 (`openssl pkeyutl -sign -rawin`). It then sends the manifest, the signature and the tarball to `POST /v1/player-releases/register`. The API checks the number again, the signature against demo's release key, and the tarball against the manifest. It stores the tarball in the `signforge-releases-demo` bucket and registers the release on `canary`. Re-running `publish` after a failure finishes the job.
+  - The run number only goes up and needs no secret. The API takes only a number above the newest registered, so renaming the workflow file, which starts the count again at 1, would leave every later release refused.
+  - **What the approval does not cover.** The reviewer approves the run, not the bytes. A poisoned dependency in `build` could still get one malicious player signed, as it could in any build it ran in. It cannot choose that player's release number: both `publish` and the API check it against the run's. A canary installs it first, and promotion needs a person.
+- **Player promote** (`player-promote.yml`; input: the release number) also has two jobs, each approved on its own.
+  - The first lists every canary screen by a short hash of its id: the release it runs and for how long, the releases it rolled back, and its last sync. It fails when a newer release is registered (promote that one instead: a canary is offered only the newest, so it may skip one), when no screen is a canary, when no canary has run exactly this release through the supervisor's 15-minute health gate, or when a canary rolled it back. The API refuses the promote for the same reasons.
+  - The second moves the release to `stable`. Approve it only after reading the first job's summary.
+
+Only demo is set up. When prod is, sign one release once and register it in both, so the release numbers stay one line.
+
+`sh scripts/player-release-proof.sh [updater.py]` runs the same pack and the same openssl signing on your machine, with the contract's test-only key and no secret. It checks the result with WebCrypto, with Python `cryptography`, and with the supervisor's `read_manifest` and `extract`.
+
+### Setting it up
+
+1. **The environment `player-release`.** Create it before any dispatch, because dispatching first creates it with no protection. Give it a required reviewer, with "Prevent self-review" off so the owner can approve their own runs, and "Allow administrators to bypass configured protection rules" unticked. Under deployment branches, allow `master` only. A `master` ruleset ([Required status check](#required-status-check)) keeps a changed workflow from being pushed to `master` directly.
+2. **Two environment secrets:**
+   - `PLAYER_RELEASE_SIGNING_KEY` holds the Ed25519 private key, PKCS#8 PEM. Make it on your machine, so the private key goes only into the secret:
+
+     ```sh
+     umask 077
+     openssl genpkey -algorithm ed25519 -out player-release.key
+     openssl pkey -in player-release.key -pubout -out device/pi/player-release.pub
+     gh secret set PLAYER_RELEASE_SIGNING_KEY --env player-release < player-release.key
+     rm player-release.key
+     ```
+
+     Its public key goes in two places. One is `PLAYER_RELEASE_PUBLIC_KEY` in `apps/api/wrangler.jsonc`: the PEM's body on one line. The other is `device/pi/player-release.pub`; the API's tests fail if the two differ. Committing the `.pub` turns updates on, because `scripts/deploy-pi.sh` copies it to each screen. A lost or leaked key needs a new pair in all three places, then `deploy-pi.sh` on each screen.
+   - `PLAYER_RELEASE_ADMIN_SECRET` is a random value, also set as the demo Worker's secret of the same name. Set it on both at once, without printing it, from `apps/api`:
+
+     ```sh
+     s=$(openssl rand -hex 32)
+     printf %s "$s" | pnpm exec wrangler secret put PLAYER_RELEASE_ADMIN_SECRET --env demo
+     printf %s "$s" | gh secret set PLAYER_RELEASE_ADMIN_SECRET --env player-release
+     unset s
+     ```
+3. **The environment variable `PLAYER_RELEASE_API`** (set). This is the demo API's origin, with no trailing slash: `gh variable set PLAYER_RELEASE_API --env player-release --body https://<demo API host>`.
+4. **The bucket and a deploy.** `signforge-releases-demo` must exist (`pnpm exec wrangler r2 bucket create signforge-releases-demo` in `apps/api`) before the API is deployed with its `PLAYER_RELEASES` binding.
+
+A run's log and summary are public, like the repository. The workflows print release numbers, hashes and short screen hashes, never a screen's id, an org's name or the account id.

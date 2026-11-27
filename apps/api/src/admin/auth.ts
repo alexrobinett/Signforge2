@@ -19,7 +19,7 @@ const encoder = new TextEncoder();
 const digest = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(s)));
 
 /** Constant-time: both sides are hashed to 32 bytes first, so length leaks nothing either. */
-async function sameSecret(presented: string, expected: string): Promise<boolean> {
+export async function sameSecret(presented: string, expected: string): Promise<boolean> {
   const [a, b] = await Promise.all([digest(presented), digest(expected)]);
   return crypto.subtle.timingSafeEqual(a, b);
 }

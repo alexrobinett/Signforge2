@@ -531,5 +531,7 @@ export async function signedRelease(over: Partial<PlayerReleaseManifest> = {}): 
 /** A release CI registered on `channel`, through `platform(db).playerReleases.register`, as the release workflow will. */
 export async function registerRelease(db: D1Database, over: Partial<PlayerReleaseManifest>, channel: PlayerChannel) {
   const { manifest, signature } = await signedRelease(over);
-  return platform(db).playerReleases.register(manifest, signature, channel);
+  const row = await platform(db).playerReleases.register(manifest, signature, channel);
+  if (!row) throw new Error(`release ${over.version ?? 1} or its tarball is registered already`);
+  return row;
 }

@@ -256,3 +256,40 @@ describe('platform(db).playerReleases.register', () => {
     expect(await platform(env.DB).playerReleases.offered('canary')).not.toMatchObject({ version: 301 });
   });
 });
+
+describe('platform(db).playerReleases: promoting, and the canaries (#628)', () => {
+  it('registers a version or a tarball once, writing nothing the second time', async () => {
+    const first = await signedRelease({ version: 310, sha256: '1'.repeat(64) });
+    expect(await platform(env.DB).playerReleases.register(first.manifest, first.signature)).toMatchObject({ version: 310 });
+    expect(await platform(env.DB).playerReleases.register(first.manifest, first.signature)).toBeUndefined();
+    const sameTarball = await signedRelease({ version: 311, sha256: '1'.repeat(64) });
+    expect(await platform(env.DB).playerReleases.register(sameTarball.manifest, sameTarball.signature)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.offers('canary', 311)).toBe(false);
+  });
+
+  it('promotes only a canary release, once', async () => {
+    const { manifest, signature } = await signedRelease({ version: 312, sha256: '2'.repeat(64) });
+    await platform(env.DB).playerReleases.register(manifest, signature, 'canary', 1_000);
+    expect(await platform(env.DB).playerReleases.promote(312, 2_000)).toMatchObject({ version: 312, channel: 'stable', promotedAt: 2_000 });
+    expect(await platform(env.DB).playerReleases.promote(312, 3_000)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.promote(9_999, 3_000)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.offers('stable', 312)).toBe(true);
+  });
+
+  it("lists every canary in every org with its heartbeat's release and last sight, and no other screen", async () => {
+    const heartbeat = { player: { release: 312 }, releaseSince: 5_000, failedReleases: [{ version: 311, reason: 'not-alive' }] };
+    await o.scope.screens.update(o.screen, { playerChannel: 'canary', heartbeatJson: JSON.stringify(heartbeat), lastSeenAt: 6_000 });
+    const other = await seedOrg(env.DB, 'org-device-canary');
+    await other.scope.screens.update(other.screen, { playerChannel: 'canary' });
+    await seedOrg(env.DB, 'org-device-stable');
+    const canaries = await platform(env.DB).playerReleases.canaries();
+    expect(canaries).toHaveLength(2);
+    expect(canaries).toEqual(
+      expect.arrayContaining([
+        { screenId: o.screen, lastSeenAt: 6_000, release: { running: 312, since: 5_000, failed: heartbeat.failedReleases } },
+        { screenId: other.screen, lastSeenAt: null, release: { running: null, since: null, failed: [] } },
+      ]),
+    );
+    await o.scope.screens.update(o.screen, { playerChannel: 'stable', heartbeatJson: null, lastSeenAt: null });
+  });
+});

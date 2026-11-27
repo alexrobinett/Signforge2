@@ -1,0 +1,75 @@
+# Promotes a canary player release to stable on demo (#628), so every other screen is offered it. Run by hand only,
+# never on a pull request. Both jobs run in the protected `player-release` environment, each approved on its own, and
+# run none of this repository's code: curl asks the API (`/v1/player-releases/promote`, apps/api/src/releases).
+# - `canaries` shows each canary screen, by a short hash of its id, with its release, how long it has run it, what it
+#   rolled back and when it last synced, and fails when no screen is a canary, none runs the release, or one rolled
+#   it back. The API refuses the promote for the same reasons.
+# - `promote`, approved once its reviewer has read that, moves the release to stable.
+# Set-up is in docs/ci.md ("Player releases").
+name: Player promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release number to promote
+        required: true
+        type: string
+
+concurrency:
+  group: player-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  canaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: player-release
+    steps:
+      - name: Canary screens
+        env:
+          API: ${{ vars.PLAYER_RELEASE_API }}
+          SECRET: ${{ secrets.PLAYER_RELEASE_ADMIN_SECRET }}
+        run: |
+          [[ "$VERSION" =~ ^[1-9][0-9]{0,8}$ ]] || { echo "::error::not a release number: $VERSION"; exit 1; }
+          status=$(curl --silent --show-error --proto '=https' --max-time 60 -o "$RUNNER_TEMP/canaries.json" -w '%{http_code}' \
+            -X POST "$API/v1/player-releases/promote" -H "authorization: Bearer $SECRET" -H 'content-type: application/json' \
+            --data "{\"version\":$VERSION,\"dryRun\":true}")
+          now=$(date +%s%3N)
+          jq -r --argjson now "$now" '
+            def ago: if . == null then "never" else (($now - .) / 60000 | floor) as $m
+              | if $m < 120 then "\($m) min" elif $m < 2880 then "\($m / 60 | floor) h" else "\($m / 1440 | floor) d" end end;
+            if .canaries == null then "The API answered: \(.error)" else
+              "Release \(.version): \(.canaries | length) canary screen(s).\n",
+              "| Screen | Runs release | For | Rolled back | Last sync |",
+              "| --- | --- | --- | --- | --- |",
+              (.canaries[] | "| \(.screen) | \(.release // "unknown") | \(.releaseSince | ago) | \([.failedReleases[] | "\(.version) (\(.reason))"] | join(", ")) | \(.lastSeenAt | ago) |"),
+              (if (.problems | length) > 0 then "\nNot promotable: \(.problems | join("; "))" else "\nNothing stands in the way." end)
+            end' "$RUNNER_TEMP/canaries.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$status" = 200 ] || { echo "::error::release $VERSION cannot be promoted (HTTP $status)"; exit 1; }
+
+  promote:
+    needs: canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: player-release
+    steps:
+      - name: Promote to stable
+        env:
+          API: ${{ vars.PLAYER_RELEASE_API }}
+          SECRET: ${{ secrets.PLAYER_RELEASE_ADMIN_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error --proto '=https' --max-time 60 -o "$RUNNER_TEMP/promoted.json" \
+            -X POST "$API/v1/player-releases/promote" -H "authorization: Bearer $SECRET" -H 'content-type: application/json' \
+            --data "{\"version\":$VERSION,\"dryRun\":false}" || { cat "$RUNNER_TEMP/promoted.json"; exit 1; }
+          echo "Release $VERSION is stable on demo." | tee -a "$GITHUB_STEP_SUMMARY"
