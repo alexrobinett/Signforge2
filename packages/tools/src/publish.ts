@@ -24,21 +24,19 @@ import { z } from 'zod';
 import { clearOfSweep } from './assets';
 import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
-import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { defaultConflict } from './playlists';
-import { keysetPage, pageInput } from './paging';
+import { keysetPage } from './paging';
 import { groupMoves, loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
-import { AIMED, aimed, entryView, missingAim, takeoverFields, takeoverOf } from './schedule';
+import { entryView, missingAim, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
 import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
 import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
-import { draftRef, outputs, publishChanges, type publishOutput, type ToolOutput } from './outputs';
-
-const SHA256 = /^[0-9a-f]{64}$/;
+import { outputs, publishChanges, type publishOutput, type ToolOutput } from './outputs';
+import { inputs, takeoverInput, takeoverRules } from './inputs';
 
 const publishManifestToScreen = defineTool({
   name: 'publish_manifest_to_screen',
@@ -49,10 +47,7 @@ const publishManifestToScreen = defineTool({
   mutates: true,
   // A developer's path (`sf push`, /admin), which act as the system: no agent pushes a raw manifest (#345).
   people: true,
-  input: z.object({
-    screenId: id('screen'),
-    manifestId: z.string().regex(SHA256, 'not a manifest id (64 lowercase hex characters)').describe("The manifest's id, the SHA-256 in its `id` field"),
-  }),
+  input: inputs.publish_manifest_to_screen,
   output: outputs.publish_manifest_to_screen,
   example: { screenId: 'scr_example', manifestId: '0'.repeat(64) },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
@@ -294,17 +289,6 @@ export function peopleAllowSample(ctx: { actor: Actor; confirmed: boolean; input
   return acks;
 }
 
-/** `allowSample`'s input: the spots a `sample_text` refusal named, as it named them. */
-export const sampleAcks = z
-  .array(
-    z.object({
-      spotId: id('spot'),
-      version: z.number().int().positive().describe('The version the refusal named'),
-      fields: z.array(z.string().max(100)).max(200).describe('The fields the refusal named'),
-    }),
-  )
-  .max(500);
-
 const publish = defineTool({
   name: 'publish',
   description:
@@ -314,26 +298,7 @@ const publish = defineTool({
   mutates: true,
   partialAgents: 'only a person publishes sample text anyway (allowSample)',
   publishes: true,
-  input: z.object({
-    ifDefault: id('playlist')
-      .nullable()
-      .optional()
-      .describe('Publish only while this playlist is the default (null: while there is none); else a conflict { defaultPlaylistId }'),
-    ifBrand: z
-      .string()
-      .max(200_000)
-      .optional()
-      .describe('Publish only while the brand kits are as the publish card read them; else a conflict { brand: true }'),
-    ifScreens: z.array(id('screen')).max(5000).optional().describe('Publish only if it switches exactly these screens; else a conflict { screens }'),
-    drafts: z
-      .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
-      .max(500)
-      .optional()
-      .describe('Each at the version you chose it at; omit for every changed draft, [] for none'),
-    allowSample: sampleAcks
-      .optional()
-      .describe('People only: the spots a sample_text refusal named, as it named them, once a person chose to publish them anyway'),
-  }),
+  input: inputs.publish,
   output: outputs.publish,
   example: {},
   target: (_input, output) => (output?.publish ? { kind: 'publish', id: output.publish.id } : undefined),
@@ -344,55 +309,6 @@ const publish = defineTool({
     return runPublish(ctx, input.drafts, [], { ifDefault: input.ifDefault, brand: input.ifBrand, screens: input.ifScreens }, peopleAllowSample(ctx));
   },
 });
-
-/** What `takeover` takes to publish a new one, refused with `end`. */
-const PUBLISH_ONLY = ['playlistId', 'target', 'groupId', 'screenId', 'startsAt', 'endsAt', 'with', 'ifReach', 'ifPlays'] as const;
-
-/** A takeover's input as agents are listed it. */
-const takeoverInput = {
-  action: z.enum(['publish', 'end']).describe('publish: make one and publish it; end: end one'),
-  scheduleEntryId: id('schedule entry').optional().describe('end: the takeover'),
-  playlistId: takeoverFields.playlistId.optional(),
-  target: takeoverFields.target.optional(),
-  groupId: takeoverFields.groupId,
-  screenId: takeoverFields.screenId,
-  startsAt: takeoverFields.startsAt,
-  endsAt: takeoverFields.endsAt.optional(),
-  with: z
-    .array(draftRef.extend({ version: z.number().int().positive() }))
-    .max(500)
-    .optional()
-    .describe('publish: drafts published with it, each at the version chosen: its playlist and spots, if never published'),
-};
-
-/**
- * What the agent drawer's card holds a takeover to, each checked against the org as the publish reads it and held to its
- * commit (#408). Only the card sends them, so they are not listed: `input` takes them from any caller.
- */
-const cardGuards = {
-  ifVersion: z.number().int().positive().optional().describe('end: the version read; refused with a conflict if it changed since'),
-  ifReach: z.array(id('screen')).max(5000).optional().describe('publish: the screens it plays on, by id; refused with a conflict unless still exactly these'),
-  ifPlays: z
-    .strictObject({ playlist: z.number().int().nullable(), spots: z.record(z.string(), z.number().int().nullable()) })
-    .optional()
-    .describe("publish: its playlist's and each of its spots' published version (null: never); refused with a conflict if one moved since"),
-};
-
-const takeoverShape = z.strictObject({ ...takeoverInput, ...cardGuards });
-
-/** What each action needs and refuses, on the tool's input and on the one it is listed. */
-function takeoverRules(v: Partial<z.output<typeof takeoverShape>>, ctx: z.RefinementCtx) {
-  const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
-  if (v.action === 'end') {
-    if (v.scheduleEntryId === undefined) issue('scheduleEntryId', 'end needs the takeover: scheduleEntryId');
-    for (const k of PUBLISH_ONLY) if (v[k] !== undefined) issue(k, `${k} is for publish: end takes scheduleEntryId alone`);
-    return;
-  }
-  if (v.scheduleEntryId !== undefined) issue('scheduleEntryId', 'publish makes a new takeover: scheduleEntryId is for end');
-  if (v.ifVersion !== undefined) issue('ifVersion', 'publish makes a new takeover: ifVersion is for end');
-  for (const k of ['playlistId', 'target', 'endsAt'] as const) if (v[k] === undefined) issue(k, `publish needs ${k}`);
-  if (!aimed(v)) issue('target', AIMED);
-}
 
 /** The same versions by id, whatever their order. */
 const sameVersions = (a: Readonly<Record<string, number | null>>, b: Readonly<Record<string, number | null>>) =>
@@ -406,7 +322,7 @@ const takeover = defineTool({
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: takeoverShape.superRefine(takeoverRules),
+  input: inputs.takeover,
   // The same rules: the drawer checks the model's call against this, and a call they refuse is no card (review of #553).
   listedInput: () => z.strictObject(takeoverInput).superRefine(takeoverRules),
   output: outputs.takeover,
@@ -494,10 +410,7 @@ const rollBackPublish = defineTool({
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: z.object({
-    publishId: id('publish').describe('The publish to go back to'),
-    ifLatest: id('publish').optional().describe('For an undo: the publish being undone. Refused with a conflict unless it is still the latest'),
-  }),
+  input: inputs.roll_back_publish,
   output: outputs.roll_back_publish,
   example: { publishId: 'pub_example' },
   target: (input) => ({ kind: 'publish', id: input.publishId }),
@@ -615,7 +528,7 @@ const listPublishes = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_publishes,
   output: outputs.list_publishes,
   example: {},
   handler: async ({ org, input }) => {
@@ -635,11 +548,7 @@ const getPublish = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    publishId: id('publish').optional().describe('Omit for the latest publish'),
-    // Every group's screen ids can be large: a page that polls the rollout leaves them out (review of #620).
-    targets: z.boolean().default(false).describe('Also return whom each group reached'),
-  }),
+  input: inputs.get_publish,
   output: outputs.get_publish,
   example: {},
   handler: async ({ org, input }) => {
@@ -679,7 +588,7 @@ const countDrafts = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: inputs.count_drafts,
   output: outputs.count_drafts,
   example: {},
   handler: async ({ org }) => {

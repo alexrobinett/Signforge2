@@ -7,11 +7,11 @@
  */
 import { reaches, targetIdOf, type ScheduleScreen } from '@signforge/compiler/schedule';
 import { published } from '@signforge/db';
-import { z } from 'zod';
 import { sha256Hex } from './dispatch';
 import { outputs } from './outputs';
 import { dryPublish, groupMoves, readTargets, type OrgGraph } from './publishing';
 import { defineTool } from './tool';
+import { inputs } from './inputs';
 
 /** A graph's published schedule and playlists, each parsed once (review of #620): what a screen plays, by entry and playlist. */
 function publishedOf(graph: OrgGraph) {
@@ -39,7 +39,7 @@ export const previewPublish = defineTool({
   mutates: false,
   // The CMS's Publish button and label editors; an agent's publish card already shows what a publish switches (#351).
   people: true,
-  input: z.object({}),
+  input: inputs.preview_publish,
   output: outputs.preview_publish,
   example: {},
   handler: async ({ org }) => {

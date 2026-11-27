@@ -7,59 +7,19 @@
  * `json-table` source is a table, whose rows a spot maps onto a list field (`read_table` shows
  * one before it is added).
  */
-import { BINDING_PATH, type DataSnapshot } from '@signforge/contract';
+import type { DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
-import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { staleAge } from '@signforge/player-core';
-import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name } from './fields';
-import { page, pageInput } from './paging';
+import type { z } from 'zod';
+import { page } from './paging';
 import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
-import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
+import { type dataSourceOutput, outputs, type sourceFormat } from './outputs';
+import { inputs, jsonTableOnly, MIN_REFRESH_S, ROWS_PATH_ONLY_JSON_TABLE, RSS_REFRESH_S, type saveDataSourceInput } from './inputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
-const MIN_REFRESH_S = 300;
-/** A news feed polls hourly unless a person chooses faster (owner decision on #339): stories turn over in hours, and each poll can queue photos. */
-const RSS_REFRESH_S = 3600;
-const MAX_REFRESH_S = 86_400;
 
-const feedUrl = z
-  .string()
-  .max(2048)
-  .superRefine((url, ctx) => {
-    const problem = feedUrlProblem(url);
-    if (problem) ctx.addIssue({ code: 'custom', message: FEED_URL_PROBLEMS[problem] });
-  })
-  .describe('The feed: https, on the default port, naming a public host. Stored encrypted and never shown again');
-const refreshS = z
-  .number()
-  .int()
-  .min(MIN_REFRESH_S, `refresh no faster than every ${MIN_REFRESH_S} seconds`)
-  .max(MAX_REFRESH_S)
-  .describe(`How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}`);
-const horizonDays = z
-  .number()
-  .int()
-  .min(1)
-  .max(366)
-  .describe('Calendars only: how many days ahead events reach (default 30). A holiday board wants months, a meeting room days');
-const rowsPath = z
-  .string()
-  .max(200)
-  .regex(BINDING_PATH, 'must be a dot path such as data.items')
-  .describe('json-table only: the dot path to the list of objects, such as data.items. Absent: the document is the list');
-const ROWS_PATH_ONLY_JSON_TABLE = 'rowsPath is for json-table sources only';
-const photos = z
-  .boolean()
-  .describe("rss only: whether screens get the stories' photos, which the server fetches, checks and stores (default true). False: headlines only");
 const PHOTOS_ONLY_RSS = 'photos is for rss sources only';
-const resource = z
-  .string()
-  .trim()
-  .min(1)
-  .max(1024)
-  .describe('Provider sources only: what to read at the provider, such as a calendar id or a sheet range. Stored encrypted and never shown again');
 const PROVIDER_FIELDS = 'a provider source takes connectionId and resource, and no feedUrl; any other format takes feedUrl only';
 
 /** What a new source reads: a provider source a resource through its connection, a feed its URL; none if it is given the other's fields. */
@@ -102,7 +62,6 @@ function sourcesBound(json: string | null | undefined): string[] {
 }
 
 const calendarOnly = (f: string, days: number | null | undefined) => days == null || f === 'ical';
-const jsonTableOnly = (f: string, path: string | null | undefined) => path == null || f === 'json-table';
 const rssOnly = (f: string, on: boolean | undefined) => on === undefined || f === 'rss';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 
@@ -113,7 +72,7 @@ const listDataSources = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_data_sources,
   output: outputs.list_data_sources,
   example: {},
   handler: async ({ org, input }) => {
@@ -145,7 +104,7 @@ const getDataSource = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ dataSourceId: id('data source') }),
+  input: inputs.get_data_source,
   output: outputs.get_data_source,
   example: { dataSourceId: 'weather' },
   handler: async ({ org, input }) => {
@@ -163,27 +122,6 @@ const getDataSource = defineTool({
       : null;
     return { dataSource: viewOf(row), snapshot };
   },
-});
-
-// Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-export const saveDataSourceInput = z.strictObject({
-  dataSourceId: id('data source').optional().describe('The source to change; omit to add one'),
-  id: id('data source').optional().describe('A new source: the id spots bind with, such as weather; made for you if absent'),
-  name: name('data source').optional(),
-  format: sourceFormat.optional().describe("A new source's format; fixed once made"),
-  feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
-  connectionId: id('connection').optional().describe('A new provider source: the connection to read through'),
-  resource: resource.optional(),
-  refreshS: refreshS
-    .optional()
-    .describe(
-      `How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}; for a new source default ${RSS_REFRESH_S} for rss, ${MIN_REFRESH_S} for the rest`,
-    ),
-  horizonDays: horizonDays.nullable().optional(),
-  rowsPath: rowsPath.nullable().optional(),
-  photos: photos.optional(),
-  ifVersion,
-  idempotencyKey,
 });
 
 type DataSourceFormat = z.infer<typeof sourceFormat>;
@@ -248,7 +186,7 @@ const saveDataSource = defineTool({
   mutates: true,
   idempotent: true,
   needs: ['feedUrls'],
-  input: saveDataSourceInput,
+  input: inputs.save_data_source,
   output: outputs.save_data_source,
   example: {
     id: 'weather',
@@ -358,7 +296,7 @@ const findPlaces = defineTool({
   mutates: false,
   // Unlimited, one member could use up the geocoder's free allowance for every org.
   needs: ['rateLimit', 'places'],
-  input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
+  input: inputs.find_places,
   output: outputs.find_places,
   example: { query: 'Atlanta' },
   handler: async ({ input, services: { places, rateLimit } }) => {
@@ -376,13 +314,7 @@ const readTable = defineTool({
   mutates: false,
   // Unlimited, one member could make the API fetch any URL as fast as it answers.
   needs: ['rateLimit', 'tables'],
-  input: z
-    .object({
-      feedUrl,
-      format: z.enum(TABLE_FORMATS).describe('csv: a header row, then a row per item; json-table: a list of objects'),
-      rowsPath: rowsPath.optional(),
-    })
-    .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] }),
+  input: inputs.read_table,
   output: outputs.read_table,
   example: { feedUrl: 'https://example.com/menu.csv', format: 'csv' },
   handler: async ({ input, services: { tables, rateLimit } }) => {

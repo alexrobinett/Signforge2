@@ -17,17 +17,15 @@
  */
 import { imageSampleSize, imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
-import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
-import { z } from 'zod';
-import { id } from './fields';
-import { page, pageInput } from './paging';
+import { readImageInfo } from '@signforge/media/image-info';
+import type { z } from 'zod';
+import { page } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
 import type { UploadSigner } from './upload';
-import { ORIENTATIONS, ASSET_STATUSES, outputs, type AssetView, type RenditionView } from './outputs';
+import { ORIENTATIONS, outputs, type AssetView, type RenditionView } from './outputs';
+import { inputs, MAX_RENDITION_BYTES, type renditionsInput } from './inputs';
 
-/** The most one rendition may weigh. A 3413x1920 PNG, the largest a cover-scaled 4K image gets, is well under it. */
-export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
 /** How long an upload URL works. */
 export const UPLOAD_URL_SECONDS = 15 * 60;
 
@@ -65,21 +63,6 @@ export async function requireAsset(org: OrgScope, assetId: string) {
 }
 
 export const SHA256 = /^[0-9a-f]{64}$/;
-const pixels = z.number().int().positive().max(65_535);
-const sha256 = z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)');
-const bytes = z
-  .number()
-  .int()
-  .positive()
-  .max(MAX_RENDITION_BYTES, `a rendition may be at most ${MAX_RENDITION_BYTES / 1024 / 1024} MB`);
-const renditionInput = z.object({
-  sha256,
-  type: z.enum(RENDITION_TYPES),
-  size: bytes,
-  width: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
-  height: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
-  sample: z.object({ sha256, size: bytes }).optional().describe('Its sample PNG from @signforge/media; none for SVG or transparency'),
-});
 
 const listAssets = defineTool({
   name: 'list_assets',
@@ -88,11 +71,7 @@ const listAssets = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    query: z.string().trim().max(100).optional().describe('Part of the name, any case'),
-    status: z.enum(ASSET_STATUSES).optional(),
-    ...pageInput,
-  }),
+  input: inputs.list_assets,
   output: outputs.list_assets,
   example: {},
   handler: async ({ org, input }) => {
@@ -117,7 +96,7 @@ const getAsset = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ assetId: id('asset') }),
+  input: inputs.get_asset,
   output: outputs.get_asset,
   example: { assetId: 'ast_example' },
   handler: async ({ org, input }) => {
@@ -125,29 +104,6 @@ const getAsset = defineTool({
     const [renditions, usage] = await Promise.all([org.assets.renditions.forAsset(a.id), org.assets.usage([a.id])]);
     return { asset: assetView(a, renditions), spotIds: usage.get(a.id) ?? [] };
   },
-});
-
-/** An image's two renditions as an upload claims them (`start_upload`, ./uploading.ts): both raster or the same SVG, each fitting its screen box. */
-export const renditionsInput = z.object({ landscape: renditionInput, portrait: renditionInput }).superRefine((renditions, ctx) => {
-  for (const o of ORIENTATIONS) {
-    const r = renditions[o];
-    const path = [o];
-    if (r.type === 'image/svg+xml') {
-      if (r.width !== null || r.height !== null) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no pixel size: send width and height as null' });
-      if (r.sample) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no sample' });
-    } else if (r.width === null || r.height === null) {
-      ctx.addIssue({ code: 'custom', path, message: 'a raster rendition needs its width and height' });
-    } else {
-      const message = imageSizeProblem(r.width, r.height, SCREEN_BOX[o]);
-      if (message) ctx.addIssue({ code: 'custom', path, message });
-    }
-  }
-  const { landscape: l, portrait: p } = renditions;
-  if ((l.type === 'image/svg+xml') !== (p.type === 'image/svg+xml')) ctx.addIssue({ code: 'custom', message: 'an SVG is sent as it is for both orientations' });
-  // Renditions and samples alike: a file is stored and checked once, by its hash.
-  const files = [l, p].flatMap((r) => [r, ...(r.sample ? [{ ...r.sample, type: 'image/png' }] : [])]);
-  if (files.some((f) => files.some((g) => f.sha256 === g.sha256 && (f.type !== g.type || f.size !== g.size))))
-    ctx.addIssue({ code: 'custom', message: 'the same file cannot have two types or sizes' });
 });
 
 /**

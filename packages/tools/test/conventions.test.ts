@@ -1,4 +1,4 @@
-// The conventions every tool keeps: it declares what it returns, and a list pages.
+// The conventions every tool keeps: it declares what it takes and returns, and a list pages.
 import { seedTeam, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -16,6 +16,7 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { inputs } from '../src/inputs';
 import { outputs, type ToolName } from '../src/outputs';
 import { seededMembers } from './member';
 
@@ -43,6 +44,11 @@ describe('every registered tool', () => {
   it('returns the output its name has in outputs.ts, the schema the CMS types its calls by', () => {
     for (const t of all) expect(t.output === outputs[t.name as ToolName], `${t.name}'s output is not outputs.${t.name}`).toBe(true);
     expect(Object.keys(outputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
+  it('takes the input its name has in inputs.ts, the schema the CMS types its calls by', () => {
+    for (const t of all) expect(t.input === inputs[t.name as ToolName], `${t.name}'s input is not inputs.${t.name}`).toBe(true);
+    expect(Object.keys(inputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
   });
 
   it('pages if it lists: limit and cursor in, next out', () => {

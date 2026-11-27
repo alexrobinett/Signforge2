@@ -153,3 +153,18 @@ export const selector = z
   .describe(
     'Screens whose labels match every term: { all: [{ key, op, values }] }. Values match case-insensitively; a screen without the key matches only missing, so neq and notin need it. System labels count: { key: "orientation", op: "eq", values: ["portrait"] }',
   );
+
+export const DEFAULT_PAGE_LIMIT = 50;
+export const MAX_PAGE_LIMIT = 200;
+
+/** The input fields a list tool adds to its own. */
+export const pageInput = {
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_LIMIT)
+    .default(DEFAULT_PAGE_LIMIT)
+    .describe(`How many to return, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
+  cursor: z.string().max(2000).optional().describe("The previous page's next, to get the page after it"),
+};

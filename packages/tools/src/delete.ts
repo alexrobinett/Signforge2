@@ -1,17 +1,10 @@
-/**
- * One tool deletes each kind of content that goes for good from the library (#345): an asset, a data source, a playlist
- * or a schedule entry. Each kind's own rules live with it; a kind that is not content (a group, a spot, a credential)
- * keeps its own tool, with its own scope or its `people` rule.
- */
-import { z } from 'zod';
 import { assetTakenUp, deleteAsset } from './assets';
 import { deleteDataSource } from './data-sources';
-import { ID_PATTERN } from '@signforge/contract';
-import { ifVersion } from './fields';
 import { deletePlaylist, playlistChangedSince, playlistInUse } from './playlists';
 import { deleteScheduleEntry } from './schedule';
 import { defineTool } from './tool';
 import { outputs } from './outputs';
+import { inputs } from './inputs';
 
 const deleteTool = defineTool({
   name: 'delete',
@@ -20,16 +13,7 @@ const deleteTool = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
-  input: z
-    .strictObject({
-      type: z.enum(['asset', 'data_source', 'playlist', 'schedule_entry']),
-      id: z.string().regex(ID_PATTERN, 'not a valid id').describe("The thing's id"),
-      ifVersion: ifVersion.describe('playlist or schedule_entry: the version you read; a conflict means it changed since'),
-    })
-    .refine((v) => v.ifVersion === undefined || v.type === 'schedule_entry' || v.type === 'playlist', {
-      message: 'ifVersion is for a playlist or a schedule entry',
-      path: ['ifVersion'],
-    }),
+  input: inputs.delete,
   output: outputs.delete,
   example: { type: 'playlist', id: 'pls_example' },
   target: (input) => ({ kind: input.type, id: input.id }),

@@ -5,15 +5,14 @@
  * (`reach`), and which screens cannot get a kit because their groups disagree (`conflicts`).
  */
 import { orgGroups } from './memberships';
-import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } from '@signforge/compiler';
+import { brandWarnings, chooseBrandKit, FONTS, fontById, onColor } from '@signforge/compiler';
 import { unverified } from '@signforge/compiler/draft';
 import type { BrandColors } from '@signforge/contract';
 import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
-import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name } from './fields';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { defineTool, invalidFields, notFound, ToolError } from './tool';
-import { brandShape, outputs, type BrandKitView } from './outputs';
+import { outputs, type BrandKitView } from './outputs';
+import { inputs } from './inputs';
 
 // ------------------------------------------------------------------ colours
 
@@ -34,29 +33,6 @@ export function kitColors(row: Pick<BrandKitRow, 'colorsJson'>): { colors: Brand
   return { colors, derived };
 }
 
-const hex = z
-  .string()
-  .regex(HEX_COLOR, 'a hex colour, #rgb or #rrggbb')
-  .transform((v) => v.toLowerCase())
-  .describe('A hex colour, #rrggbb');
-const colorsPatch = z
-  .object({
-    primary: hex.optional().describe('Filled buttons and badges'),
-    accent: hex.optional().describe('Highlights, tags, the crawl label'),
-    background: hex.optional().describe('The page'),
-    surface: hex.optional().describe('Cards and rows on the page'),
-    text: hex.optional().describe('Body text'),
-    muted: hex.optional().describe('Secondary text'),
-    onPrimary: hex.nullable().optional().describe('Text on primary. Leave out, or null, to derive it for 4.5:1 contrast'),
-    onAccent: hex.nullable().optional().describe('Text on accent. Leave out, or null, to derive it for 4.5:1 contrast'),
-  })
-  .describe("The kit colours: a new kit's six, or those to change, the rest staying");
-
-const fontId = (role: string) =>
-  z
-    .string()
-    .refine((v) => fontById(v) !== undefined, 'not a font in the catalogue; see list_fonts')
-    .describe(`The ${role} font's catalogue id, such as base/inter. See list_fonts`);
 // ------------------------------------------------------------------ views
 
 /** A choice staged in this call but not committed yet, so a view can show the result. */
@@ -137,11 +113,6 @@ async function checkLogo(org: OrgScope, assetId: string | null | undefined, fiel
   if (problem) throw new ToolError('invalid_input', problem, [{ path: field, message: problem }]);
 }
 
-const logoFields = {
-  logoOnDarkAssetId: id('asset').describe('The logo for dark backgrounds: an SVG or PNG image asset'),
-  logoOnLightAssetId: id('asset').describe('The logo for light backgrounds, if it differs'),
-};
-
 // ------------------------------------------------------------------ tools
 
 const listFonts = defineTool({
@@ -151,7 +122,7 @@ const listFonts = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_fonts,
   output: outputs.list_fonts,
   example: {},
   handler: async ({ input }) => {
@@ -177,7 +148,7 @@ const listBrandKits = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_brand_kits,
   output: outputs.list_brand_kits,
   example: {},
   handler: async ({ org, input, memo }) => {
@@ -194,7 +165,7 @@ const getBrandKit = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ brandKitId: id('brand kit') }),
+  input: inputs.get_brand_kit,
   output: outputs.get_brand_kit,
   example: { brandKitId: 'bk_example' },
   // Once per read: a read of several kits by id shares one context (review of #608).
@@ -215,19 +186,7 @@ const saveBrandKit = defineTool({
   mutates: true,
   idempotent: true,
   // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-  input: z.strictObject({
-    brandKitId: id('brand kit').optional().describe('The kit to change; omit to create one'),
-    name: name('brand kit').optional(),
-    colors: colorsPatch.optional(),
-    shape: brandShape.optional(),
-    displayFontId: fontId('display').nullable().optional(),
-    bodyFontId: fontId('body').nullable().optional(),
-    logoOnDarkAssetId: logoFields.logoOnDarkAssetId.nullable().optional(),
-    logoOnLightAssetId: logoFields.logoOnLightAssetId.nullable().optional(),
-    makeDefault: z.boolean().optional().describe("True makes it the organization's default kit"),
-    ifVersion,
-    idempotencyKey,
-  }),
+  input: inputs.save_brand_kit,
   output: outputs.save_brand_kit,
   example: {
     name: 'House style',
@@ -318,13 +277,7 @@ const assignBrandKit = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
-  input: z
-    .object({
-      brandKitId: id('brand kit').nullable().describe('The kit to use, or null to remove the choice'),
-      screenId: id('screen').optional(),
-      groupId: id('group').optional(),
-    })
-    .refine((v) => (v.screenId === undefined) !== (v.groupId === undefined), 'give exactly one of screenId and groupId'),
+  input: inputs.assign_brand_kit,
   output: outputs.assign_brand_kit,
   example: { brandKitId: 'bk_example', screenId: 'scr_example' },
   target: (input) => (input.screenId ? { kind: 'screen', id: input.screenId } : { kind: 'group', id: input.groupId! }),

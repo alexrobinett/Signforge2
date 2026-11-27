@@ -10,8 +10,7 @@ import { z } from 'zod';
 import { effectiveScopes, type Grant, grantOf, permits } from './dispatch';
 import { agentTimeProperties, applyTimes, type TimePlan, timePlan } from './agent-times';
 import { outputs } from './outputs';
-import { id } from './fields';
-import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
+import { describeInput, inputs, READ_TYPE_NAMES, type ReadType, readInput } from './inputs';
 import { type AnyTool, defineTool, ToolError, type ToolContext, type ToolServices } from './tool';
 
 type Row = Record<string, unknown>;
@@ -215,9 +214,7 @@ export const READ_TYPES = {
     list: { tool: 'list_invitations', items: 'invitations' },
     summary: ['id', 'email', 'role', 'status', 'expiresAt'],
   },
-} as const satisfies Record<string, TypeDef>;
-
-export type ReadType = keyof typeof READ_TYPES;
+} as const satisfies Record<ReadType, TypeDef>;
 
 /** The tools that change each type, as describe names them: explicit, so a tool named alike is never one of them. */
 const CHANGED_BY = {
@@ -245,7 +242,7 @@ const CHANGED_BY = {
   alert_channels: [],
   invitation: ['cancel_invitation'],
 } as const satisfies Record<ReadType, readonly string[]>;
-const TYPE_NAMES = Object.keys(READ_TYPES).filter((t): t is ReadType => t in READ_TYPES);
+const TYPE_NAMES = READ_TYPE_NAMES;
 const defOf = (type: ReadType): TypeDef => READ_TYPES[type];
 
 export const isReadType = (v: unknown): v is ReadType => typeof v === 'string' && v in READ_TYPES;
@@ -291,8 +288,6 @@ export const readTypes = (tools: Tools, grant: Grant, services?: ToolServices): 
 export const servedByRead = (tools: Tools, grant: Grant, name: string, services?: ToolServices) =>
   readTypes(tools, grant, services).some((type) => toolsOf(type).includes(name));
 
-const typeField = (types: readonly ReadType[]) => z.enum(types).describe('What to read; describe(type) says its filters and fields');
-
 /** `read`'s description for `types`: one line each, so a model picks a type without describing it first. */
 export const readDescription = (types: readonly ReadType[]) =>
   [
@@ -300,26 +295,6 @@ export const readDescription = (types: readonly ReadType[]) =>
     ...types.map((t) => `${t}: ${defOf(t).about}.`),
     'Returns { type, items, next }.',
   ].join(' ');
-
-/** `read`'s input, its type one of `types`: a key it does not take is refused, saying where it goes. */
-export const readInput = (types: readonly ReadType[]) =>
-  z.strictObject(
-    {
-      type: typeField(types),
-      ids: z.array(id('record')).min(1).optional().describe("Read these by id, at most as many as describe's maxIds (publish takes 'latest'); omit to list"),
-      filter: z.record(z.string(), z.unknown()).optional().describe("The type's filters, as describe lists them; with ids, only its idOptions"),
-      query: z.string().min(1).max(100).optional().describe('Words in the name, where the type can search (asset, audit_entry)'),
-      detail: z.enum(['summary', 'full']).optional().describe('summary (the default): the fields most tasks need; full: every field'),
-      fields: z.array(z.string()).min(1).max(40).optional().describe('Only these top-level fields of each row'),
-      // A list's page: the list's own default when omitted, and none with ids.
-      limit: z.number().int().min(1).max(MAX_PAGE_LIMIT).optional().describe(`How many to list, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
-      cursor: z.string().max(2000).optional().describe("The previous page's next, to list the page after it"),
-    },
-    { error: (issue) => (issue.code === 'unrecognized_keys' ? `read takes no ${issue.keys.join(', ')}: put a type's filters under filter` : undefined) },
-  );
-
-/** `describe`'s input, its type one of `types`. */
-export const describeInput = (types: readonly ReadType[]) => z.object({ type: typeField(types) });
 
 /** The JSON Schema properties of one of a tool's outputs: the rows under `key`, or the output itself. */
 function propertiesOf(tools: Tools, tool: string, key?: string): Record<string, unknown> {
@@ -434,7 +409,7 @@ export function readTools(tools: Tools) {
     scope: 'content:read',
     minRole: 'viewer',
     mutates: false,
-    input: readInput(TYPE_NAMES),
+    input: inputs.read,
     listedInput: (grant, services) => readInput(readTypes(tools, grant, services)),
     output: outputs.read,
     example: { type: 'screen', filter: { selector: { all: [{ key: 'orientation', op: 'eq', values: ['portrait'] }] } } },
@@ -512,7 +487,7 @@ export function readTools(tools: Tools) {
     scope: 'content:read',
     minRole: 'viewer',
     mutates: false,
-    input: describeInput(TYPE_NAMES),
+    input: inputs.describe,
     listedInput: (grant, services) => describeInput(readTypes(tools, grant, services)),
     output: outputs.describe,
     example: { type: 'spot' },

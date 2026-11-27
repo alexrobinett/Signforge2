@@ -1,33 +1,4 @@
-/**
- * Paging for list tools. Every `list_*` tool takes `limit` (default 50, at most 200) and an
- * optional `cursor`, and returns `next`: the cursor for the following page, or null on the last.
- *
- * A cursor is opaque to callers: the sort key of the last row returned, encoded here, and sealed
- * for the org and the tool by dispatch where the caller has the `cursors` service (#345). The next
- * page starts after that key, so rows added or removed between calls neither repeat nor shift the
- * rest. A cursor is only meaningful with the filters it was made with.
- *
- * Paging bounds what a call returns and the per-row work a tool does (groups' members, assets'
- * renditions). Most repositories still read the org's whole list and `page()` cuts it; a tool
- * that is polled (`list_screen_status`) reads one page in SQL with `keysetPage()`.
- */
-import { z } from 'zod';
 import { ToolError } from './tool';
-
-export const DEFAULT_PAGE_LIMIT = 50;
-export const MAX_PAGE_LIMIT = 200;
-
-/** The input fields a list tool adds to its own. */
-export const pageInput = {
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_PAGE_LIMIT)
-    .default(DEFAULT_PAGE_LIMIT)
-    .describe(`How many to return, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
-  cursor: z.string().max(2000).optional().describe("The previous page's next, to get the page after it"),
-};
 
 /** A sort key: compared element by element. */
 export type SortKey = readonly (string | number)[];

@@ -3,16 +3,15 @@ import { labelsByScreen, resolveGroups } from './memberships';
 import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
-import { z } from 'zod';
 import { matches, systemLabels } from '@signforge/compiler/selector';
-import { displayHours, id, ifVersion, locale, name, orientation, selector, timezone } from './fields';
 import { parseHeartbeat } from './heartbeat';
-import { keysetPage, page, pageInput } from './paging';
+import { keysetPage, page } from './paging';
 import { manifestKey } from './r2';
 import { screenState, shouldBeShowing, type StateInput } from './screen-state';
 import { unreachableAfterMs } from './settings';
 import { defineTool, notFound, ToolError } from './tool';
 import { outputs, type CredentialView, type ScreenView } from './outputs';
+import { inputs } from './inputs';
 
 /** How long a display override lasts at most: on a screen without display hours, and over a closed weekend. */
 export const OVERRIDE_LIMIT_MS = 12 * 3_600_000;
@@ -170,7 +169,7 @@ const listScreens = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ selector: selector.optional().describe('Only the screens it matches; omit for every screen'), ...pageInput }),
+  input: inputs.list_screens,
   output: outputs.list_screens,
   example: { selector: { all: [{ key: 'orientation', op: 'eq', values: ['portrait'] }] } },
   handler: async ({ org, input, blobs }) => {
@@ -198,7 +197,7 @@ const listScreenStatus = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_screen_status,
   output: outputs.list_screen_status,
   example: {},
   handler: async ({ org, input }) => {
@@ -229,7 +228,7 @@ const getScreen = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ screenId: id('screen') }),
+  input: inputs.get_screen,
   output: outputs.get_screen,
   example: { screenId: 'scr_example' },
   handler: async ({ org, input, blobs, memo }) => {
@@ -261,20 +260,7 @@ const updateScreen = defineTool({
   minRole: 'editor',
   mutates: true,
   // Strict: a field it does not take (a stray state, a group's name) is refused by name, not dropped.
-  input: z
-    .strictObject({
-      screenId: id('screen'),
-      name: name('screen').optional(),
-      timezone: timezone.optional(),
-      locale: locale.nullable().optional(),
-      orientation: orientation.optional(),
-      displayHours: displayHours.nullable().optional(),
-      ifVersion,
-    })
-    .refine(
-      (v) => v.name !== undefined || v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
-      'give at least one of name, timezone, locale, orientation or displayHours to change',
-    ),
+  input: inputs.update_screen,
   output: outputs.update_screen,
   example: { screenId: 'scr_example', name: 'Lobby', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
@@ -297,9 +283,6 @@ const updateScreen = defineTool({
   },
 });
 
-/** What `screen_command` sends: a display override (on, off, or back to the display hours), identify, or restart. */
-const SCREEN_COMMANDS = ['identify', 'restart', 'display_on', 'display_off', 'display_auto'] as const;
-
 const screenCommand = defineTool({
   name: 'screen_command',
   description: `Act on a live screen now, for someone standing at it. identify shows its name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. restart reloads its player, which plays from its cache at once and syncs: use it when a screen looks stuck (rebooting the device is not available yet). display_on wakes its display and display_off puts it to sleep, until its next scheduled display change and at most ${OVERRIDE_LIMIT_MS / 3_600_000} hours (the limit alone on a screen without display hours), then it follows its hours again; display_auto goes back to its display hours now. The screen gets it at once over its socket; an unreachable one misses identify and restart and gets a display change at its next sync. A revoked screen is refused identify and restart (conflict). Returns { screenId, command, displayOverride }.`,
@@ -308,7 +291,7 @@ const screenCommand = defineTool({
   mutates: true,
   // Identify and restart act on the screen, not the database: audited though they stage nothing.
   alwaysAudited: true,
-  input: z.strictObject({ screenId: id('screen'), command: z.enum(SCREEN_COMMANDS).describe('identify, restart, display_on, display_off or display_auto') }),
+  input: inputs.screen_command,
   output: outputs.screen_command,
   example: { screenId: 'scr_example', command: 'identify' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
@@ -344,7 +327,7 @@ const revokeScreenCredential = defineTool({
   mutates: true,
   // A repeat stages nothing but still closes the socket, in case the first notice never arrived.
   alwaysAudited: true,
-  input: z.object({ screenId: id('screen'), credentialId: id('credential') }),
+  input: inputs.revoke_screen_credential,
   output: outputs.revoke_screen_credential,
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
   target: (input) => ({ kind: 'credential', id: input.credentialId }),

@@ -1,16 +1,8 @@
-/**
- * The org's audit log (#82): every change a tool, Better Auth's membership endpoints or an agent's
- * limit refusal recorded, newest first, filtered, a page at a time read in SQL. Inputs were
- * redacted when the row was written (`redact()` in ./dispatch.ts) and are returned as stored.
- *
- * An entry carries no id of its own: an agent-limit row's id is longer than the contract's id rules
- * allow (#77), and the cursor, made from each row's time and `rowid` and the org, is what pages.
- */
-import { z } from 'zod';
 import { shownClientName } from './agent-clients';
-import { keysetPage, pageInput } from './paging';
+import { keysetPage } from './paging';
 import { defineTool, ToolError } from './tool';
-import { ACTOR_KINDS, outputs } from './outputs';
+import { outputs } from './outputs';
+import { inputs } from './inputs';
 
 /**
  * Membership changes whose detail names the invitee by email. Better Auth lets only owners list
@@ -65,31 +57,6 @@ const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inp
     set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
   };
 
-const isoTime = z.iso.datetime({ offset: true });
-/**
- * The earliest time a filter takes, 2000-01-01: no log goes back further, and a number below it is seconds since the
- * epoch, which as ms would mean January 1970 (#543). An ISO time before it is refused alike, never a negative ms.
- */
-const EARLIEST = Date.UTC(2000, 0, 1);
-/**
- * A time an agent gives as it reads one, ISO 8601, or as the CMS does, ms since the epoch (#345): ms to the handler.
- * Checked by refine, so its schema says date-time rather than carry zod's regex (#543).
- */
-const instant = z
-  .union(
-    [
-      z.number().int().min(EARLIEST, 'ms since the epoch, from 2000 on: a number this small is seconds, so multiply it by 1000'),
-      z
-        .string()
-        .refine((t) => isoTime.safeParse(t).success)
-        .meta({ format: 'date-time' })
-        .transform((t) => Date.parse(t)),
-    ],
-    { error: 'Expected an ISO 8601 time with its offset, such as 2026-11-26T09:00:00Z, or ms since the epoch' },
-  )
-  // Only an ISO time reaches this below the floor: a number is refused above, as seconds.
-  .refine((ms) => ms >= EARLIEST, 'a time from 2000 on');
-
 const listAuditLog = defineTool({
   name: 'list_audit_log',
   description:
@@ -97,28 +64,7 @@ const listAuditLog = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    ...pageInput,
-    actor: z
-      .object({ kind: z.enum(ACTOR_KINDS).optional(), id: z.string().min(1).max(200).optional().describe('One actor, as an entry names it') })
-      .optional()
-      .describe('Only what this kind of actor, or this one actor, did'),
-    action: z
-      .string()
-      .min(1)
-      .max(64)
-      .optional()
-      .describe(
-        'Only this action, such as update_screen. A replaced tool also finds the rows of the tool that does its job now: create_spot and update_spot find save_spot without and with spotId, delete_playlist finds delete of a playlist, identify_screen finds screen_command identify, and so on',
-      ),
-    target: z
-      .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
-      .optional()
-      .describe('Only what was done to this kind of thing, or this one thing, even one since deleted'),
-    from: instant.optional().describe('Only entries at or after this time, from 2000 on: ISO 8601, or ms since the epoch'),
-    to: instant.optional().describe('Only entries before this time, from 2000 on: ISO 8601, or ms since the epoch'),
-    query: z.string().trim().min(1).max(100).optional().describe('Only entries whose action, actor, target or recorded input contains this text'),
-  }),
+  input: inputs.list_audit_log,
   output: outputs.list_audit_log,
   example: {},
   handler: async ({ org, input, role }) => {

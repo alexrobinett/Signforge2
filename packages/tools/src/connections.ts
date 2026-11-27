@@ -10,10 +10,10 @@
 import type { OrgScope, Staged } from '@signforge/db';
 import { z } from 'zod';
 import { sha256Hex } from './dispatch';
-import { id } from './fields';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { type Connectors, defineTool, notFound, ToolError } from './tool';
 import { type connectionOutput, outputs } from './outputs';
+import { inputs } from './inputs';
 
 /** How long an authorization waits for its callback. */
 const AUTHORIZATION_MS = 10 * 60_000;
@@ -58,7 +58,7 @@ const listConnections = defineTool({
   minRole: 'viewer',
   mutates: false,
   needs: ['connectors'],
-  input: z.object({ ...pageInput }),
+  input: inputs.list_connections,
   output: outputs.list_connections,
   example: {},
   handler: async ({ org, input, services: { connectors } }) => {
@@ -77,13 +77,7 @@ const startConnection = defineTool({
   // An account at a provider is a person's choice, and the provider sends a browser back to finish it.
   people: true,
   needs: ['connectors'],
-  input: z.object({
-    provider: z
-      .string()
-      .regex(/^[a-z][a-z0-9-]{0,31}$/, 'not a provider name')
-      .describe('The provider, such as google'),
-    connectionId: id('connection').optional().describe('A connection to authorize again in place, keeping its id and its data sources'),
-  }),
+  input: inputs.start_connection,
   output: outputs.start_connection,
   example: { provider: 'google' },
   target: (input, output) =>
@@ -128,10 +122,7 @@ const finishConnection = defineTool({
   // An account at a provider is a person's choice, and the provider sends a browser back to finish it.
   people: true,
   needs: ['connectors'],
-  input: z.object({
-    oauthState: z.string().min(16).max(256).describe('The state the provider sent back'),
-    code: z.string().min(1).max(2048).describe("The provider's authorization code"),
-  }),
+  input: inputs.finish_connection,
   output: outputs.finish_connection,
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
@@ -187,7 +178,7 @@ const disconnect = defineTool({
   minRole: 'editor',
   mutates: true,
   needs: ['connectors'],
-  input: z.object({ connectionId: id('connection') }),
+  input: inputs.disconnect,
   output: outputs.disconnect,
   example: { connectionId: 'con_example' },
   target: (input) => ({ kind: 'connection', id: input.connectionId }),

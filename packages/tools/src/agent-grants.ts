@@ -13,14 +13,11 @@
  * is refused. Clients are named as `/connect` names them (`shownClient`).
  */
 import type { AgentGrantRow, OrgScope } from '@signforge/db';
-import { z } from 'zod';
 import { shownClient } from './agent-clients';
-import { id } from './fields';
 import { outputs, SCOPES, type AgentGrantView } from './outputs';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { type Actor, defineTool, notFound, type Role, type Scope, ToolError } from './tool';
-
-const grantId = id('agent grant');
+import { inputs } from './inputs';
 
 /** The scopes a grant row holds, in the registry's order. Written only by consent and these tools, from `SCOPES`. */
 const scopesOf = (row: AgentGrantRow): Scope[] => {
@@ -70,7 +67,7 @@ const listAgentGrants = defineTool({
   minRole: 'viewer',
   mutates: false,
   people: true,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_agent_grants,
   output: outputs.list_agent_grants,
   example: {},
   handler: async ({ org, actor, role, input }) => {
@@ -87,7 +84,7 @@ const getAgentGrant = defineTool({
   minRole: 'viewer',
   mutates: false,
   people: true,
-  input: z.object({ grantId }),
+  input: inputs.get_agent_grant,
   output: outputs.get_agent_grant,
   example: { grantId: 'agt_example' },
   handler: async ({ org, actor, role, input }) => {
@@ -103,22 +100,7 @@ const updateAgentGrantScopes = defineTool({
   minRole: 'viewer',
   mutates: true,
   people: true,
-  input: z.object({
-    grantId,
-    scopes: z
-      .array(z.enum(SCOPES))
-      .min(1)
-      .max(SCOPES.length)
-      .describe('Every scope it should hold, content:read among them: the whole set, replacing the grant’s'),
-    // Required (#328): a set made from a stale read would put back a scope another person took away meanwhile.
-    ifVersion: z
-      .number()
-      .int()
-      .positive()
-      .describe(
-        'The version you read. If the grant has changed since, nothing is written and the call is refused with conflict, details { id, version }: read it again and redo the change',
-      ),
-  }),
+  input: inputs.update_agent_grant_scopes,
   output: outputs.update_agent_grant_scopes,
   example: { grantId: 'agt_example', scopes: ['content:read', 'content:draft'], ifVersion: 1 },
   target,
@@ -148,7 +130,7 @@ const revokeAgentGrant = defineTool({
   minRole: 'viewer',
   mutates: true,
   people: true,
-  input: z.object({ grantId }),
+  input: inputs.revoke_agent_grant,
   output: outputs.revoke_agent_grant,
   example: { grantId: 'agt_example' },
   target,
@@ -173,7 +155,7 @@ const getAgentGrantUsage = defineTool({
   mutates: false,
   people: true,
   needs: ['agentCalls'],
-  input: z.object({ grantId: grantId.optional() }),
+  input: inputs.get_agent_grant_usage,
   output: outputs.get_agent_grant_usage,
   example: { grantId: 'agt_example' },
   handler: async ({ org, actor, role, input, services: { agentCalls } }) => {

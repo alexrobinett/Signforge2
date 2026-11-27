@@ -296,9 +296,10 @@ The API's five-minute check marks a rollout finished once every screen it switch
    - Write the description for an agent.
    - Give it the narrowest scope and role.
    - Set `mutates: true` if it changes anything.
-   - Give a `target` for the audit log.
-   - Give an `output` schema: what it returns, as zod, written in `src/outputs.ts` under the tool's name and given as `output: outputs.<name>`. The handler's return type is checked against it at compile time, and every output against it in tests. `src/outputs.ts` imports only zod, the contract, the compiler's types and (through `src/screen-state.ts`) player-core, all of which the CMS's DOM typecheck can load, as the CMS types its calls from it (`@signforge/tools/outputs`, types only); never import a tool file or a Workers type there. A schema the input shares goes there too.
-   - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` (`src/outputs.ts`) to its output, and cut the rows with `page()`.
+   - Give a `target` for the audit log. A refused call has no output: name the target from the input, or return undefined when the output is undefined.
+   - Give an `input` schema: what it takes, as zod, written in `src/inputs.ts` under the tool's name and given as `input: inputs.<name>`. `src/inputs.ts` loads in the CMS's DOM typecheck as `src/outputs.ts` does, and the CMS types its calls' inputs from it (`@signforge/tools/inputs`, types only): never import a tool file or a Workers type there.
+   - Give an `output` schema: what it returns, as zod, written in `src/outputs.ts` under the tool's name and given as `output: outputs.<name>`. The handler's return type is checked against it at compile time, and every output against it in tests. `src/outputs.ts` imports only zod, the contract, the compiler's types and (through `src/screen-state.ts`) player-core, all of which the CMS's DOM typecheck can load, as the CMS types its calls from it (`@signforge/tools/outputs`, types only); never import a tool file or a Workers type there. A schema the input shares goes there too, and `src/inputs.ts` imports it.
+   - A `list_*` tool pages: spread `pageInput` (`src/fields.ts`) into its input, add `next: nextOutput` (`src/outputs.ts`) to its output, and cut the rows with `page()`.
    - Give an `example`.
    - Name in `needs` the tool services its handler uses (see Tool services), and read them from `ctx.services`. Do not check for them yourself: the dispatcher refuses a call without one.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
@@ -316,7 +317,7 @@ The API's five-minute check marks a rollout finished once every screen it switch
 ## Tests
 
 - `test/isolation.test.ts`: generated from the registry, as above.
-- `test/conventions.test.ts`: fails on a tool without an output schema or whose output is not its entry in `src/outputs.ts`, a `list_*` tool without paging, or an update tool without `ifVersion` in its input and `version` in its output (`update_screen_labels`, a merge, needs none), and checks the output check and paging itself.
+- `test/conventions.test.ts`: fails on a tool without an output schema, whose output is not its entry in `src/outputs.ts` or whose input is not its entry in `src/inputs.ts`, a `list_*` tool without paging, or an update tool without `ifVersion` in its input and `version` in its output (`update_screen_labels`, a merge, needs none), and checks the output check and paging itself.
 - `test/versions.test.ts`: a stale `ifVersion` is refused and writes nothing, even when the change lands between the read and the commit; group members added and removed without dropping anyone's.
 - `test/labels.test.ts`: `update_screen_labels`'s merge, every key, value and count limit, the reserved keys, `list_screens({ selector })` matching case-insensitively and on system labels, `list_label_keys`, `claim_screen`'s labels, and another org's screens refused.
 - `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and any writing batch other than the dispatcher's commit (one run while the handler runs, or one that does not end with the audit row), and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.

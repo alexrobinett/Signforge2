@@ -1,23 +1,12 @@
-/**
- * Video assets. A video ships as it was exported: there is no transcoding, so it must already
- * match `VIDEO_SPEC`. The CMS checks the file with `@signforge/media-check` before uploading;
- * `finalize_upload` checks it again here, over R2 range reads, because the client cannot be
- * trusted.
- *
- * The file goes straight to R2 as a multipart upload: `start_upload` starts it and signs
- * an UploadPart URL per part, the browser PUTs the parts, and `finalize_upload` completes
- * it, reads the MP4 header, re-hashes the file and only then moves it to `o/<org>/b/<sha256>`.
- * Both tools are in ./uploading.ts.
- */
-import { VIDEO_SPEC } from '@signforge/contract';
 import { checkVideo, EXPORT_ADVICE } from '@signforge/media-check';
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { Asset } from '@signforge/db';
-import { assetView, clearOfSweep, SHA256 } from './assets';
+import { assetView, clearOfSweep } from './assets';
 import { orgBlobKey, uploadKey } from './r2';
 import { ToolError, type ToolContext } from './tool';
 import type { UploadSigner } from './upload';
-import { VIDEO_TYPES } from './outputs';
+import type { VIDEO_TYPES } from './outputs';
+import type { videoParts } from './inputs';
 
 /**
  * Every part but the last is this size, as R2 requires (at least 5 MiB, all but the last equal).
@@ -26,16 +15,6 @@ import { VIDEO_TYPES } from './outputs';
 const VIDEO_PART_BYTES = 16 * 1024 * 1024;
 /** How long the part URLs work. Each part must start before then; a 500 MB file at 5 Mbit/s takes about 15 minutes. */
 const VIDEO_UPLOAD_URL_SECONDS = 60 * 60;
-/** A video's file as an upload claims it (`start_upload`, ./uploading.ts). */
-export const videoFileInput = {
-  sha256: z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)'),
-  type: z.enum(VIDEO_TYPES),
-  size: z
-    .number()
-    .int()
-    .positive()
-    .max(VIDEO_SPEC.maxBytes, `a video may be at most ${VIDEO_SPEC.maxBytes / 1e6} MB`),
-};
 
 /**
  * Start a video upload (`start_upload`): the asset, pending, and a multipart upload with a presigned UploadPart URL per
@@ -84,21 +63,6 @@ export async function startVideoUpload(
   }
   return { asset: assetView(asset, []), upload: { uploadId, partBytes: VIDEO_PART_BYTES, parts, expiresAt } };
 }
-
-/** A multipart upload's parts, each with the ETag its PUT returned (`finalize_upload`). */
-export const videoParts = z
-  .array(
-    z.object({
-      partNumber: z.number().int().min(1).max(10_000),
-      // As the S3 API's response header gives it, in quotes; R2's binding takes it bare.
-      etag: z
-        .string()
-        .min(1)
-        .max(256)
-        .transform((e) => e.replace(/^"(.*)"$/, '$1')),
-    }),
-  )
-  .max(10_000);
 
 /**
  * Finish a video upload (`finalize_upload`): complete the multipart upload, read the MP4 header from storage against the

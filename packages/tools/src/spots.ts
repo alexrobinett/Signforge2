@@ -10,11 +10,8 @@
 import { spotProblems } from '@signforge/compiler';
 import { bindingOf, DEFAULT_FIT, draftCheck, sampleAfterEdit, sampleData, sampleFieldsOf, unverified } from '@signforge/compiler/draft';
 import {
-  BINDING_PATH,
   missingColumns,
   readPath,
-  safeUrl,
-  TABLE_ROWS_PATH,
   templateKey,
   validateTableFeed,
   type Binding,
@@ -23,50 +20,16 @@ import {
   type TemplateManifest,
 } from '@signforge/contract';
 import { contentJson, draftChanged, published, StaleVersionError, type OrgScope, type SpotRow } from '@signforge/db';
-import { z } from 'zod';
-import { DECIDING, decidedMeanwhile, keptFor, shownVersion, spotContent } from './agent-drafts';
-import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
-import { page, pageInput } from './paging';
+import type { z } from 'zod';
+import { DECIDING, decidedMeanwhile, keptFor, spotContent } from './agent-drafts';
+import { page } from './paging';
 import { loadOrg, previewInput, spotDraft } from './publishing';
 import { defineTool, invalidFields, isAgent, notFound, ToolError } from './tool';
-import { outputs, SPOT_FITS, SPOT_KINDS, tableMapping, type SpotView } from './outputs';
+import { outputs, type SpotView } from './outputs';
+import { type bindings, inputs } from './inputs';
 
 /** A new image, video or URL spot's length when none is given. */
 const DEFAULT_MEDIA_MS = 10_000;
-
-const durationMs = z
-  .number()
-  .int()
-  .min(1000)
-  .max(24 * 3600_000)
-  .describe('How long the spot stays on screen, in ms');
-const data = z.record(z.string(), z.unknown()).describe("The template's field values by name, the whole set; one left out takes its default");
-const assets = z.record(z.string(), id('asset')).describe('Image fields to verified asset ids, by name, the whole set');
-const url = z.string().refine(safeUrl, 'must be an https URL').describe('An https page on another origin');
-const binding = z.object({
-  dataSourceId: id('data source'),
-  path: z
-    .string()
-    .max(200)
-    .regex(BINDING_PATH, 'must be a dot path such as current.temperature_2m')
-    .describe(`A dot path into the source's snapshot; numbers index arrays: daily.temperature_2m_max.0, items. With table, ${TABLE_ROWS_PATH}`),
-  table: tableMapping.optional(),
-});
-const bindings = z
-  .record(z.string(), binding)
-  .describe(
-    "Template fields bound to the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). describe(spot) says how binding works",
-  );
-
-/** The fields that belong to one kind of spot (KIND_FIELDS), as save_spot takes them. */
-const kindInput = {
-  data: data.optional(),
-  assets: assets.optional(),
-  bindings: bindings.optional(),
-  assetId: id('asset').optional(),
-  fit: z.enum(SPOT_FITS).optional(),
-  url: url.optional(),
-};
 
 /** A JSON column as the repository stored it. */
 function parsed<T>(text: string | null): T | null {
@@ -230,11 +193,7 @@ const listSpots = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    ...pageInput,
-    kind: z.enum(SPOT_KINDS).optional().describe('Only spots of this kind'),
-    unpublished: z.boolean().optional().describe('Only those whose draft differs from what is published (never published included)'),
-  }),
+  input: inputs.list_spots,
   output: outputs.list_spots,
   example: {},
   handler: async ({ org, input }) => {
@@ -251,7 +210,7 @@ const getSpot = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ spotId: id('spot'), published: z.boolean().optional().describe("The version screens have, not the draft's") }),
+  input: inputs.get_spot,
   output: outputs.get_spot,
   example: { spotId: 'spt_example' },
   handler: async ({ org, input }) => {
@@ -274,17 +233,7 @@ const saveSpot = defineTool({
   idempotent: true,
   partialAgents: "an agent's edit is its proposal (#116), held to the version it read",
   // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
-  input: z.strictObject({
-    spotId: id('spot').optional().describe('The spot to change; omit to create one'),
-    name: name('spot').optional(),
-    kind: z.enum(SPOT_KINDS).optional().describe("A new spot's kind; fixed once made"),
-    durationMs: durationMs.optional(),
-    templateVersionId: id('template version').optional().describe("A new template spot's template version; fixed once made"),
-    ...kindInput,
-    sample: z.boolean().optional().describe("A new template spot: start with the template's sample copy in place of data (describe(spot))"),
-    ifVersion,
-    idempotencyKey,
-  }),
+  input: inputs.save_spot,
   output: outputs.save_spot,
   example: { name: 'Fresh picked', kind: 'template', templateVersionId: 'tpv_example', data: { title: 'Fresh picked' } },
   target: (input, output) => {
@@ -386,15 +335,12 @@ async function spotAt(org: OrgScope, spotId: string, version: number) {
   return row;
 }
 
-/** Reject's and Keep's input: the spot, at the version shown. */
-const decideSpotInput = z.object({ spotId: id('spot'), ifVersion: shownVersion });
-
 const revertSpotDraft = defineTool({
   name: 'revert_spot_draft',
   description:
     "Reject an agent's draft of a spot (#116): the draft goes back to the one the agent wrote over (the person's, or as published), with its sample-text marks, and the agent's is kept beside it; the same call again puts the agent's back (its Undo). Refused with a conflict if neither is kept (no agent's draft to reject), and if the spot changed since ifVersion. People only. Returns { spot, rejected }.",
   ...DECIDING,
-  input: decideSpotInput,
+  input: inputs.revert_spot_draft,
   output: outputs.revert_spot_draft,
   example: { spotId: 'spt_example', ifVersion: 3 },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
@@ -424,7 +370,7 @@ const keepSpotDraft = defineTool({
   description:
     "Keep an agent's draft of a spot as the draft (#116): it is no longer a proposal, and the draft it was written over is let go. The draft is not changed and not published. Refused with a conflict if it is not an agent's proposal, or the spot changed since ifVersion. People only. Returns { spot }.",
   ...DECIDING,
-  input: decideSpotInput,
+  input: inputs.keep_spot_draft,
   output: outputs.keep_spot_draft,
   example: { spotId: 'spt_example', ifVersion: 3 },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
@@ -447,7 +393,7 @@ const getSpotPreview = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ orientation, templateVersionId: id('template version').optional(), brandKitId: id('brand kit').optional() }),
+  input: inputs.get_spot_preview,
   output: outputs.get_spot_preview,
   example: { orientation: 'landscape', templateVersionId: 'tpv_example', brandKitId: 'bk_example' },
   handler: async ({ org, input }) => {
@@ -482,7 +428,7 @@ const deleteSpot = defineTool({
   mutates: true,
   // #242: deleting is a person's choice, as its confirmation in the spot editor says; no ticket gives it to an agent.
   people: true,
-  input: z.object({ spotId: id('spot'), ifVersion }),
+  input: inputs.delete_spot,
   output: outputs.delete_spot,
   example: { spotId: 'spt_example' },
   target: (input) => ({ kind: 'spot', id: input.spotId }),

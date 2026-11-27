@@ -10,9 +10,9 @@
 import { contentJson, type OrgScope, type PlaylistRow, type SpotRow, type Staged } from '@signforge/db';
 import { z } from 'zod';
 import { grantClient } from './agent-grants';
-import { id } from './fields';
 import { outputs } from './outputs';
 import { type Actor, CMS_AGENT_CLIENT_ID, defineTool, isAgent, notFound, ToolError } from './tool';
+import { inputs } from './inputs';
 
 export type KeptKind = 'spot' | 'playlist';
 
@@ -106,9 +106,7 @@ const getAgentDraft = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z
-    .object({ spotId: id('spot').optional(), playlistId: id('playlist').optional() })
-    .refine((v) => (v.spotId === undefined) !== (v.playlistId === undefined), 'give spotId or playlistId, one of them'),
+  input: inputs.get_agent_draft,
   output: outputs.get_agent_draft,
   example: { spotId: 'spt_example' },
   handler: async ({ org, input }) => {
@@ -168,13 +166,6 @@ export async function decidedMeanwhile(org: OrgScope, kind: KeptKind, draftId: s
 
 /** Reject and Keep: a person's decision on a draft, as an editor may change it (`people`: never an agent's own). */
 export const DECIDING = { scope: 'content:draft', minRole: 'editor', mutates: true, people: true } as const;
-
-/** Reject's and Keep's: the draft's version as the person was shown it. */
-export const shownVersion = z
-  .number()
-  .int()
-  .positive()
-  .describe('The version you were shown. If the draft has changed since, nothing is written: conflict, details { id, version }');
 
 /** A playlist's, with its items. */
 export const playlistContent = z.object({ name: z.string(), transitionJson: z.string(), items: z.array(z.string()) });
