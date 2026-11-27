@@ -137,6 +137,32 @@ describe('admin auth', () => {
     }
   });
 
+  // A deploy secret is 32 random bytes (`openssl rand -base64 32`, 44 characters): one a person could guess never turns the tree on.
+  it('is off while ADMIN_TOKEN is shorter than 32 characters, to its holder too, and on from 32', async () => {
+    const fetchWith = (token: string, method: string, path: string) =>
+      app.fetch(new Request(`${API}/admin${path}`, { method, body: '{}', headers: { authorization: `Bearer ${token}` } }), { ...env, ADMIN_TOKEN: token });
+    for (const [method, path] of paths) expect((await fetchWith('a'.repeat(31), method, path)).status, `${method} ${path}`).toBe(404);
+    // Its holder reaches the route, which refuses the body: not the file of that hash.
+    const reached = await fetchWith('a'.repeat(32), 'PUT', `/base/blobs/${'a'.repeat(64)}`);
+    expect(reached.status).toBe(400);
+    expect(await reached.json()).toEqual({ error: 'body does not match its sha256' });
+  });
+
+  it('refuses a body over 20 MiB on every route, storing nothing, and takes one of 20 MiB', async () => {
+    const most = 20 * 1024 * 1024;
+    const over = new Uint8Array(most + 1);
+    const overSha = await sha256(over);
+    for (const [method, path] of [...paths.filter(([, p]) => !p.includes('/blobs/')), ['PUT', `/base/blobs/${overSha}`] as const]) {
+      const res = await admin(method, path, over);
+      expect(res.status, `${method} ${path}`).toBe(413);
+    }
+    expect(await env.BLOBS.head(baseBlobKey(overSha))).toBeNull();
+    const whole = over.subarray(0, most);
+    const wholeSha = await sha256(whole);
+    expect((await admin('PUT', `/base/blobs/${wholeSha}`, whole)).status).toBe(200);
+    expect((await env.BLOBS.head(baseBlobKey(wholeSha)))?.size).toBe(most);
+  });
+
   it('is not accepted on the device tree', async () => {
     const res = await exports.default.fetch(`${API}/v1/device/manifest.json`, { headers: { authorization: `Bearer ${TOKEN}` } });
     expect(res.status).toBe(401);
