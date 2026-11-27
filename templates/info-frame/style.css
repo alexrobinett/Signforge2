@@ -56,12 +56,18 @@ h1 {
   color: var(--card-text, var(--ink));
 }
 
-/* The photo panel, and what sits on the photo: the caption, and without a rail the chip and the logo. */
-.panel {
+/* The photo panel, and what sits on the photo: the caption, and without a rail the chip and the logo. Those sit beside
+   the panel, not in it: in a layer whose opacity animates, layers of their own made Chromium draw the whole panel off
+   screen every frame of its intro and outro, which dropped portrait fades over 1% on the Pi (#239). */
+.photo-area {
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+.panel {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   border-radius: var(--if-panel-radius, 0);
   background: var(--lk-surface);
@@ -652,6 +658,12 @@ h1 {
 [data-look='night'] .chip-time {
   color: var(--card-primary, var(--ink-primary));
   font: 700 4.07vmin / 1.1 var(--lk-font-display);
+}
+/* Night's caption sits on the photo's bottom edge, and its intro rises from below it: the area clips it to the panel's
+   rounded edge, as the panel did when the caption was inside it. The area itself never animates (#239). */
+[data-look='night'] .photo-area {
+  overflow: hidden;
+  border-radius: var(--if-panel-radius, 0);
 }
 [data-look='night'] .caption {
   left: 0;
