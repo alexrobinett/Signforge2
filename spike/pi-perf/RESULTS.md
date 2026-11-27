@@ -1250,7 +1250,6 @@ The same bench with every photo 700x560, as The Guardian's feed sends them, so e
 - Within the budget in landscape. Night's first run dropped 1.30% to two long frames while playing; two more runs of it dropped 0.11 and 0.17%, so it is not the layout.
 - Portrait prepares, 496 to 547 ms, are where 2.0.0's were with large photos (478 to 530): a small photo decodes faster and the wait for its load costs about as much. Over the budget by up to 47 ms in 7 of 8, as accepted for 2.0.0.
 
-<<<<<<< Updated upstream
 
 ## The bundle cache, with and without (issue #213, 2026-11-26)
 
@@ -1676,7 +1675,7 @@ Master's player, content built from master `9c09d376` (A) and from the branch (B
 - **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
 
 **Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.
-=======
+
 ## Overclock and a quiet console (2026-11-22 and 2026-11-27)
 
 The Pi 400 as `tune.sh` left it on 2026-11-18, changed one setting at a time. Kept changes are in `device/pi/tune.sh`.
@@ -1725,4 +1724,3 @@ Kernel start to the first spot, from `signforge-bootprobe.service`, 3 reboots pe
 - Settings that act before the kernel starts (`disable_splash`, `boot_delay`, the camera and display auto-detect) were not tried: `/proc/uptime` cannot see that time, so they could not be measured.
 
 Raw files are on the rig in `~/signforge/tuning-logs-20261122/`.
->>>>>>> Stashed changes
