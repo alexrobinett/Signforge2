@@ -8,7 +8,8 @@ import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
 import { queueNotices, screenNotifier, type PublishNotice } from '../src/device/screens';
-import { deliverNotices, publishLock, type OrgObject } from '../src/publish';
+import type { OrgObject } from '../src/org-object';
+import { deliverNotices, publishLock } from '../src/publish';
 import { syncAs, syncBody } from './sync-client';
 
 const BASE = 'https://api.test/v1/device';

@@ -7,7 +7,7 @@
  *
  * What a press may run is fixed when the card is made (`input`): the versions and pins it showed, never
  * what is there at the press. The card's record is kept in the org's Durable Object under a one-use
- * token (`Confirmation`, src/publish.ts); a press takes it, once, for the member it was made for,
+ * token (`Confirmation`, src/org-object.ts); a press takes it, once, for the member it was made for,
  * before it runs out, and only with the input exactly as shown. It then runs through the dispatcher as
  * the member, so their role and scopes are checked as they press, and the audit row carries the card's
  * summary (`Caller.confirmed`).

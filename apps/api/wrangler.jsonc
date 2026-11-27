@@ -48,7 +48,7 @@
       "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_dev" }],
       // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts), one
       // per agent grant, counting its calls against its limits (src/agents/grant-object.ts), and one
-      // per org, holding its publish lock (src/publish.ts).
+      // per org, holding its publish lock (src/org-object.ts).
       "durable_objects": {
         "bindings": [
           { "name": "SCREENS", "class_name": "ScreenObject" },

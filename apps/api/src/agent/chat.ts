@@ -56,7 +56,7 @@ import { cmsCaller } from '../api/tools';
 import { type ConnectorDeps, workerFetch } from '../connectors';
 import { feedGuards } from '../data/fetch';
 import { openMeteoPlaces } from '../data/places';
-import type { Confirmation } from '../publish';
+import type { Confirmation } from '../org-object';
 import {
   type AnswerCard,
   CHAT_EVENTS,
