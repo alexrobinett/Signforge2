@@ -121,7 +121,7 @@ For zero-touch installs, the CMS mints a credential that the image script pre-se
 - An opaque token, `sfd_<screenId>.<32 random bytes>`, stored as a SHA-256. It is not a JWT.
 - Revoking is one row update, then the Durable Object closes the socket.
 - Pairing gives a screen its credential. For local work without a screen, `pnpm --filter @signforge/api dev:screen [--content dist/content]` still creates a screen in local D1, loads a build into local R2, and prints a credential.
-- Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It uploads through a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset). The last step, making the manifest desired, runs the `publish_manifest_to_screen` tool through the dispatcher and is audited as the system actor `sf-push`. `/admin` goes once assets upload through the CMS (M3-14) and agents hold OAuth grants (Milestone 4).
+- Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It uploads through a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset, or shorter than 32 characters: it speaks for every org and nothing limits tries, so it must be a random one, `openssl rand -base64 32`). No request's body may be over 20 MiB (413): each route holds its body whole. The last step, making the manifest desired, runs the `publish_manifest_to_screen` tool through the dispatcher and is audited as the system actor `sf-push`. `/admin` goes once assets upload through the CMS (M3-14) and agents hold OAuth grants (Milestone 4).
 
 **What replaces `/admin`, and when.** No new routes go under `/admin`; each group has a replacement and goes with it:
 
@@ -131,7 +131,7 @@ For zero-touch installs, the CMS mints a credential that the image script pre-se
 | `/admin/orgs/:org/*` (blobs, templates) | `sf template push --org` | The same tools over `/mcp` with an OAuth grant, for agents and the CLI; the CMS already pushes assets through `/api` (M3-14). | Milestone 4 |
 | `/admin/base/*` (blobs, templates) | `pnpm seed:templates` on deploy | A deploy step in each environment's pipeline that runs the platform registry with a deploy credential, not a long-lived `ADMIN_TOKEN` on a public route. | M3-24 (environments) |
 
-Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
+Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset or shorter than 32 characters.
 
 **The screen's Durable Object** holds one hibernating WebSocket. The desired manifest ID is in D1 (`screens.desired_manifest_id`), where sync and the manifest route read it; the object only passes a new one on.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. The player pings every 50 seconds, under the usual 100-second proxy and NAT idle timeouts, and treats a ping without a pong in 10 seconds as a dead connection. The billed count is still to be read from analytics on a paid account (M3-06 could not deploy); lengthen the ping if it shows pings are billed and connections hold.

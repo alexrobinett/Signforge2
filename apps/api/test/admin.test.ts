@@ -11,7 +11,7 @@ import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
 
-const TOKEN = 'test-admin-token'; // vitest.config.ts
+const TOKEN = 'test-admin-token-of-32-characters'; // vitest.config.ts
 const API = 'https://api.test';
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');

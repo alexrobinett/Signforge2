@@ -13,7 +13,7 @@ import { app } from '../src/index';
 import { baseBlobKey, orgBlobKey } from '../src/r2';
 import { Client, clockLimits, email, testApp } from './client';
 
-const TOKEN = 'test-admin-token'; // vitest.config.ts
+const TOKEN = 'test-admin-token-of-32-characters'; // vitest.config.ts
 const API = 'https://api.test';
 
 interface Built {

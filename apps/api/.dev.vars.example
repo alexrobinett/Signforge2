@@ -1,4 +1,5 @@
 # Copy to .dev.vars (gitignored) for `wrangler dev`. Never commit the real file.
 # ADMIN_TOKEN turns on the temporary /admin upload routes that `sf push` uses; unset, they answer 404.
-# Set it to a long random value, e.g. from: openssl rand -base64 32
+# Set it to a random value of at least 32 characters, e.g. from: openssl rand -base64 32
+# A shorter one leaves the routes off (404), and the API's log says so.
 ADMIN_TOKEN=

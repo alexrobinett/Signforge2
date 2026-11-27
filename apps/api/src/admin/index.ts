@@ -29,6 +29,8 @@
  * its hash before it is stored, and a manifest is checked by `validateManifest` and against its
  * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
+ *
+ * No request's body may be over `MAX_BODY_BYTES`: a larger one is refused (413) before a route reads it.
  */
 import { baseTemplateHtml, isId, manifestIdInput, parseManifest, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, organizationExists, platform, scoped, StaleVersionError } from '@signforge/db';
@@ -43,6 +45,7 @@ import {
   type TemplateVersionView,
 } from '@signforge/tools';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { toolServices } from '../tool-services';
 import { adminAuth, type AdminEnv } from './auth';
@@ -55,7 +58,8 @@ const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const sha256 = async (data: ArrayBuffer | string) => hex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? encoder.encode(data) : data));
 
-const fail = (c: Context, status: 400 | 404 | 409 | 429 | 500 | 503, error: string, extra: Record<string, unknown> = {}) => c.json({ error, ...extra }, status);
+const fail = (c: Context, status: 400 | 404 | 409 | 413 | 429 | 500 | 503, error: string, extra: Record<string, unknown> = {}) =>
+  c.json({ error, ...extra }, status);
 
 /** Where each of a manifest's files lives: base templates' HTML in `sys/b/`, the rest under the org. */
 function fileKeys(m: ScreenManifest, orgId: string): { sha256: string; scope: 'org' | 'base'; key: string }[] {
@@ -129,8 +133,15 @@ async function putOrgBlob(c: Context<AdminEnv>, orgId: string, sha: string) {
   return stored;
 }
 
+/**
+ * The largest body a route reads: 20 MiB, an image rendition's own limit (`MAX_RENDITION_BYTES`) and twice the
+ * largest file a push sends today. Each route holds its body whole, to hash or parse it, in a Worker with 128 MB.
+ */
+const MAX_BODY_BYTES = 20 * 1024 * 1024;
+
 export const admin = new Hono<AdminEnv>();
 admin.use('*', adminAuth);
+admin.use('*', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => fail(c, 413, `the body is over ${MAX_BODY_BYTES} bytes, the most /admin takes`) }));
 
 admin.post('/screens/:screen/missing', async (c) => {
   const screen = await findDeviceScreen(c.env.DB, c.req.param('screen'));

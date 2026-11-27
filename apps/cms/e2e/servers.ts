@@ -14,7 +14,7 @@ export const API_PORT = port('E2E_API_PORT', 8797);
 export const CMS_PORT = port('E2E_CMS_PORT', 3997);
 export const CMS_URL = `http://localhost:${CMS_PORT}`;
 /** The dev API's deploy secret for this run, which turns on `/admin` (how `sf push` publishes, and seeding templates). */
-export const ADMIN_TOKEN = 'e2e-admin-token';
+export const ADMIN_TOKEN = 'e2e-admin-token-of-32-characters';
 
 /** The one key the run's Anthropic stub accepts (global-setup.ts), and the models it lists for it. */
 export const ANTHROPIC_STUB_KEY = 'sk-ant-e2e-stub-key-0000000000000000-Ab12';

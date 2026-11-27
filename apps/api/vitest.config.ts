@@ -92,7 +92,7 @@ export const workers = (extra: Record<string, string> = {}) =>
     wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
     miniflare: {
       bindings: {
-        ADMIN_TOKEN: 'test-admin-token',
+        ADMIN_TOKEN: 'test-admin-token-of-32-characters',
         PLAYER_RELEASE_ADMIN_SECRET: 'test-release-secret',
         // The release key screens check, once it is committed: demo's PLAYER_RELEASE_PUBLIC_KEY must be it (releases.test.ts).
         RELEASE_PUB_FILE: existsSync(PUB_FILE) ? readFileSync(PUB_FILE, 'utf8') : '',
