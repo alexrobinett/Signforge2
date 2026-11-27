@@ -4,7 +4,7 @@
  * live state (`window.__sf`) and its template frames.
  */
 import { crc32, deflateSync } from 'node:zlib';
-import { afterAll, afterEach, beforeAll, inject } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, inject } from 'vitest';
 import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright';
 import { buildContent, type FixtureSpot } from './content';
 import { FixtureServer } from './fixture-server';
@@ -260,3 +260,29 @@ export function png(w: number, h: number, shade = 128): Buffer {
 
 /** The ids of the spots played, in order. */
 export const spotsPlayed = (s: PlayerState) => s.log.map((l) => l.spot);
+
+/** What a frame can reach from inside: its origin, then each of the player, its page and its storage, or `blocked`. */
+export async function reachOf(frame: Frame): Promise<Record<string, string>> {
+  return frame.evaluate(() => {
+    const tries: Record<string, () => unknown> = {
+      origin: () => origin,
+      top: () => top!.document.title,
+      parent: () => parent.document.title,
+      caches: () => (typeof caches === 'undefined' ? 'none' : caches.keys()),
+      storage: () => localStorage.length,
+    };
+    return Object.fromEntries(
+      Object.entries(tries).map(([k, f]) => {
+        try {
+          const v = f();
+          return [k, v instanceof Promise ? 'promise' : String(v)];
+        } catch {
+          return [k, 'blocked'];
+        }
+      }),
+    );
+  });
+}
+
+/** A frame with an opaque origin that reaches nothing of the player's: a template's (containment.test.ts), the spare's. */
+export const NO_REACH = { origin: 'null', top: 'blocked', parent: 'blocked', caches: expect.stringMatching(/blocked|none/), storage: 'blocked' };

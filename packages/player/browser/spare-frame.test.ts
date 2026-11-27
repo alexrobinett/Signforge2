@@ -1,41 +1,50 @@
 /**
- * The spare template frame (#232): from the page's start, one wrapper frame holding a frame sandboxed as a template's,
- * under a policy that allows nothing, with an empty document. It starts the templates' renderer before the first
- * prepare and keeps it running between templates; it carries no script and is never shown.
+ * The spare template frame (#232): from the page's start, a frame sandboxed with no allowances, in a wrapper as a
+ * template's is, under a policy that allows nothing, with an empty document. It starts the templates' renderer before the first prepare, so a
+ * template's frame joins it rather than a new one, and it can reach nothing a template cannot.
  */
+import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
-import { useHarness } from './harness';
+import { NO_REACH, reachOf, useHarness } from './harness';
 
 // As on the Pi, so the sandboxed frames run out of process, as there.
 const h = useHarness({ siteIsolation: true });
 
 describe('the spare template frame', () => {
-  it('is there from the start, sandboxed as a template is, allowing nothing, and stays while spots change', async () => {
-    const p = await h.openPlayer((server) =>
-      server.publish(
-        h.content([
-          { id: 'a', durationMs: 800 },
-          { id: 'b', durationMs: 800 },
-        ]),
-      ),
-    );
-    const spare = () =>
-      p.page.evaluate(() => {
-        const found = [...document.querySelectorAll('iframe')].filter((f) => f.title === 'Spare template frame');
-        const doc = found[0]?.srcdoc ?? '';
-        return { count: found.length, hidden: found[0]?.getAttribute('aria-hidden'), doc };
-      });
-    const first = await spare();
-    expect(first.count).toBe(1);
-    expect(first.hidden).toBe('true');
-    expect(first.doc).toContain(`content="default-src 'none'"`);
-    expect(first.doc).toContain('<iframe sandbox="allow-scripts"');
-    expect(first.doc).not.toContain('<script');
-    await p.until((s) => s.played >= 3);
-    expect(await spare()).toEqual(first);
-    // Its inner frame holds the empty document, nothing else.
-    const inner = p.page.frames().filter((f) => f.parentFrame()?.parentFrame() === p.page.mainFrame() && f.name() === '');
-    const bodies = await Promise.all(inner.map((f) => f.evaluate(() => document.body?.innerHTML ?? null).catch(() => undefined)));
-    expect(bodies).toContain('');
+  it('starts the renderer the first template joins, so playing one starts no new process', async () => {
+    // Nothing to play yet: the spare alone.
+    const p = await h.openPlayer(() => undefined);
+    const browser = await p.page.context().browser()!.newBrowserCDPSession();
+    const sandboxed = async () => (await browser.send('Target.getTargets')).targetInfos.filter((t) => t.type === 'iframe' && t.url === 'about:srcdoc');
+    await expect.poll(async () => (await sandboxed()).length).toBe(1);
+    const renderers = async () =>
+      new Set(
+        ((await browser.send('SystemInfo.getProcessInfo')) as { processInfo: { type: string; id: number }[] }).processInfo
+          .filter((x) => x.type === 'renderer')
+          .map((x) => x.id),
+      );
+    const before = await renderers();
+    p.server.publish(h.content([{ id: 'a', durationMs: 5000 }]));
+    await p.until((s) => s.spot === 'a');
+    // The template's frame is out of process, beside the spare, in the renderer the spare started.
+    expect((await sandboxed()).length).toBe(2);
+    expect(await renderers()).toEqual(before);
+  });
+
+  it('keeps an opaque origin, so it cannot reach the player or its storage', async () => {
+    const p = await h.openPlayer(() => undefined);
+    let inner: Frame | undefined;
+    await expect
+      .poll(async () => {
+        for (const f of p.page.frames()) {
+          const wrapper = f.parentFrame();
+          const title = wrapper && wrapper !== p.page.mainFrame() ? await (await wrapper.frameElement()).getAttribute('title') : null;
+          if (title === 'Spare template frame') inner = f;
+        }
+        return inner !== undefined;
+      })
+      .toBe(true);
+    expect(await reachOf(inner!)).toEqual(NO_REACH);
+    expect(await inner!.evaluate(() => document.body.innerHTML)).toBe('');
   });
 });
