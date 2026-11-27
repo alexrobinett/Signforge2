@@ -3,8 +3,10 @@ Description=SignForge player files (local static server; stands in for the CDN u
 
 [Service]
 User=alex
-WorkingDirectory=/home/alex/signforge/www
-ExecStart=/usr/bin/python3 -m http.server 8090 --bind 127.0.0.1
+# www is a link to players/<version> (#628), followed on each request: a switch needs no restart. A working directory
+# would stay on the old version's. player_web.py answers with no-store, so Chromium keeps no build in its cache.
+WorkingDirectory=/home/alex/signforge
+ExecStart=/usr/bin/python3 /home/alex/signforge/player_web.py
 Restart=always
 
 [Install]

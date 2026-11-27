@@ -269,6 +269,35 @@ describe('content files', () => {
     expect(await readsOf(p, bundleOf(two))).toBe(1);
   });
 
+  /** Reload, play `a` and `b` once each, and count the reads of their bundles in the new page. */
+  const reloadAndRead = async (p: Player, bundle: Record<string, string>) => {
+    await p.page.reload();
+    await p.until((s) => s.log.some((l) => l.spot === 'a') && s.log.some((l) => l.spot === 'b'));
+    return [await readsOf(p, bundle.a!), await readsOf(p, bundle.b!)];
+  };
+
+  it('keeps its bundles as contained, so a later page load plays them without reading a bundle (#232)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a', 'b']);
+    const p = await openCountingReads(content);
+    // The read-ahead keeps them while a spot plays, some time after the first plays.
+    await expect.poll(() => reloadAndRead(p, bundle), { timeout: 20_000 }).toEqual([0, 0]);
+  });
+
+  it('contains a bundle again when what it kept cannot be read, and keeps it anew (#232)', async () => {
+    const { content, bundle } = ownBundles(['b'], ['a', 'b']);
+    const p = await openCountingReads(content);
+    await expect.poll(() => reloadAndRead(p, bundle), { timeout: 20_000 }).toEqual([0, 0]);
+    // Each kept entry turned into something that is not frames: one not JSON, one of the wrong shape.
+    await p.page.evaluate(async () => {
+      const frames = await caches.open('sf-frames-v1');
+      const [one, two] = await frames.keys();
+      await frames.put(one!, new Response('not frames'));
+      await frames.put(two!, Response.json({ wrapper: 1 }));
+    });
+    expect(await reloadAndRead(p, bundle)).toEqual([1, 1]);
+    await expect.poll(() => reloadAndRead(p, bundle), { timeout: 20_000 }).toEqual([0, 0]);
+  });
+
   it('never shows a template from the bundle it had for another hash (#213)', async () => {
     const one = h.content([{ id: 'a', durationMs: 600 }], { variant: 'bundle-one' });
     const p = await h.openPlayer((s) => s.publish(one));

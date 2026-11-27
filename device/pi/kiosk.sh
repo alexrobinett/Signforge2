@@ -15,6 +15,10 @@ until wlr-randr 2>/dev/null | grep -q '1920x1080 px, 60\.000000 Hz (.*current'; 
   [ -n "$out" ] && msg=$(wlr-randr --output "$out" --mode 1920x1080@60 2>&1) || echo "kiosk.sh: mode set try $tries failed: ${msg:-no output yet}" >&2
   sleep 0.1
 done
+# Chromium's HTTP cache goes before it starts (#628): a build it kept there would hide a switch the update channel
+# made. player-web answers with no-store, but a cache filled before that, or by a build served otherwise, stays. The
+# service worker's shell cache is network first, and the content the player keeps is in its own storage, not here.
+rm -rf "$HOME/.kiosk-profile/Default/Cache" "$HOME/.kiosk-profile/Default/Code Cache"
 # No secrets in this URL: a template frame can read its parent's address.
 url="${KIOSK_URL:-http://127.0.0.1:8090/index.html}"
 exec /usr/bin/chromium \
