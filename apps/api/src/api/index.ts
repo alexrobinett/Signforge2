@@ -154,7 +154,7 @@ export function createApi(deps: ApiDeps = {}) {
   mountTools(api, deps.connectors, deps.email);
   mountInline(api, deps.connectors, deps.agent);
   mountChat(api, deps.connectors, deps.agent);
-  mountApply(api, deps.connectors);
+  mountApply(api, deps.connectors, deps.agent);
   mountConnectionCallback(api, deps.connectors);
   mountBlobs(api);
   return api;

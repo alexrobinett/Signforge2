@@ -65,6 +65,8 @@ export interface ProposedCall {
   input: Record<string, unknown>;
   target: { kind: string; id: string } | null;
   before: Record<string, unknown> | null;
+  /** The turn's signature of the call for this member and org, until it runs out: a save carries it back with the call (#269). */
+  token: string;
 }
 
 export interface AnswerCard {

@@ -67,11 +67,10 @@ import {
   type ChatProblem,
   type ConfirmCard,
   type ConfirmDone,
-  type ProposedCall,
   type ToolCard,
 } from './chat-shapes';
 import { CardProblem, canonical, CONFIRM_MS, CONFIRMABLE, pressable, whyNot } from './confirm';
-import { draftTools, join, MAX_DRAFTS, propose, SAVE_STATEMENTS, saveStatements } from './drafts';
+import { draftTools, join, MAX_DRAFTS, type Proposal, propose, SAVE_STATEMENTS, saveStatements, signDraft } from './drafts';
 import { type AgentDeps, dayIn, fenced, readBody } from './inline';
 import { type ModelReach, turnWith } from './provider';
 
@@ -460,7 +459,7 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
     };
 
     const trace: ToolCard[] = [];
-    const drafts: ProposedCall[] = [];
+    const drafts: Proposal[] = [];
     /** Tool cards made since the stream last yielded: sent before its next event. */
     const shown: StreamChunk[] = [];
     let calls = pressed?.spent.calls ?? 0;
@@ -805,7 +804,10 @@ export function mountChat(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefin
       else if (refused) yield ended('unreadable', 'The model would not answer that.');
       else if (!answer) yield ended('unreadable', 'The model gave no answer it could show. Ask again.');
       else {
-        yield { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: { ...answer, trace, drafts } satisfies AnswerCard, timestamp: Date.now() };
+        // Signed as they are sent, once no later change can join them: a save takes these and nothing else (#269, ./drafts.ts).
+        const proposer = { orgId: org.orgId, userId: member };
+        const signed = await Promise.all(drafts.map(async (d) => ({ ...d, token: await signDraft(c.env, proposer, d, now()) })));
+        yield { type: 'CUSTOM', name: CHAT_EVENTS.answer, value: { ...answer, trace, drafts: signed } satisfies AnswerCard, timestamp: Date.now() };
         if (finished) yield finished;
       }
     }

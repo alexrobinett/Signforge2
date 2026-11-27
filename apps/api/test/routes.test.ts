@@ -6,6 +6,7 @@ import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/index';
+import { signDraft } from '../src/agent/drafts';
 import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 import { type Block, anthropicStream } from './model-streams';
@@ -116,12 +117,14 @@ describe('requests', () => {
   let baseVersion: string;
   let grantId: string;
   let publishRequestId: string;
+  let orgId: string;
 
   beforeAll(async () => {
     ({ template: baseTemplate, templateVersion: baseVersion } = await seedBaseTemplate(env.DB));
     const setup = new Client(t);
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
+    orgId = org.id;
     screenId = (await testScope(env.DB, org.id).screens.insert({ name: 'Guarded', timezone: 'UTC', orientation: 'landscape' })).id;
     assetId = (
       await testScope(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
@@ -276,10 +279,10 @@ describe('requests', () => {
       idempotencyKey: 'guard-draft-1',
     });
     const { spot } = (await made.json()) as { spot: { id: string; version: number } };
+    const call = { tool: 'save_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } };
+    const userId: string = (await member.session()).body.user.id;
     writes.length = 0;
-    const saved = await member.post('/api/agent/apply', {
-      calls: [{ tool: 'save_spot', input: { spotId: spot.id, name: 'Clock, renamed', ifVersion: spot.version } }],
-    });
+    const saved = await member.post('/api/agent/apply', { calls: [{ ...call, token: await signDraft(env, { orgId, userId }, call, Date.now()) }] });
     expect(saved.status, await saved.clone().text()).toBe(200);
     // A draft saved from the drawer is the agent's proposal (#116): the draft it replaced is kept beside it.
     expect(ours()).toEqual(['draft_snapshots', 'spots', 'audit_log']);
