@@ -21,7 +21,8 @@ import { openFrameHost, type FrameHost } from '@signforge/player-core/frame-host
 import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
-import { getFile } from './source';
+import { getFile, SOURCE } from './source';
+import { dropFrames, storedFrames, storeFrames } from './store';
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
@@ -199,7 +200,22 @@ function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
   const cache = cacheOf(manifest);
   let frames = cache.frames.get(sha);
   if (!frames) {
-    const read = getFile(sha).then(parseBundle);
+    // A screen keeps what it contained for its next page load (#232); a preview stores nothing. Kept frames that
+    // cannot be read (Cache Storage refused, or full) are made again: the same frames, made slower.
+    const kept = SOURCE === 'device' ? storedFrames(sha).catch(() => undefined) : Promise.resolve(undefined);
+    const read = kept.then((frames) => {
+      if (frames) {
+        fromKept.add(sha);
+        return frames;
+      }
+      return getFile(sha)
+        .then(parseBundle)
+        .then((made) => {
+          // Only where the read-ahead runs to keep them.
+          if (SOURCE === 'device' && typeof requestIdleCallback === 'function') unkept.set(sha, made);
+          return made;
+        });
+    });
     cache.frames.set(sha, (frames = read));
     // A read that failed is not kept: the next prepare tries again. From the cache as it is then,
     // which a manifest prepared meanwhile has replaced, carrying this read over.
@@ -210,6 +226,24 @@ function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
   return frames;
 }
 
+/**
+ * Frames this page contained and has not kept yet (#232). The read-ahead keeps them, one an idle callback while a spot
+ * plays: writing a 400 kB bundle's frames during the prepare that made them added about 20 ms to it on a Pi.
+ */
+const unkept = new Map<string, Frames>();
+
+/** Bundles whose frames this page read back from what it kept: a prepare from them that fails drops them. */
+const fromKept = new Set<string>();
+
+/**
+ * Stop keeping frames: what waits to be kept, and the read-ahead that would keep it. A revoked screen calls this before
+ * it wipes its storage, so nothing is kept after the wipe.
+ */
+export function stopKeepingFrames(): void {
+  unkept.clear();
+  warming = undefined;
+}
+
 /** The read-ahead running, if one is: the manifest it reads for, and the run, so one that a later run replaced stops. */
 let warming: { manifest: string; run: object } | undefined;
 
@@ -218,7 +252,7 @@ let warming: { manifest: string; run: object } | undefined;
  * spots in `first` first: while a spot plays, so a template's first prepare does not pay for it
  * (#232). On a Pi 4 a 400 kB bundle's first read and parse took 75 to 210 ms of its first prepare,
  * of 450 to 610 in all; the template plays in its own process. Each starts when the page is idle and
- * parses in the bundle worker (`parseBundle`). `manifest` is the one playing, so the cache is
+ * parses in the bundle worker (`parseBundle`). Before reading, it keeps what the page has contained (`unkept`). `manifest` is the one playing, so the cache is
  * made its own here, whatever kind of spot came first; it stops once another manifest has been
  * prepared. Not in a browser without `requestIdleCallback` (Safari): the budget it serves is the
  * Pi's, and a timer could start a parse in the middle of a prepare.
@@ -243,6 +277,18 @@ export function warmBundles(manifest: ScreenManifest, first: readonly string[]):
   // Another manifest prepared while this waited: reading for this one would put its cache back.
   const ours = () => warming?.run === run && framesCache?.manifest === manifest.id;
   const next = () => {
+    if (unkept.size && warming?.run === run) {
+      requestIdleCallback(() => {
+        // A revoke may have wiped the storage meanwhile, and ended the run.
+        const keep = warming?.run === run && unkept.entries().next().value;
+        if (!keep) return done();
+        unkept.delete(keep[0]);
+        void storeFrames(...keep)
+          .catch(() => undefined)
+          .then(next);
+      });
+      return;
+    }
     const cache = framesCache;
     const sha = ours() && cache ? [...left].find((s) => !cache.frames.has(s) && !cache.unreadable.has(s)) : undefined;
     if (!sha || !cache) return done();
@@ -339,6 +385,16 @@ export class Slot {
     });
     try {
       await Promise.race([work, timeout]);
+    } catch (err) {
+      // From frames kept on a page load before: they may be well formed and still wrong, so they go, and the next
+      // prepare contains the bundle again. A prepare cancelled for another says nothing about them.
+      const sha = spot.kind === 'template' ? manifest.templates[spot.template]?.html : undefined;
+      if (sha && fromKept.has(sha) && !(err instanceof Error && err.message === 'cancelled')) {
+        fromKept.delete(sha);
+        framesCache?.frames.delete(sha);
+        void dropFrames(sha).catch(() => undefined);
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }

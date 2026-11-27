@@ -71,7 +71,7 @@ import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retra
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
 import { bundleHangs } from './bundles';
-import { Slot, warmBundles } from './slot';
+import { Slot, stopKeepingFrames, warmBundles } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
@@ -632,6 +632,7 @@ function revoked(): Promise<void> {
     contentAbort = new AbortController();
     await credential?.revoke();
     setOverride(null);
+    stopKeepingFrames();
     await wipeContent().catch((err: unknown) => console.warn('[sf] could not wipe the cache', err));
     if (held) {
       location.reload();
