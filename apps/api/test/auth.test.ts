@@ -41,6 +41,20 @@ describe('sign-up and sign-in by email code', () => {
     await c.ok('/api/auth/sign-out');
     expect((await c.session()).status).toBe(401);
   });
+
+  it('lists active sessions after a session is older than 24 hours', async () => {
+    onTestFinished(() => void vi.useRealTimers());
+    const t0 = Date.parse('2026-11-20T09:00:00Z');
+    vi.setSystemTime(t0);
+    const c = new Client(testApp());
+    await c.signIn(email('sessions-age'));
+
+    // Two days on, past Better Auth's default one-day freshAge: /account still lists sessions.
+    vi.setSystemTime(t0 + 2 * 24 * 3_600_000);
+    const res = await c.get('/api/auth/list-sessions');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([expect.objectContaining({ token: expect.any(String) })]);
+  });
 });
 
 describe('organizations', () => {

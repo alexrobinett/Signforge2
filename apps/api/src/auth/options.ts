@@ -201,7 +201,9 @@ export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, gr
     ],
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
     emailAndPassword: { enabled: false },
-    session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
+    // `freshAge: 0` disables Better Auth's 24-hour createdAt gate on /api/auth/list-sessions:
+    // /account calls it for the full sliding session lifetime, and there is no password or re-auth flow.
+    session: { freshAge: 0, cookieCache: { enabled: true, maxAge: 5 * 60 } },
     user: { additionalFields: { lastActiveOrganizationId: { type: 'string', required: false, input: false, returned: false } } },
     // A session starts in the member's only org, or the one they last made active (#182), so only a
     // member of several orgs who never chose one is asked. Set at creation, so the cookie cache the
