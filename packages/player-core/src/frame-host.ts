@@ -168,3 +168,21 @@ export async function openFrameHost(o: FrameHostOptions): Promise<FrameHost> {
     },
   };
 }
+
+/**
+ * A spare template frame (#232): a wrapper frame as `openFrameHost` builds one, around a frame sandboxed with no
+ * allowances at all, under a policy that allows nothing, holding an empty document. Chromium runs a template's sandboxed frame
+ * in a renderer of its own, started afresh on each page load; the spare, kept for the page's life from its start, starts
+ * that renderer before the first prepare and keeps it running between templates, so a template finds it warm.
+ */
+export function openSpareFrame(container: HTMLElement): void {
+  const wrapperFrame = document.createElement('iframe');
+  wrapperFrame.title = 'Spare template frame';
+  wrapperFrame.setAttribute('aria-hidden', 'true');
+  wrapperFrame.tabIndex = -1;
+  wrapperFrame.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
+  wrapperFrame.srcdoc =
+    `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'">` +
+    `<iframe sandbox="" title="Spare template frame" srcdoc="&lt;!doctype html&gt;"></iframe>`;
+  container.appendChild(wrapperFrame);
+}

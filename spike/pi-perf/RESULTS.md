@@ -1608,6 +1608,46 @@ Per spot, through DevTools as `isolate.py` drives it: a page load with the HTTP 
 
 **While the read-ahead keeps them** (review of #635). The first 12 s of plays after a cleared page load, when the read-ahead reads the bundles still to come and, on the branch, stores their frames: `room-status+announcement+countdown+info-frame`, cut, landscape, master `12f1f88b` (A) against the branch (B), ABBA, three loads a pass. Frames dropped while playing: A 0.00 to 0.15% (0 or 1 of about 675 a load), B the same, no stall over 50 ms in either; B had kept all five of the manifest's bundles by the end of each load.
 
+## The template renderer started at page load (issue #232, 2026-11-26)
+
+What #635 left of a look-kit template's first prepare after a page load that keeps storage: about 185 ms for the template's new process, and over a 4K photo its first decode. Pi 400 at 1080p 60 Hz, the supervisor and soak logger stopped while measured, portrait with the output rotated (`wlr-randr --transform 90`) and restored afterwards.
+
+**Content.** The stress example's Announcement (over the 4K river photo, with its QR code), Info frame (over the 4K kitchen photo) and Countdown (no photo), each in Pop, 10 s, their own data and no bindings, built with `sf build` once per orientation. Each build was served beside the deployed player under `players/0/m232*/<orientation>/`: master `4c1d81e7` (A) and the branch (B).
+
+**Method.** As for #635, through DevTools. For each spot and build: one page load with the HTTP cache and the origin's storage cleared, 12 s to settle, then three page loads keeping storage. The figure is the page's first prepare of each load. The runs were ABBA: A then B, then B then A.
+
+**What the new process is.** On the Pi, Chromium runs each template's sandboxed frame out of process, a DevTools `iframe` target. Both slots' templates share one renderer. Each page load starts that renderer afresh, while Chromium keeps a spare renderer of its own warm. A sandboxed frame placed directly in the player's page stays in the page's process. Only one inside a wrapper frame, as a template's is, joins the templates' renderer: burning CPU in each frame moved the same process.
+
+**The fix tried: a spare template frame** (`openSpareFrame`), from the page's start, holding an empty document. Each cell lists the six loads that kept storage, both passes, A's first pass first; the median follows. The two cleared loads are one per pass.
+
+| Orientation | Template | A, storage kept | B, storage kept | A, cleared | B, cleared |
+| --- | --- | --- | --- | --- | --- |
+| landscape | Announcement | 415, 425, 442, 440, 422, 439 (median 432) | 413, 419, 406, 398, 390, 425 (410) | 569, 600 | 565, 566 |
+| | Info frame | 452, 466, 476, 470, 463, 460 (465) | 432, 445, 432, 442, 429, 448 (437) | 620, 632 | 583, 593 |
+| | Countdown | 394, 404, 409, 400, 403, 396 (402) | 362, 411, 385, 356, 363, 355 (363) | 565, 559 | 541, 534 |
+| portrait | Announcement | 763, 748, 765, 762, 755, 759 (761) | 801, 754, 731, 749, 744, 753 (751) | 945, 931 | 896, 905 |
+| | Info frame | 542, 594, 538, 556, 561, 548 (552) | 508, 509, 505, 501, 506, 535 (507) | 701, 732 | 672, 680 |
+| | Countdown | 412, 415, 400, 382, 406, 436 (409) | 402, 375, 464, 430, 386, 384 (394) | 574, 572 | 544, 551 |
+
+- **With storage cleared, the spare takes 19 to 40 ms off the first prepare** in every spec (the means of the two loads).
+- **With storage kept, Info frame gains about 20 to 50 ms** (median 28 ms in landscape, 45 in portrait), the ranges apart. Announcement in landscape gains a little (median 22 ms, the ranges overlapping), and the rest are within the spread. Info frame in portrait stays at about 500 to 535 ms and Announcement in portrait does not move.
+- Starting a renderer costs the same for any template; what differs is what each one's own document costs after.
+
+**With the spare sandboxed with no allowances** (`sandbox=""`, review of #641, 2026-11-27, the branch at `f565a7ab`): the spare's frame is still out of process, in the template's renderer. Burning CPU in each frame moved one process.
+
+**Playback with the spare.** `isolate.py 30 fade announcement-pop+info-frame-pop+countdown-pop` was run twice per orientation. Master at `7c509ff7` was run after it, the same way:
+
+| | Overall | Playing | Loading next | Transition | Worst frame | Prepares |
+| --- | --- | --- | --- | --- | --- | --- |
+| branch, landscape | 0.33, 0.39% | 0.00, 0.00% | 9.1, 10.3% | 1.1, 1.1% | 50, 67 ms | 283-359 ms |
+| master, landscape | 0.44, 0.44 | 0.00, 0.00 | 12.3, 12.5 | 1.1, 1.1 | 67, 67 | 293-341 |
+| branch, portrait | 0.44, 0.44 | 0.06, 0.06 | 6.4, 7.6 | 3.3, 2.3 | 50, 50 | 258-429 |
+| master, portrait | 0.50, 0.44 | 0.06, 0.06 | 9.1, 4.4 | 2.2, 4.4 | 50, 33 | 251-443 |
+
+The spare costs playback nothing measurable: the branch is within master's spread throughout.
+- **The rest of the first run belongs to the template's own document.** A spare that also laid out text, ran a script and decoded a small JPEG (a third build, C) did no better than B: 379 to 451 ms in landscape, and in portrait 736 to 769 for Announcement and 495 to 556 for Info frame. Compiling the template's script, resolving its styles and decoding its faces are each paid by its own document. So is a photo's first decode: Chromium does not share decoded images across documents or processes. Only preparing the template pays them, and at a page load nothing plays before its first prepare to hide that behind.
+- **Why a photo costs more in portrait.** A 16:9 4K photo covering a 1080x1920 screen is drawn about 3413x1920, so it decodes near full size. In landscape it is drawn 1920x1080, where a JPEG decodes at half scale, a quarter of the pixels. A photo sized for the screen would cost less. That is a change to the media, not to the player.
+
 ## Info frame's photo panel (issue #239, 2026-11-26)
 
 Info frame's portrait fades dropped 1.06 to 1.33% of frames in every look on master `c0d984c2`, 14 to 16% of the fade's own frames; landscape fades 0.44 to 0.72%, and the other look-kit templates' portrait fades 0.17 to 0.56%. Cuts and later prepares were within budget.
